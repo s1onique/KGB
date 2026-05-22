@@ -84,4 +84,26 @@ else
   echo "[gate] zig not installed; skipping Zig build/test"
 fi
 
+echo ""
+echo "[gate:coverage] checking coverage status"
+
+# TODO: When Zig coverage backend matures, wire in real coverage collection.
+# For now, we use test execution as the coverage signal.
+# See docs/doctrine/day-0-code-coverage.md for philosophy.
+
+if command -v zig >/dev/null 2>&1; then
+  if cd tovarisch && zig build test 2>&1; then
+    echo "[INFO] coverage: Zig tests passed — current coverage proxy"
+    echo "[INFO] coverage: Zig coverage backend not configured yet"
+    echo "[INFO] coverage: See docs/doctrine/day-0-code-coverage.md"
+  else
+    echo "[gate] FAIL: Zig tests failed" >&2
+    exit 1
+  fi
+else
+  echo "[INFO] coverage: Zig not installed; using test-as-signal proxy"
+  echo "[INFO] coverage: See docs/doctrine/day-0-code-coverage.md"
+fi
+
+echo ""
 echo "[gate] PASS"

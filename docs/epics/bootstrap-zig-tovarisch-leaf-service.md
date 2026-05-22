@@ -101,6 +101,30 @@ Add canonical coding-agent guidance via `AGENTS.md` and `.clinerules`.
 - [x] `scripts/quality_gate.sh` checks for new files and content.
 - [x] `make gate` passes.
 
+## ACT 4 Scope (Day-0 Coverage Doctrine)
+
+Add repository doctrine and quality-gate structure for Day-0 code coverage.
+
+### ACT 4 Board
+
+| ID | Work Item | Status |
+|---|---|---|
+| tovarisch-023 | Add `docs/doctrine/day-0-code-coverage.md` | **done** |
+| tovarisch-024 | Add `docs/doctrine/README.md` doctrine index | **done** |
+| tovarisch-025 | Wire coverage section into `scripts/quality_gate.sh` | **done** |
+| tovarisch-026 | Add `coverage` target to `Makefile` | **done** |
+| tovarisch-027 | Update epic with ACT 4 entry | **done** |
+| tovarisch-028 | Run `make gate` | **done** |
+
+### ACT 4 Acceptance
+
+- [x] Coverage is documented as Day-0 practice in `docs/doctrine/day-0-code-coverage.md`.
+- [x] `make coverage` exists and gives honest result.
+- [x] `scripts/quality_gate.sh` exposes coverage status.
+- [x] Missing coverage backend is explicit, not hidden.
+- [x] Existing Zig tests still run and fail gate on failure.
+- [x] No fake coverage percentage is invented.
+
 ## Future Work
 
 - Define signed report schema
