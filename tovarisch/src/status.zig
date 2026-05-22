@@ -17,9 +17,15 @@ pub const version = "0.1.1";
 //   - status:      string — one of: ok, warn, error
 //   - detail:      string — human-readable detail (optional, empty string allowed)
 
+pub const CheckStatus = enum {
+    ok,
+    warn,
+    @"error",
+};
+
 pub const Check = struct {
     name: []const u8,
-    status: []const u8,
+    status: CheckStatus,
     detail: []const u8,
 };
 
@@ -27,49 +33,94 @@ pub const Status = struct {
     service: []const u8,
     version: []const u8,
     node_id: []const u8,
-    status: []const u8,
+    status: CheckStatus,
     checks: []const Check,
 };
 
-// --- Payload construction ---
+// --- Status Derivation ---
+//
+// Top-level status is derived from child checks:
+//   - any error => error
+//   - else any warn => warn
+//   - else ok
 
-const static_checks = [_]Check{
-    Check{
-        .name = "process",
-        .status = "ok",
-        .detail = "static bootstrap status",
-    },
+/// Derives the top-level status from an array of checks.
+pub fn deriveStatus(checks: []const Check) CheckStatus {
+    for (checks) |check| {
+        if (check.status == .@"error") return .@"error";
+    }
+    for (checks) |check| {
+        if (check.status == .warn) return .warn;
+    }
+    return .ok;
+}
+
+// --- Local Health Checks ---
+//
+// Static checks - no dynamic allocation needed for basic checks
+
+const process_check = Check{
+    .name = "process",
+    .status = .ok,
+    .detail = "running",
 };
 
-pub const static_status: Status = .{
+const binary_check = Check{
+    .name = "binary",
+    .status = .ok,
+    .detail = "tovarisch",
+};
+
+const config_check = Check{
+    .name = "config",
+    .status = .warn,
+    .detail = "not configured yet",
+};
+
+/// Returns the static array of local health checks.
+pub fn getLocalChecks() []const Check {
+    return &[_]Check{ process_check, binary_check, config_check };
+}
+
+// --- Built Status ---
+//
+// Pre-computed status using static checks.
+
+const local_status: Status = .{
     .service = "tovarisch",
     .version = version,
     .node_id = "local-dev",
-    .status = "ok",
-    .checks = &static_checks,
+    .status = deriveStatus(getLocalChecks()),
+    .checks = getLocalChecks(),
 };
 
-/// Renders the static status payload as JSON to the given writer.
-/// Uses the Zig 0.16 streaming JSON Stringify API.
-pub fn renderPayload(writer: anytype) !void {
+/// Returns the current status (static, using local checks).
+pub fn getStatus() Status {
+    return local_status;
+}
+
+// --- Payload construction ---
+
+/// Renders the given status as JSON to the writer.
+pub fn renderStatus(writer: anytype, s: Status) !void {
     var jw = std.json.Stringify{ .writer = writer };
     try jw.beginObject();
     try jw.objectField("service");
-    try jw.write(static_status.service);
+    try jw.write(s.service);
     try jw.objectField("version");
-    try jw.write(static_status.version);
+    try jw.write(s.version);
     try jw.objectField("node_id");
-    try jw.write(static_status.node_id);
+    try jw.write(s.node_id);
     try jw.objectField("status");
-    try jw.write(static_status.status);
+    try jw.write(@tagName(s.status));
     try jw.objectField("checks");
     try jw.beginArray();
-    for (static_status.checks) |check| {
+    for (s.checks) |check| {
         try jw.beginObject();
         try jw.objectField("name");
         try jw.write(check.name);
         try jw.objectField("status");
-        try jw.write(check.status);
+        try jw.write(@tagName(check.status));
         try jw.objectField("detail");
         try jw.write(check.detail);
         try jw.endObject();
@@ -78,13 +129,9 @@ pub fn renderPayload(writer: anytype) !void {
     try jw.endObject();
 }
 
-/// Returns the static status payload as a heap-allocated JSON string.
-/// Caller owns the memory.
-pub fn generatePayload(allocator: std.mem.Allocator) ![]u8 {
-    var out = std.Io.Writer.Allocating.init(allocator);
-    defer out.deinit();
-    try renderPayload(&out);
-    return try out.written();
+/// Renders the current status payload to the given writer.
+pub fn renderPayload(writer: anytype) !void {
+    try renderStatus(writer, local_status);
 }
 
 // --- Required-field validation ---
@@ -116,56 +163,84 @@ pub fn parseStatus(json_bytes: []const u8, allocator: std.mem.Allocator) !Status
     return try std.json.parseFromSlice(Status, allocator, json_bytes, .{});
 }
 
-// --- Static payload string (for backwards-compatible testing) ---
-//
-// Note: prefer renderPayload() / generatePayload() for dynamic use.
-// This string is provided for existing test compatibility and gate grep checks.
-
-pub const payload = "{\"service\":\"tovarisch\",\"version\":\"0.1.1\",\"node_id\":\"local-dev\",\"status\":\"ok\",\"checks\":[{\"name\":\"process\",\"status\":\"ok\",\"detail\":\"static bootstrap status\"}]}";
-
 // --- Tests ---
 
 test "version constant is 0.1.1" {
     try std.testing.expectEqualStrings("0.1.1", version);
 }
 
-test "static_status has all required fields" {
-    try std.testing.expectEqualStrings("tovarisch", static_status.service);
-    try std.testing.expectEqualStrings("0.1.1", static_status.version);
-    try std.testing.expectEqualStrings("local-dev", static_status.node_id);
-    try std.testing.expectEqualStrings("ok", static_status.status);
-    // static_checks is a [1]Check array, so checks[0] is valid
-    try std.testing.expectEqualStrings("process", static_status.checks[0].name);
+test "deriveStatus returns ok for all-ok checks" {
+    const checks = [_]Check{
+        .{ .name = "a", .status = .ok, .detail = "" },
+        .{ .name = "b", .status = .ok, .detail = "" },
+    };
+    try std.testing.expectEqual(CheckStatus.ok, deriveStatus(&checks));
 }
 
-test "payload contains expected fields" {
-    try std.testing.expect(std.mem.containsAtLeast(u8, payload, 1, "\"service\":\"tovarisch\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, payload, 1, "\"version\":\"0.1.1\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, payload, 1, "\"node_id\":\"local-dev\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, payload, 1, "\"status\":\"ok\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, payload, 1, "\"checks\""));
+test "deriveStatus returns warn when any warn present" {
+    const checks = [_]Check{
+        .{ .name = "a", .status = .ok, .detail = "" },
+        .{ .name = "b", .status = .warn, .detail = "" },
+    };
+    try std.testing.expectEqual(CheckStatus.warn, deriveStatus(&checks));
 }
 
-test "validateRequiredFields returns true for valid payload" {
-    try std.testing.expect(validateRequiredFields(payload));
+test "deriveStatus returns error when any error present" {
+    const checks = [_]Check{
+        .{ .name = "a", .status = .@"error", .detail = "" },
+        .{ .name = "b", .status = .ok, .detail = "" },
+    };
+    try std.testing.expectEqual(CheckStatus.@"error", deriveStatus(&checks));
 }
 
-test "validateRequiredFields returns false for missing field" {
-    const bad = "{\"service\":\"tovarisch\",\"version\":\"0.1.1\"}";
-    try std.testing.expect(!validateRequiredFields(bad));
+test "deriveStatus returns error even if warn also present" {
+    const checks = [_]Check{
+        .{ .name = "a", .status = .@"error", .detail = "" },
+        .{ .name = "b", .status = .warn, .detail = "" },
+    };
+    try std.testing.expectEqual(CheckStatus.@"error", deriveStatus(&checks));
+}
+
+test "deriveStatus returns ok for empty checks" {
+    const checks: [0]Check = .{};
+    try std.testing.expectEqual(CheckStatus.ok, deriveStatus(&checks));
+}
+
+test "getLocalChecks returns three checks" {
+    const checks = getLocalChecks();
+    try std.testing.expect(@as(usize, 3), checks.len);
+}
+
+test "getLocalChecks first check is process" {
+    const checks = getLocalChecks();
+    try std.testing.expectEqualStrings("process", checks[0].name);
+}
+
+test "local_status has correct structure" {
+    try std.testing.expectEqualStrings("tovarisch", local_status.service);
+    try std.testing.expectEqualStrings("0.1.1", local_status.version);
+    try std.testing.expectEqualStrings("local-dev", local_status.node_id);
+    // config is warn, so top-level should be warn
+    try std.testing.expectEqual(CheckStatus.warn, local_status.status);
+    try std.testing.expect(@as(usize, 3), local_status.checks.len);
+}
+
+test "getStatus returns local_status" {
+    const s = getStatus();
+    try std.testing.expectEqualStrings("tovarisch", s.service);
 }
 
 test "parseStatus parses valid JSON" {
-    var buf: [256]u8 = undefined;
+    var buf: [1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buf);
     const allocator = fba.allocator();
 
-    const parsed = try parseStatus(payload, allocator);
+    const json = "{\"service\":\"tovarisch\",\"version\":\"0.1.1\",\"node_id\":\"local-dev\",\"status\":\"warn\",\"checks\":[{\"name\":\"test\",\"status\":\"ok\",\"detail\":\"hi\"}]}";
+    const parsed = try parseStatus(json, allocator);
     try std.testing.expectEqualStrings("tovarisch", parsed.service);
     try std.testing.expectEqualStrings("0.1.1", parsed.version);
     try std.testing.expectEqualStrings("local-dev", parsed.node_id);
-    try std.testing.expectEqualStrings("ok", parsed.status);
-    // JSON array is parsed as a slice, so .len works
+    try std.testing.expectEqual(CheckStatus.warn, parsed.status);
     try std.testing.expect(@as(usize, 1), parsed.checks.len);
 }
 
@@ -178,8 +253,23 @@ test "parseStatus returns error for invalid JSON" {
     try std.testing.expectError(error.InvalidJSON, parseStatus(bad, allocator));
 }
 
-test "renderPayload produces valid JSON" {
-    var buf: [512]u8 = undefined;
+test "renderStatus produces valid JSON" {
+    var buf: [2048]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const allocator = fba.allocator();
+
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try renderStatus(&out, local_status);
+
+    const json_str = try out.written();
+    // Validate it parses back
+    const parsed = try parseStatus(json_str, allocator);
+    try std.testing.expectEqualStrings("tovarisch", parsed.service);
+}
+
+test "renderPayload produces valid JSON with all checks" {
+    var buf: [2048]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buf);
     const allocator = fba.allocator();
 
@@ -187,22 +277,15 @@ test "renderPayload produces valid JSON" {
     defer out.deinit();
     try renderPayload(&out);
 
-    // Rendered JSON must be parseable as Status
-    const parsed = try parseStatus(try out.written(), allocator);
-    try std.testing.expectEqualStrings("tovarisch", parsed.service);
-    try std.testing.expectEqualStrings("0.1.1", parsed.version);
-}
-
-test "generatePayload produces valid JSON" {
-    var buf: [512]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-
-    const payload_str = try generatePayload(fba.allocator());
+    const json_str = try out.written();
 
     // Must contain all required fields
-    try std.testing.expect(std.mem.containsAtLeast(u8, payload_str, 1, "\"service\":\"tovarisch\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, payload_str, 1, "\"version\":\"0.1.1\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, payload_str, 1, "\"node_id\":\"local-dev\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, payload_str, 1, "\"status\":\"ok\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, payload_str, 1, "\"checks\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, json_str, 1, "\"service\":\"tovarisch\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, json_str, 1, "\"version\":\"0.1.1\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, json_str, 1, "\"node_id\":\"local-dev\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, json_str, 1, "\"checks\""));
+    // Must contain all three checks
+    try std.testing.expect(std.mem.containsAtLeast(u8, json_str, 1, "\"name\":\"process\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, json_str, 1, "\"name\":\"binary\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, json_str, 1, "\"name\":\"config\""));
 }

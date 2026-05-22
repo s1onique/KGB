@@ -171,5 +171,18 @@ test "status --json contains expected fields" {
     try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"service\":\"tovarisch\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"version\":\"0.1.1\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"node_id\":\"local-dev\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"status\":\"ok\""));
+}
+
+test "status --json contains multiple checks" {
+    var buf: [512]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const allocator = fba.allocator();
+
+    var output = std.ArrayList(u8).init(allocator);
+    const writer = output.writer();
+
+    _ = run(&.{ "tovarisch", "status", "--json" }, writer, writer);
+    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"name\":\"process\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"name\":\"binary\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"name\":\"config\""));
 }

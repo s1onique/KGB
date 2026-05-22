@@ -179,6 +179,31 @@ Capture Zig 0.16 JSON serialization lessons into the field manual and harden rep
 - [x] All existing tracked files pass the final-newline check.
 - [x] `make gate` passes.
 
+## ACT 7 Scope (Local Health Checks)
+
+Add first real local health checks to `tovarisch status --json`.
+
+### ACT 7 Board
+
+| ID | Work Item | Status |
+|---|---|---|
+| tovarisch-044 | Add `CheckStatus` enum with ok/warn/error values | **done** |
+| tovarisch-045 | Add `deriveStatus()` function for top-level status derivation | **done** |
+| tovarisch-046 | Implement static checks: process, binary, config | **done** |
+| tovarisch-047 | Update JSON serialization to use enum values | **done** |
+| tovarisch-048 | Add tests for status derivation logic | **done** |
+| tovarisch-049 | Update epic docs and run `make gate` | **done** |
+
+### ACT 7 Acceptance
+
+- [x] `tovarisch status --json` contains multiple checks (process, binary, config).
+- [x] Top-level `status` is derived from child checks, not hardcoded.
+- [x] Config check shows "not configured yet" as warn.
+- [x] Status derivation: any error => error, else any warn => warn, else ok.
+- [x] JSON contract remains stable (verified by `verify_status_json.sh`).
+- [x] All Zig tests pass.
+- [x] `make gate` passes.
+
 ## Future Work
 
 - Define signed report schema
