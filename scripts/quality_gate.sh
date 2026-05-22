@@ -39,6 +39,9 @@ required=(
   docs/tooling/zig-0.16-field-manual.md
   docs/tooling/cline-context.md
   docs/coverage/tovarisch-coverage.md
+  docs/contracts/tovarisch-status-v0.md
+  docs/contracts/examples/tovarisch-status-v0.json
+  scripts/verify_tovarisch_status_contract.sh
   AGENTS.md
   .clinerules/00-bootstrap.md
   .clinerules/10-kgb-doctrine.md
@@ -118,7 +121,7 @@ echo "[gate:coverage] checking coverage status"
 # See docs/doctrine/day-0-code-coverage.md for philosophy.
 
 if command -v zig >/dev/null 2>&1; then
-  if cd tovarisch && zig build test 2>&1; then
+  if (cd tovarisch && zig build test 2>&1); then
     echo "[INFO] coverage: Zig tests passed — current coverage proxy"
     echo "[INFO] coverage: Zig coverage backend not configured yet"
     echo "[INFO] coverage: See docs/doctrine/day-0-code-coverage.md"
@@ -130,6 +133,11 @@ else
   echo "[INFO] coverage: Zig not installed; using test-as-signal proxy"
   echo "[INFO] coverage: See docs/doctrine/day-0-code-coverage.md"
 fi
+
+echo ""
+echo "[gate] checking status contract"
+
+./scripts/verify_tovarisch_status_contract.sh
 
 echo ""
 echo "[gate] PASS"

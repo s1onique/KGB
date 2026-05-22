@@ -48,3 +48,8 @@ coverage-report:
 		echo "[ERROR] Coverage ledger not found: docs/coverage/tovarisch-coverage.md"; \
 		exit 1; \
 	fi
+
+.PHONY: verify-status-contract
+
+verify-status-contract:
+	./scripts/verify_tovarisch_status_contract.sh

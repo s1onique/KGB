@@ -1,4 +1,4 @@
-# [Open] Epic: Bootstrap Zig tovarisch leaf service
+# [Closed] Epic: Bootstrap Zig tovarisch leaf service
 
 ## Goal
 
@@ -259,6 +259,48 @@ Turn the current partial help coverage into explicit command coverage, because `
 - [x] Coverage ledger marks help behavior as covered.
 - [x] `make gate` passes.
 - [x] All Zig tests pass.
+
+## ACT 10 Scope (Status Contract v0)
+
+Define `tovarisch status --json` as a documented, fixture-backed contract and close the bootstrap epic.
+
+### ACT 10 Board
+
+| ID | Work Item | Status |
+|---|---|---|
+| tovarisch-066 | Add contract docs directory and status contract doc | **done** |
+| tovarisch-067 | Add status fixture (`tovarisch-status-v0.json`) | **done** |
+| tovarisch-068 | Add fixture verification script | **done** |
+| tovarisch-069 | Wire verifier into quality gate | **done** |
+| tovarisch-070 | Add `make verify-status-contract` target | **done** |
+| tovarisch-071 | Update TODO to mark bootstrap items done | **done** |
+| tovarisch-072 | Close bootstrap epic | **done** |
+| tovarisch-073 | Run `make gate` | **done** |
+
+### ACT 10 Acceptance
+
+- [x] `docs/contracts/tovarisch-status-v0.md` exists with complete contract definition.
+- [x] `docs/contracts/examples/tovarisch-status-v0.json` exists with fixture.
+- [x] `scripts/verify_tovarisch_status_contract.sh` exists and validates contract/fixture.
+- [x] Gate checks for new contract files.
+- [x] Gate runs contract verification.
+- [x] `make verify-status-contract` target exists.
+- [x] TODO.md updated with completed bootstrap items.
+- [x] Epic marked as `[Closed]`.
+- [x] `make gate` passes.
+
+## Closure Summary
+
+The bootstrap epic is now **closed**. What was accomplished:
+
+- Zig package exists and builds under `tovarisch/`.
+- CLI commands work: `--version`, `check`, `--help`, `status --json`.
+- CLI/status logic is fully unit-tested.
+- Zig 0.16 field manual exists with documented patterns.
+- Agent guidance exists via `AGENTS.md` and `.clinerules`.
+- Status contract v0 is documented and fixture-backed.
+- Quality gate passes all checks.
+- `make gate` is the acceptance boundary for all future work.
 
 ## Future Work
 

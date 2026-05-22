@@ -1,0 +1,23 @@
+{
+  "service": "tovarisch",
+  "version": "0.1.1",
+  "node_id": "local-dev",
+  "status": "warn",
+  "checks": [
+    {
+      "name": "process",
+      "status": "ok",
+      "detail": "running"
+    },
+    {
+      "name": "binary",
+      "status": "ok",
+      "detail": "tovarisch"
+    },
+    {
+      "name": "config",
+      "status": "warn",
+      "detail": "not configured yet"
+    }
+  ]
+}

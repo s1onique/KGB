@@ -1,6 +1,6 @@
 # TODO
 
-## Immediate
+## Immediate (Bootstrap Epic — Closed)
 
 - [x] Add docs/doctrine/factory.md
 - [x] Add docs/doctrine/kgb.md
@@ -18,8 +18,11 @@
 - [x] Add .clinerules (Cline/MiniMax bootstrap rules)
 - [x] Gate agent guidance files
 - [x] Add LLM-friendliness gate (Day-0 file size/line limits)
+- [x] Define `tovarisch status --json` contract v0
+- [x] Add status fixture
+- [x] Gate status contract
 
-## Later
+## Future
 
 - [ ] Define signed report schema
 - [ ] Define desired-state schema
