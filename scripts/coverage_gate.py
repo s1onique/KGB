@@ -155,6 +155,56 @@ def kcov_supports_include_pattern(kcov_cmd: str) -> bool:
     return "--include-pattern" in result.stdout
 
 
+# Signal number to name mapping for POSIX systems
+SIGNAL_NAMES = {
+    1: "SIGHUP",   # Hangup
+    2: "SIGINT",   # Interrupt
+    3: "SIGQUIT",  # Quit
+    4: "SIGILL",   # Illegal instruction
+    5: "SIGTRAP",  # Trace/breakpoint trap
+    6: "SIGABRT",  # Aborted
+    7: "SIGBUS",   # Bus error
+    8: "SIGFPE",   # Floating point exception
+    9: "SIGKILL",  # Killed
+    10: "SIGUSR1", # User defined signal 1
+    11: "SIGSEGV", # Segmentation fault
+    12: "SIGUSR2", # User defined signal 2
+    13: "SIGPIPE", # Broken pipe
+    14: "SIGALRM", # Alarm
+    15: "SIGTERM", # Terminated
+    16: "SIGSTKFLT", # Stack fault
+    17: "SIGCHLD", # Child exited
+    18: "SIGCONT", # Continue
+    19: "SIGSTOP", # Stopped
+    20: "SIGTSTP", # Stopped
+    21: "SIGTTIN", # Stopped (tty input)
+    22: "SIGTTOU", # Stopped (tty output)
+    23: "SIGURG",  # Urgent data
+    24: "SIGXCPU", # CPU time limit exceeded
+    25: "SIGXFSZ", # File size limit exceeded
+    26: "SIGVTALRM", # Virtual alarm
+    27: "SIGPROF", # Profile signal
+    28: "SIGWINCH", # Window changed
+    29: "SIGIO",   # I/O possible
+    30: "SIGPWR",  # Power failure
+    31: "SIGSYS",  # Bad system call
+}
+
+
+def format_returncode(rc: int) -> str:
+    """Format return code with signal explanation for negative values (POSIX convention).
+    
+    On POSIX systems, negative subprocess return codes encode signals:
+    - returncode = -N means process terminated by signal N
+    - returncode = N means process exited with status N
+    """
+    if rc < 0:
+        signal_num = -rc
+        signal_name = SIGNAL_NAMES.get(signal_num, f"signal {signal_num}")
+        return f"{rc} (terminated by {signal_name})"
+    return str(rc)
+
+
 def run_kcov_attempt(kcov_cmd: str, binary: Path, output_dir: Path, mode: str, 
                    extra_args: list[str] | None = None) -> tuple[bool, bool]:
     """Run kcov and return (success, timed_out).
@@ -182,7 +232,15 @@ def run_kcov_attempt(kcov_cmd: str, binary: Path, output_dir: Path, mode: str,
         return (False, True)
     
     if result.returncode != 0:
-        print(f"[coverage] kcov ({mode}) exited with error (rc={result.returncode})")
+        formatted_rc = format_returncode(result.returncode)
+        print(f"[coverage] kcov ({mode}) exited with error (rc={formatted_rc})")
+        if result.returncode < 0:
+            signal_num = -result.returncode
+            signal_name = SIGNAL_NAMES.get(signal_num, f"signal {signal_num}")
+            if signal_name == "SIGILL":
+                print("[coverage] backend terminated by SIGILL / illegal instruction")
+            else:
+                print(f"[coverage] backend terminated by {signal_name}")
         print(f"[coverage] stdout (first 1000 chars): {result.stdout[:1000] if result.stdout else 'none'}")
         print(f"[coverage] stderr (first 1000 chars): {result.stderr[:1000] if result.stderr else 'none'}")
         return (False, False)

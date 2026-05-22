@@ -40,107 +40,79 @@ jobs:
       - name: Show Zig version
         run: zig version
 
-      - name: Install zig-kcov
+      - name: Install zig-kcov from source
         env:
           ZIG_KCOV_VERSION: v42.0.1
         run: |
           set -euo pipefail
 
           sudo apt-get update
-          sudo apt-get install -y bc jq git unzip curl
+          sudo apt-get install -y bc jq git unzip curl binutils
 
           tool_dir="$RUNNER_TEMP/zig-kcov-tools"
           mkdir -p "$tool_dir"
 
-          api_url="https://api.github.com/repos/roc-lang/zig-kcov/releases/tags/${ZIG_KCOV_VERSION}"
+          # Build zig-kcov from source to avoid SIGILL from prebuilt binaries
+          # Prebuilt assets may use CPU features unavailable on GitHub runner CPUs
+          echo "=== Cloning zig-kcov from source ==="
+          git clone --depth 1 --branch "${ZIG_KCOV_VERSION}" \
+            https://github.com/roc-lang/zig-kcov.git \
+            /tmp/zig-kcov-src
+          cd /tmp/zig-kcov-src
 
-          # Debug: print all available asset names to diagnose selection issues
-          echo "=== Debug: All release assets for ${ZIG_KCOV_VERSION} ==="
-          curl -fsSL "$api_url" | jq -r '.assets[].name' || echo "Could not list assets"
-          echo ""
+          echo "=== Inspecting build files ==="
+          ls -la
+          cat build.zig 2>/dev/null | head -50 || echo "No build.zig found"
 
-          asset_url="$(
-            curl -fsSL "$api_url" |
-              jq -r '
-                .assets[]
-                | select(
-                    (.name | test("linux"; "i")) and
-                    (.name | test("x86_64|amd64"; "i"))
-                  )
-                | .browser_download_url
-              ' |
-              head -n 1
-          )"
+          echo "=== Building zig-kcov ==="
+          # Build for Linux x86_64 target (native to the runner)
+          # Use ReleaseSafe to avoid aggressive optimizations that may use CPU-specific instructions
+          # This prevents SIGILL on runners with older CPU feature sets
+          zig build -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSafe
 
-          if [ -z "$asset_url" ] || [ "$asset_url" = "null" ]; then
-            echo "Could not find linux x86_64 zig-kcov asset in ${ZIG_KCOV_VERSION}" >&2
-            echo "=== Debug: All assets from release ===" >&2
-            curl -fsSL "$api_url" | jq -r '.assets[].name' >&2
-            exit 1
-          fi
-
-          echo "Downloading zig-kcov from: $asset_url"
-          curl -fL "$asset_url" -o /tmp/zig-kcov-release
-
-          echo "=== File type of downloaded asset ==="
-          file /tmp/zig-kcov-release || true
-          ls -l /tmp/zig-kcov-release || true
-
-          case "$asset_url" in
-            *.tar.gz|*.tgz)
-              mkdir -p /tmp/zig-kcov-unpack
-              tar -xzf /tmp/zig-kcov-release -C /tmp/zig-kcov-unpack
-              found="$(find /tmp/zig-kcov-unpack -type f \( -name 'zig-kcov' -o -name 'kcov' \) | head -n 1)"
-              ;;
-            *.zip)
-              mkdir -p /tmp/zig-kcov-unpack
-              unzip -q /tmp/zig-kcov-release -d /tmp/zig-kcov-unpack
-              found="$(find /tmp/zig-kcov-unpack -type f \( -name 'zig-kcov' -o -name 'kcov' \) | head -n 1)"
-              ;;
-            *)
-              found="/tmp/zig-kcov-release"
-              ;;
-          esac
+          # Find the built binary
+          found="$(find zig-out -type f \( -name 'zig-kcov' -o -name 'kcov' \) 2>/dev/null | head -n 1)"
 
           if [ -z "${found:-}" ] || [ ! -f "$found" ]; then
-            echo "Downloaded asset did not contain zig-kcov/kcov executable" >&2
-            find /tmp/zig-kcov-unpack -maxdepth 4 -type f 2>/dev/null >&2 || true
+            echo "Build did not produce zig-kcov/kcov binary" >&2
+            find zig-out -type f 2>/dev/null >&2 || true
             exit 1
           fi
 
-          cp "$found" "$tool_dir/zig-kcov"
-          chmod +x "$tool_dir/zig-kcov"
+          # Rename to kcov (matches the actual binary name from upstream)
+          cp "$found" "$tool_dir/kcov"
+          chmod +x "$tool_dir/kcov"
 
-          echo "=== zig-kcov executable diagnostics ==="
+          echo "=== kcov executable diagnostics ==="
           echo "File info:"
-          file "$tool_dir/zig-kcov" || true
-          ls -l "$tool_dir/zig-kcov" || true
+          file "$tool_dir/kcov" || true
+          ls -l "$tool_dir/kcov" || true
 
           echo "Dynamic library dependencies (ldd):"
-          ldd "$tool_dir/zig-kcov" 2>&1 || echo "ldd failed or not applicable"
+          ldd "$tool_dir/kcov" 2>&1 || echo "ldd failed or not applicable"
 
-          echo "zig-kcov --help:"
+          echo "kcov --help:"
           set +e
-          "$tool_dir/zig-kcov" --help > /tmp/zig-kcov-help-inline.txt 2>&1
+          "$tool_dir/kcov" --help > /tmp/kcov-help-inline.txt 2>&1
           help_rc=$?
           set -e
-          echo "zig-kcov --help rc=$help_rc"
-          head -40 /tmp/zig-kcov-help-inline.txt || true
+          echo "kcov --help rc=$help_rc"
+          head -40 /tmp/kcov-help-inline.txt || true
 
-          echo "zig-kcov --version:"
-          "$tool_dir/zig-kcov" --version 2>&1 || echo "zig-kcov --version exited non-zero: rc=$?"
+          echo "kcov --version:"
+          "$tool_dir/kcov" --version 2>&1 || echo "kcov --version exited non-zero: rc=$?"
 
           # Smoke test with harmless invocation (non-fatal under set -e)
-          echo "=== zig-kcov smoke test ==="
+          echo "=== kcov smoke test ==="
           set +e
-          "$tool_dir/zig-kcov" --help > /tmp/zig-kcov-help.txt 2>&1
+          "$tool_dir/kcov" --help > /tmp/kcov-help.txt 2>&1
           sm_rc=$?
           set -e
           echo "smoke test rc=$sm_rc"
-          head -40 /tmp/zig-kcov-help.txt || true
+          head -40 /tmp/kcov-help.txt || true
 
-          # Check for missing shared libraries (diagnostic only, do not auto-install)
-          missing_libs=$(ldd "$tool_dir/zig-kcov" 2>&1 | grep "not found" || true)
+          # Check for missing shared libraries (diagnostic only)
+          missing_libs=$(ldd "$tool_dir/kcov" 2>&1 | grep "not found" || true)
           if [ -n "$missing_libs" ]; then
             echo "=== WARNING: Missing shared libraries detected ==="
             echo "$missing_libs"
@@ -148,29 +120,29 @@ jobs:
           fi
 
           # Minimal smoke: try to cover /bin/true (not the project binary)
-          # This distinguishes "zig-kcov is broken" from "Zig test binary + kcov incompatibility"
-          echo "=== zig-kcov backend smoke (cover /bin/true) ==="
-          tmp_cov="$RUNNER_TEMP/zig-kcov-smoke"
+          # This distinguishes "kcov is broken" from "Zig test binary + kcov incompatibility"
+          echo "=== kcov backend smoke (cover /bin/true) ==="
+          tmp_cov="$RUNNER_TEMP/kcov-smoke"
           rm -rf "$tmp_cov"
           set +e
-          "$tool_dir/zig-kcov" "$tmp_cov" /bin/true > /tmp/zig-kcov-smoke.out 2>&1
+          "$tool_dir/kcov" "$tmp_cov" /bin/true > /tmp/kcov-smoke.out 2>&1
           sm_cov_rc=$?
           set -e
-          echo "zig-kcov /bin/true rc=$sm_cov_rc"
-          head -80 /tmp/zig-kcov-smoke.out || true
+          echo "kcov /bin/true rc=$sm_cov_rc"
+          head -80 /tmp/kcov-smoke.out || true
           echo "Smoke output files:"
           find "$tmp_cov" -maxdepth 3 -type f 2>/dev/null | sort | head -50 || echo "none found"
 
-          # If zig-kcov itself is not runnable (not a valid ELF or missing libs), abort before gate
-          if [ ! -x "$tool_dir/zig-kcov" ]; then
-            echo "FATAL: zig-kcov is not executable. Check above diagnostics." >&2
+          # If kcov itself is not runnable, abort before gate
+          if [ ! -x "$tool_dir/kcov" ]; then
+            echo "FATAL: kcov is not executable. Check above diagnostics." >&2
             exit 1
           fi
 
-          echo "=== zig-kcov installation complete ==="
-          test -x "$tool_dir/zig-kcov" || exit 1
+          echo "=== kcov source build complete ==="
+          test -x "$tool_dir/kcov" || exit 1
 
-          echo "KCOV_BIN=$tool_dir/zig-kcov" >> "$GITHUB_ENV"
+          echo "KCOV_BIN=$tool_dir/kcov" >> "$GITHUB_ENV"
 
       - name: Run quality gate
         run: make gate
