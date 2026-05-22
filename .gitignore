@@ -9,3 +9,4 @@ dist/
 zig-out/
 zig-cache/
 .zig-cache/
+scripts/__pycache__/

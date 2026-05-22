@@ -1,8 +1,25 @@
 # Tovarisch Coverage Ledger
 
-> **Purpose**: This ledger tracks which `tovarisch` behaviors are covered by automated checks and which remain accepted uncovered risk. No fake percentages.
+> **Purpose**: This ledger tracks which `tovarisch` behaviors are covered by automated checks and which remain accepted uncovered risk.
 
 Coverage is an accountability surface. Every important behavior must either be covered or consciously accepted as uncovered.
+
+## Dual Coverage System
+
+### 1. Real Line Coverage (kcov)
+
+`tovarisch` uses `kcov` to measure actual line coverage of the test binary:
+
+- **Threshold**: 60% (configurable via `COVERAGE_THRESHOLD`)
+- **Files covered**: `tovarisch/src/` only (no cache/vendor paths)
+- **Gate**: Fails if below threshold, unless `ALLOW_MISSING_KCOV=1`
+- **Enforcement**: Required in `make gate`
+
+See `scripts/coverage_gate.sh` for implementation.
+
+### 2. Behavior Coverage Ledger
+
+This document tracks which specific behaviors are covered by automated checks.
 
 ## Behavior Coverage Matrix
 
@@ -10,20 +27,20 @@ Coverage is an accountability surface. Every important behavior must either be c
 
 | Behavior | Coverage Mechanism | Gate-Enforced? | Status | Gap / Follow-up |
 |----------|-------------------|----------------|--------|-----------------|
-| CLI usage / invalid args | Unit tests in `cli.zig` | Yes (`zig build test`) | ✅ Covered | None |
-| `--help` / `-h` command | Unit tests: returns ok, prints usage | Yes | ✅ Covered | None |
-| `--version` command | Unit test + gate verification | Yes | ✅ Covered | None |
-| `check` command | Unit test + gate verification | Yes | ✅ Covered | None |
-| `status --json` JSON validity | `verify_status_json.sh` structural validation | Yes | ✅ Covered | None |
-| JSON structural contract | Unit tests + verification script | Yes | ✅ Covered | None |
-| Required JSON fields/types | Verification script checks fields and types | Yes | ✅ Covered | None |
-| `CheckStatus` enum rendering | Unit tests for `deriveStatus()` | Yes | ✅ Covered | None |
-| Top-level status derivation | Unit tests verify error > warn > ok | Yes | ✅ Covered | None |
-| Local checks: process | Static check in `status.zig` + output test | Yes | ✅ Covered | None |
-| Local checks: binary | Static check in `status.zig` + output test | Yes | ✅ Covered | None |
-| Local checks: config | Static check shows "not configured yet" as warn | Yes | ✅ Covered | None |
-| Local checks: state_dir (placeholder) | Emits warn with "state directory not found" | Yes | ✅ Covered | Temporary until real Io.Dir API used |
-| Multiple local checks in output | Unit test `status --json contains multiple checks` | Yes | ✅ Covered | None |
+| CLI usage / invalid args | Unit tests in `cli.zig` | Yes (kcov + gate) | ✅ Covered | None |
+| `--help` / `-h` command | Unit tests: returns ok, prints usage | Yes (kcov + gate) | ✅ Covered | None |
+| `--version` command | Unit test + gate verification | Yes (kcov + gate) | ✅ Covered | None |
+| `check` command | Unit test + gate verification | Yes (kcov + gate) | ✅ Covered | None |
+| `status --json` JSON validity | `verify_status_json.sh` structural validation | Yes (gate) | ✅ Covered | None |
+| JSON structural contract | Unit tests + verification script | Yes (gate) | ✅ Covered | None |
+| Required JSON fields/types | Verification script checks fields and types | Yes (gate) | ✅ Covered | None |
+| `CheckStatus` enum rendering | Unit tests for `deriveStatus()` | Yes (kcov + gate) | ✅ Covered | None |
+| Top-level status derivation | Unit tests verify error > warn > ok | Yes (kcov + gate) | ✅ Covered | None |
+| Local checks: process | Static check in `status.zig` + output test | Yes (kcov + gate) | ✅ Covered | None |
+| Local checks: binary | Static check in `status.zig` + output test | Yes (kcov + gate) | ✅ Covered | None |
+| Local checks: config | Static check shows "not configured yet" as warn | Yes (kcov + gate) | ✅ Covered | None |
+| Local checks: state_dir (placeholder) | Emits warn with "state directory not found" | Yes (kcov + gate) | ✅ Covered | Temporary until real Io.Dir API used |
+| Multiple local checks in output | Unit test `status --json contains multiple checks` | Yes (kcov + gate) | ✅ Covered | None |
 
 ### Accepted Uncovered Future Behaviors
 
@@ -41,6 +58,16 @@ Coverage is an accountability surface. Every important behavior must either be c
 | state_dir (permission denied) | Io.Dir API not yet understood; placeholder only | Implement real filesystem check |
 
 ## Coverage Mechanisms
+
+### Real Line Coverage (kcov)
+
+`kcov` instruments the test binary and measures actual line coverage:
+
+- **Command**: `make coverage`
+- **Threshold**: 60% (configurable via `COVERAGE_THRESHOLD`)
+- **Files covered**: `tovarisch/src/` only
+- **Parser**: `scripts/extract_kcov_line_coverage.py`
+- **Gate**: Fails if coverage below threshold, unless `ALLOW_MISSING_KCOV=1`
 
 ### Unit Tests (`zig build test`)
 
@@ -62,9 +89,10 @@ Validates `status --json` output:
 
 ### Gate Integration (`make gate`)
 
-- Runs `zig build test` when Zig is available
+- Runs `kcov` coverage gate when kcov is available
 - Runs `verify_status_json.sh` on `status --json` output
-- Fails if any test fails or JSON contract is violated
+- Fails if coverage below threshold or JSON contract is violated
+- Behavior coverage ledger must exist and mention all public commands
 
 ## Commands Tracked
 

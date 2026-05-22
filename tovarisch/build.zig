@@ -25,6 +25,8 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run tovarisch");
     run_step.dependOn(&run_cmd.step);
 
+    // Test artifact for coverage — test-bin step produces:
+    // zig-out/bin/tovarisch-test (not zig-out/test/)
     const unit_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
@@ -37,4 +39,15 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
+
+    // test-bin step: builds test artifact and prepares it for coverage
+    // The test executable is compiled and available via unit_tests
+    const test_bin_step = b.step("test-bin", "Build test binary for kcov coverage");
+    test_bin_step.dependOn(&unit_tests.step);
+
+    // Install test binary to zig-out/bin/tovarisch-test
+    const install_test = b.addInstallArtifact(unit_tests, .{
+        .dest_sub_path = "tovarisch-test",
+    });
+    test_bin_step.dependOn(&install_test.step);
 }
