@@ -40,6 +40,12 @@ jobs:
       - name: Show Zig version
         run: zig version
 
+      - name: Install coverage dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y kcov bc jq
+          kcov --version
+
       - name: Run quality gate
         run: make gate
 
