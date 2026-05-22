@@ -40,27 +40,71 @@ jobs:
       - name: Show Zig version
         run: zig version
 
-      - name: Install coverage dependencies
+      - name: Install zig-kcov
+        env:
+          ZIG_KCOV_VERSION: v42.0.1
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            bc \
-            jq \
-            git \
-            cmake \
-            g++ \
-            pkg-config \
-            binutils-dev \
-            libcurl4-openssl-dev \
-            libdw-dev \
-            libelf-dev \
-            zlib1g-dev
+          set -euo pipefail
 
-          git clone --depth 1 https://github.com/SimonKagstrom/kcov.git /tmp/kcov
-          cmake -S /tmp/kcov -B /tmp/kcov/build
-          cmake --build /tmp/kcov/build --parallel
-          sudo cmake --install /tmp/kcov/build
-          kcov --version
+          sudo apt-get update
+          sudo apt-get install -y bc jq git unzip curl
+
+          mkdir -p "$GITHUB_WORKSPACE/.tools"
+
+          api_url="https://api.github.com/repos/roc-lang/zig-kcov/releases/tags/${ZIG_KCOV_VERSION}"
+          asset_url="$(
+            curl -fsSL "$api_url" |
+              jq -r '
+                .assets[]
+                | select(
+                    (.name | test("linux"; "i")) and
+                    (.name | test("x86_64|amd64"; "i"))
+                  )
+                | .browser_download_url
+              ' |
+              head -n 1
+          )"
+
+          if [ -z "$asset_url" ] || [ "$asset_url" = "null" ]; then
+            echo "Could not find linux x86_64 zig-kcov asset in ${ZIG_KCOV_VERSION}" >&2
+            curl -fsSL "$api_url" | jq -r '.assets[].name' >&2
+            exit 1
+          fi
+
+          echo "Downloading zig-kcov from: $asset_url"
+          curl -fL "$asset_url" -o /tmp/zig-kcov-release
+          file /tmp/zig-kcov-release || true
+
+          case "$asset_url" in
+            *.tar.gz|*.tgz)
+              mkdir -p /tmp/zig-kcov-unpack
+              tar -xzf /tmp/zig-kcov-release -C /tmp/zig-kcov-unpack
+              found="$(find /tmp/zig-kcov-unpack -type f \( -name 'zig-kcov' -o -name 'kcov' \) | head -n 1)"
+              ;;
+            *.zip)
+              mkdir -p /tmp/zig-kcov-unpack
+              unzip -q /tmp/zig-kcov-release -d /tmp/zig-kcov-unpack
+              found="$(find /tmp/zig-kcov-unpack -type f \( -name 'zig-kcov' -o -name 'kcov' \) | head -n 1)"
+              ;;
+            *)
+              found="/tmp/zig-kcov-release"
+              ;;
+          esac
+
+          if [ -z "${found:-}" ] || [ ! -f "$found" ]; then
+            echo "Downloaded asset did not contain zig-kcov/kcov executable" >&2
+            find /tmp/zig-kcov-unpack -maxdepth 4 -type f 2>/dev/null >&2 || true
+            exit 1
+          fi
+
+          cp "$found" "$GITHUB_WORKSPACE/.tools/zig-kcov"
+          chmod +x "$GITHUB_WORKSPACE/.tools/zig-kcov"
+
+          echo "=== zig-kcov installation verification ==="
+          test -x "$GITHUB_WORKSPACE/.tools/zig-kcov" || exit 1
+          "$GITHUB_WORKSPACE/.tools/zig-kcov" --version || true
+
+          echo "KCOV_BIN=$GITHUB_WORKSPACE/.tools/zig-kcov" >> "$GITHUB_ENV"
 
       - name: Run quality gate
         run: make gate
