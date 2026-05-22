@@ -49,7 +49,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc jq git unzip curl
 
-          mkdir -p "$GITHUB_WORKSPACE/.tools"
+          tool_dir="$RUNNER_TEMP/zig-kcov-tools"
+          mkdir -p "$tool_dir"
 
           api_url="https://api.github.com/repos/roc-lang/zig-kcov/releases/tags/${ZIG_KCOV_VERSION}"
           asset_url="$(
@@ -97,14 +98,14 @@ jobs:
             exit 1
           fi
 
-          cp "$found" "$GITHUB_WORKSPACE/.tools/zig-kcov"
-          chmod +x "$GITHUB_WORKSPACE/.tools/zig-kcov"
+          cp "$found" "$tool_dir/zig-kcov"
+          chmod +x "$tool_dir/zig-kcov"
 
           echo "=== zig-kcov installation verification ==="
-          test -x "$GITHUB_WORKSPACE/.tools/zig-kcov" || exit 1
-          "$GITHUB_WORKSPACE/.tools/zig-kcov" --version || true
+          test -x "$tool_dir/zig-kcov" || exit 1
+          "$tool_dir/zig-kcov" --version || true
 
-          echo "KCOV_BIN=$GITHUB_WORKSPACE/.tools/zig-kcov" >> "$GITHUB_ENV"
+          echo "KCOV_BIN=$tool_dir/zig-kcov" >> "$GITHUB_ENV"
 
       - name: Run quality gate
         run: make gate
