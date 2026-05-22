@@ -58,7 +58,20 @@ done
 
 echo "[gate] checking forbidden generic naming"
 
-if grep -RIn --exclude-dir=.git --exclude='quality_gate.sh' --exclude-dir=.clinerules 'kgb-agent\|KGB agent' .; then
+# Use git grep to search tracked file contents (not filenames) with timeout
+# Excludes policy files that document the rule (they will mention the forbidden term)
+status=0
+timeout 15s git grep -n -i -E 'kgb-agent|KGB agent' -- . \
+  ':(exclude)scripts/quality_gate.sh' \
+  ':(exclude).clinerules/' || status=$?
+
+if [[ "$status" -eq 1 ]]; then
+  :  # git grep returns 1 when no matches found — this is success
+elif [[ "$status" -eq 124 ]]; then
+  echo "[gate] FAIL: forbidden generic naming check timed out" >&2
+  exit 1
+else
+  echo "[gate] FAIL: forbidden generic naming check: found 'kgb-agent' or 'KGB agent' in tracked file contents" >&2
   echo "[gate] avoid kgb-agent naming; use tovarisch" >&2
   exit 1
 fi
