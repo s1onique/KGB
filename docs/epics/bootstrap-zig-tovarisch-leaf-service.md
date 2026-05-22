@@ -153,6 +153,32 @@ Make `tovarisch status --json` a stable, gate-verified JSON contract.
 - [x] `docs/doctrine/day-0-code-coverage.md` updated to mark `status --json` as contract-validated.
 - [x] `make gate` passes.
 
+## ACT 6 Scope (Zig 0.16 Lessons + Text Hygiene)
+
+Capture Zig 0.16 JSON serialization lessons into the field manual and harden repository text hygiene with final-newline checks.
+
+### ACT 6 Board
+
+| ID | Work Item | Status |
+|---|---|---|
+| tovarisch-037 | Add JSON serialization section to Zig 0.16 field manual | **done** |
+| tovarisch-038 | Document `std.json.Stringify` streaming pattern | **done** |
+| tovarisch-039 | Add example based on `status --json` | **done** |
+| tovarisch-040 | Add final-newline checking to `scripts/quality_gate.sh` | **done** |
+| tovarisch-041 | Fix existing files missing final newlines | **done** |
+| tovarisch-042 | Update epic with ACT 6 board and acceptance | **done** |
+| tovarisch-043 | Run `make gate` | **done** |
+
+### ACT 6 Acceptance
+
+- [x] `docs/tooling/zig-0.16-field-manual.md` contains JSON serialization section.
+- [x] Section documents `beginObject()`, `objectField()`, `write()`, etc.
+- [x] Example shows `renderPayload()` pattern from `status.zig`.
+- [x] `scripts/quality_gate.sh` checks all tracked files for final newlines.
+- [x] Gate fails if any tracked file lacks final newline.
+- [x] All existing tracked files pass the final-newline check.
+- [x] `make gate` passes.
+
 ## Future Work
 
 - Define signed report schema

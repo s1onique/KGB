@@ -4,6 +4,24 @@ set -euo pipefail
 echo "[gate] checking LLM-friendliness"
 ./scripts/check_llm_friendliness.sh
 
+echo "[gate] checking final newlines"
+
+missing_newline=0
+while IFS= read -r f; do
+    if [[ -f "$f" && -s "$f" ]]; then
+        last_char=$(tail -c1 "$f" | tr -d '\n')
+        if [[ -n "$last_char" ]]; then
+            echo "[gate] missing final newline: $f" >&2
+            missing_newline=1
+        fi
+    fi
+done < <(git ls-files)
+
+if [[ "$missing_newline" -eq 1 ]]; then
+    echo "[gate] fix: append newline to files above" >&2
+    exit 1
+fi
+
 echo "[gate] checking required docs"
 
 required=(

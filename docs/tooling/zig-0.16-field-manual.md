@@ -68,3 +68,49 @@ const exe = b.addExecutable(.{
 ```zig
 const std = @import("std");
 const Io = std.Io;
+```
+
+## Zig 0.16 JSON Serialization
+
+Do not assume a high-level `std.json.stringify()` helper exists.
+
+For controlled JSON output, use the **streaming API**:
+
+```zig
+var jw = std.json.Stringify{ .writer = writer };
+try jw.beginObject();
+try jw.objectField("field_name");
+try jw.write(value);
+try jw.beginArray();
+try jw.write(array_element);
+try jw.endArray();
+try jw.endObject();
+```
+
+### Key methods
+
+| Method | Purpose |
+|--------|---------|
+| `beginObject()` | Start an object `{` |
+| `endObject()` | End an object `}` |
+| `beginArray()` | Start an array `[` |
+| `endArray()` | End an array `]` |
+| `objectField(name)` | Write a field name key `"name":` |
+| `write(value)` | Write a value (string, number, bool, etc.) |
+
+### Example: `status --json`
+
+See `tovarisch/src/status.zig` for a working example of rendering a status payload:
+
+```zig
+pub fn renderPayload(writer: anytype) !void {
+    var jw = std.json.Stringify{ .writer = writer };
+    try jw.beginObject();
+    try jw.objectField("service");
+    try jw.write(static_status.service);
+    // ... more fields
+    try jw.endObject();
+}
+```
+
+This pattern is suitable for stable CLI JSON contracts.
