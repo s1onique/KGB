@@ -99,10 +99,24 @@ def run_command(cmd: list[str], cwd: Path | None = None, capture: bool = False,
 
 
 def require_tool(tool_path: str) -> str:
-    """Check that a tool is available and print version."""
-    result = subprocess.run([tool_path, "--version"], capture_output=True, text=True)
-    version = result.stdout.split("\n")[0] if result.stdout else "unknown"
-    print(f"[coverage] {Path(tool_path).name} version: {version}")
+    """Check that a tool is available and print diagnostics."""
+    tool_name = Path(tool_path).name
+    
+    # Try --version first
+    version_result = subprocess.run([tool_path, "--version"], capture_output=True, text=True)
+    version_rc = version_result.returncode
+    version = version_result.stdout.split("\n")[0] if version_result.stdout else "unknown"
+    print(f"[coverage] {tool_name} --version: '{version}' (rc={version_rc})")
+    
+    # Also try --help for tools that don't support --version
+    if version_rc != 0:
+        help_result = subprocess.run([tool_path, "--help"], capture_output=True, text=True)
+        print(f"[coverage] {tool_name} --help rc={help_result.returncode}")
+        if help_result.stdout:
+            print(f"[coverage] {tool_name} --help stdout (first 500 chars): {help_result.stdout[:500]}")
+        if help_result.stderr:
+            print(f"[coverage] {tool_name} --help stderr (first 500 chars): {help_result.stderr[:500]}")
+    
     return tool_path
 
 
@@ -157,7 +171,9 @@ def run_kcov_attempt(kcov_cmd: str, binary: Path, output_dir: Path, mode: str,
         args.extend(extra_args)
     args.extend([str(output_dir), str(binary)])
     
-    # Run kcov with timeout - suppress test output to stderr, capture only errors
+    print(f"[coverage] kcov command: {' '.join(args)}")
+    
+    # Run kcov with timeout - capture both stdout and stderr
     try:
         result = subprocess.run(args, capture_output=True, text=True, 
                               timeout=KCOV_ATTEMPT_TIMEOUT_SECONDS)
@@ -166,8 +182,9 @@ def run_kcov_attempt(kcov_cmd: str, binary: Path, output_dir: Path, mode: str,
         return (False, True)
     
     if result.returncode != 0:
-        print(f"[coverage] kcov ({mode}) exited with error")
-        print(f"[coverage] stderr: {result.stderr[:500] if result.stderr else 'none'}")
+        print(f"[coverage] kcov ({mode}) exited with error (rc={result.returncode})")
+        print(f"[coverage] stdout (first 1000 chars): {result.stdout[:1000] if result.stdout else 'none'}")
+        print(f"[coverage] stderr (first 1000 chars): {result.stderr[:1000] if result.stderr else 'none'}")
         return (False, False)
     
     print(f"[coverage] kcov ({mode}) completed")
