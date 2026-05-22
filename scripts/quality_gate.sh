@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "[gate] checking LLM-friendliness"
+./scripts/check_llm_friendliness.sh
+
 echo "[gate] checking required docs"
 
 required=(

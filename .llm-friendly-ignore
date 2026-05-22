@@ -1,0 +1,50 @@
+# .llm-friendly-ignore
+# Patterns for files that are exempt from LLM-friendliness checks.
+# Each pattern should have a comment explaining why it's exempt.
+#
+# IMPORTANT: Do NOT add broad ignores like "docs/**" or "src/**".
+# These defeat the purpose of the policy. Only add specific,
+# justified exemptions below.
+
+# =============================================================================
+# Generated files — these are auto-generated, not human-authored
+# =============================================================================
+
+# Protocol buffer generated Go code
+*.pb.go
+
+# Build artifacts
+tovarisch/.zig-cache/
+.zig-cache/
+build/
+dist/
+target/
+
+# Vendor dependencies (do not edit these)
+vendor/
+node_modules/
+
+# Ziggy TypeScript bindings (auto-generated from Zig)
+tovarisch/.ziggy/
+
+# =============================================================================
+# Binary/cache files that should never be checked
+# =============================================================================
+
+# Git objects and metadata
+.git/
+
+# macOS metadata
+.DS_Store
+
+# Editor swap files
+*.swp
+*.swo
+*~
+
+# =============================================================================
+# External data fixtures — only if genuinely too large to decompose
+# =============================================================================
+# Add specific files here only with explicit justification comments.
+# Example:
+# path/to/large_fixture.json  # Required for integration tests; too large to inline

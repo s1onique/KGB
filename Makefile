@@ -1,7 +1,10 @@
-.PHONY: gate digest tovarisch-build tovarisch-test tovarisch-run tovarisch-status
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status
 
 gate:
 	./scripts/quality_gate.sh
+
+llm-friendliness:
+	./scripts/check_llm_friendliness.sh
 
 digest:
 	./scripts/make_targeted_digest.sh --dirty --output digest.txt

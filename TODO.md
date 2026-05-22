@@ -17,6 +17,7 @@
 - [x] Add AGENTS.md (canonical agent contract)
 - [x] Add .clinerules (Cline/MiniMax bootstrap rules)
 - [x] Gate agent guidance files
+- [x] Add LLM-friendliness gate (Day-0 file size/line limits)
 
 ## Later
 
