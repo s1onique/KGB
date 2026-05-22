@@ -14,6 +14,9 @@
 - [x] Start Zig `tovarisch` spike
 - [x] Add first static `tovarisch status --json`
 - [x] Add Zig checks to repo gate
+- [x] Add AGENTS.md (canonical agent contract)
+- [x] Add .clinerules (Cline/MiniMax bootstrap rules)
+- [x] Gate agent guidance files
 
 ## Later
 

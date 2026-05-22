@@ -17,6 +17,11 @@ required=(
   docs/epics/bootstrap-zig-tovarisch-leaf-service.md
   docs/tooling/zig-0.16-field-manual.md
   docs/tooling/cline-context.md
+  AGENTS.md
+  .clinerules/00-bootstrap.md
+  .clinerules/10-kgb-doctrine.md
+  .clinerules/20-zig-016.md
+  .clinerules/30-verification.md
 )
 
 for path in "${required[@]}"; do
@@ -28,7 +33,7 @@ done
 
 echo "[gate] checking forbidden generic naming"
 
-if grep -RIn --exclude-dir=.git --exclude='quality_gate.sh' 'kgb-agent\|KGB agent' .; then
+if grep -RIn --exclude-dir=.git --exclude='quality_gate.sh' --exclude-dir=.clinerules 'kgb-agent\|KGB agent' .; then
   echo "[gate] avoid kgb-agent naming; use tovarisch" >&2
   exit 1
 fi
@@ -49,6 +54,18 @@ echo "[gate] checking Zig 0.16 field manual content"
 grep -q 'std.process.Init' docs/tooling/zig-0.16-field-manual.md
 grep -q 'std.Io' docs/tooling/zig-0.16-field-manual.md
 grep -qi 'do not downgrade' docs/tooling/zig-0.16-field-manual.md
+
+echo "[gate] checking AGENTS.md content"
+
+grep -q 'Zig Learning Protocol' AGENTS.md
+grep -qi 'Do not downgrade' AGENTS.md
+grep -q 'KGB observes infrastructure health, not people' AGENTS.md
+
+echo "[gate] checking .clinerules content"
+
+grep -q 'AGENTS.md' .clinerules/00-bootstrap.md
+grep -q 'docs/tooling/zig-0.16-field-manual.md' .clinerules/20-zig-016.md
+grep -q 'make gate' .clinerules/30-verification.md
 
 if command -v zig >/dev/null 2>&1; then
   (

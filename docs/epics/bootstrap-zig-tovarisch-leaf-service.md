@@ -75,6 +75,32 @@ Add repo-local recent-Zig knowledge pack and restore meaningful tests by separat
 - [x] Tests cover: `--version`, `check`, `status --json`, unknown command, missing args.
 - [x] Gate requires the new tooling docs and validates field manual content.
 
+## ACT 3a Scope
+
+Add canonical coding-agent guidance via `AGENTS.md` and `.clinerules`.
+
+### ACT 3a Board
+
+| ID | Work Item | Status |
+|---|---|---|
+| tovarisch-016 | Add root `AGENTS.md` | **done** |
+| tovarisch-017 | Add Cline bootstrap rule | **done** |
+| tovarisch-018 | Add KGB doctrine rule | **done** |
+| tovarisch-019 | Add Zig 0.16 rule | **done** |
+| tovarisch-020 | Add verification rule | **done** |
+| tovarisch-021 | Update quality gate | **done** |
+| tovarisch-022 | Run `make gate` | **done** |
+
+### ACT 3a Acceptance
+
+- [x] `AGENTS.md` exists and contains: Zig learning protocol, "Do not downgrade Zig", "KGB observes infrastructure health, not people".
+- [x] `.clinerules/00-bootstrap.md` exists and references `AGENTS.md`.
+- [x] `.clinerules/10-kgb-doctrine.md` exists with KGB doctrine summary.
+- [x] `.clinerules/20-zig-016.md` exists with Zig 0.16 rules.
+- [x] `.clinerules/30-verification.md` exists with verification rules.
+- [x] `scripts/quality_gate.sh` checks for new files and content.
+- [x] `make gate` passes.
+
 ## Future Work
 
 - Define signed report schema
