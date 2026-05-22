@@ -78,7 +78,7 @@ if command -v zig >/dev/null 2>&1; then
     zig build test
     zig build run -- --version >/dev/null
     zig build run -- check >/dev/null
-    zig build run -- status --json | grep -q '"service":"tovarisch"'
+    zig build run -- status --json | ../scripts/verify_status_json.sh
   )
 else
   echo "[gate] zig not installed; skipping Zig build/test"

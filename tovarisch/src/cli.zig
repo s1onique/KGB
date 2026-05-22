@@ -44,7 +44,7 @@ fn statusCommand(args: []const []const u8, stdout: anytype, stderr: anytype) Exi
         return .usage;
     }
 
-    stdout.writeAll(status.payload) catch return .usage;
+    status.renderPayload(stdout) catch return .usage;
     stdout.writeByte('\n') catch return .usage;
 
     return .ok;
@@ -84,7 +84,7 @@ test "version command prints version" {
 
     _ = run(&.{ "tovarisch", "--version" }, writer, writer);
     try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "tovarisch"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "0.1.0"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "0.1.1"));
 }
 
 test "check command returns ok" {
@@ -169,7 +169,7 @@ test "status --json contains expected fields" {
 
     _ = run(&.{ "tovarisch", "status", "--json" }, writer, writer);
     try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"service\":\"tovarisch\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"version\":\"0.1.0\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"version\":\"0.1.1\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"node_id\":\"local-dev\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"status\":\"ok\""));
 }

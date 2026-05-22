@@ -125,6 +125,34 @@ Add repository doctrine and quality-gate structure for Day-0 code coverage.
 - [x] Existing Zig tests still run and fail gate on failure.
 - [x] No fake coverage percentage is invented.
 
+## ACT 5 Scope (Status JSON Contract)
+
+Make `tovarisch status --json` a stable, gate-verified JSON contract.
+
+### ACT 5 Board
+
+| ID | Work Item | Status |
+|---|---|---|
+| tovarisch-029 | Define canonical status JSON schema in `status.zig` | **done** |
+| tovarisch-030 | Implement `renderPayload()` / `parseStatus()` for structural validation | **done** |
+| tovarisch-031 | Add JSON verification script `verify_status_json.sh` | **done** |
+| tovarisch-032 | Wire verification into `scripts/quality_gate.sh` (replace grep check) | **done** |
+| tovarisch-033 | Add structural validation tests in `status.zig` | **done** |
+| tovarisch-034 | Update `docs/doctrine/day-0-code-coverage.md` to document contract coverage | **done** |
+| tovarisch-035 | Update epic with ACT 5 board and acceptance | **done** |
+| tovarisch-036 | Run `make gate` | **done** |
+
+### ACT 5 Acceptance
+
+- [x] Minimal canonical status JSON shape defined as `Status` struct with required fields.
+- [x] `make tovarisch-status` emits valid JSON (verified by structural parsing).
+- [x] `scripts/verify_status_json.sh` parses JSON structurally, validates required fields and types.
+- [x] Gate uses structural validation instead of grep for `status --json`.
+- [x] Gate fails if `status --json` emits invalid JSON.
+- [x] Gate fails if required fields disappear.
+- [x] `docs/doctrine/day-0-code-coverage.md` updated to mark `status --json` as contract-validated.
+- [x] `make gate` passes.
+
 ## Future Work
 
 - Define signed report schema
