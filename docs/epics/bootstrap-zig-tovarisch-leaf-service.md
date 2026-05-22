@@ -204,6 +204,62 @@ Add first real local health checks to `tovarisch status --json`.
 - [x] All Zig tests pass.
 - [x] `make gate` passes.
 
+## ACT 8 Scope (Coverage Inventory)
+
+Add coverage inventory and uncovered-risk ledger to make coverage explicit and visible.
+
+### ACT 8 Board
+
+| ID | Work Item | Status |
+|---|---|---|
+| tovarisch-050 | Add `docs/coverage/tovarisch-coverage.md` with behavior coverage matrix | **done** |
+| tovarisch-051 | Add behavior coverage matrix (covered behaviors section) | **done** |
+| tovarisch-052 | Add accepted uncovered future behaviors section | **done** |
+| tovarisch-053 | Add commands tracked table | **done** |
+| tovarisch-054 | Add `make coverage-report` target to print coverage ledger | **done** |
+| tovarisch-055 | Update `make coverage` to point to coverage ledger | **done** |
+| tovarisch-056 | Add gate check for coverage ledger existence | **done** |
+| tovarisch-057 | Add gate check that coverage ledger mentions all public commands | **done** |
+| tovarisch-058 | Update Zig 0.16 field manual with reserved keyword enum note | **done** |
+| tovarisch-059 | Update epic board with ACT 8 entry | **done** |
+| tovarisch-060 | Run `make gate`, `make coverage`, `make coverage-report` | **done** |
+
+### ACT 8 Acceptance
+
+- [x] `docs/coverage/tovarisch-coverage.md` exists with behavior coverage matrix.
+- [x] Covered behaviors documented with coverage mechanism and gate enforcement.
+- [x] Accepted uncovered future behaviors documented with follow-up items.
+- [x] Commands tracked table lists all public commands.
+- [x] `make coverage-report` prints the coverage ledger.
+- [x] `make coverage` points to the coverage ledger.
+- [x] Gate checks coverage ledger exists and mentions all public commands.
+- [x] Zig 0.16 field manual updated with reserved keyword enum note.
+- [x] `make gate` passes.
+- [x] `make coverage` runs successfully.
+- [x] `make coverage-report` displays the ledger.
+
+## ACT 9 Scope (Explicit `--help` Coverage)
+
+Turn the current partial help coverage into explicit command coverage, because `--help` and `-h` are listed as public commands in the coverage ledger.
+
+### ACT 9 Board
+
+| ID | Work Item | Status |
+|---|---|---|
+| tovarisch-061 | Add unit tests for `--help` command | **done** |
+| tovarisch-062 | Add unit tests for `-h` short flag | **done** |
+| tovarisch-063 | Update coverage ledger to mark help as covered | **done** |
+| tovarisch-064 | Update epic board with ACT 9 entry | **done** |
+| tovarisch-065 | Run `make gate`, `make coverage`, `make coverage-report` | **done** |
+
+### ACT 9 Acceptance
+
+- [x] `--help` output is unit-tested (returns ok, prints usage with all commands).
+- [x] `-h` output is unit-tested (returns ok, prints usage).
+- [x] Coverage ledger marks help behavior as covered.
+- [x] `make gate` passes.
+- [x] All Zig tests pass.
+
 ## Future Work
 
 - Define signed report schema

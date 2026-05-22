@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status coverage
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status coverage coverage-report
 
 gate:
 	./scripts/quality_gate.sh
@@ -23,7 +23,7 @@ tovarisch-status:
 
 coverage:
 	@echo "=== Coverage Status ==="
-	@echo "Coverage is tracked from Day 0. See docs/doctrine/day-0-code-coverage.md"
+	@echo "See docs/coverage/tovarisch-coverage.md for behavior coverage ledger."
 	@echo ""
 	@if command -v zig >/dev/null 2>&1; then \
 		echo "Running: zig build test"; \
@@ -31,9 +31,20 @@ coverage:
 		echo ""; \
 		echo "[INFO] Zig tests passed — current coverage proxy"; \
 		echo "[INFO] Zig coverage backend not configured yet"; \
+		echo "[INFO] Run 'make coverage-report' for the coverage ledger"; \
 		echo "[INFO] Run 'make gate' for full quality gate"; \
-	else \
+		else \
 		echo "[INFO] Zig not installed; test-as-signal proxy unavailable"; \
-		echo "[INFO] See docs/doctrine/day-0-code-coverage.md"; \
+		echo "[INFO] See docs/coverage/tovarisch-coverage.md"; \
+		exit 1; \
+	fi
+
+coverage-report:
+	@echo "=== Tovarisch Coverage Ledger ==="
+	@echo ""
+	@if [[ -s "docs/coverage/tovarisch-coverage.md" ]]; then \
+		cat docs/coverage/tovarisch-coverage.md; \
+	else \
+		echo "[ERROR] Coverage ledger not found: docs/coverage/tovarisch-coverage.md"; \
 		exit 1; \
 	fi

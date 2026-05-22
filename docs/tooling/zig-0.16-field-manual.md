@@ -114,3 +114,28 @@ pub fn renderPayload(writer: anytype) !void {
 ```
 
 This pattern is suitable for stable CLI JSON contracts.
+
+## Reserved Keywords in Enum Variants
+
+If an enum variant name collides with a Zig keyword, escape it with `@"..."`.
+
+Example:
+
+```zig
+pub const CheckStatus = enum {
+    ok,
+    warn,
+    @"error",
+};
+```
+
+Use it as `.@"error"` in comparisons and construction.
+
+This matters because `error` is a reserved keyword in Zig. Without escaping:
+- The enum variant cannot be named `error`
+- Comparison `.error` fails to parse
+
+With escaping:
+- The variant `@"error"` is valid
+- Use `.@"error"` to refer to it
+- `@tagName()` correctly outputs `"error"` (quotes are part of the identifier)

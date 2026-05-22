@@ -62,6 +62,56 @@ fn printUsage(writer: anytype) void {
 
 // --- Tests ---
 
+test "help command returns ok" {
+    var buf: [256]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const allocator = fba.allocator();
+
+    var output = std.ArrayList(u8).init(allocator);
+    const writer = output.writer();
+
+    const code = run(&.{ "tovarisch", "--help" }, writer, writer);
+    try std.testing.expectEqual(ExitCode.ok, code);
+}
+
+test "help command prints usage" {
+    var buf: [256]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const allocator = fba.allocator();
+
+    var output = std.ArrayList(u8).init(allocator);
+    const writer = output.writer();
+
+    _ = run(&.{ "tovarisch", "--help" }, writer, writer);
+    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "tovarisch --version"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "tovarisch check"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "tovarisch status --json"));
+}
+
+test "-h short flag returns ok" {
+    var buf: [256]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const allocator = fba.allocator();
+
+    var output = std.ArrayList(u8).init(allocator);
+    const writer = output.writer();
+
+    const code = run(&.{ "tovarisch", "-h" }, writer, writer);
+    try std.testing.expectEqual(ExitCode.ok, code);
+}
+
+test "-h short flag prints usage" {
+    var buf: [256]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const allocator = fba.allocator();
+
+    var output = std.ArrayList(u8).init(allocator);
+    const writer = output.writer();
+
+    _ = run(&.{ "tovarisch", "-h" }, writer, writer);
+    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "usage:"));
+}
+
 test "version command returns ok" {
     var buf: [256]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buf);

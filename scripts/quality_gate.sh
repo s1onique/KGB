@@ -38,6 +38,7 @@ required=(
   docs/epics/bootstrap-zig-tovarisch-leaf-service.md
   docs/tooling/zig-0.16-field-manual.md
   docs/tooling/cline-context.md
+  docs/coverage/tovarisch-coverage.md
   AGENTS.md
   .clinerules/00-bootstrap.md
   .clinerules/10-kgb-doctrine.md
@@ -87,6 +88,13 @@ echo "[gate] checking .clinerules content"
 grep -q 'AGENTS.md' .clinerules/00-bootstrap.md
 grep -q 'docs/tooling/zig-0.16-field-manual.md' .clinerules/20-zig-016.md
 grep -q 'make gate' .clinerules/30-verification.md
+
+echo "[gate] checking coverage ledger mentions all public commands"
+
+grep -q '`--help`' docs/coverage/tovarisch-coverage.md
+grep -q '`--version`' docs/coverage/tovarisch-coverage.md
+grep -q '`check`' docs/coverage/tovarisch-coverage.md
+grep -q '`status --json`' docs/coverage/tovarisch-coverage.md
 
 if command -v zig >/dev/null 2>&1; then
   (
