@@ -2,6 +2,7 @@
 """extract_kcov_line_coverage.py — Robust kcov coverage parser
 
 Parses kcov's coverage.json to extract line coverage percentage.
+Filters coverage to tovarisch/src/ only.
 Handles multiple kcov output formats (list of files or aggregated format).
 Handles missing files, parse errors, and malformed data gracefully.
 
@@ -19,8 +20,76 @@ import os
 from pathlib import Path
 
 
+# Paths that are NOT part of tovarisch source
+FORBIDDEN_PATTERNS = [
+    'zig-cache',
+    '.zig-cache',
+    'zig-out',
+    '.git',
+    '/usr/',
+    '/opt/homebrew/',
+    '/nix/store/',
+    '/.cache/',
+    'kcov-',
+    'compiler_rt/',
+    'std/zig/',
+]
+
+
+def is_tovarisch_src_file(filepath: str) -> bool:
+    """Check if filepath is under tovarisch/src/ directory.
+    
+    Accepts:
+    - src/main.zig
+    - ./src/main.zig
+    - tovarisch/src/main.zig
+    - ./tovarisch/src/main.zig
+    - /path/to/KGB/tovarisch/src/main.zig
+    - /Volumes/.../tovarisch/src/main.zig
+    
+    Rejects:
+    - /home/runner/work/other-project/src/main.zig (generic /src/ not under tovarisch)
+    - /usr/include/...
+    - compiler_rt paths
+    - zig-out/...
+    - zig-cache/...
+    - any path containing forbidden patterns
+    - non-.zig files
+    """
+    if not filepath:
+        return False
+    
+    # Normalize path separators
+    path = filepath.replace("\\", "/")
+    path_lower = path.lower()
+    
+    # Reject non-.zig files (safety check)
+    if not path_lower.endswith(".zig"):
+        return False
+    
+    # Check for forbidden patterns first
+    for pattern in FORBIDDEN_PATTERNS:
+        if pattern.lower() in path_lower:
+            return False
+    
+    # Accept relative paths: src/ or ./src/
+    if path_lower.startswith("src/") or path_lower.startswith("./src/"):
+        return True
+    
+    # Accept paths explicitly under tovarisch/src/
+    if "/tovarisch/src/" in path_lower:
+        return True
+    
+    # Accept relative tovarisch/src/
+    if path_lower.startswith("tovarisch/src/") or path_lower.startswith("./tovarisch/src/"):
+        return True
+    
+    # Reject generic /src/ paths not under tovarisch
+    return False
+
+
 def extract_line_coverage(coverage_dir: str) -> float:
-    """Extract line coverage percentage from kcov coverage.json"""
+    """Extract line coverage percentage from kcov coverage.json, filtered to tovarisch/src/ only."""
     
     # kcov may produce output in a subdirectory with the binary name
     # e.g., coverage/tovarisch-test.HASH/coverage.json
@@ -70,45 +139,84 @@ def extract_line_coverage(coverage_dir: str) -> float:
         print(f"[ERROR] unexpected error reading coverage.json: {e}", file=sys.stderr)
         sys.exit(1)
     
-    # kcov format variant 1: aggregated (newer kcov versions)
-    # {"percent_covered": "0.00", "covered_lines": 0, "total_lines": 0, ...}
+    # kcov format variant 1: dict with "files" list (newer kcov versions, e.g., kcov 43)
+    # {"files": [{"file": "...", "covered_lines": N, "total_lines": M, ...}], "covered_lines": X, "total_lines": Y}
     if isinstance(data, dict):
-        # Authoritative: use covered_lines and total_lines if available
-        if 'total_lines' in data:
-            total = int(data['total_lines'])
-            if total <= 0:
-                print("[ERROR] kcov found 0 lines to cover — no coverage data", file=sys.stderr)
+        # Handle kcov's "files" list wrapper format
+        # {"files": [{"file": "...", "covered_lines": N, "total_lines": M, ...}]}
+        if 'files' in data and isinstance(data['files'], list):
+            files_list = data['files']
+            total_covered = 0
+            total_found = 0
+            source_files_seen = []
+            
+            for entry in files_list:
+                if not isinstance(entry, dict):
+                    continue
+                
+                filepath = entry.get('file', '')
+                
+                # Filter to only tovarisch/src files
+                if not is_tovarisch_src_file(filepath):
+                    continue
+                
+                source_files_seen.append(filepath)
+                
+                # Handle string values ("0", "5") or int values
+                covered = entry.get('covered_lines', 0)
+                found = entry.get('total_lines', 0)
+                
+                # Convert string to int if needed
+                if isinstance(covered, str):
+                    covered = int(covered) if covered.isdigit() else 0
+                if isinstance(found, str):
+                    found = int(found) if found.isdigit() else 0
+                
+                total_covered += covered
+                total_found += found
+            
+            if len(source_files_seen) == 0:
+                print("[ERROR] kcov found 0 tovarisch/src lines to cover — no source coverage data", file=sys.stderr)
+                print(f"[ERROR] kcov emitted {len(files_list)} files but none matched tovarisch/src/", file=sys.stderr)
                 sys.exit(1)
             
-            if 'covered_lines' in data:
-                covered = int(data['covered_lines'])
-                return (covered / total) * 100
+            if total_found == 0:
+                print("[ERROR] kcov found 0 lines to cover in tovarisch/src — no source coverage data", file=sys.stderr)
+                sys.exit(1)
+            
+            coverage_pct = (total_covered / total_found) * 100
+            return coverage_pct
         
-        # Fallback: use percent_covered if no line totals
-        # But only if we have total_lines to validate
-        if 'percent_covered' in data:
-            # If we have total_lines, we already handled it above
-            # If not, percent_covered alone is not authoritative
-            if 'total_lines' not in data:
-                print("[ERROR] kcov data lacks total_lines field — ambiguous schema", file=sys.stderr)
-                sys.exit(1)
-            
-            try:
-                pct = float(data['percent_covered'])
-                return pct
-            except (ValueError, TypeError):
-                print("[ERROR] invalid kcov percent_covered value", file=sys.stderr)
-                sys.exit(1)
+        # Aggregate-only format without files list: REJECT as ambiguous
+        # We cannot determine which lines are in tovarisch/src without per-file data
+        if 'total_lines' in data and 'files' not in data:
+            print("[ERROR] kcov data has aggregate totals but no per-file breakdown — ambiguous", file=sys.stderr)
+            print("[ERROR] cannot determine tovarisch/src coverage without files list", file=sys.stderr)
+            sys.exit(1)
+        
+        # No files list and no totals - unknown format
+        print("[ERROR] unknown kcov coverage format", file=sys.stderr)
+        sys.exit(1)
     
     # kcov format variant 2: per-file list (older kcov versions)
     # [{"filename": "...", "covered": [...], "found": [...]}]
     if isinstance(data, list):
         total_covered = 0
         total_found = 0
+        source_files_seen = []
         
         for entry in data:
             if not isinstance(entry, dict):
                 continue
+            
+            # Get filepath - kcov uses "file" or "filename"
+            filepath = entry.get('file', '') or entry.get('filename', '')
+            
+            # Filter to only tovarisch/src files
+            if not is_tovarisch_src_file(filepath):
+                continue
+            
+            source_files_seen.append(filepath)
             
             # kcov uses "covered" (hit lines) and "found" (all lines)
             covered = entry.get('covered', [])
@@ -122,8 +230,13 @@ def extract_line_coverage(coverage_dir: str) -> float:
                 total_covered += covered
                 total_found += found
         
+        if len(source_files_seen) == 0:
+            print("[ERROR] kcov found 0 tovarisch/src lines to cover — no source coverage data", file=sys.stderr)
+            print(f"[ERROR] kcov emitted {len(data)} files but none matched tovarisch/src/", file=sys.stderr)
+            sys.exit(1)
+        
         if total_found == 0:
-            print("[ERROR] kcov found 0 lines to cover — no coverage data", file=sys.stderr)
+            print("[ERROR] kcov found 0 lines to cover in tovarisch/src — no source coverage data", file=sys.stderr)
             print("[ERROR] this may indicate the test binary did not run or produced no coverage", file=sys.stderr)
             sys.exit(1)
         

@@ -54,9 +54,10 @@ mkdir -p "$COVERAGE_DIR"
 # kcov MUST succeed; no || true
 echo "[coverage] running kcov with threshold ${COVERAGE_THRESHOLD}%"
 
-kcov --include-path=src \
-     --exclude-path=zig-cache \
-     --exclude-path=zig-out \
+# Run kcov without --include-path to avoid DWARF path mismatch issues on macOS.
+# Parser filters coverage to tovarisch/src/ only.
+echo "[coverage] running kcov (parser filters to tovarisch/src)"
+kcov --exclude-path=zig-cache \
      --exclude-path=.git \
      "$COVERAGE_DIR" \
      "$TEST_BINARY"
