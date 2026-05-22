@@ -2,16 +2,18 @@
 
 ## Immediate
 
-- [ ] Add docs/doctrine/factory.md
-- [ ] Add docs/doctrine/kgb.md
-- [ ] Add docs/doctrine/privacy.md
-- [ ] Add docs/doctrine/tiny-leafs.md
-- [ ] Add docs/doctrine/metrics.md
-- [ ] Add docs/architecture/overview.md
-- [ ] Add docs/architecture/naming.md
-- [ ] Add docs/architecture/components.md
-- [ ] Add first quality gate
-- [ ] Start Zig `tovarisch` spike
+- [x] Add docs/doctrine/factory.md
+- [x] Add docs/doctrine/kgb.md
+- [x] Add docs/doctrine/privacy.md
+- [x] Add docs/doctrine/tiny-leafs.md
+- [x] Add docs/doctrine/metrics.md
+- [x] Add docs/architecture/overview.md
+- [x] Add docs/architecture/naming.md
+- [x] Add docs/architecture/components.md
+- [x] Add first quality gate
+- [x] Start Zig `tovarisch` spike
+- [x] Add first static `tovarisch status --json`
+- [x] Add Zig checks to repo gate
 
 ## Later
 
