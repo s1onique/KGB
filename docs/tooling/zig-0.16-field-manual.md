@@ -191,3 +191,47 @@ For Zig 0.16-dev, verify standard library APIs against the installed local stdli
 | `std.c.fd_set`, `std.c.timespec` | Platform-dependent | Use alternative approaches |
 
 **Always inspect local stdlib source** when encountering API uncertainty. Zig's language reference and stdlib are versioned; local source is the right source of truth for API drift.
+
+## HTTP Server Sockets and libc
+
+When implementing HTTP servers with socket operations, be aware:
+
+### std.posix Limitations in Zig 0.16
+
+The `std.posix` namespace does **NOT** expose socket functions directly:
+- `std.posix.socket` — **NOT AVAILABLE**
+- `std.posix.bind` — **NOT AVAILABLE**
+- `std.posix.listen` — **NOT AVAILABLE**
+- `std.posix.accept` — **NOT AVAILABLE**
+
+Socket operations exist in:
+- `std.os.linux.socket` (Linux direct syscalls, no libc required)
+- `std.c.socket` (libc wrapper, requires explicit libc linking)
+
+### Using std.c.socket in Zig 0.16
+
+To use `std.c.socket`, `std.c.bind`, `std.c.listen`, `std.c.accept` with cross-platform targets, set `.link_libc = true` in the module options.
+
+**Important:** In Zig 0.16 module-style build, there is **no `exe.linkLibC()`** method. Link libc via `Module.CreateOptions`:
+
+```zig
+const exe = b.addExecutable(.{
+    .name = "tovarisch",
+    .root_module = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        // Required for std.c.socket on cross-platform builds
+        .link_libc = true,
+    }),
+});
+```
+
+This is required for non-native targets (e.g., `arm-linux-musleabihf`).
+
+### Leaf-Service Doctrine Tradeoff
+
+The leaf-service doctrine prefers avoiding libc where practical. However:
+- HTTP socket functionality requires explicit libc linking in Zig 0.16
+- This is a documented exception until `std.posix` includes socket APIs
+- TODO: Investigate `std.os.linux.socket`-based alternative for pure syscall approach

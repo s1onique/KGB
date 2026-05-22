@@ -10,6 +10,23 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            // Explicitly require libc linking for HTTP server socket support.
+            //
+            // The HTTP server (src/http/server.zig) uses std.c.socket, std.c.bind,
+            // std.c.listen, std.c.accept, and std.c.write for cross-platform networking.
+            //
+            // Decision rationale:
+            // - Zig 0.16's std.posix namespace does NOT expose socket/bind/listen/accept
+            //   functions directly; they remain in std.c or OS-specific modules.
+            // - Using std.c.* with cross-platform targets (e.g., arm-linux-musleabihf)
+            //   requires explicit libc linking to satisfy the compiler.
+            // - The leaf-service doctrine prefers avoiding libc where practical, but
+            //   HTTP socket functionality is a documented exception for now.
+            // - Alternative: Use OS-specific modules (std.os.linux.socket, etc.) which
+            //   use direct syscalls and don't require libc. This would require significant
+            //   refactoring of the HTTP server abstraction layer.
+            // - TODO: Investigate std.os.linux.socket-based alternative for pure syscall approach
+            .link_libc = true,
         }),
     });
 

@@ -113,6 +113,7 @@ No framework.
 |-----|-------|--------|
 | ACT 1 | Define HTTP service contract and private-bind doctrine | ✅ done |
 | ACT 2 | Add `tovarisch serve` with minimal HTTP `/healthz` | ✅ done |
+| ACT 2b | Fix CI build failure: explicit libc for HTTP sockets | ✅ done |
 | ACT 3 | Enumerate private interface addresses and bind only those by default | open |
 | ACT 4 | Add `/status.json` over HTTP using existing status model | open |
 | ACT 5 | Add private interface traffic collector from Linux sysfs | open |
@@ -150,23 +151,78 @@ No framework.
 
 | ID | Work Item | Status |
 |---|---|---|
-| webservice-007 | Create `tovarisch/src/http/` module structure | open |
-| webservice-008 | Implement `http/server.zig` - TCP listener on configured addresses | open |
-| webservice-009 | Implement `http/routes.zig` - GET routing by path | open |
-| webservice-010 | Implement `http/response.zig` - JSON response helpers | open |
-| webservice-011 | Add `serve` command to `cli.zig` | open |
-| webservice-012 | Implement `GET /healthz` handler returning `{"status":"ok"}` | open |
-| webservice-013 | Add `serve` tests | open |
-| webservice-014 | Run `make gate`, `make tovarisch-build`, `make tovarisch-test` | open |
+| webservice-007 | Create `tovarisch/src/http/` module structure | ✅ done |
+| webservice-008 | Implement `http/server.zig` - TCP listener on configured addresses | ✅ done |
+| webservice-009 | Implement `http/routes.zig` - GET routing by path | ✅ done |
+| webservice-010 | Implement `http/response.zig` - JSON response helpers | ✅ done |
+| webservice-011 | Add `serve` command to `cli.zig` | ✅ done |
+| webservice-012 | Implement `GET /healthz` handler returning `{"status":"ok"}` | ✅ done |
+| webservice-013 | Add `serve` tests | ✅ done |
+| webservice-014 | Run `make gate`, `make tovarisch-build`, `make tovarisch-test` | ✅ done |
 
 ### Acceptance
 
-- [ ] `tovarisch serve` starts HTTP server.
-- [ ] `GET /healthz` returns `{"status":"ok"}`.
-- [ ] Server binds to loopback by default (127.0.0.1:8317).
-- [ ] `make tovarisch-build` succeeds.
-- [ ] `make tovarisch-test` succeeds.
-- [ ] `make gate` passes.
+- [x] `tovarisch serve` starts HTTP server.
+- [x] `GET /healthz` returns `{"status":"ok"}`.
+- [x] Server binds to loopback by default (127.0.0.1:8317).
+- [x] `make tovarisch-build` succeeds.
+- [x] `make tovarisch-test` succeeds.
+- [x] `make gate` passes.
+
+## ACT 2b: Fix CI build failure - explicit libc for HTTP sockets
+
+### Problem
+
+The HTTP server code in `tovarisch/src/http/server.zig` uses `std.c.socket`, `std.c.bind`, `std.c.listen`, `std.c.accept`, and `std.c.write` for cross-platform networking. When targeting non-native platforms (e.g., `arm-linux-musleabihf`), Zig 0.16 requires explicit libc linking:
+
+```
+error: dependency on libc must be explicitly specified in the build command
+```
+
+### Investigation
+
+- **std.posix does NOT expose socket functions in Zig 0.16**: Attempted refactoring to `std.posix.socket` etc., but confirmed that `std.posix` namespace does not contain `socket`, `bind`, `listen`, `accept` functions. These remain in `std.c` or OS-specific modules.
+- **std.c.socket requires libc on cross-platform targets**: The native macOS build succeeded without explicit linking, but cross-compilation to `arm-linux-musleabihf` failed.
+- **Zig 0.16 API**: `exe.linkLibC()` does not exist on `Compile`. The correct way is `.link_libc = true` in `Module.CreateOptions`.
+
+### Decision: Explicit libc
+
+Added `link_libc: true` to the root module in `tovarisch/build.zig`:
+
+```zig
+const exe = b.addExecutable(.{
+    .name = "tovarisch",
+    .root_module = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,  // Required for HTTP socket support
+    }),
+});
+```
+
+### Doctrine Tradeoff
+
+The leaf-service doctrine prefers avoiding libc where practical. However:
+- HTTP socket functionality is a documented exception
+- `std.posix` does not provide socket APIs in Zig 0.16
+- Alternative: Use `std.os.linux.socket` for direct syscalls (TODO: investigate)
+- Documented in `docs/tooling/zig-0.16-field-manual.md`
+
+### Files Changed
+
+- `tovarisch/build.zig` — Added `.link_libc = true` with documentation
+- `tovarisch/src/http/server.zig` — Unchanged (still uses `std.c.*`)
+- `tovarisch/src/http/response.zig` — Unchanged (still uses `std.c.write`)
+- `docs/tooling/zig-0.16-field-manual.md` — Documented socket API limitation
+
+### Verification
+
+- `zig build` — ✅ Passes
+- `zig build test` — ✅ All 70 tests pass
+- `zig build -Dtarget=arm-linux-musleabihf` — ✅ Passes (cross-compile)
+- `make gate` — ✅ Passes
+- Coverage: 82.18% (threshold: 60%)
 
 ## ACT 3: Enumerate private interface addresses and bind only those by default
 

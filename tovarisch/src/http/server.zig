@@ -46,7 +46,10 @@ pub const Server = struct {
         const fd = c.socket(c.AF.INET, c.SOCK.STREAM, 0);
         if (fd < 0) return error.SocketCreateFailed;
         self.listener_fd = @as(i32, fd);
-        errdefer { _ = c.close(self.listener_fd); self.listener_fd = -1; }
+        errdefer {
+            _ = c.close(self.listener_fd);
+            self.listener_fd = -1;
+        }
 
         // Set SO_REUSEADDR
         const one: c_int = 1;
@@ -60,7 +63,7 @@ pub const Server = struct {
             .sin_port = @byteSwap(self.config.port),
             .sin_addr = parseIpAddress(self.config.address),
         };
-        
+
         const bind_result = c.bind(self.listener_fd, @as(*c.sockaddr, @ptrFromInt(@intFromPtr(&addr))), @sizeOf(SockaddrIn));
         if (bind_result < 0) return error.BindFailed;
 
@@ -123,7 +126,7 @@ fn parseIpAddress(addr: []const u8) u32 {
 fn parseIpOctets(addr: []const u8) [4]u8 {
     var octets: [4]u8 = .{ 0, 0, 0, 0 };
     var idx: usize = 0;
-    
+
     var start: usize = 0;
     for (addr, 0..) |ch, i| {
         if (ch == '.') {
@@ -135,13 +138,13 @@ fn parseIpOctets(addr: []const u8) [4]u8 {
             }
         }
     }
-    
+
     // Parse the last octet
     if (idx < 4) {
         const octet_str = addr[start..];
         octets[idx] = @intCast(parseU8(octet_str));
     }
-    
+
     return octets;
 }
 

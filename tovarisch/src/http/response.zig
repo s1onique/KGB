@@ -90,10 +90,7 @@ pub fn writeSimpleJsonFd(fd: i32, status_code: u16, body: []const u8) !void {
     };
 
     var buf: [256]u8 = undefined;
-    const header_slice = try std.fmt.bufPrint(&buf,
-        "HTTP/1.1 {d} {s}\r\nContent-Type: application/json\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n",
-        .{ status_code, status_text, body.len }
-    );
+    const header_slice = try std.fmt.bufPrint(&buf, "HTTP/1.1 {d} {s}\r\nContent-Type: application/json\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n", .{ status_code, status_text, body.len });
     _ = c.write(fd, @as([*]const u8, @ptrCast(&buf)), header_slice.len);
     _ = c.write(fd, @as([*]const u8, @ptrCast(body.ptr)), body.len);
 }
