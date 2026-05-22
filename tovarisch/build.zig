@@ -27,9 +27,13 @@ pub fn build(b: *std.Build) void {
 
     // Test artifact for coverage — test-bin step produces:
     // zig-out/bin/tovarisch-test (not zig-out/test/)
+    //
+    // Uses test_all.zig as root to ensure all module tests are discovered.
+    // test_all.zig imports cli.zig and status.zig and calls refAllDecls
+    // to force Zig to link and run their tests.
     const unit_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
+            .root_source_file = b.path("src/test_all.zig"),
             .target = target,
             .optimize = optimize,
         }),

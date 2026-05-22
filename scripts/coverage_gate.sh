@@ -45,6 +45,22 @@ fi
 
 echo "[coverage] test binary: $TEST_BINARY"
 
+# Zero-test guard: run the test binary once to verify it actually runs tests
+# If the binary exits nonzero, fail immediately before wasting time on kcov
+echo "[coverage] verifying test binary executes real tests..."
+if ! TEST_OUTPUT=$("$TEST_BINARY" 2>&1); then
+    echo "[FAIL] coverage: test binary failed before kcov" >&2
+    echo "$TEST_OUTPUT" >&2
+    exit 1
+fi
+if echo "$TEST_OUTPUT" | grep -q "All 0 tests passed"; then
+    echo "[FAIL] coverage: test binary contains zero tests — cannot measure coverage" >&2
+    echo "[INFO] coverage: test binary output:" >&2
+    echo "$TEST_OUTPUT" | head -5 >&2
+    exit 1
+fi
+echo "[coverage] test binary confirmed: real tests found"
+
 # Create coverage output directory
 COVERAGE_DIR="zig-out/coverage"
 rm -rf "$COVERAGE_DIR"

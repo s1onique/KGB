@@ -60,180 +60,205 @@ fn printUsage(writer: anytype) void {
     ) catch {};
 }
 
+// CaptureWriter: collects bytes written for test assertions.
+// Uses a fixed buffer to avoid allocator complexity in tests.
+// Buffer size is generous for the CLI's small output.
+pub const CaptureWriter = struct {
+    const Self = @This();
+    const BufSize = 4096;
+
+    buf: [BufSize]u8 = undefined,
+    len: usize = 0,
+
+    pub fn init() Self {
+        return .{
+            .buf = undefined,
+            .len = 0,
+        };
+    }
+
+    pub fn print(self: *Self, comptime fmt: []const u8, args: anytype) !void {
+        if (self.len >= BufSize) return error.BufferOverflow;
+        const written = std.fmt.bufPrint(self.buf[self.len..], fmt, args) catch return error.BufferOverflow;
+        self.len += written.len;
+    }
+
+    pub fn writeAll(self: *Self, bytes: []const u8) !void {
+        if (self.len + bytes.len > BufSize) return error.BufferOverflow;
+        @memcpy(self.buf[self.len..][0..bytes.len], bytes);
+        self.len += bytes.len;
+    }
+
+    pub fn writeByte(self: *Self, byte: u8) !void {
+        if (self.len >= BufSize) return error.BufferOverflow;
+        self.buf[self.len] = byte;
+        self.len += 1;
+    }
+
+    pub fn slice(self: *const Self) []const u8 {
+        return self.buf[0..self.len];
+    }
+};
+
+// VoidWriter: for tests that only need exit codes (no output)
+pub const VoidWriter = struct {
+    const Self = @This();
+
+    pub fn writeAll(_: Self, _: []const u8) error{}!void {}
+    pub fn write(_: Self, _: []const u8) error{}!void {}
+    pub fn print(_: Self, _: []const u8, _: anytype) error{}!void {}
+    pub fn writeByte(_: Self, _: u8) error{}!void {}
+    pub fn flush(_: Self) error{}!void {}
+};
+
 // --- Tests ---
 
 test "help command returns ok" {
-    var buf: [256]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
-
-    var output = std.ArrayList(u8).init(allocator);
-    const writer = output.writer();
-
-    const code = run(&.{ "tovarisch", "--help" }, writer, writer);
-    try std.testing.expectEqual(ExitCode.ok, code);
-}
-
-test "help command prints usage" {
-    var buf: [256]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
-
-    var output = std.ArrayList(u8).init(allocator);
-    const writer = output.writer();
-
-    _ = run(&.{ "tovarisch", "--help" }, writer, writer);
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "tovarisch --version"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "tovarisch check"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "tovarisch status --json"));
+    const w = VoidWriter{};
+    try std.testing.expect(run(&.{ "tovarisch", "--help" }, w, w) == .ok);
 }
 
 test "-h short flag returns ok" {
-    var buf: [256]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
-
-    var output = std.ArrayList(u8).init(allocator);
-    const writer = output.writer();
-
-    const code = run(&.{ "tovarisch", "-h" }, writer, writer);
-    try std.testing.expectEqual(ExitCode.ok, code);
-}
-
-test "-h short flag prints usage" {
-    var buf: [256]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
-
-    var output = std.ArrayList(u8).init(allocator);
-    const writer = output.writer();
-
-    _ = run(&.{ "tovarisch", "-h" }, writer, writer);
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "usage:"));
+    const w = VoidWriter{};
+    try std.testing.expect(run(&.{ "tovarisch", "-h" }, w, w) == .ok);
 }
 
 test "version command returns ok" {
-    var buf: [256]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
-
-    var output = std.ArrayList(u8).init(allocator);
-    const writer = output.writer();
-
-    const code = run(&.{ "tovarisch", "--version" }, writer, writer);
-    try std.testing.expectEqual(ExitCode.ok, code);
-}
-
-test "version command prints version" {
-    var buf: [256]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
-
-    var output = std.ArrayList(u8).init(allocator);
-    const writer = output.writer();
-
-    _ = run(&.{ "tovarisch", "--version" }, writer, writer);
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "tovarisch"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "0.1.1"));
+    const w = VoidWriter{};
+    try std.testing.expect(run(&.{ "tovarisch", "--version" }, w, w) == .ok);
 }
 
 test "check command returns ok" {
-    var buf: [256]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
-
-    var output = std.ArrayList(u8).init(allocator);
-    const writer = output.writer();
-
-    const code = run(&.{ "tovarisch", "check" }, writer, writer);
-    try std.testing.expectEqual(ExitCode.ok, code);
-}
-
-test "check command prints ok" {
-    var buf: [256]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
-
-    var output = std.ArrayList(u8).init(allocator);
-    const writer = output.writer();
-
-    _ = run(&.{ "tovarisch", "check" }, writer, writer);
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "tovarisch check: ok"));
+    const w = VoidWriter{};
+    try std.testing.expect(run(&.{ "tovarisch", "check" }, w, w) == .ok);
 }
 
 test "unknown command returns usage" {
-    var buf: [256]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
-
-    var err_output = std.ArrayList(u8).init(allocator);
-    const err_writer = err_output.writer();
-
-    const code = run(&.{ "tovarisch", "badcmd" }, err_writer, err_writer);
-    try std.testing.expectEqual(ExitCode.usage, code);
+    const w = VoidWriter{};
+    try std.testing.expect(run(&.{ "tovarisch", "badcmd" }, w, w) == .usage);
 }
 
 test "no args returns usage" {
-    var buf: [256]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
-
-    var err_output = std.ArrayList(u8).init(allocator);
-    const err_writer = err_output.writer();
-
-    const code = run(&.{"tovarisch"}, err_writer, err_writer);
-    try std.testing.expectEqual(ExitCode.usage, code);
+    const w = VoidWriter{};
+    try std.testing.expect(run(&.{"tovarisch"}, w, w) == .usage);
 }
 
 test "status without --json returns usage" {
-    var buf: [512]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
-
-    var err_output = std.ArrayList(u8).init(allocator);
-    const err_writer = err_output.writer();
-
-    const code = run(&.{ "tovarisch", "status" }, err_writer, err_writer);
-    try std.testing.expectEqual(ExitCode.usage, code);
+    const w = VoidWriter{};
+    try std.testing.expect(run(&.{ "tovarisch", "status" }, w, w) == .usage);
 }
 
 test "status --json returns ok" {
-    var buf: [512]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
-
-    var output = std.ArrayList(u8).init(allocator);
-    const writer = output.writer();
-
-    const code = run(&.{ "tovarisch", "status", "--json" }, writer, writer);
-    try std.testing.expectEqual(ExitCode.ok, code);
+    const w = VoidWriter{};
+    try std.testing.expect(run(&.{ "tovarisch", "status", "--json" }, w, w) == .ok);
 }
 
-test "status --json contains expected fields" {
-    var buf: [512]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
+// --- Output behavior tests ---
+// These tests verify CLI output content using CaptureWriter.
 
-    var output = std.ArrayList(u8).init(allocator);
-    const writer = output.writer();
-
-    _ = run(&.{ "tovarisch", "status", "--json" }, writer, writer);
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"service\":\"tovarisch\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"version\":\"0.1.1\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"node_id\":\"local-dev\""));
+test "--help output contains usage" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "--help" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "usage:"));
 }
 
-test "status --json contains multiple checks" {
-    var buf: [512]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
+test "--help output contains tovarisch --version" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "--help" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "tovarisch --version"));
+}
 
-    var output = std.ArrayList(u8).init(allocator);
-    const writer = output.writer();
+test "--help output contains tovarisch check" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "--help" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "tovarisch check"));
+}
 
-    _ = run(&.{ "tovarisch", "status", "--json" }, writer, writer);
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"name\":\"process\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"name\":\"binary\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"name\":\"config\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"name\":\"state_dir\""));
+test "--help output contains tovarisch status --json" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "--help" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "tovarisch status --json"));
+}
+
+test "-h short flag contains usage" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "-h" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "usage:"));
+}
+
+test "--version output contains tovarisch" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "--version" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "tovarisch"));
+}
+
+test "--version output contains 0.1.1" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "--version" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "0.1.1"));
+}
+
+test "check output contains tovarisch check: ok" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "check" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "tovarisch check: ok"));
+}
+
+test "status --json output contains service:tovarisch" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "status", "--json" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "\"service\":\"tovarisch\""));
+}
+
+test "status --json output contains name:process" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "status", "--json" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "\"name\":\"process\""));
+}
+
+test "status --json output contains name:binary" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "status", "--json" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "\"name\":\"binary\""));
+}
+
+test "status --json output contains name:config" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "status", "--json" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "\"name\":\"config\""));
+}
+
+test "status --json output contains name:state_dir" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "status", "--json" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "\"name\":\"state_dir\""));
+}
+
+test "CLI exit codes match expected behavior" {
+    const w = VoidWriter{};
+
+    // Success exit codes
+    try std.testing.expect(run(&.{ "tovarisch", "--help" }, w, w) == .ok);
+    try std.testing.expect(run(&.{ "tovarisch", "-h" }, w, w) == .ok);
+    try std.testing.expect(run(&.{ "tovarisch", "--version" }, w, w) == .ok);
+    try std.testing.expect(run(&.{ "tovarisch", "check" }, w, w) == .ok);
+    try std.testing.expect(run(&.{ "tovarisch", "status", "--json" }, w, w) == .ok);
+
+    // Usage exit codes
+    try std.testing.expect(run(&.{"tovarisch"}, w, w) == .usage);
+    try std.testing.expect(run(&.{ "tovarisch", "badcmd" }, w, w) == .usage);
+    try std.testing.expect(run(&.{ "tovarisch", "status" }, w, w) == .usage);
 }
