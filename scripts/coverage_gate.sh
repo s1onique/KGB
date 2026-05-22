@@ -61,6 +61,72 @@ if echo "$TEST_OUTPUT" | grep -q "All 0 tests passed"; then
 fi
 echo "[coverage] test binary confirmed: real tests found"
 
+# =============================================================================
+# DWARF DIAGNOSTICS — Determine if binary contains project source paths
+# =============================================================================
+echo ""
+echo "[DWARF-DIAGNOSTIC] === Binary analysis for source mapping ==="
+
+echo "[DWARF-DIAGNOSTIC] file type:"
+file "$TEST_BINARY"
+
+echo "[DWARF-DIAGNOSTIC] debug sections:"
+if command -v readelf >/dev/null 2>&1; then
+    readelf -S "$TEST_BINARY" | grep -E 'debug|symtab' || echo "[DWARF-DIAGNOSTIC] no debug/symtab sections found"
+else
+    echo "[DWARF-DIAGNOSTIC] readelf not available — skipping section listing"
+fi
+
+echo "[DWARF-DIAGNOSTIC] checking for project source paths in DWARF line tables..."
+if command -v readelf >/dev/null 2>&1; then
+    # Try readelf first (widely available on Linux after binutils install)
+    # grep exits 1 when no matches — must be non-fatal inside substitution
+    DWARF_LINES=$(
+        readelf --debug-dump=decodedline "$TEST_BINARY" 2>/dev/null \
+            | grep -E 'tovarisch/src|src/(main|cli|status|http)|commands\.zig|status\.zig' \
+            | head -50 \
+            || true
+    )
+    if [[ -n "$DWARF_LINES" ]]; then
+        echo "[DWARF-DIAGNOSTIC] FOUND project paths in DWARF line tables:"
+        echo "$DWARF_LINES" | head -50 | sed 's/^/[DWARF-DIAGNOSTIC] &/'
+        echo "[DWARF-DIAGNOSTIC] project path match count: $(printf '%s\n' "$DWARF_LINES" | sed '/^$/d' | wc -l)"
+    else
+        echo "[DWARF-DIAGNOSTIC] WARNING: no project source paths found in DWARF line tables"
+        echo "[DWARF-DIAGNOSTIC] This suggests Zig compiled the tests without debug-line info"
+        
+        # Show a sample of what IS in the DWARF to help diagnose
+        echo "[DWARF-DIAGNOSTIC] Sample of actual DWARF paths (first 20 lines):"
+        readelf --debug-dump=decodedline "$TEST_BINARY" 2>/dev/null | head -20 | sed 's/^/[DWARF-DIAGNOSTIC] &/'
+    fi
+elif command -v llvm-dwarfdump >/dev/null 2>&1; then
+    # Fallback to llvm-dwarfdump if available
+    # grep exits 1 when no matches — must be non-fatal inside substitution
+    DWARF_LINES=$(
+        llvm-dwarfdump --debug-line "$TEST_BINARY" 2>/dev/null \
+            | grep -E 'tovarisch/src|src/(main|cli|status|http)|commands\.zig|status\.zig' \
+            | head -50 \
+            || true
+    )
+    if [[ -n "$DWARF_LINES" ]]; then
+        echo "[DWARF-DIAGNOSTIC] FOUND project paths in DWARF line tables:"
+        echo "$DWARF_LINES" | head -50 | sed 's/^/[DWARF-DIAGNOSTIC] &/'
+        echo "[DWARF-DIAGNOSTIC] project path match count: $(printf '%s\n' "$DWARF_LINES" | sed '/^$/d' | wc -l)"
+    else
+        echo "[DWARF-DIAGNOSTIC] WARNING: no project source paths found in DWARF line tables"
+        echo "[DWARF-DIAGNOSTIC] llvm-dwarfdump sample (first 20 lines):"
+        llvm-dwarfdump --debug-line "$TEST_BINARY" 2>/dev/null | head -20 | sed 's/^/[DWARF-DIAGNOSTIC] &/'
+    fi
+else
+    echo "[DWARF-DIAGNOSTIC] Neither readelf nor llvm-dwarfdump available — cannot inspect DWARF"
+fi
+echo "[DWARF-DIAGNOSTIC] === End binary analysis ==="
+echo ""
+
+# =============================================================================
+# KCOV RUN
+# =============================================================================
+
 # Create coverage output directory
 COVERAGE_DIR="zig-out/coverage"
 rm -rf "$COVERAGE_DIR"
@@ -70,18 +136,21 @@ mkdir -p "$COVERAGE_DIR"
 # kcov MUST succeed; no || true
 echo "[coverage] running kcov with threshold ${COVERAGE_THRESHOLD}%"
 
-# Run kcov without --include-path to avoid DWARF path mismatch issues on macOS.
-# Parser filters coverage to tovarisch/src/ only.
 echo "[coverage] running kcov (parser filters to tovarisch/src)"
 kcov --exclude-path=zig-cache \
      --exclude-path=.git \
      "$COVERAGE_DIR" \
      "$TEST_BINARY"
 
-# Diagnostic: dump kcov output directory tree
-echo "[coverage-debug] kcov output directory contents:"
-find "$COVERAGE_DIR" -maxdepth 3 -type f | sort | sed 's#^#  [coverage-debug] file: #'
-echo "[coverage-debug] end of kcov output tree"
+# Capped kcov tree dump — prevent enormous CI logs while still providing evidence
+# Suppress SIGPIPE from head truncation (not a real error)
+echo "[coverage-debug] kcov output directory contents (capped at 100 files):"
+find "$COVERAGE_DIR" -maxdepth 3 -type f 2>/dev/null | sort | head -100 | sed 's#^#  [coverage-debug] file: #' || true
+FILE_COUNT=$(find "$COVERAGE_DIR" -type f 2>/dev/null | wc -l)
+if [[ "$FILE_COUNT" -gt 100 ]]; then
+    echo "  [coverage-debug] ... and $((FILE_COUNT - 100)) more files (output capped)"
+fi
+echo "[coverage-debug] end of kcov output tree (total: $FILE_COUNT files)"
 
 # kcov succeeded — parse coverage
 # SCRIPT_DIR, REPO_ROOT, TOVARISCH_DIR already set at script start
