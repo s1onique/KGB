@@ -12,6 +12,7 @@ permissions:
 env:
   ZIG_VERSION: "0.16.0"
   BINARY_NAME: "tovarisch"
+  ZIG_PROJECT_DIR: "tovarisch"
 
 jobs:
   build:
@@ -46,12 +47,16 @@ jobs:
         run: |
           set -euo pipefail
 
+          cd "${ZIG_PROJECT_DIR}"
+
           zig build \
             -Dtarget=${{ matrix.zig_target }} \
             -Doptimize=ReleaseSafe
 
+          cd ..
+
           mkdir -p dist
-          cp "zig-out/bin/${BINARY_NAME}" "dist/${{ matrix.asset_name }}"
+          cp "${ZIG_PROJECT_DIR}/zig-out/bin/${BINARY_NAME}" "dist/${{ matrix.asset_name }}"
           chmod +x "dist/${{ matrix.asset_name }}"
 
       - name: Verify binary exists
