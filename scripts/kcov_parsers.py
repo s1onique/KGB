@@ -296,3 +296,4 @@ def parse_coverage_json(coverage_path: Path) -> float | None:
     coverage_pct = (total_covered / total_found) * 100
     print(f"[DEBUG] coverage.json: {len(source_files_seen)} files, {total_covered}/{total_found} lines, {coverage_pct:.2f}%", file=sys.stderr)
     return coverage_pct
+

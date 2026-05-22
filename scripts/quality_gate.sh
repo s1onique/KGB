@@ -7,15 +7,41 @@ echo "[gate] checking LLM-friendliness"
 echo "[gate] checking final newlines"
 
 missing_newline=0
+
+# Scan both tracked and untracked/new files to catch files that escape locally but fail in CI
+# when the patch is materialized. This mirrors LLM-friendliness behavior.
+files="$(
+  {
+    git ls-files
+    git ls-files --others --exclude-standard
+  } | sort -u
+)"
+
 while IFS= read -r f; do
-    if [[ -f "$f" && -s "$f" ]]; then
-        last_char=$(tail -c1 "$f" | tr -d '\n')
-        if [[ -n "$last_char" ]]; then
-            echo "[gate] missing final newline: $f" >&2
-            missing_newline=1
-        fi
+    [ -n "$f" ] || continue
+    [ -f "$f" ] || continue
+
+    # Skip binary and generated file types
+    case "$f" in
+      .git/*|zig-cache/*|zig-out/*|.zig-cache/*|coverage/*|kcov-output/*)
+        continue
+        ;;
+      *.png|*.jpg|*.jpeg|*.gif|*.ico|*.pdf|*.zip|*.gz|*.tar|*.tgz|*.wasm)
+        continue
+        ;;
+    esac
+
+    # Empty files are okay
+    [ -s "$f" ] || continue
+
+    # Check if last byte is a newline
+    if [[ "$(tail -c 1 "$f" | wc -l | tr -d ' ')" != "1" ]]; then
+        echo "[gate] missing final newline: $f" >&2
+        missing_newline=1
     fi
-done < <(git ls-files)
+done <<EOF
+$files
+EOF
 
 if [[ "$missing_newline" -eq 1 ]]; then
     echo "[gate] fix: append newline to files above" >&2
@@ -38,6 +64,7 @@ required=(
   docs/epics/bootstrap-zig-tovarisch-leaf-service.md
   docs/tooling/zig-0.16-field-manual.md
   docs/tooling/cline-context.md
+  docs/tooling/scripts-inventory.md
   docs/coverage/tovarisch-coverage.md
   docs/contracts/tovarisch-status-v0.md
   docs/contracts/examples/tovarisch-status-v0.json

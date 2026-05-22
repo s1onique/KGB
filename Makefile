@@ -36,3 +36,6 @@ coverage-report:
 
 verify-status-contract:
 	./scripts/verify_tovarisch_status_contract.sh
+
+test-final-newlines-regression:
+	./scripts/check_final_newlines_regression.sh
