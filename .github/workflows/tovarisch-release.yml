@@ -40,46 +40,64 @@ jobs:
       - name: Show Zig version
         run: zig version
 
-      - name: Install zig-kcov from source
+      - name: Install zig-kcov from source (CMake path)
         env:
           ZIG_KCOV_VERSION: v42.0.1
         run: |
           set -euo pipefail
 
+          # Install build dependencies for kcov
+          # - cmake: build system
+          # - g++: C++ compiler
+          # - pkg-config: library discovery
+          # - binutils-dev: libiberty for archive parsing
+          # - libcurl4-openssl-dev: libcurl for remote coverage
+          # - libdw-dev: libdw for DWARF processing
+          # - libelf-dev: libelf for ELF binary analysis
+          # - zlib1g-dev: zlib for compression
+          # - bc jq git unzip: utility tools
           sudo apt-get update
-          sudo apt-get install -y bc jq git unzip curl binutils
+          sudo apt-get install -y \
+            bc jq git unzip curl \
+            cmake g++ pkg-config \
+            binutils-dev libcurl4-openssl-dev \
+            libdw-dev libelf-dev zlib1g-dev
 
           tool_dir="$RUNNER_TEMP/zig-kcov-tools"
           mkdir -p "$tool_dir"
 
-          # Build zig-kcov from source to avoid SIGILL from prebuilt binaries
-          # Prebuilt assets may use CPU features unavailable on GitHub runner CPUs
+          # Build zig-kcov from source using CMake (conservative path)
+          # The experimental build.zig path is blocked by Zig 0.16 API drift:
+          # build.zig:108:51: error: member function expected 1 argument(s), found 0
+          # Zig 0.16 Run.captureStdOut requires options argument.
           echo "=== Cloning zig-kcov from source ==="
           git clone --depth 1 --branch "${ZIG_KCOV_VERSION}" \
             https://github.com/roc-lang/zig-kcov.git \
             /tmp/zig-kcov-src
-          cd /tmp/zig-kcov-src
 
           echo "=== Inspecting build files ==="
-          ls -la
-          cat build.zig 2>/dev/null | head -50 || echo "No build.zig found"
+          ls -la /tmp/zig-kcov-src/
+          ls -la /tmp/zig-kcov-src/CMakeLists.txt 2>/dev/null || echo "No CMakeLists.txt"
 
-          echo "=== Building zig-kcov ==="
-          # Build for Linux x86_64 target (native to the runner)
-          # Use ReleaseSafe to avoid aggressive optimizations that may use CPU-specific instructions
-          # This prevents SIGILL on runners with older CPU feature sets
-          zig build -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSafe
+          echo "=== Configuring zig-kcov with CMake ==="
+          cmake -S /tmp/zig-kcov-src -B /tmp/zig-kcov-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=g++
+
+          echo "=== Building zig-kcov with CMake ==="
+          cmake --build /tmp/zig-kcov-build --parallel
 
           # Find the built binary
-          found="$(find zig-out -type f \( -name 'zig-kcov' -o -name 'kcov' \) 2>/dev/null | head -n 1)"
+          echo "=== Locating kcov binary ==="
+          found="$(find /tmp/zig-kcov-build -type f \( -name 'zig-kcov' -o -name 'kcov' \) 2>/dev/null | head -n 1)"
 
           if [ -z "${found:-}" ] || [ ! -f "$found" ]; then
-            echo "Build did not produce zig-kcov/kcov binary" >&2
-            find zig-out -type f 2>/dev/null >&2 || true
+            echo "CMake build did not produce zig-kcov/kcov binary" >&2
+            find /tmp/zig-kcov-build -type f 2>/dev/null >&2 || true
             exit 1
           fi
 
-          # Rename to kcov (matches the actual binary name from upstream)
+          # Install to runner temp
           cp "$found" "$tool_dir/kcov"
           chmod +x "$tool_dir/kcov"
 
