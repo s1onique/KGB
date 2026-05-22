@@ -36,56 +36,69 @@ FORBIDDEN_PATTERNS = [
 ]
 
 
-def is_tovarisch_src_file(filepath: str) -> bool:
-    """Check if filepath is under tovarisch/src/ directory.
+def normalize_tovarisch_src_path(filepath: str) -> str | None:
+    """Check if filepath is tovarisch source and return normalized repo-relative path.
     
-    Accepts:
+    Accepts DWARF source paths in various forms:
     - src/main.zig
     - ./src/main.zig
     - tovarisch/src/main.zig
-    - ./tovarisch/src/main.zig
     - /path/to/KGB/tovarisch/src/main.zig
+    - /home/runner/work/KGB/KGB/tovarisch/src/main.zig
     - /Volumes/.../tovarisch/src/main.zig
     
-    Rejects:
-    - /home/runner/work/other-project/src/main.zig (generic /src/ not under tovarisch)
-    - /usr/include/...
-    - compiler_rt paths
-    - zig-out/...
-    - zig-cache/...
-    - any path containing forbidden patterns
-    - non-.zig files
+    Returns normalized path like "tovarisch/src/main.zig" or None if not project source.
     """
     if not filepath:
-        return False
+        return None
     
     # Normalize path separators
     path = filepath.replace("\\", "/")
     path_lower = path.lower()
     
-    # Reject non-.zig files (safety check)
+    # Reject non-.zig files
     if not path_lower.endswith(".zig"):
-        return False
+        return None
     
     # Check for forbidden patterns first
     for pattern in FORBIDDEN_PATTERNS:
         if pattern.lower() in path_lower:
-            return False
+            return None
     
-    # Accept relative paths: src/ or ./src/
-    if path_lower.startswith("src/") or path_lower.startswith("./src/"):
-        return True
+    # Method 1: suffix-based match — find /tovarisch/src/ at any position
+    # This handles absolute paths like /home/runner/work/KGB/KGB/tovarisch/src/http/server.zig
+    tovarisch_marker = "/tovarisch/src/"
+    marker_pos = path_lower.rfind(tovarisch_marker)
+    if marker_pos != -1:
+        filename = path[marker_pos + len(tovarisch_marker):]
+        # Accept nested paths (e.g., http/response.zig) and direct files (e.g., main.zig)
+        # Must not start with / and must not contain parent-dir traversal
+        if filename and not filename.startswith("/") and "/../" not in filename:
+            return f"tovarisch/src/{filename}"
     
-    # Accept paths explicitly under tovarisch/src/
-    if "/tovarisch/src/" in path_lower:
-        return True
+    # Method 2: relative paths starting with tovarisch/src/
+    # Normalize ./ prefix for consistency
+    if path_lower.startswith("./tovarisch/src/"):
+        return path[2:]  # strip leading ./
+    if path_lower.startswith("tovarisch/src/"):
+        return path  # already repo-relative
     
-    # Accept relative tovarisch/src/
-    if path_lower.startswith("tovarisch/src/") or path_lower.startswith("./tovarisch/src/"):
-        return True
+    # Method 3: relative paths starting with src/ (within tovarisch directory)
+    if path_lower.startswith("./src/"):
+        return path[2:]  # strip leading ./
+    if path_lower.startswith("src/"):
+        return path  # already repo-relative
     
-    # Reject generic /src/ paths not under tovarisch
-    return False
+    # Reject — not under tovarisch/src/
+    return None
+
+
+def is_tovarisch_src_file(filepath: str) -> bool:
+    """Check if filepath is under tovarisch/src/ directory.
+    
+    This is a wrapper for normalize_tovarisch_src_path for backward compatibility.
+    """
+    return normalize_tovarisch_src_path(filepath) is not None
 
 
 def extract_line_coverage(coverage_dir: str) -> float:
@@ -178,6 +191,12 @@ def extract_line_coverage(coverage_dir: str) -> float:
             if len(source_files_seen) == 0:
                 print("[ERROR] kcov found 0 tovarisch/src lines to cover — no source coverage data", file=sys.stderr)
                 print(f"[ERROR] kcov emitted {len(files_list)} files but none matched tovarisch/src/", file=sys.stderr)
+                # Show sample paths for debugging
+                sample_paths = [e.get('file', '') for e in files_list[:10] if isinstance(e, dict)]
+                if sample_paths:
+                    print("[DEBUG] First observed source paths:", file=sys.stderr)
+                    for p in sample_paths:
+                        print(f"  {p}", file=sys.stderr)
                 sys.exit(1)
             
             if total_found == 0:
@@ -233,6 +252,17 @@ def extract_line_coverage(coverage_dir: str) -> float:
         if len(source_files_seen) == 0:
             print("[ERROR] kcov found 0 tovarisch/src lines to cover — no source coverage data", file=sys.stderr)
             print(f"[ERROR] kcov emitted {len(data)} files but none matched tovarisch/src/", file=sys.stderr)
+            # Show sample paths for debugging
+            sample_paths = []
+            for e in data[:10]:
+                if isinstance(e, dict):
+                    p = e.get('file', '') or e.get('filename', '')
+                    if p:
+                        sample_paths.append(p)
+            if sample_paths:
+                print("[DEBUG] First observed source paths:", file=sys.stderr)
+                for p in sample_paths:
+                    print(f"  {p}", file=sys.stderr)
             sys.exit(1)
         
         if total_found == 0:
