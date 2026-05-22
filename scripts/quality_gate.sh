@@ -15,6 +15,8 @@ required=(
   docs/architecture/components.md
   docs/epics/kgb-repo-indoctrination.md
   docs/epics/bootstrap-zig-tovarisch-leaf-service.md
+  docs/tooling/zig-0.16-field-manual.md
+  docs/tooling/cline-context.md
 )
 
 for path in "${required[@]}"; do
@@ -42,10 +44,16 @@ if [[ ! -s "tovarisch/build.zig" || ! -s "tovarisch/src/main.zig" ]]; then
   exit 1
 fi
 
+echo "[gate] checking Zig 0.16 field manual content"
+
+grep -q 'std.process.Init' docs/tooling/zig-0.16-field-manual.md
+grep -q 'std.Io' docs/tooling/zig-0.16-field-manual.md
+grep -qi 'do not downgrade' docs/tooling/zig-0.16-field-manual.md
+
 if command -v zig >/dev/null 2>&1; then
   (
     cd tovarisch
-    zig fmt --check build.zig src/main.zig
+    zig fmt --check build.zig src/main.zig src/cli.zig src/status.zig
     zig build
     zig build test
     zig build run -- --version >/dev/null
