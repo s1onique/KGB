@@ -185,6 +185,28 @@ error: dependency on libc must be explicitly specified in the build command
 - **std.c.socket requires libc on cross-platform targets**: The native macOS build succeeded without explicit linking, but cross-compilation to `arm-linux-musleabihf` failed.
 - **Zig 0.16 API**: `exe.linkLibC()` does not exist on `Compile`. The correct way is `.link_libc = true` in `Module.CreateOptions`.
 
+### Root Cause: Separate Module Options for Executable vs. Test Artifacts
+
+**First fix:** Added `.link_libc = true` to executable root module (fixed `zig build`).
+
+**CI still failed:** `zig build test` / `make gate` failed on `std.c.write` and `std.c.socket` during the **test compile path**.
+
+**Second fix:** Added `.link_libc = true` to test root module:
+```zig
+const unit_tests = b.addTest(.{
+    .root_module = b.createModule(.{
+        .root_source_file = b.path("src/test_all.zig"),
+        .link_libc = true,  // Also required for test compilation
+    }),
+});
+```
+
+**Key insight:** Zig 0.16 module-style build creates separate root modules for each artifact. Module options do NOT automatically apply across artifacts.
+
+When `test_all.zig` uses `std.testing.refAllDecls`, it forces compilation of all declarations including those referencing `std.c.*` functions. This requires libc linkage at **test compile time** as well.
+
+**Rule:** `.link_libc` is NOT a project-wide flag. Apply it to every `b.createModule()` that imports code using `std.c.*` functions.
+
 ### Decision: Explicit libc
 
 Added `link_libc: true` to the root module in `tovarisch/build.zig`:

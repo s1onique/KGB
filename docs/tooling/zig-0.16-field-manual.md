@@ -235,3 +235,34 @@ The leaf-service doctrine prefers avoiding libc where practical. However:
 - HTTP socket functionality requires explicit libc linking in Zig 0.16
 - This is a documented exception until `std.posix` includes socket APIs
 - TODO: Investigate `std.os.linux.socket`-based alternative for pure syscall approach
+
+### Critical: `.link_libc` is NOT a project-wide flag
+
+In Zig 0.16 module-style build, `.link_libc` is a **module/artifact-level build option**. It must be applied to **every root module** that imports code using `std.c.*` functions.
+
+**Executables and tests are separate build artifacts with separate root modules:**
+
+```zig
+// Executable root module — has .link_libc
+const exe = b.addExecutable(.{
+    .root_module = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .link_libc = true,  // Required for std.c.*
+    }),
+});
+
+// Test root module — must ALSO have .link_libc
+// It does NOT inherit the executable's module options!
+const unit_tests = b.addTest(.{
+    .root_module = b.createModule(.{
+        .root_source_file = b.path("src/test_all.zig"),
+        .link_libc = true,  // Required for std.c.* in test compilation
+    }),
+});
+```
+
+**Key insight:** `b.addExecutable()` and `b.addTest()` each create a separate build artifact with a separate root module. Settings on one artifact's root module do **not** automatically apply to another.
+
+When `test_all.zig` uses `std.testing.refAllDecls`, it forces compilation of all imported declarations, including code that references `std.c.write`, `std.c.socket`, etc. This requires libc linkage at **test compile time** as well.
+
+**Rule:** Apply `.link_libc = true` to every `b.createModule()` that imports code which can reference `std.c.*` functions.
