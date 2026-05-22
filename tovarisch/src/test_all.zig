@@ -10,6 +10,9 @@ const std = @import("std");
 // Import all source modules to ensure they are compiled and their tests discovered
 const _cli = @import("cli.zig");
 const _status = @import("status.zig");
+const _http_response = @import("http/response.zig");
+const _http_routes = @import("http/routes.zig");
+const _http_server = @import("http/server.zig");
 
 // Force test discovery for all imported modules
 // This ensures the test binary actually runs the tests from these modules
@@ -19,4 +22,16 @@ test {
 
 test {
     std.testing.refAllDecls(@import("status.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("http/response.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("http/routes.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("http/server.zig"));
 }

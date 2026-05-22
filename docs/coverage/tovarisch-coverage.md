@@ -104,6 +104,7 @@ All public `tovarisch` commands must appear in this ledger:
 | `--version` | Yes | ✅ Unit test + gate |
 | `check` | Yes | ✅ Unit test + gate |
 | `status --json` | Yes | ✅ Unit test + structural validation |
+| `serve` | Yes | ✅ CLI parse unit tests; daemon loop = manual smoke test |
 
 ## Updating This Ledger
 

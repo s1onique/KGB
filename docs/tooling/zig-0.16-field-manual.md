@@ -139,3 +139,55 @@ With escaping:
 - The variant `@"error"` is valid
 - Use `.@"error"` to refer to it
 - `@tagName()` correctly outputs `"error"` (quotes are part of the identifier)
+
+## Daemon Command Tests
+
+Do not unit-test commands that enter blocking daemon loops by calling the top-level CLI runner.
+
+Extract pure argument parsing and config construction into a separate function, test that, and cover the daemon loop with a manual or integration smoke test.
+
+**Example pattern:**
+
+```zig
+pub fn parseServeArgs(args: []const []const u8, stderr: anytype) ServeParseResult {
+    // Pure parsing logic
+    ...
+}
+
+// Test the parser, not the daemon
+test "parseServeArgs defaults to loopback" {
+    const w = VoidWriter{};
+    const parsed = parseServeArgs(&.{}, w);
+    try std.testing.expect(parsed == .ok);
+}
+```
+
+The blocking accept loop is not executed by unit tests. Use manual smoke tests or integration tests for the daemon path.
+
+## HTTP Method Parsing
+
+`std.meta.stringToEnum()` is exact and does not map uppercase protocol strings such as `GET` to lowercase enum tags such as `.get`.
+
+Use an explicit parser for wire-protocol tokens:
+
+```zig
+fn parseMethod(method_str: []const u8) Method {
+    if (std.mem.eql(u8, method_str, "GET")) return .get;
+    if (std.mem.eql(u8, method_str, "POST")) return .post;
+    // ... other methods
+    return .unknown;
+}
+```
+
+## Zig 0.16 stdlib Drift
+
+For Zig 0.16-dev, verify standard library APIs against the installed local stdlib before coding from memory. Observed mismatches:
+
+| API | Status | Alternative |
+|-----|--------|-------------|
+| `std.time.sleep` | Unavailable | `std.Thread.yield()` for non-blocking polling |
+| `std.io.fixedBufferStream` | Unavailable | Implement inline fixed buffer writer |
+| `std.c.write` | 3 args (fd, [*]const u8, usize) | Cast slices to raw pointers |
+| `std.c.fd_set`, `std.c.timespec` | Platform-dependent | Use alternative approaches |
+
+**Always inspect local stdlib source** when encountering API uncertainty. Zig's language reference and stdlib are versioned; local source is the right source of truth for API drift.

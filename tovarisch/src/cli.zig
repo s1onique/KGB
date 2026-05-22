@@ -1,9 +1,11 @@
 const std = @import("std");
 const status = @import("status.zig");
+const http = @import("http/server.zig");
 
 pub const ExitCode = enum(u8) {
     ok = 0,
     usage = 2,
+    serve_error = 3,
 };
 
 pub fn run(args: []const []const u8, stdout: anytype, stderr: anytype) ExitCode {
@@ -29,6 +31,10 @@ pub fn run(args: []const []const u8, stdout: anytype, stderr: anytype) ExitCode 
         return .ok;
     }
 
+    if (std.mem.eql(u8, command, "serve")) {
+        return serveCommand(args[2..], stdout, stderr);
+    }
+
     if (std.mem.eql(u8, command, "status")) {
         return statusCommand(args[2..], stdout, stderr);
     }
@@ -36,6 +42,70 @@ pub fn run(args: []const []const u8, stdout: anytype, stderr: anytype) ExitCode 
     stderr.print("unknown command: {s}\n\n", .{command}) catch {};
     printUsage(stderr);
     return .usage;
+}
+
+/// Result of parsing serve command arguments.
+pub const ServeParseResult = union(enum) {
+    ok: http.Config,
+    usage,
+};
+
+/// Parse serve command arguments without starting the daemon.
+/// Returns the parsed config or usage error.
+pub fn parseServeArgs(args: []const []const u8, stderr: anytype) ServeParseResult {
+    var config = http.defaultConfig();
+
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+
+        if (std.mem.eql(u8, arg, "--listen") and i + 1 < args.len) {
+            const addr = args[i + 1];
+            if (std.mem.indexOfScalar(u8, addr, ':')) |colon_idx| {
+                const host = addr[0..colon_idx];
+                const port_str = addr[colon_idx + 1 ..];
+                config.port = std.fmt.parseInt(u16, port_str, 10) catch {
+                    stderr.writeAll("invalid port in --listen address\n") catch {};
+                    return .usage;
+                };
+                config.address = host;
+            } else {
+                config.address = addr;
+            }
+            i += 1;
+        } else if (std.mem.eql(u8, arg, "--listen-private")) {
+            config.address = "127.0.0.1";
+        } else if (std.mem.eql(u8, arg, "--listen-all-public-dangerous")) {
+            config.address = "0.0.0.0";
+        } else if (std.mem.eql(u8, arg, "--listen-all")) {
+            stderr.writeAll("error: --listen-all is deprecated; use --listen-all-public-dangerous\n") catch {};
+            return .usage;
+        } else {
+            stderr.print("unknown serve option: {s}\n", .{arg}) catch {};
+            return .usage;
+        }
+    }
+
+    return .{ .ok = config };
+}
+
+fn serveCommand(args: []const []const u8, stdout: anytype, stderr: anytype) ExitCode {
+    const parsed = parseServeArgs(args, stderr);
+
+    switch (parsed) {
+        .usage => return .usage,
+        .ok => |config| {
+            stdout.print("Starting tovarisch HTTP service on port {d}...\n", .{config.port}) catch {};
+            stdout.writeAll("Press Ctrl+C to stop.\n") catch {};
+
+            http.serve(config) catch {
+                stderr.writeAll("error: failed to start HTTP server\n") catch {};
+                return .serve_error;
+            };
+
+            return .ok;
+        },
+    }
 }
 
 fn statusCommand(args: []const []const u8, stdout: anytype, stderr: anytype) ExitCode {
@@ -55,6 +125,7 @@ fn printUsage(writer: anytype) void {
         \\usage:
         \\  tovarisch --version
         \\  tovarisch check
+        \\  tovarisch serve [--listen ADDR:PORT] [--listen-private] [--listen-all-public-dangerous]
         \\  tovarisch status --json
         \\
     ) catch {};
@@ -153,6 +224,49 @@ test "status --json returns ok" {
     try std.testing.expect(run(&.{ "tovarisch", "status", "--json" }, w, w) == .ok);
 }
 
+// --- serve argument parsing tests (non-blocking) ---
+// Note: We test parseServeArgs directly to avoid blocking daemon tests.
+
+test "parseServeArgs defaults to loopback port 8317" {
+    const w = VoidWriter{};
+    const parsed = parseServeArgs(&.{}, w);
+    try std.testing.expect(parsed == .ok);
+    try std.testing.expectEqualStrings("127.0.0.1", parsed.ok.address);
+    try std.testing.expectEqual(@as(u16, 8317), parsed.ok.port);
+}
+
+test "parseServeArgs with --listen sets address and port" {
+    const w = VoidWriter{};
+    const parsed = parseServeArgs(&.{ "--listen", "127.0.0.1:9999" }, w);
+    try std.testing.expect(parsed == .ok);
+    try std.testing.expectEqualStrings("127.0.0.1", parsed.ok.address);
+    try std.testing.expectEqual(@as(u16, 9999), parsed.ok.port);
+}
+
+test "parseServeArgs with --listen-private sets loopback" {
+    const w = VoidWriter{};
+    const parsed = parseServeArgs(&.{"--listen-private"}, w);
+    try std.testing.expect(parsed == .ok);
+    try std.testing.expectEqualStrings("127.0.0.1", parsed.ok.address);
+}
+
+test "parseServeArgs with --listen-all-public-dangerous sets 0.0.0.0" {
+    const w = VoidWriter{};
+    const parsed = parseServeArgs(&.{"--listen-all-public-dangerous"}, w);
+    try std.testing.expect(parsed == .ok);
+    try std.testing.expectEqualStrings("0.0.0.0", parsed.ok.address);
+}
+
+test "parseServeArgs with deprecated --listen-all returns usage" {
+    const w = VoidWriter{};
+    try std.testing.expect(parseServeArgs(&.{"--listen-all"}, w) == .usage);
+}
+
+test "parseServeArgs with unknown option returns usage" {
+    const w = VoidWriter{};
+    try std.testing.expect(parseServeArgs(&.{"--unknown"}, w) == .usage);
+}
+
 // --- Output behavior tests ---
 // These tests verify CLI output content using CaptureWriter.
 
@@ -175,6 +289,28 @@ test "--help output contains tovarisch check" {
     const code = run(&.{ "tovarisch", "--help" }, &cw, &cw);
     try std.testing.expect(code == .ok);
     try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "tovarisch check"));
+}
+
+test "--help output contains tovarisch serve" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "--help" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "tovarisch serve"));
+}
+
+test "--help output contains --listen-all-public-dangerous" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "--help" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "--listen-all-public-dangerous"));
+}
+
+test "--help output does NOT contain deprecated --listen-all" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "--help" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    // The deprecated --listen-all should NOT appear in help
+    try std.testing.expect(!std.mem.containsAtLeast(u8, cw.slice(), 1, "--listen-all]"));
 }
 
 test "--help output contains tovarisch status --json" {
@@ -211,6 +347,10 @@ test "check output contains tovarisch check: ok" {
     try std.testing.expect(code == .ok);
     try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "tovarisch check: ok"));
 }
+
+// Note: Tests for "serve" output are removed because serveCommand blocks forever.
+// Use parseServeArgs tests above for argument parsing coverage.
+// Daemon smoke tests should be run manually or via integration harness.
 
 test "status --json output contains service:tovarisch" {
     var cw = CaptureWriter.init();
@@ -250,15 +390,17 @@ test "status --json output contains name:state_dir" {
 test "CLI exit codes match expected behavior" {
     const w = VoidWriter{};
 
-    // Success exit codes
+    // Success exit codes (skip "serve" - blocks forever)
     try std.testing.expect(run(&.{ "tovarisch", "--help" }, w, w) == .ok);
     try std.testing.expect(run(&.{ "tovarisch", "-h" }, w, w) == .ok);
     try std.testing.expect(run(&.{ "tovarisch", "--version" }, w, w) == .ok);
     try std.testing.expect(run(&.{ "tovarisch", "check" }, w, w) == .ok);
     try std.testing.expect(run(&.{ "tovarisch", "status", "--json" }, w, w) == .ok);
+    // Note: "serve" is skipped because it blocks forever; use parseServeArgs tests instead.
 
     // Usage exit codes
     try std.testing.expect(run(&.{"tovarisch"}, w, w) == .usage);
     try std.testing.expect(run(&.{ "tovarisch", "badcmd" }, w, w) == .usage);
     try std.testing.expect(run(&.{ "tovarisch", "status" }, w, w) == .usage);
+    try std.testing.expect(run(&.{ "tovarisch", "serve", "--unknown" }, w, w) == .usage);
 }
