@@ -78,6 +78,11 @@ kcov --exclude-path=zig-cache \
      "$COVERAGE_DIR" \
      "$TEST_BINARY"
 
+# Diagnostic: dump kcov output directory tree
+echo "[coverage-debug] kcov output directory contents:"
+find "$COVERAGE_DIR" -maxdepth 3 -type f | sort | sed 's#^#  [coverage-debug] file: #'
+echo "[coverage-debug] end of kcov output tree"
+
 # kcov succeeded — parse coverage
 # SCRIPT_DIR, REPO_ROOT, TOVARISCH_DIR already set at script start
 cd "$TOVARISCH_DIR"

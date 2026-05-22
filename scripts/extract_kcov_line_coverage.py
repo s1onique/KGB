@@ -152,6 +152,9 @@ def extract_line_coverage(coverage_dir: str) -> float:
         print(f"[ERROR] unexpected error reading coverage.json: {e}", file=sys.stderr)
         sys.exit(1)
     
+    print(f"[DEBUG] Parsed kcov coverage.json from: {coverage_path}", file=sys.stderr)
+    print(f"[DEBUG] kcov data type: {type(data).__name__}", file=sys.stderr)
+    
     # kcov format variant 1: dict with "files" list (newer kcov versions, e.g., kcov 43)
     # {"files": [{"file": "...", "covered_lines": N, "total_lines": M, ...}], "covered_lines": X, "total_lines": Y}
     if isinstance(data, dict):
@@ -191,8 +194,44 @@ def extract_line_coverage(coverage_dir: str) -> float:
             if len(source_files_seen) == 0:
                 print("[ERROR] kcov found 0 tovarisch/src lines to cover — no source coverage data", file=sys.stderr)
                 print(f"[ERROR] kcov emitted {len(files_list)} files but none matched tovarisch/src/", file=sys.stderr)
-                # Show sample paths for debugging
-                sample_paths = [e.get('file', '') for e in files_list[:10] if isinstance(e, dict)]
+                
+                # Enhanced diagnostics: categorize all paths
+                all_paths = [e.get('file', '') for e in files_list if isinstance(e, dict) and e.get('file')]
+                
+                # Count categories
+                tovarisch_count = sum(1 for p in all_paths if 'tovarisch' in p.lower())
+                src_count = sum(1 for p in all_paths if '/src/' in p.lower().replace('\\', '/'))
+                zig_count = sum(1 for p in all_paths if p.lower().endswith('.zig'))
+                compiler_rt_count = sum(1 for p in all_paths if 'compiler_rt' in p.lower())
+                
+                print("[DEBUG] kcov path summary:", file=sys.stderr)
+                print(f"  total files: {len(all_paths)}", file=sys.stderr)
+                print(f"  .zig files: {zig_count}", file=sys.stderr)
+                print(f"  paths containing 'tovarisch': {tovarisch_count}", file=sys.stderr)
+                print(f"  paths containing '/src/': {src_count}", file=sys.stderr)
+                print(f"  paths containing 'compiler_rt': {compiler_rt_count}", file=sys.stderr)
+                
+                # Project-like paths (tovarisch, /src/, or .zig files not in compiler_rt)
+                project_like = [
+                    p for p in all_paths
+                    if 'tovarisch' in p.lower() 
+                    or '/src/' in p.lower().replace('\\', '/') 
+                    or (p.lower().endswith('.zig') and 'compiler_rt' not in p.lower())
+                ]
+                if project_like:
+                    print("[DEBUG] First 30 project-like paths:", file=sys.stderr)
+                    for p in project_like[:30]:
+                        print(f"  {p}", file=sys.stderr)
+                
+                # Non-compiler_rt paths
+                non_rt = [p for p in all_paths if 'compiler_rt' not in p.lower()]
+                if non_rt:
+                    print("[DEBUG] First 30 non-compiler_rt paths:", file=sys.stderr)
+                    for p in non_rt[:30]:
+                        print(f"  {p}", file=sys.stderr)
+                
+                # Raw sample paths (backward compatible)
+                sample_paths = all_paths[:10]
                 if sample_paths:
                     print("[DEBUG] First observed source paths:", file=sys.stderr)
                     for p in sample_paths:
@@ -252,13 +291,49 @@ def extract_line_coverage(coverage_dir: str) -> float:
         if len(source_files_seen) == 0:
             print("[ERROR] kcov found 0 tovarisch/src lines to cover — no source coverage data", file=sys.stderr)
             print(f"[ERROR] kcov emitted {len(data)} files but none matched tovarisch/src/", file=sys.stderr)
-            # Show sample paths for debugging
-            sample_paths = []
-            for e in data[:10]:
+            
+            # Enhanced diagnostics: categorize all paths
+            all_paths = []
+            for e in data:
                 if isinstance(e, dict):
                     p = e.get('file', '') or e.get('filename', '')
                     if p:
-                        sample_paths.append(p)
+                        all_paths.append(p)
+            
+            # Count categories
+            tovarisch_count = sum(1 for p in all_paths if 'tovarisch' in p.lower())
+            src_count = sum(1 for p in all_paths if '/src/' in p.lower().replace('\\', '/'))
+            zig_count = sum(1 for p in all_paths if p.lower().endswith('.zig'))
+            compiler_rt_count = sum(1 for p in all_paths if 'compiler_rt' in p.lower())
+            
+            print("[DEBUG] kcov path summary:", file=sys.stderr)
+            print(f"  total files: {len(all_paths)}", file=sys.stderr)
+            print(f"  .zig files: {zig_count}", file=sys.stderr)
+            print(f"  paths containing 'tovarisch': {tovarisch_count}", file=sys.stderr)
+            print(f"  paths containing '/src/': {src_count}", file=sys.stderr)
+            print(f"  paths containing 'compiler_rt': {compiler_rt_count}", file=sys.stderr)
+            
+            # Project-like paths (tovarisch, /src/, or .zig files not in compiler_rt)
+            project_like = [
+                p for p in all_paths
+                if 'tovarisch' in p.lower() 
+                or '/src/' in p.lower().replace('\\', '/') 
+                or (p.lower().endswith('.zig') and 'compiler_rt' not in p.lower())
+            ]
+            if project_like:
+                print("[DEBUG] First 30 project-like paths:", file=sys.stderr)
+                for p in project_like[:30]:
+                    print(f"  {p}", file=sys.stderr)
+            
+            # Non-compiler_rt paths
+            non_rt = [p for p in all_paths if 'compiler_rt' not in p.lower()]
+            if non_rt:
+                print("[DEBUG] First 30 non-compiler_rt paths:", file=sys.stderr)
+                for p in non_rt[:30]:
+                    print(f"  {p}", file=sys.stderr)
+            
+            # Raw sample paths (backward compatible)
+            sample_paths = all_paths[:10]
             if sample_paths:
                 print("[DEBUG] First observed source paths:", file=sys.stderr)
                 for p in sample_paths:
