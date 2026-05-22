@@ -1,0 +1,11 @@
+.DS_Store
+result
+result-*
+.direnv
+.env
+*.log
+tmp/
+dist/
+zig-out/
+zig-cache/
+.zig-cache/
