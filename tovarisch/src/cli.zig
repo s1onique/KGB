@@ -235,4 +235,5 @@ test "status --json contains multiple checks" {
     try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"name\":\"process\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"name\":\"binary\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"name\":\"config\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output.items, 1, "\"name\":\"state_dir\""));
 }

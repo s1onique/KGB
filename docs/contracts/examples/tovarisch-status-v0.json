@@ -18,6 +18,11 @@
       "name": "config",
       "status": "warn",
       "detail": "not configured yet"
+    },
+    {
+      "name": "state_dir",
+      "status": "warn",
+      "detail": "state directory not found"
     }
   ]
 }

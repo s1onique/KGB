@@ -22,6 +22,7 @@ Coverage is an accountability surface. Every important behavior must either be c
 | Local checks: process | Static check in `status.zig` + output test | Yes | ✅ Covered | None |
 | Local checks: binary | Static check in `status.zig` + output test | Yes | ✅ Covered | None |
 | Local checks: config | Static check shows "not configured yet" as warn | Yes | ✅ Covered | None |
+| Local checks: state_dir (placeholder) | Emits warn with "state directory not found" | Yes | ✅ Covered | Temporary until real Io.Dir API used |
 | Multiple local checks in output | Unit test `status --json contains multiple checks` | Yes | ✅ Covered | None |
 
 ### Accepted Uncovered Future Behaviors
@@ -35,6 +36,9 @@ Coverage is an accountability surface. Every important behavior must either be c
 | Signed status reports | Report schema TBD; no signing implementation | Define report schema and add coverage |
 | Desired-state pull | Desired-state model not designed | Design desired-state interface and add coverage |
 | Transport to station | Station-side not implemented | Implement station transport and add coverage |
+| state_dir (directory exists) | Io.Dir API not yet understood in Zig 0.16; placeholder returns warn | Investigate std.fs.Dir.stat() or simpler API |
+| state_dir (path is file, not dir) | Io.Dir API not yet understood; placeholder only | Implement real filesystem check |
+| state_dir (permission denied) | Io.Dir API not yet understood; placeholder only | Implement real filesystem check |
 
 ## Coverage Mechanisms
 

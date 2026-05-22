@@ -34,3 +34,22 @@ Recording field notes from Zig 0.16 experiments. Confidence varies; do not promo
 - Tests are discovered from all source files in the module; explicit test files not required.
 
 **Confidence:** high; verified with compiler errors and successful builds.
+
+---
+
+## 2026-05-22 — Io.Dir API not directly usable in status.zig
+
+- **Context:** Attempted to use `std.fs.cwd()` and `std.Io.Dir.cwd()` to check directory existence.
+- **Symptom:** `std.fs.cwd()` does not exist in Zig 0.16; `std.Io.Dir.cwd()` exists but requires an `Io` context for operations.
+- **Failed assumptions:**
+  1. `std.fs.cwd()` was assumed to be available (old API pattern)
+  2. `std.process.cwd()` was assumed to exist (doesn't exist in Zig 0.16)
+  3. `std.Io.Dir.openDir(path, io, options)` requires 3 arguments including `Io` context
+  4. `std.options.debug_io` doesn't exist as a simple field access
+  5. Static global initialization in `const x = fn()` causes segfault at runtime for certain function calls
+- **Working fix:** For v0 ACT 2, implemented `state_dir` check as a placeholder that always returns `warn`. The actual directory checking will be implemented once the `Io.Dir` API is fully understood.
+- **Files affected:** `tovarisch/src/status.zig`
+- **Promote to field manual:** No — this is a known limitation, not a recommended pattern. The placeholder approach is temporary.
+- **Recommendation:** Investigate `std.fs.Dir.stat()` or another simpler API for directory existence checking. The old `std.fs.cwd().stat(path)` pattern is invalid in Zig 0.16.
+
+**Confidence:** high; verified with compiler errors and successful builds.

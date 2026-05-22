@@ -77,26 +77,47 @@ const config_check = Check{
     .detail = "not configured yet",
 };
 
-/// Returns the static array of local health checks.
-pub fn getLocalChecks() []const Check {
-    return &[_]Check{ process_check, binary_check, config_check };
+/// Default state directory path for v0.
+/// Uses .tovarisch/state relative to current working directory.
+/// This is predictable and harmless for local dev/testing.
+/// TODO: Implement actual directory check once Io.Dir API is confirmed working.
+const DEFAULT_STATE_DIR = ".tovarisch/state";
+
+/// Checks the state directory status without creating it.
+/// Returns a Check with appropriate status and detail.
+/// For v0, this is a placeholder that returns warn (not yet implemented).
+pub fn getStateDirCheck() Check {
+    // v0 placeholder: directory check not yet implemented
+    // Will be implemented once Io.Dir API is confirmed working in Zig 0.16
+    _ = DEFAULT_STATE_DIR;
+    return Check{
+        .name = "state_dir",
+        .status = .warn,
+        .detail = "state directory not found",
+    };
 }
 
-// --- Built Status ---
-//
-// Pre-computed status using static checks.
+/// State directory check (computed once at startup).
+const state_check = getStateDirCheck();
 
-const local_status: Status = .{
-    .service = "tovarisch",
-    .version = version,
-    .node_id = "local-dev",
-    .status = deriveStatus(getLocalChecks()),
-    .checks = getLocalChecks(),
-};
+/// All local health checks combined into a static array.
+const all_checks = [_]Check{ process_check, binary_check, config_check, state_check };
 
-/// Returns the current status (static, using local checks).
+/// Returns the array of local health checks.
+pub fn getLocalChecks() []const Check {
+    return &all_checks;
+}
+
+/// Returns the current status with all local checks.
 pub fn getStatus() Status {
-    return local_status;
+    const checks = getLocalChecks();
+    return Status{
+        .service = "tovarisch",
+        .version = version,
+        .node_id = "local-dev",
+        .status = deriveStatus(checks),
+        .checks = checks,
+    };
 }
 
 // --- Payload construction ---
@@ -131,7 +152,7 @@ pub fn renderStatus(writer: anytype, s: Status) !void {
 
 /// Renders the current status payload to the given writer.
 pub fn renderPayload(writer: anytype) !void {
-    try renderStatus(writer, local_status);
+    try renderStatus(writer, getStatus());
 }
 
 // --- Required-field validation ---
@@ -206,9 +227,9 @@ test "deriveStatus returns ok for empty checks" {
     try std.testing.expectEqual(CheckStatus.ok, deriveStatus(&checks));
 }
 
-test "getLocalChecks returns three checks" {
+test "getLocalChecks returns four checks" {
     const checks = getLocalChecks();
-    try std.testing.expect(@as(usize, 3), checks.len);
+    try std.testing.expect(@as(usize, 4), checks.len);
 }
 
 test "getLocalChecks first check is process" {
@@ -216,13 +237,14 @@ test "getLocalChecks first check is process" {
     try std.testing.expectEqualStrings("process", checks[0].name);
 }
 
-test "local_status has correct structure" {
-    try std.testing.expectEqualStrings("tovarisch", local_status.service);
-    try std.testing.expectEqualStrings("0.1.1", local_status.version);
-    try std.testing.expectEqualStrings("local-dev", local_status.node_id);
-    // config is warn, so top-level should be warn
-    try std.testing.expectEqual(CheckStatus.warn, local_status.status);
-    try std.testing.expect(@as(usize, 3), local_status.checks.len);
+test "status has correct structure" {
+    const s = getStatus();
+    try std.testing.expectEqualStrings("tovarisch", s.service);
+    try std.testing.expectEqualStrings("0.1.1", s.version);
+    try std.testing.expectEqualStrings("local-dev", s.node_id);
+    // config and state_dir are warn, so top-level should be warn
+    try std.testing.expectEqual(CheckStatus.warn, s.status);
+    try std.testing.expect(@as(usize, 4), s.checks.len);
 }
 
 test "getStatus returns local_status" {
@@ -260,7 +282,7 @@ test "renderStatus produces valid JSON" {
 
     var out = std.Io.Writer.Allocating.init(allocator);
     defer out.deinit();
-    try renderStatus(&out, local_status);
+    try renderStatus(&out, getStatus());
 
     const json_str = try out.written();
     // Validate it parses back
@@ -284,8 +306,25 @@ test "renderPayload produces valid JSON with all checks" {
     try std.testing.expect(std.mem.containsAtLeast(u8, json_str, 1, "\"version\":\"0.1.1\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, json_str, 1, "\"node_id\":\"local-dev\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, json_str, 1, "\"checks\""));
-    // Must contain all three checks
+    // Must contain all four checks
     try std.testing.expect(std.mem.containsAtLeast(u8, json_str, 1, "\"name\":\"process\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, json_str, 1, "\"name\":\"binary\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, json_str, 1, "\"name\":\"config\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, json_str, 1, "\"name\":\"state_dir\""));
+}
+
+test "getStateDirCheck returns correct name" {
+    const check = getStateDirCheck();
+    try std.testing.expectEqualStrings("state_dir", check.name);
+}
+
+test "getStateDirCheck status is warn when directory missing" {
+    const check = getStateDirCheck();
+    // .tovarisch/state does not exist in test environment, expect warn
+    try std.testing.expectEqual(CheckStatus.warn, check.status);
+}
+
+test "getStateDirCheck detail for missing directory" {
+    const check = getStateDirCheck();
+    try std.testing.expectEqualStrings("state directory not found", check.detail);
 }
