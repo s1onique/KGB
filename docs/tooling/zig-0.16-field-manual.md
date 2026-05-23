@@ -179,6 +179,24 @@ fn parseMethod(method_str: []const u8) Method {
 }
 ```
 
+## Third-Party build.zig Files May Break Under Zig 0.16 Build API Changes
+
+Third-party projects that include their own `build.zig` may use APIs that have changed or been removed in Zig 0.16.
+
+### Observed Example: zig-kcov Build Failure
+
+The `roc-lang/zig-kcov` fork's `build.zig` uses `Run.captureStdOut()` without required options argument:
+
+```
+build.zig:108:51: error: member function expected 1 argument(s), found 0
+```
+
+**Root cause**: Zig 0.16 requires `Run.captureStdOut()` with explicit options.
+
+**Workaround**: Use CMake to build third-party projects instead of Zig's build system, when available. The CMake path for zig-kcov builds and runs correctly on Linux.
+
+**Rule**: When third-party build.zig fails under Zig 0.16, check if a CMake or autotools path exists before attempting to patch the build.zig.
+
 ## Zig 0.16 stdlib Drift
 
 For Zig 0.16-dev, verify standard library APIs against the installed local stdlib before coding from memory. Observed mismatches:

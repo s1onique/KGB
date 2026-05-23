@@ -40,130 +40,17 @@ jobs:
       - name: Show Zig version
         run: zig version
 
-      - name: Install zig-kcov from source (CMake path)
-        env:
-          ZIG_KCOV_VERSION: v42.0.1
-        run: |
-          set -euo pipefail
+      - name: Source policy hygiene gate
+        run: make hygiene-gate
 
-          # Install build dependencies for kcov
-          # - cmake: build system
-          # - g++: C++ compiler
-          # - pkg-config: library discovery
-          # - binutils-dev: libiberty for archive parsing
-          # - libcurl4-openssl-dev: libcurl for remote coverage
-          # - libdw-dev: libdw for DWARF processing
-          # - libelf-dev: libelf for ELF binary analysis
-          # - zlib1g-dev: zlib for compression
-          # - bc jq git unzip: utility tools
-          sudo apt-get update
-          sudo apt-get install -y \
-            bc jq git unzip curl \
-            cmake g++ pkg-config \
-            binutils-dev libcurl4-openssl-dev \
-            libdw-dev libelf-dev zlib1g-dev
+      - name: Build tovarisch
+        run: make tovarisch-build
 
-          tool_dir="$RUNNER_TEMP/zig-kcov-tools"
-          mkdir -p "$tool_dir"
+      - name: Run tovarisch tests
+        run: make tovarisch-test
 
-          # Build zig-kcov from source using CMake (conservative path)
-          # The experimental build.zig path is blocked by Zig 0.16 API drift:
-          # build.zig:108:51: error: member function expected 1 argument(s), found 0
-          # Zig 0.16 Run.captureStdOut requires options argument.
-          echo "=== Cloning zig-kcov from source ==="
-          git clone --depth 1 --branch "${ZIG_KCOV_VERSION}" \
-            https://github.com/roc-lang/zig-kcov.git \
-            /tmp/zig-kcov-src
-
-          echo "=== Inspecting build files ==="
-          ls -la /tmp/zig-kcov-src/
-          ls -la /tmp/zig-kcov-src/CMakeLists.txt 2>/dev/null || echo "No CMakeLists.txt"
-
-          echo "=== Configuring zig-kcov with CMake ==="
-          cmake -S /tmp/zig-kcov-src -B /tmp/zig-kcov-build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_COMPILER=g++
-
-          echo "=== Building zig-kcov with CMake ==="
-          cmake --build /tmp/zig-kcov-build --parallel
-
-          # Find the built binary
-          echo "=== Locating kcov binary ==="
-          found="$(find /tmp/zig-kcov-build -type f \( -name 'zig-kcov' -o -name 'kcov' \) 2>/dev/null | head -n 1)"
-
-          if [ -z "${found:-}" ] || [ ! -f "$found" ]; then
-            echo "CMake build did not produce zig-kcov/kcov binary" >&2
-            find /tmp/zig-kcov-build -type f 2>/dev/null >&2 || true
-            exit 1
-          fi
-
-          # Install to runner temp
-          cp "$found" "$tool_dir/kcov"
-          chmod +x "$tool_dir/kcov"
-
-          echo "=== kcov executable diagnostics ==="
-          echo "File info:"
-          file "$tool_dir/kcov" || true
-          ls -l "$tool_dir/kcov" || true
-
-          echo "Dynamic library dependencies (ldd):"
-          ldd "$tool_dir/kcov" 2>&1 || echo "ldd failed or not applicable"
-
-          echo "kcov --help:"
-          set +e
-          "$tool_dir/kcov" --help > /tmp/kcov-help-inline.txt 2>&1
-          help_rc=$?
-          set -e
-          echo "kcov --help rc=$help_rc"
-          head -40 /tmp/kcov-help-inline.txt || true
-
-          echo "kcov --version:"
-          "$tool_dir/kcov" --version 2>&1 || echo "kcov --version exited non-zero: rc=$?"
-
-          # Smoke test with harmless invocation (non-fatal under set -e)
-          echo "=== kcov smoke test ==="
-          set +e
-          "$tool_dir/kcov" --help > /tmp/kcov-help.txt 2>&1
-          sm_rc=$?
-          set -e
-          echo "smoke test rc=$sm_rc"
-          head -40 /tmp/kcov-help.txt || true
-
-          # Check for missing shared libraries (diagnostic only)
-          missing_libs=$(ldd "$tool_dir/kcov" 2>&1 | grep "not found" || true)
-          if [ -n "$missing_libs" ]; then
-            echo "=== WARNING: Missing shared libraries detected ==="
-            echo "$missing_libs"
-            echo "Install the missing runtime libraries on the runner before retrying."
-          fi
-
-          # Minimal smoke: try to cover /bin/true (not the project binary)
-          # This distinguishes "kcov is broken" from "Zig test binary + kcov incompatibility"
-          echo "=== kcov backend smoke (cover /bin/true) ==="
-          tmp_cov="$RUNNER_TEMP/kcov-smoke"
-          rm -rf "$tmp_cov"
-          set +e
-          "$tool_dir/kcov" "$tmp_cov" /bin/true > /tmp/kcov-smoke.out 2>&1
-          sm_cov_rc=$?
-          set -e
-          echo "kcov /bin/true rc=$sm_cov_rc"
-          head -80 /tmp/kcov-smoke.out || true
-          echo "Smoke output files:"
-          find "$tmp_cov" -maxdepth 3 -type f 2>/dev/null | sort | head -50 || echo "none found"
-
-          # If kcov itself is not runnable, abort before gate
-          if [ ! -x "$tool_dir/kcov" ]; then
-            echo "FATAL: kcov is not executable. Check above diagnostics." >&2
-            exit 1
-          fi
-
-          echo "=== kcov source build complete ==="
-          test -x "$tool_dir/kcov" || exit 1
-
-          echo "KCOV_BIN=$tool_dir/kcov" >> "$GITHUB_ENV"
-
-      - name: Run quality gate
-        run: make gate
+      - name: Verify tovarisch status contract
+        run: make verify-status-contract
 
       - name: Build release binary
         run: |

@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Parse --hygiene-only flag
+HYGIENE_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --hygiene-only) HYGIENE_ONLY=1 ;;
+  esac
+done
+
+if [[ "$HYGIENE_ONLY" -eq 1 ]]; then
+  echo "[gate:hygiene] starting hygiene-only gate"
+fi
+
 echo "[gate] checking LLM-friendliness"
 ./scripts/check_llm_friendliness.sh
 
@@ -138,6 +150,12 @@ grep -q '`--help`' docs/coverage/tovarisch-coverage.md
 grep -q '`--version`' docs/coverage/tovarisch-coverage.md
 grep -q '`check`' docs/coverage/tovarisch-coverage.md
 grep -q '`status --json`' docs/coverage/tovarisch-coverage.md
+
+if [[ "$HYGIENE_ONLY" -eq 1 ]]; then
+  echo ""
+  echo "[gate:hygiene] hygiene-only gate PASS"
+  exit 0
+fi
 
 if command -v zig >/dev/null 2>&1; then
   (

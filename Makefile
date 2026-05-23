@@ -3,8 +3,38 @@
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 60
 
+# === Split Gates ===
+
+# hygiene-gate: source-policy checks (non-coverage subset of quality_gate.sh)
+# Includes: LLM-friendliness, final newlines, required docs, forbidden naming,
+# privacy doctrine, AGENTS/.clinerules content, coverage ledger commands.
+# Does NOT include: Zig build/test (see test-gate), coverage (see make coverage).
+hygiene-gate:
+	@./scripts/quality_gate.sh --hygiene-only
+	@./scripts/check_final_newlines_regression.sh
+
+# test-gate: build + test + status contract
+test-gate:
+	cd tovarisch && zig build
+	cd tovarisch && zig build test
+	./scripts/verify_tovarisch_status_contract.sh
+
+# === Coverage Gate (local only) ===
+
+coverage:
+	@echo "=== Coverage Gate ==="
+	@./scripts/coverage_gate.sh
+
+coverage-report:
+	@echo "=== Coverage Report ==="
+	@./scripts/coverage_report.sh
+
+# === Combined Gate (local default) ===
+
 gate:
 	./scripts/quality_gate.sh
+
+# === Individual Targets ===
 
 llm-friendliness:
 	./scripts/check_llm_friendliness.sh
@@ -23,16 +53,6 @@ tovarisch-run:
 
 tovarisch-status:
 	cd tovarisch && zig build run -- status --json
-
-coverage:
-	@echo "=== Coverage Gate ==="
-	@./scripts/coverage_gate.sh
-
-coverage-report:
-	@echo "=== Coverage Report ==="
-	@./scripts/coverage_report.sh
-
-.PHONY: verify-status-contract
 
 verify-status-contract:
 	./scripts/verify_tovarisch_status_contract.sh

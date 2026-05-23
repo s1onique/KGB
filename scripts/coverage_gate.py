@@ -361,6 +361,22 @@ def main() -> int:
             print(f"[INFO] coverage: Tried kcov binary: {KCOV_CMD}", file=sys.stderr)
             print("[INFO] coverage: This may indicate a Zig DWARF + Linux kcov incompatibility.", file=sys.stderr)
             print("[INFO] coverage: Consider trying roc-lang/zig-kcov (github.com/roc-lang/zig-kcov)", file=sys.stderr)
+            # Check if this looks like the known Linux backend gap
+            import platform
+            is_linux = platform.system() == "Linux"
+            if is_linux:
+                print("", file=sys.stderr)
+                print("[INFO] coverage: === Accepted Tooling Risk ===", file=sys.stderr)
+                print("[INFO] coverage: Linux kcov backend emits empty reports for Zig 0.16 test binary.", file=sys.stderr)
+                print("[INFO] coverage: This is a known backend gap (documented in docs/coverage/tovarisch-coverage.md).", file=sys.stderr)
+                print("[INFO] coverage: All serious backend paths have been exhausted:", file=sys.stderr)
+                print("[INFO] coverage:   - Upstream kcov: empty reports", file=sys.stderr)
+                print("[INFO] coverage:   - zig-kcov prebuilt: SIGILL", file=sys.stderr)
+                print("[INFO] coverage:   - zig-kcov via Zig: build.zig API drift", file=sys.stderr)
+                print("[INFO] coverage:   - zig-kcov via CMake: empty reports", file=sys.stderr)
+                print("[INFO] coverage: Local/macOS coverage remains strict.", file=sys.stderr)
+                print("[INFO] coverage: Linux CI uses explicit test/status gates without kcov.", file=sys.stderr)
+                print("[INFO] coverage: See: docs/coverage/tovarisch-coverage.md#accepted-tooling-risks", file=sys.stderr)
         else:
             print("[INFO] coverage: DWARF also did not find project source paths.", file=sys.stderr)
         # Dynamic message: list only the modes that were actually attempted
@@ -373,7 +389,7 @@ def main() -> int:
         print("[INFO] coverage:   1. Pin kcov to a version known to work with Zig 0.16 DWARF", file=sys.stderr)
         print("[INFO] coverage:   2. Try roc-lang/zig-kcov fork: KCOV_BIN=/path/to/zig-kcov make coverage", file=sys.stderr)
         print("[INFO] coverage:   3. Verify Linux kernel has breakpoints enabled (ptrace_scope)", file=sys.stderr)
-        print("[INFO] coverage:   4. Mark Linux kcov as accepted tooling risk until Zig-native coverage stabilizes", file=sys.stderr)
+        print("[INFO] coverage:   4. On Linux: mark kcov as accepted tooling risk (see docs/coverage/tovarisch-coverage.md)", file=sys.stderr)
         return 1
     
     print("")

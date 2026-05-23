@@ -128,8 +128,32 @@ When implementing previously-uncovered behavior:
 - **Coverage signals intent**: Test passing is the current coverage proxy until Zig coverage backend matures.
 - **TODOs are visible**: Gaps are documented, not hidden.
 
+## Accepted Tooling Risks
+
+### Linux kcov Backend Emits Empty Reports for Zig 0.16 Test Binary
+
+**Status**: Known Linux CI backend gap — accepted tooling risk.
+
+**Evidence**: All serious kcov-compatible backend paths have been exhausted:
+
+| Backend | Result | Evidence |
+|---------|--------|----------|
+| Upstream kcov from source | Builds/runs; DWARF has project paths; reports structurally valid but empty | `files: []`, `covered_lines: 0`, `total_lines: 0` |
+| roc-lang/zig-kcov prebuilt release | Executable dies with `rc=-4` / SIGILL before help/version | Release binary incompatible with GitHub runner CPU/runtime |
+| roc-lang/zig-kcov source build via Zig | Blocked by Zig 0.16 build.zig API drift | `build.zig:108:51: error: member function expected 1 argument(s), found 0` |
+| roc-lang/zig-kcov source build via CMake | Builds/runs; standard/verify/include-pattern modes complete; reports structurally valid but empty | `coverage.json files=[]`, `Cobertura classes=[]`, `covered_lines: 0`, `total_lines: 0` |
+
+**Impact**: Linux CI real line coverage for `tovarisch` is temporarily unsupported. The test binary has DWARF project paths, and kcov backends emit structurally valid JSON/XML reports, but no source files are included.
+
+**Local/macOS Coverage**: Real line coverage remains strict where kcov works. Current local coverage passes at approximately 82.69%.
+
+**Linux CI Behavior**: Linux release workflow runs real Zig tests and status-contract verification without requiring kcov coverage. This is not a coverage gap — it is a documented backend limitation.
+
+**Future**: Native Zig coverage is a long-running open area. This gap may resolve when Zig's own coverage tooling matures.
+
 ## References
 
 - [Day-0 Code Coverage Doctrine](../doctrine/day-0-code-coverage.md)
 - [Quality Gate Script](../scripts/quality_gate.sh)
 - [JSON Verification Script](../scripts/verify_status_json.sh)
+- [zig-0.16-field-manual.md: Build.zig API Drift](../tooling/zig-0.16-field-manual.md)
