@@ -102,7 +102,11 @@ fn openForWrite(path: []const u8) ReadError!usize {
     const c_path = toCString(path, &path_buf) catch return error.StatFileUnreadable;
 
     if (@import("builtin").os.tag == .linux) {
-        const flags = std.os.linux.O{ .CREAT = true, .WRONLY = true };
+        const flags = std.os.linux.O{
+            .ACCMODE = std.posix.ACCMODE.WRONLY,
+            .CREAT = true,
+            .TRUNC = true,
+        };
         const fd = std.c.open(c_path, flags, @as(c_uint, 0o644));
         if (fd < 0) return error.StatFileUnreadable;
         return @as(usize, @intCast(fd));

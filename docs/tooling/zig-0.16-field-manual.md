@@ -383,3 +383,18 @@ Key points:
 - We link libc anyway for socket support, so `std.c.*` functions are available
 - Cross-compiled tests cannot execute on non-Linux hosts; compile-only verification
 
+### Writing Files on Linux
+
+For Linux file write operations, use `.ACCMODE` to set the access mode:
+
+```zig
+const flags = std.os.linux.O{
+    .ACCMODE = std.posix.ACCMODE.WRONLY,
+    .CREAT = true,
+    .TRUNC = true,
+};
+const fd = std.c.open(c_path, flags, @as(c_uint, 0o644));
+```
+
+**Key insight:** `std.os.linux.O` is a packed struct with `.ACCMODE` enum field (values: `std.posix.ACCMODE.RDONLY`, `std.posix.ACCMODE.WRONLY`, `std.posix.ACCMODE.RDWR`). It does NOT have boolean fields like `.WRONLY = true`. Always use `.ACCMODE = std.posix.ACCMODE.WRONLY`.
+

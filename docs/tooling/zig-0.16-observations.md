@@ -37,6 +37,28 @@ Recording field notes from Zig 0.16 experiments. Confidence varies; do not promo
 
 ---
 
+## 2026-05-23 — Linux open flags: ACCMODE, not boolean `.WRONLY`
+
+- **Context:** Linux CI fails in `tovarisch/src/net/linux_stats.zig` on open flags.
+- **Symptom:** `error: no field named 'WRONLY' in struct 'os.linux.O__struct_...'`
+- **Failed assumption:** `std.os.linux.O` has boolean fields like `.WRONLY = true`. It does NOT.
+- **Root cause:** On Linux, access mode is represented through `.ACCMODE` enum field with values like `.WRONLY` / `.RDWR`.
+- **Working fix:** Use `.ACCMODE = std.posix.ACCMODE.WRONLY` instead:
+  ```zig
+  const flags = std.os.linux.O{
+      .ACCMODE = std.posix.ACCMODE.WRONLY,
+      .CREAT = true,
+      .TRUNC = true,  // Truncate for clean fixture writes
+  };
+  ```
+- **Why this escaped:** Linux-only branch inside `openForWrite()` helper used by tests. macOS local tests exercised the fallback path, not the Linux packed `O` struct.
+- **Files affected:** `tovarisch/src/net/linux_stats.zig`
+- **Promote to field manual:** Yes — added "Writing Files on Linux" section with the correct pattern.
+
+**Confidence:** high; verified with `make tovarisch-test` passing.
+
+---
+
 ## 2026-05-23 — `@intCast` target inference
 
 - **Context:** Using integer type coercion in Zig 0.16.
