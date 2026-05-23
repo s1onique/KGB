@@ -23,8 +23,19 @@ jobs:
 
       - name: Install packaging and coverage tools
         run: |
+          set -euo pipefail
+
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev kcov
+          sudo apt-get install -y dpkg-dev curl ca-certificates
+
+          url="https://github.com/SimonKagstrom/kcov/releases/download/v42/kcov-amd64.tar.gz"
+          curl -fsSL "${url}" -o /tmp/kcov-amd64.tar.gz
+
+          tar -tzf /tmp/kcov-amd64.tar.gz | grep -qx 'kcov'
+          sudo tar -xzf /tmp/kcov-amd64.tar.gz -C /usr/local/bin kcov
+
+          command -v kcov
+          kcov --version
 
       - name: Show tool versions
         run: |
