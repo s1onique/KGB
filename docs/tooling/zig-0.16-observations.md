@@ -289,3 +289,47 @@ const num_str = std.fmt.bufPrint(&num_buf, "{d}\n", .{counter_value}) catch unre
 
 - **Files affected:** `tovarisch/src/net/linux_addr.zig`, `tovarisch/src/net/linux_addr_parse.zig`
 - **Promote to field manual:** Yes — add "Linux rtnetlink Socket Pattern" section.
+
+---
+
+## 2026-05-24 — Raw u8 buffers must NOT be @alignCast into extern structs
+
+- **Context:** Linux live tests crash with `panic: incorrect alignment` in `discoverPrivateAddresses()` on `tovarisch/src/net/linux_addr.zig:201`.
+- **Symptom:** `@ptrCast(@alignCast(&buffer[offset]))` panics when the byte offset is not aligned for `nlmsghdr` (extern struct requires proper alignment).
+- **Root cause:** Raw `[]u8` network/kernel buffers arrive at arbitrary byte offsets. Zig correctly rejects casting unaligned byte pointers to extern structs.
+- **Wrong assumption:** `@alignCast` was assumed to safely convert any pointer. It does NOT — it panics when the source is not actually aligned.
+
+**Working fix — reading response structs:**
+
+```zig
+fn readStruct(comptime T: type, bytes: []const u8) AddrError!T {
+    if (bytes.len < @sizeOf(T)) return error.InvalidMessage;
+    var value: T = undefined;
+    @memcpy(std.mem.asBytes(&value), bytes[0..@sizeOf(T)]);
+    return value;
+}
+
+// Usage:
+const nlhdr = try readStruct(nlmsghdr, buffer[offset..msg_len]);
+const response_len = @as(usize, @intCast(nlhdr.nlmsg_len));
+```
+
+**Working fix — building request structs:**
+
+```zig
+// Build local aligned structs and copy into request buffer
+var hdr = nlmsghdr{
+    .nlmsg_len = @intCast(nlmsg_len),
+    .nlmsg_type = @intCast(RTM_GETADDR),
+    // ...
+};
+var msg = ifaddrmsg{ ... };
+
+@memcpy(request[0..@sizeOf(nlmsghdr)], std.mem.asBytes(&hdr));
+@memcpy(request[@sizeOf(nlmsghdr)..][0..@sizeOf(ifaddrmsg)], std.mem.asBytes(&msg));
+```
+
+**Doctrine:** Raw `[]u8` network/kernel buffers are byte-aligned. Do NOT `@alignCast` them into extern structs. Copy bytes into aligned local structs instead.
+
+- **Files affected:** `tovarisch/src/net/linux_addr.zig`
+- **Promote to field manual:** Yes — refine the alignment section to cover network buffers.

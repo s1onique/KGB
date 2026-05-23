@@ -16,6 +16,11 @@
 // - No IPv6 support (deferred to future ACT)
 // - No /metrics.json wiring
 // - No sysfs fallback
+//
+// Alignment Doctrine:
+// - Raw []u8 network/kernel buffers are byte-aligned.
+// - Do NOT @alignCast them into extern structs.
+// - Copy bytes into aligned local structs using readStruct() instead.
 
 const std = @import("std");
 const private_ip = @import("private_ip.zig");
@@ -26,6 +31,24 @@ const linux_addr_parse = @import("linux_addr_parse.zig");
 pub const align4 = linux_addr_parse.align4;
 pub const formatIpv4 = linux_addr_parse.formatIpv4;
 pub const parseLabel = linux_addr_parse.parseLabel;
+
+// ============================================================================
+// Alignment-Safe Struct Reading
+// ============================================================================
+
+/// Reads a struct from a byte buffer by copying bytes into a properly aligned
+/// local variable. This avoids panics from @alignCast when the byte offset
+/// is not aligned for the extern struct.
+///
+/// This pattern is required for network/kernel byte buffers that may arrive
+/// at arbitrary byte offsets.
+fn readStruct(comptime T: type, bytes: []const u8) AddrError!T {
+    if (bytes.len < @sizeOf(T)) return error.InvalidMessage;
+
+    var value: T = undefined;
+    @memcpy(std.mem.asBytes(&value), bytes[0..@sizeOf(T)]);
+    return value;
+}
 
 // ============================================================================
 // C Socket Definitions
@@ -138,23 +161,29 @@ pub fn discoverPrivateAddresses(
     defer _ = std.c.close(sock);
 
     // Build netlink request for RTM_GETADDR
+    // Build local aligned structs and copy into request buffer to avoid
+    // alignment issues when casting from byte arrays.
     const nlmsg_len = @sizeOf(nlmsghdr) + @sizeOf(ifaddrmsg);
     var request: [nlmsg_len]u8 = undefined;
 
-    const nlhdr = @as(*nlmsghdr, @ptrCast(@alignCast(&request)));
-    nlhdr.nlmsg_len = @intCast(nlmsg_len);
-    nlhdr.nlmsg_type = @intCast(RTM_GETADDR);
-    nlhdr.nlmsg_flags = @intCast(NLM_F_REQUEST | NLM_F_DUMP);
-    nlhdr.nlmsg_seq = 1;
-    nlhdr.nlmsg_pid = 0;
+    var hdr = nlmsghdr{
+        .nlmsg_len = @intCast(nlmsg_len),
+        .nlmsg_type = @intCast(RTM_GETADDR),
+        .nlmsg_flags = @intCast(NLM_F_REQUEST | NLM_F_DUMP),
+        .nlmsg_seq = 1,
+        .nlmsg_pid = 0,
+    };
 
-    // Fill ifaddrmsg - request all families (AF_UNSPEC), all prefixes
-    const addrmsg_ptr = @as(*ifaddrmsg, @ptrCast(@constCast(&request[@sizeOf(nlmsghdr)..])));
-    addrmsg_ptr.ifa_family = 0; // AF_UNSPEC = all families
-    addrmsg_ptr.ifa_prefixlen = 0;
-    addrmsg_ptr.ifa_flags = 0;
-    addrmsg_ptr.ifa_scope = 0;
-    addrmsg_ptr.ifa_index = 0;
+    var msg = ifaddrmsg{
+        .ifa_family = 0, // AF_UNSPEC = all families
+        .ifa_prefixlen = 0,
+        .ifa_flags = 0,
+        .ifa_scope = 0,
+        .ifa_index = 0,
+    };
+
+    @memcpy(request[0..@sizeOf(nlmsghdr)], std.mem.asBytes(&hdr));
+    @memcpy(request[@sizeOf(nlmsghdr)..][0..@sizeOf(ifaddrmsg)], std.mem.asBytes(&msg));
 
     // Send request to kernel
     var nl_addr: sockaddr_nl = undefined;
@@ -198,18 +227,18 @@ pub fn discoverPrivateAddresses(
         while (offset < msg_len) {
             if (offset + @sizeOf(nlmsghdr) > msg_len) break;
 
-            const nlhdr_ptr = @as(*const nlmsghdr, @ptrCast(@alignCast(&buffer[offset])));
-            const response_len = @as(usize, @intCast(nlhdr_ptr.nlmsg_len));
+            const nlhdr = try readStruct(nlmsghdr, buffer[offset..msg_len]);
+            const response_len = @as(usize, @intCast(nlhdr.nlmsg_len));
 
             if (response_len < @sizeOf(nlmsghdr) or response_len > msg_len - offset) break;
 
             // NLMSG_DONE terminates the multipart message
-            if (nlhdr_ptr.nlmsg_type == NLMSG_DONE) {
+            if (nlhdr.nlmsg_type == NLMSG_DONE) {
                 done = true;
                 break;
             }
 
-            if (nlhdr_ptr.nlmsg_type == RTM_NEWADDR) {
+            if (nlhdr.nlmsg_type == RTM_NEWADDR) {
                 // Parse the ifaddrmsg header
                 const addrmsg_offset = offset + @sizeOf(nlmsghdr);
                 if (addrmsg_offset + @sizeOf(ifaddrmsg) > msg_len) {
@@ -217,7 +246,7 @@ pub fn discoverPrivateAddresses(
                     continue;
                 }
 
-                const addrmsg_hdr = @as(*const ifaddrmsg, @ptrCast(@alignCast(&buffer[addrmsg_offset])));
+                const addrmsg_hdr = try readStruct(ifaddrmsg, buffer[addrmsg_offset..msg_len]);
                 _ = addrmsg_hdr.ifa_index; // Available if needed for logging
 
                 // Only process IPv4 addresses (AF_INET)
@@ -238,7 +267,7 @@ pub fn discoverPrivateAddresses(
                 while (attr_pos < msg_end) {
                     if (attr_pos + @sizeOf(rtattr) > msg_end) break;
 
-                    const attr_hdr = @as(*const rtattr, @ptrCast(@alignCast(&buffer[attr_pos])));
+                    const attr_hdr = try readStruct(rtattr, buffer[attr_pos..msg_end]);
                     const attr_full_len = @as(usize, @intCast(attr_hdr.rta_len));
                     const attr_type = @as(c_ushort, @intCast(attr_hdr.rta_type));
 
@@ -269,7 +298,7 @@ pub fn discoverPrivateAddresses(
                     while (attr_pos < msg_end) {
                         if (attr_pos + @sizeOf(rtattr) > msg_end) break;
 
-                        const attr_hdr = @as(*const rtattr, @ptrCast(@alignCast(&buffer[attr_pos])));
+                        const attr_hdr = try readStruct(rtattr, buffer[attr_pos..msg_end]);
                         const attr_full_len = @as(usize, @intCast(attr_hdr.rta_len));
                         const attr_type = @as(c_ushort, @intCast(attr_hdr.rta_type));
 
