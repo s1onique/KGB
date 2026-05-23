@@ -37,6 +37,27 @@ Recording field notes from Zig 0.16 experiments. Confidence varies; do not promo
 
 ---
 
+## 2026-05-23 — c.sockaddr.in is nested inside c.sockaddr, not a direct c member
+
+- **Context:** Fixing `bind failed errno=97` (EAFNOSUPPORT) on Linux. Attempted to use `c.sockaddr_in` directly.
+- **Symptom:** `error: root source file struct 'c' has no member named 'sockaddr_in'`
+- **Failed assumption:** `c.sockaddr_in` exists as a direct member of `std.c`. The correct path is `c.sockaddr.in` (nested inside the `sockaddr` struct).
+- **Root cause of original bug:** The custom `SockaddrIn` struct had a `sin_len` field (macOS style) but Linux's `sockaddr` struct does NOT have a length prefix. This caused `EAFNOSUPPORT` because Linux couldn't parse the malformed sockaddr.
+- **Working fix:** Use `c.sockaddr.in` which is the correct cross-platform sockaddr_in definition for both Linux and macOS:
+  ```zig
+  var addr: c.sockaddr.in = std.mem.zeroes(c.sockaddr.in);
+  addr.family = c.AF.INET;
+  addr.port = std.mem.nativeToBig(u16, self.config.port);
+  addr.addr = parseIpAddress(self.config.address);
+  ```
+- **Key difference:** Linux's `c.sockaddr.in` has fields `family`, `port`, `addr`, `zero` (no length prefix). macOS's has `len`, `family`, `port`, `addr`, `zero`. The `c.sockaddr.in` struct is platform-adaptive.
+- **Files affected:** `tovarisch/src/http/server.zig`
+- **Promote to field manual:** No — this is specific to the sockaddr fix. The field manual section on libc socket operations should mention the correct pattern.
+
+**Confidence:** high; verified with successful `make tovarisch-build`, `make tovarisch-test`, `make tovarisch-status`, `make gate`.
+
+---
+
 ## 2026-05-23 — CI Zig dev build lacks `std.process.Init`
 
 - **Context:** GitHub CI fails during Zig build because CI uses `0.16.0-dev.732+2f3234c76`.

@@ -11,16 +11,6 @@ pub const Config = struct {
     address: []const u8 = "127.0.0.1",
 };
 
-/// Manual IPv4 sockaddr_in structure for binding.
-/// This works across platforms including macOS.
-const SockaddrIn = extern struct {
-    sin_len: u8 = @sizeOf(SockaddrIn),
-    sin_family: u8,
-    sin_port: u16,
-    sin_addr: u32,
-    sin_zero: [8]u8 = @splat(0),
-};
-
 /// HTTP server that listens and serves requests.
 pub const Server = struct {
     const Self = @This();
@@ -64,15 +54,18 @@ pub const Server = struct {
             return error.SetsockoptFailed;
         }
 
-        // Construct sockaddr_in
-        var addr = SockaddrIn{
-            .sin_len = @sizeOf(SockaddrIn),
-            .sin_family = c.AF.INET,
-            .sin_port = @byteSwap(self.config.port),
-            .sin_addr = parseIpAddress(self.config.address),
-        };
+        // Construct sockaddr_in using standard nested struct from c.sockaddr
+        // c.sockaddr.in is the correct cross-platform approach for both Linux and macOS
+        var addr: c.sockaddr.in = std.mem.zeroes(c.sockaddr.in);
+        addr.family = c.AF.INET;
+        addr.port = std.mem.nativeToBig(u16, self.config.port);
+        addr.addr = parseIpAddress(self.config.address);
 
-        const bind_result = c.bind(self.listener_fd, @as(*c.sockaddr, @ptrFromInt(@intFromPtr(&addr))), @sizeOf(SockaddrIn));
+        const bind_result = c.bind(
+            self.listener_fd,
+            @ptrCast(&addr),
+            @sizeOf(c.sockaddr.in),
+        );
         if (bind_result < 0) {
             const errno_val = std.c._errno().*;
             std.debug.print("bind failed errno={d}\n", .{errno_val});
