@@ -37,6 +37,22 @@ Recording field notes from Zig 0.16 experiments. Confidence varies; do not promo
 
 ---
 
+## 2026-05-23 — `@intCast` target inference
+
+- **Context:** Using integer type coercion in Zig 0.16.
+- **Symptom:** Unclear which API to use for integer casting.
+- **Working fix:** `@intCast(value)` takes one argument and infers the target integer type from assignment/context:
+  ```zig
+  octets[octet_idx] = @intCast(value);
+  ```
+  For explicit type coercion where inference is not enough, use `@as(T, value)`.
+- **Files affected:** Any Zig code doing integer casts.
+- **Promote to field manual:** Yes — this is a general Zig 0.16 pattern.
+
+**Confidence:** high; confirmed by reading Zig 0.16 stdlib behavior.
+
+---
+
 ## 2026-05-23 — c.sockaddr.in is nested inside c.sockaddr, not a direct c member
 
 - **Context:** Fixing `bind failed errno=97` (EAFNOSUPPORT) on Linux. Attempted to use `c.sockaddr_in` directly.
