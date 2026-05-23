@@ -12,6 +12,7 @@ Canonical doctrine documents for KGB project hygiene and architecture.
 | [tiny-leafs.md](./tiny-leafs.md) | Leaf node constraints |
 | [metrics.md](./metrics.md) | Observable metrics philosophy |
 | [llm-friendliness.md](./llm-friendliness.md) | Code readability for agents |
+| [platform-portability.md](./platform-portability.md) | Portable code default, platform isolation rules |
 
 ## Day-0 Practices
 

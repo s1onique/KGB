@@ -151,9 +151,25 @@ When implementing previously-uncovered behavior:
 
 **Future**: Native Zig coverage is a long-running open area. This gap may resolve when Zig's own coverage tooling matures.
 
+## Platform-Specific Coverage Honesty
+
+See [Platform Portability Doctrine](../doctrine/platform-portability.md) for full rules.
+
+Platform-specific runtime paths require honest classification. The coverage ledger must distinguish between:
+
+| Classification | Meaning | Sufficient? |
+|---------------|---------|-------------|
+| Covered by pure parser tests | Fixture input validates parsing logic | ✅ Yes |
+| Covered by contract tests | Stable output validated against contract | ✅ Yes |
+| Compile-gated only | Syntax/API verified on target, runtime untested | ⚠️ Partial |
+| Accepted uncovered risk | Not yet exercised; must appear here | ❌ No |
+
+**Critical rule**: Linux-only runtime paths are **not fully covered** merely because the macOS test suite passes. Any platform-specific behavior not exercised in tests must appear in the accepted uncovered-risk ledger until Linux runtime coverage exists.
+
 ## References
 
 - [Day-0 Code Coverage Doctrine](../doctrine/day-0-code-coverage.md)
+- [Platform Portability Doctrine](../doctrine/platform-portability.md)
 - [Quality Gate Script](../scripts/quality_gate.sh)
 - [JSON Verification Script](../scripts/verify_status_json.sh)
 - [zig-0.16-field-manual.md: Build.zig API Drift](../tooling/zig-0.16-field-manual.md)
