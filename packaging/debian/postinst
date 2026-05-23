@@ -1,0 +1,32 @@
+#!/bin/sh
+# Debian postinst script for tovarisch
+# Creates dedicated system user and required directories.
+set -e
+
+# Create tovarisch group if it does not exist
+if ! getent group tovarisch >/dev/null 2>&1; then
+    addgroup --system tovarisch
+fi
+
+# Create tovarisch user if it does not exist
+if ! getent passwd tovarisch >/dev/null 2>&1; then
+    adduser --system \
+        --ingroup tovarisch \
+        --home /var/lib/tovarisch \
+        --no-create-home \
+        --disabled-login \
+        --disabled-password \
+        tovarisch
+fi
+
+# Create required state directories with correct ownership
+install -d -o tovarisch -g tovarisch -m 0750 /var/lib/tovarisch
+install -d -o tovarisch -g tovarisch -m 0750 /var/cache/tovarisch
+install -d -o tovarisch -g tovarisch -m 0750 /var/log/tovarisch
+
+# Reload systemd if available (do not enable or start the service)
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload || true
+fi
+
+exit 0

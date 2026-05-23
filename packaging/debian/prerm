@@ -1,0 +1,14 @@
+#!/bin/sh
+# Debian prerm script for tovarisch
+# Stops the service during package removal/upgrade.
+set -e
+
+case "$1" in
+    remove|deconfigure|upgrade)
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl stop tovarisch.service >/dev/null 2>&1 || true
+        fi
+        ;;
+esac
+
+exit 0

@@ -24,6 +24,16 @@ zig build -Dtarget="${TARGET}" -Doptimize=ReleaseSafe
 install -m 0755 "zig-out/bin/${APP_NAME}" "${PKG_ROOT}/usr/bin/${APP_NAME}"
 install -m 0644 "${SCRIPT_DIR}/../packaging/systemd/${APP_NAME}.service" "${PKG_ROOT}/lib/systemd/system/${APP_NAME}.service"
 
+# Install Debian maintainer scripts
+SCRIPT_DEBIAN_DIR="${SCRIPT_DIR}/../packaging/debian"
+for script in postinst prerm postrm; do
+    if [[ ! -f "${SCRIPT_DEBIAN_DIR}/${script}" ]]; then
+        echo "[package] ERROR: Missing ${script} script at ${SCRIPT_DEBIAN_DIR}/${script}"
+        exit 1
+    fi
+    install -m 0755 "${SCRIPT_DEBIAN_DIR}/${script}" "${PKG_ROOT}/DEBIAN/${script}"
+done
+
 cat > "${PKG_ROOT}/DEBIAN/control" <<EOF
 Package: ${APP_NAME}
 Version: ${VERSION}

@@ -9,10 +9,8 @@ ExecStart=/usr/bin/tovarisch serve
 Restart=on-failure
 RestartSec=5s
 
-# ACT 1 intentionally runs without User=/Group= because the package
-# does not create the dedicated system user yet. ACT 2 must add:
-# User=tovarisch
-# Group=tovarisch
+User=tovarisch
+Group=tovarisch
 
 NoNewPrivileges=true
 PrivateTmp=true
