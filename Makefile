@@ -59,3 +59,11 @@ verify-status-contract:
 
 test-final-newlines-regression:
 	./scripts/check_final_newlines_regression.sh
+
+# === Debian Package ===
+
+package-deb:
+	./scripts/package_deb.sh
+
+release-artifacts: package-deb
+	ls -lh dist/*.deb
