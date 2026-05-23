@@ -10,7 +10,7 @@ Coverage is an accountability surface. Every important behavior must either be c
 
 `tovarisch` uses `kcov` to measure actual line coverage of the test binary:
 
-- **Threshold**: 60% (configurable via `COVERAGE_THRESHOLD`)
+- **Threshold**: 83% (configurable via `COVERAGE_THRESHOLD`)
 - **Files covered**: `tovarisch/src/` only (no cache/vendor paths)
 - **Gate**: Fails if below threshold, unless `ALLOW_MISSING_KCOV=1`
 - **Enforcement**: Required in `make gate`

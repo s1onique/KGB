@@ -10,7 +10,7 @@ Behavior:
 - Verifies test binary runs real tests
 - Runs DWARF diagnostics
 - Attempts kcov modes (standard, verify, include-pattern)
-- Enforces coverage threshold (default 60%)
+- Enforces coverage threshold (set by COVERAGE_THRESHOLD env var from Makefile)
 - Fails if no real tovarisch/src coverage found
 """
 
@@ -49,7 +49,27 @@ from coverage_diagnostics import (
 )
 
 
-COVERAGE_THRESHOLD = float(os.environ.get("COVERAGE_THRESHOLD", "60"))
+def read_coverage_threshold() -> float:
+    """Read coverage threshold from environment; fail if unset.
+
+    The Makefile is the single source of truth for the default.
+    Python is the enforcement engine, not the policy owner.
+    """
+    raw = os.environ.get("COVERAGE_THRESHOLD")
+    if raw is None:
+        raise SystemExit(
+            "[FAIL] coverage: COVERAGE_THRESHOLD is required; invoke via 'make coverage' or 'make gate'"
+        )
+
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise SystemExit(
+            f"[FAIL] coverage: invalid COVERAGE_THRESHOLD={raw!r}; expected a number"
+        ) from exc
+
+
+COVERAGE_THRESHOLD = read_coverage_threshold()
 
 
 def resolve_tool(tool: str) -> str:
