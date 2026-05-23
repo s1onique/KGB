@@ -52,8 +52,11 @@ jobs:
       - name: Verify tovarisch status contract
         run: make verify-status-contract
 
-      - name: Linux runtime path smoke tests
-        if: contains(matrix.zig_target, 'linux')
+      # Runtime smoke tests execute the built binary and must only run for targets
+      # executable on the GitHub runner (x86_64). ARM64 cross-compiled artifacts
+      # would require QEMU/binfmt support to test in CI.
+      - name: Native Linux runtime path smoke tests
+        if: matrix.zig_target == 'x86_64-linux-musl'
         run: |
           set -euo pipefail
           
