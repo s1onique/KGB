@@ -52,6 +52,19 @@ jobs:
       - name: Verify tovarisch status contract
         run: make verify-status-contract
 
+      - name: Linux runtime path smoke tests
+        if: contains(matrix.zig_target, 'linux')
+        run: |
+          set -euo pipefail
+          
+          # Build the Linux binary first if not already built
+          cd "${ZIG_PROJECT_DIR}"
+          zig build -Dtarget=${{ matrix.zig_target }} -Doptimize=ReleaseSafe
+          cd ..
+          
+          # Run the Linux smoke tests against the built binary
+          ./scripts/linux_smoke_test.sh "${ZIG_PROJECT_DIR}/zig-out/bin/${BINARY_NAME}"
+
       - name: Build release binary
         run: |
           set -euo pipefail

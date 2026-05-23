@@ -172,14 +172,14 @@ The following table inventories all known platform-specific branches in `tovaris
 
 | File | Path | Classification | Notes |
 |------|------|----------------|-------|
-| `runtime/telemetry.zig` | `linuxGetVmRssKiB()` — opens `/proc/self/status` | **Compile-gated only** | Parses VmRSS; parser (`parseVmRssKiB`) tested via fixtures on macOS; runtime file read is Linux-only and not exercised locally |
-| `runtime/telemetry.zig` | `getVmRssKiB()` — `builtin.os.tag == .linux` gate | **Compile-gated only** | Returns `null` on non-Linux; compile-gate verifies syntax, not behavior |
-| `net/linux_stats.zig` | `fileExists()` — Linux `std.c.open` path | **Compile-gated only** | Uses `std.os.linux.O` struct; macOS fallback via `std.c.access` |
-| `net/linux_stats.zig` | `openForRead()` — Linux `std.c.open` path | **Compile-gated only** | Returns raw fd on Linux; uses `std.c.fopen` on macOS |
-| `net/linux_stats.zig` | `openForWrite()` — Linux `std.c.open` path | **Compile-gated only** | Same pattern as `openForRead` |
-| `net/linux_stats.zig` | `closeFile()` — Linux `std.c.close` path | **Compile-gated only** | Differentiates raw fd vs `FILE*` |
-| `net/linux_stats.zig` | `readFromFd()` — Linux `std.c.read` path | **Compile-gated only** | Raw syscall vs `std.c.fread` |
-| `net/linux_stats.zig` | `writeToFd()` — Linux `std.c.write` path | **Compile-gated only** | Raw syscall vs `std.c.fwrite` |
+| `runtime/telemetry.zig` | `linuxGetVmRssKiB()` — opens `/proc/self/status` | **Linux CI smoke test** | Exercise in CI via `linux_smoke_test.sh`; verifies `rss_kib` is non-null |
+| `runtime/telemetry.zig` | `getVmRssKiB()` — `builtin.os.tag == .linux` gate | **Linux CI smoke test** | Covered by smoke test on Linux; null fallback remains for non-Linux |
+| `net/linux_stats.zig` | `fileExists()` — Linux `std.c.open` path | **Compile-gated only** | Fixture tests prove directory traversal works; real Linux path exercised in future ACT |
+| `net/linux_stats.zig` | `openForRead()` — Linux `std.c.open` path | **Compile-gated only** | Fixture tests prove file reading works; real Linux path exercised in future ACT |
+| `net/linux_stats.zig` | `openForWrite()` — Linux `std.c.open` path | **Compile-gated only** | Used only for test fixtures; no production write path needed |
+| `net/linux_stats.zig` | `closeFile()` — Linux `std.c.close` path | **Compile-gated only** | Fixture tests prove file closing works; real Linux path exercised in future ACT |
+| `net/linux_stats.zig` | `readFromFd()` — Linux `std.c.read` path | **Compile-gated only** | Fixture tests prove read semantics; real Linux path exercised in future ACT |
+| `net/linux_stats.zig` | `writeToFd()` — Linux `std.c.write` path | **Compile-gated only** | Used only for test fixtures; no production write path needed |
 
 #### Parser Logic (Portable)
 
@@ -192,27 +192,31 @@ The following code is **fully tested** via pure parser unit tests on macOS:
 | `linux_stats.zig: statsFromCounters()` | 1 unit test covering InterfaceStats construction |
 | `net/private_ip.zig: classifyIpv4Text()` | 30+ unit tests covering all RFC ranges and invalid inputs |
 
-#### Runtime Paths (Linux-only, Compile-gated)
+#### Runtime Paths (Linux-only, Mixed Coverage)
 
-These functions reach Linux-specific syscalls that cannot be exercised on macOS:
+These functions reach Linux-specific syscalls that are exercised in Linux CI via `linux_smoke_test.sh`:
 
 | Function | Linux API | Coverage |
 |----------|-----------|----------|
-| `linuxGetVmRssKiB()` | `std.c.open("/proc/self/status")`, `std.c.read()`, `std.c.close()` | Compile-gated; parser tested |
-| `fileExists()` (Linux path) | `std.c.open()` | Compile-gated |
-| `openForRead()` (Linux path) | `std.c.open()` | Compile-gated |
-| `openForWrite()` (Linux path) | `std.c.open(O.CREAT)` | Compile-gated |
-| `closeFile()` (Linux path) | `std.c.close()` | Compile-gated |
-| `readFromFd()` (Linux path) | `std.c.read()` | Compile-gated |
-| `writeToFd()` (Linux path) | `std.c.write()` | Compile-gated |
+| `linuxGetVmRssKiB()` | `std.c.open("/proc/self/status")`, `std.c.read()`, `std.c.close()` | **Linux CI smoke test** (`linux_smoke_test.sh: test_rss_read`) |
+| `fileExists()` (Linux path) | `std.c.open()` | **Compile-gated only** (fixture tests cover logic; real sysfs exercised in future ACT) |
+| `openForRead()` (Linux path) | `std.c.open()` | **Compile-gated only** (fixture tests cover logic; real sysfs exercised in future ACT) |
+| `openForWrite()` (Linux path) | `std.c.open(O.CREAT)` | **Compile-gated only** (used in fixture tests only) |
+| `closeFile()` (Linux path) | `std.c.close()` | **Compile-gated only** (fixture tests cover logic; real sysfs exercised in future ACT) |
+| `readFromFd()` (Linux path) | `std.c.read()` | **Compile-gated only** (fixture tests cover logic; real sysfs exercised in future ACT) |
+| `writeToFd()` (Linux path) | `std.c.write()` | **Compile-gated only** (used in fixture tests only) |
 
 #### Accepted Uncovered Risk
 
 | Path | Reason Uncovered | Follow-up |
 |------|------------------|-----------|
-| `linuxGetVmRssKiB()` runtime read | `/proc/self/status` does not exist on macOS; cannot exercise in local tests | Add Linux CI smoke test or fixture-based contract test |
-| `readInterfaceStats()` live sysfs read | `/sys/class/net/` does not exist on macOS; fixture tests cover parser behavior and directory traversal via fake sysfs fixtures, not live sysfs | Add Linux CI smoke test or mock sysfs fixture |
-| Platform-specific error paths | Error codes from Linux syscalls (ENOENT, EACCES, etc.) not exercised on macOS | Consider adding error-path fixture tests |
+| `readInterfaceStats()` live sysfs read | Shell sysfs smoke proves counters readable, not that Zig reader works on Linux | **Next ACT**: Add Linux-only Zig test that calls `readInterfaceStats()` with real sysfs root |
+| `fileExists()` (Linux path) | Fixture tests prove logic; real sysfs not exercised through `tovarisch` | **Future ACT**: Wire `readInterfaceStats()` into a public command or internal test |
+| `openForRead()` (Linux path) | Fixture tests prove logic; real sysfs not exercised through `tovarisch` | **Future ACT**: Wire `readInterfaceStats()` into a public command or internal test |
+| `closeFile()` (Linux path) | Fixture tests prove logic; real sysfs not exercised through `tovarisch` | **Future ACT**: Wire `readInterfaceStats()` into a public command or internal test |
+| `readFromFd()` (Linux path) | Fixture tests prove logic; real sysfs not exercised through `tovarisch` | **Future ACT**: Wire `readInterfaceStats()` into a public command or internal test |
+| `openForWrite()` (Linux path) | Used only for test fixtures; no production write path needed | Acceptable — no production write path needed |
+| `writeToFd()` (Linux path) | Used only for test fixtures; no production write path needed | Acceptable — no production write path needed |
 
 #### Classification Key
 
