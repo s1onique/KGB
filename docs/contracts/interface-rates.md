@@ -1,0 +1,122 @@
+# Interface Traffic Rates Contract
+
+## Purpose
+
+This document defines the rate calculation behavior for private interface traffic metrics.
+
+## Overview
+
+Rates are derived from two cumulative counter samples. The rate calculation module (`rates.zig`) is intentionally pure: it performs no wall-clock access, no OS/sysfs access, and no HTTP wiring.
+
+## Rate Calculation Behavior
+
+### Data Flow
+
+```
+InterfaceCounterSample (previous) + InterfaceCounterSample (current)
+                              |
+                              v
+                    rates.calculateRate()
+                              |
+                              v
+               ?InterfaceRate (null if unavailable)
+```
+
+### Return null (rate unavailable) when:
+
+1. **First sample**: No previous sample exists (null previous)
+2. **Non-positive elapsed time**: `current.sampled_at_ms <= previous.sampled_at_ms`
+3. **Sub-second elapsed time**: `elapsed_ms < 1000` (cannot derive meaningful per-second rate)
+4. **Counter reset detected**: Any current counter is less than its previous counter
+
+### Counter Reset Handling
+
+A counter reset occurs when a current value is less than its previous value. This can happen due to:
+- Interface restart
+- System reboot
+- Kernel counter overflow reset
+- Interface removal/recreation
+
+When a reset is detected, `calculateRate()` returns `null` because no valid rate can be computed.
+
+### Rate Computation (when available)
+
+- `window_seconds`: Integer elapsed seconds between samples (`(current.sampled_at_ms - previous.sampled_at_ms) / 1000`)
+- Deltas: `current.counter - previous.counter` (guaranteed non-negative by reset detection)
+- Per-second rates: `delta / window_seconds` (integer division)
+
+### Edge Cases
+
+| Scenario | Behavior |
+|----------|----------|
+| Elapsed time < 1000ms | `null`; rate unavailable (sub-second samples have no rate) |
+| Very small deltas | Per-second rate may be 0 (integer truncation) |
+| Large counters | Uses u64 arithmetic; handles values up to 2^64-1 |
+
+## Data Structures
+
+### InterfaceCounterSample
+
+```zig
+pub const InterfaceCounterSample = struct {
+    name: []const u8,
+    rx_bytes: u64,
+    tx_bytes: u64,
+    rx_packets: u64,
+    tx_packets: u64,
+    sampled_at_ms: i64,
+};
+```
+
+### InterfaceRate
+
+```zig
+pub const InterfaceRate = struct {
+    window_seconds: u64,
+    rx_bytes_delta: u64,
+    tx_bytes_delta: u64,
+    rx_packets_delta: u64,
+    tx_packets_delta: u64,
+    rx_bytes_per_second: u64,
+    tx_bytes_per_second: u64,
+    rx_packets_per_second: u64,
+    tx_packets_per_second: u64,
+};
+```
+
+## Scope and Limitations
+
+### This ACT Does NOT Include:
+
+- ❌ `/metrics.json` wiring (future ACT)
+- ❌ HTTP server integration (future ACT)
+- ❌ Counter collection (belongs in `linux_stats.zig`)
+- ❌ Sample storage/state management (future ACT)
+- ❌ IPv6 rate support (deferred)
+
+### This ACT Includes:
+
+- ✅ Pure rate calculation function
+- ✅ Comprehensive unit tests (12 test cases)
+- ✅ Counter reset detection
+- ✅ Integer-only arithmetic
+- ✅ Edge case handling (zero/negative elapsed, divide-by-zero prevention)
+
+## Future Work
+
+The following work is deferred to future ACTs:
+
+1. **ACT 2**: Add sampler state that matches interfaces by name and produces `rate: null | InterfaceRate` per current counter row
+2. **Metrics wiring**: Wire rates into `/metrics.json` response
+3. **IPv6 support**: Extend to handle IPv6 interface counters
+
+## Module Location
+
+- **Source**: `tovarisch/src/net/rates.zig`
+- **Tests**: Inline in `rates.zig` (12 test cases)
+- **Test wiring**: `tovarisch/src/test_all.zig`
+
+## References
+
+- [tovarisch-http-v0.md](./tovarisch-http-v0.md) — HTTP contract (rates to be added in future ACT)
+- [ACT 5 Epic](../epics/act-5-sysfs-collector.md) — sysfs collection context

@@ -204,6 +204,7 @@ The following code is **fully tested** via pure parser unit tests on macOS:
 | `linux_stats.zig: parseCounter()` | 6 unit tests covering valid/invalid/overflow inputs |
 | `linux_stats.zig: statsFromCounters()` | 1 unit test covering InterfaceStats construction |
 | `net/private_ip.zig: classifyIpv4Text()` | 30+ unit tests covering all RFC ranges and invalid inputs |
+| `net/rates.zig: calculateRate()` | 12 unit tests covering all edge cases (null, reset, elapsed, etc.) |
 
 #### Runtime Paths (Linux-only, Mixed Coverage)
 
