@@ -1,4 +1,5 @@
 const std = @import("std");
+const telemetry = @import("runtime/telemetry.zig");
 
 pub const version = "0.1.1";
 
@@ -24,6 +25,7 @@ pub const Status = struct {
     node_id: []const u8,
     status: CheckStatus,
     checks: []const Check,
+    runtime: telemetry.RuntimeTelemetry,
 };
 
 /// Derives the top-level status from an array of checks.
@@ -78,6 +80,7 @@ pub fn getStatus() Status {
         .node_id = "local-dev",
         .status = deriveStatus(checks),
         .checks = checks,
+        .runtime = telemetry.getRuntimeTelemetry(),
     };
 }
 
@@ -101,7 +104,15 @@ fn renderStatus(writer: anytype, s: Status) !void {
             .{ check.name, @tagName(check.status), check.detail },
         );
     }
-    try writer.writeAll("]}\n");
+    // Render runtime block
+    try writer.writeAll("],\"runtime\":{");
+    try writer.print("\"pid\":{d}", .{s.runtime.pid});
+    if (s.runtime.rss_kib) |rss| {
+        try writer.print(",\"rss_kib\":{d}", .{rss});
+    } else {
+        try writer.writeAll(",\"rss_kib\":null");
+    }
+    try writer.writeAll("}}\n");
 }
 
 // --- Tests ---
@@ -304,4 +315,19 @@ test "renderPayload output contains all four check names" {
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"binary\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"config\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"state_dir\""));
+}
+
+test "renderPayload output contains runtime block" {
+    var w = TestWriter.init();
+    try renderPayload(&w);
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"runtime\":{"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"pid\":"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rss_kib\":"));
+}
+
+test "getStatus includes runtime telemetry" {
+    const s = getStatus();
+    try std.testing.expect(s.runtime.pid > 0);
+    // rss_kib can be null on non-Linux platforms or valid on Linux
+    try std.testing.expect(s.runtime.rss_kib == null or s.runtime.rss_kib.? >= 0);
 }

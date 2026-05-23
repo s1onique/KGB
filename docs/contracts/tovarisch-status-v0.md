@@ -25,6 +25,28 @@ v0 is the initial stable contract. Breaking changes require a new version.
 | `node_id` | string | yes | Local node identifier |
 | `status` | string | yes | Derived status value |
 | `checks` | array | yes | List of check objects (may be empty) |
+| `runtime` | object | yes | Runtime telemetry (never null in practice) |
+
+## Runtime Object
+
+The `runtime` object contains self-observed process metrics:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `pid` | number | yes | Process ID of the running daemon |
+| `rss_kib` | number\|null | yes | Resident memory size in KiB, or `null` on non-Linux platforms |
+
+### Platform Behavior
+
+| Platform | RSS Source | Notes |
+|----------|------------|-------|
+| Linux | `/proc/self/status` VmRSS | Best accuracy for VPS/leaf nodes |
+| macOS | `null` | Mach API not implemented yet |
+| Other | `null` | Honest fallback |
+
+### Design Rationale
+
+RSS is **telemetry**, not a health check. It helps detect memory bloat in constrained leaf nodes from Day 0. Future ACTs may add `memory_budget` as a separate health check with thresholds.
 
 ## Check Object Fields
 
@@ -55,7 +77,7 @@ The status payload must NOT include:
 - Message contents
 - Per-user behavioral timelines
 
-**Allowed:** node identity, transport state, handshake age, reachability, probe results, config version, clock skew.
+**Allowed:** node identity, transport state, handshake age, reachability, probe results, config version, clock skew, RSS memory usage.
 
 ## Explicit Non-goals
 
@@ -65,6 +87,7 @@ The status payload must NOT include:
 - No transport backend supervision yet
 - No real health probes yet
 - No station upload yet
+- No Prometheus/metrics platform
 
 ## Example
 
@@ -89,8 +112,17 @@ The status payload must NOT include:
       "name": "config",
       "status": "warn",
       "detail": "not configured yet"
+    },
+    {
+      "name": "state_dir",
+      "status": "warn",
+      "detail": "state directory not found"
     }
-  ]
+  ],
+  "runtime": {
+    "pid": 1044345,
+    "rss_kib": null
+  }
 }
 ```
 
@@ -105,5 +137,6 @@ The status payload must NOT include:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 0.1.1 | 2026-05-23 | Add runtime telemetry block with pid and rss_kib |
 | 0.1.1 | 2026-05-22 | Match current tovarisch version |
 | 0.1.0 | 2026-05-22 | Initial stable contract |

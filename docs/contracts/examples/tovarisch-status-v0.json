@@ -24,5 +24,9 @@
       "status": "warn",
       "detail": "state directory not found"
     }
-  ]
+  ],
+  "runtime": {
+    "pid": 1044345,
+    "rss_kib": null
+  }
 }

@@ -28,6 +28,7 @@ echo "[status-contract] Checking contract documentation"
 contract_sections=(
     "Purpose"
     "Top-level Fields"
+    "Runtime Object"
     "Check Object Fields"
     "Allowed Values"
     "Privacy Constraints"
@@ -87,32 +88,45 @@ if command -v jq >/dev/null 2>&1; then
     jq -e '.checks[0].name == "process"' docs/contracts/examples/tovarisch-status-v0.json >/dev/null && echo "  OK: first check is process"
     jq -e '.checks[0].status == "ok"' docs/contracts/examples/tovarisch-status-v0.json >/dev/null && echo "  OK: first check status is ok"
 
+    # Verify runtime block
+    jq -e '.runtime.pid > 0' docs/contracts/examples/tovarisch-status-v0.json >/dev/null && echo "  OK: runtime.pid > 0"
+    jq -e '(.runtime.rss_kib == null or .runtime.rss_kib >= 0)' docs/contracts/examples/tovarisch-status-v0.json >/dev/null && echo "  OK: runtime.rss_kib is null or >= 0"
+
     echo "[status-contract] Fixture fields verified"
 
-    # Check if Zig is available to compare CLI output
+    # Check if Zig is available to compare CLI output with fixture
     if command -v zig >/dev/null 2>&1; then
         echo "[status-contract] Zig available — comparing CLI output with fixture"
 
-        # Get CLI output and normalize both through jq -c
-        cli_output=$(cd tovarisch && zig build run -- status --json 2>/dev/null | jq -c . 2>/dev/null)
-        fixture_normalized=$(jq -c . docs/contracts/examples/tovarisch-status-v0.json 2>/dev/null)
-
+        # Get CLI output and fixture
+        cli_output=$(cd tovarisch && zig build run -- status --json 2>/dev/null)
+        
         if [[ -z "$cli_output" ]]; then
             echo "[status-contract] FAIL: could not get CLI output" >&2
             exit 1
         fi
 
-        echo "[status-contract] CLI output: $cli_output"
-        echo "[status-contract] Fixture normalized: $fixture_normalized"
+        # Normalize runtime values (they vary by platform/run)
+        # Use same sentinel string for rss_kib regardless of null vs non-null
+        normalized_filter='
+          .runtime.pid = 1
+          | .runtime.rss_kib = "normalized"
+        '
 
-        if [[ "$cli_output" != "$fixture_normalized" ]]; then
-            echo "[status-contract] FAIL: CLI output differs from fixture" >&2
-            echo "[status-contract] CLI output: $cli_output" >&2
-            echo "[status-contract] Fixture:    $fixture_normalized" >&2
+        cli_normalized=$(printf '%s\n' "$cli_output" | jq -c "$normalized_filter" 2>/dev/null)
+        fixture_normalized=$(jq -c "$normalized_filter" docs/contracts/examples/tovarisch-status-v0.json 2>/dev/null)
+
+        if [[ "$cli_normalized" != "$fixture_normalized" ]]; then
+            echo "[status-contract] FAIL: CLI output differs from fixture after runtime normalization" >&2
+            echo "[status-contract] CLI normalized:     $cli_normalized" >&2
+            echo "[status-contract] Fixture normalized: $fixture_normalized" >&2
             exit 1
         fi
 
-        echo "[status-contract] CLI output matches fixture"
+        echo "[status-contract] CLI output matches fixture (runtime values normalized)"
+
+        # Also validate that rss_kib is either null or a non-negative number
+        printf '%s\n' "$cli_output" | jq -e '(.runtime.rss_kib == null or .runtime.rss_kib >= 0)' >/dev/null && echo "  OK: runtime.rss_kib is null or non-negative"
     else
         echo "[status-contract] INFO: Zig not available — skipping CLI comparison"
     fi
