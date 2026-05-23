@@ -31,10 +31,12 @@ jobs:
           url="https://github.com/SimonKagstrom/kcov/releases/download/v42/kcov-amd64.tar.gz"
           curl -fsSL "${url}" -o /tmp/kcov-amd64.tar.gz
 
-          echo "[kcov] archive contents:"
-          tar -tzf /tmp/kcov-amd64.tar.gz | head -50
+          tar -tzf /tmp/kcov-amd64.tar.gz > /tmp/kcov-contents.txt
 
-          tar -tzf /tmp/kcov-amd64.tar.gz | grep -Eq '^(\./)?usr/local/bin/kcov$'
+          echo "[kcov] archive contents:"
+          sed -n '1,50p' /tmp/kcov-contents.txt
+
+          grep -Eq '^(\./)?usr/local/bin/kcov$' /tmp/kcov-contents.txt
           sudo tar -xzf /tmp/kcov-amd64.tar.gz -C /
 
           command -v kcov
