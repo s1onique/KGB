@@ -1,6 +1,6 @@
 # ACT 5: Add private interface traffic collector from Linux sysfs
 
-**Status: open** (slices ACT 5a ✅, ACT 5b ✅, ACT 5c ✅, ACT 5d ✅)
+**Status: open** (slices ACT 5a ✅, ACT 5b ✅, ACT 5c ✅, ACT 5d ✅, ACT 5e ✅)
 
 Linux exposes per-interface statistics under:
 `/sys/class/net/<iface>/statistics/`
@@ -235,6 +235,79 @@ The composition layer provides:
 ### Next: ACT 5e
 
 ACT 5e should add private-interface filtering based on existing `private_ip.zig` logic.
+
+## ACT 5e: Private-interface filtering using fixture-backed address source
+
+**Status: ✅ done**
+
+This slice adds a filtering layer that takes collected interface stats snapshots
+and keeps only interfaces that have at least one private IP address.
+It does NOT wire `/metrics.json`, does NOT change HTTP output, does NOT change
+listen behavior.
+
+### Board
+
+| ID | Work Item | Status |
+|---|---|---|
+| webservice-052 | Create `net/interface_filter.zig` | ✅ done |
+| webservice-053 | Define `InterfaceAddress` struct | ✅ done |
+| webservice-054 | Add `interfaceHasPrivateAddress()` predicate | ✅ done |
+| webservice-055 | Add `filterPrivateInterfaceStats()` function | ✅ done |
+| webservice-056 | Add fixture-based tests | ✅ done |
+| webservice-057 | Update test_all.zig | ✅ done |
+| webservice-058 | Run `make gate` and verify | ✅ done |
+
+### Acceptance
+
+- [x] `interface_filter.zig` exists with address-source abstraction.
+- [x] `InterfaceAddress` struct holds iface and address fields.
+- [x] `interfaceHasPrivateAddress()` predicate returns true if any address is private.
+- [x] Reuses existing `private_ip.zig` classification logic.
+- [x] `filterPrivateInterfaceStats()` returns owned snapshot copies.
+- [x] Input snapshots are not freed or modified.
+- [x] Result can be freed via `freeInterfaceStatsSnapshots()`.
+- [x] Tests cover all required cases (RFC1918, public, multiple, no addresses, etc.).
+- [x] Loopback and link-local correctly excluded (not private per private_ip).
+- [x] Malformed addresses ignored and do not include interface.
+- [x] IPv6 addresses handled per current private_ip semantics (IPv4-only).
+- [x] No live address discovery added.
+- [x] No rtnetlink implemented.
+- [x] No `/proc/net/fib_trie` parsing.
+- [x] No shell command parsing (ip addr).
+- [x] No `/metrics.json` wiring.
+- [x] `make tovarisch-test` passes.
+- [x] `make gate` passes.
+- [x] ACT 5 remains open.
+
+### Implementation
+
+The filtering module provides:
+
+- `InterfaceAddress` struct with `iface: []const u8` and `address: []const u8`
+- `interfaceHasPrivateAddress(iface, addresses) bool`
+  - Pure predicate with no allocator requirements
+  - Checks all addresses for matching interface name
+  - Returns true if any address is classified as `.private` by private_ip.zig
+  - Returns false for no addresses, no private, or malformed
+- `filterPrivateInterfaceStats(allocator, snapshots, addresses) ![]InterfaceStatsSnapshot`
+  - Includes only snapshots with at least one private address
+  - Returns owned copies with allocator-owned name copies
+  - Uses errdefer for partial cleanup on allocation failure
+
+### Files Changed
+
+- `tovarisch/src/net/interface_filter.zig` — InterfaceAddress, interfaceHasPrivateAddress, filterPrivateInterfaceStats
+- `tovarisch/src/net/interface_filter_tests.zig` — comprehensive fixture tests
+- `tovarisch/src/test_all.zig` — Added refAllDecls for interface_filter modules
+
+### Next: ACT 5f
+
+ACT 5f should add live Linux address discovery (likely via rtnetlink).
+The `/metrics.json` endpoint remains unwired until live address discovery exists.
+
+Note: Linux rtnetlink is the proper kernel interface for reading network addresses.
+`rtnetlink(7)` documents that NETLINK_ROUTE sockets control network routes, IP addresses,
+link parameters, neighbors, and related state. This is deferred until ACT 5f.
 
 ## Future: ACT 5b (live sysfs collection)
 

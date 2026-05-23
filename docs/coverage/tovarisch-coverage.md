@@ -178,6 +178,8 @@ The following table inventories all known platform-specific branches in `tovaris
 | `net/linux_stats.zig` | `fileExists()` — Linux `std.c.open` path | **Linux CI smoke test** | Exercise via live sysfs smoke test; probes common Linux interface names directly |
 | `net/linux_interface_stats.zig` | `collectInterfaceStats()` — composition layer | **Linux CI smoke test** | Exercise via live sysfs smoke test; composes listInterfaces() + readInterfaceStats() |
 | `net/linux_interface_stats.zig` | `freeInterfaceStatsSnapshots()` — cleanup helper | **Pure fixture tests** | Cross-platform, tested via fixture tests |
+| `net/interface_filter.zig` | `interfaceHasPrivateAddress()` — pure predicate | **Pure fixture tests** | Cross-platform, tested via fixture tests |
+| `net/interface_filter.zig` | `filterPrivateInterfaceStats()` — filtering function | **Pure fixture tests** | Cross-platform, tested via fixture tests |
 | `net/linux_stats.zig` | `openForWrite()` — Linux `std.c.open` path | **Compile-gated only** | Used only for test fixtures; no production write path needed |
 | `net/linux_stats.zig` | `closeFile()` — Linux `std.c.close` path | **Linux CI smoke test** | Exercise via live sysfs smoke test; closes file descriptors after reading stats |
 | `net/linux_stats.zig` | `readFromFd()` — Linux `std.c.read` path | **Linux CI smoke test** | Exercise via live sysfs smoke test; reads counter values from sysfs files |
