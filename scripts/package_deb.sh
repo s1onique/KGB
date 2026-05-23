@@ -2,10 +2,12 @@
 set -euo pipefail
 
 APP_NAME="tovarisch"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOVARISCH_DIR="${SCRIPT_DIR}/../tovarisch"
 VERSION="${VERSION:-0.1.1}"
 ARCH="${ARCH:-amd64}"
 TARGET="${TARGET:-x86_64-linux-gnu}"
-DIST_DIR="${DIST_DIR:-dist}"
+DIST_DIR="${SCRIPT_DIR}/../dist"
 PKG_ROOT="${DIST_DIR}/pkg/${APP_NAME}_${VERSION}_${ARCH}"
 DEB_PATH="${DIST_DIR}/${APP_NAME}_${VERSION}_${ARCH}.deb"
 
@@ -14,6 +16,8 @@ mkdir -p \
   "${PKG_ROOT}/usr/bin" \
   "${PKG_ROOT}/DEBIAN"
 
+# Change to tovarisch/ directory so zig build finds build.zig
+cd "${TOVARISCH_DIR}"
 zig build -Dtarget="${TARGET}" -Doptimize=ReleaseSafe
 
 install -m 0755 "zig-out/bin/${APP_NAME}" "${PKG_ROOT}/usr/bin/${APP_NAME}"
