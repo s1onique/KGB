@@ -112,16 +112,15 @@ pub fn align4(len: usize) usize {
     return (len + 3) & ~@as(usize, 3);
 }
 
-/// Build a string representation of an IPv4 address from binary data.
-/// Returns the formatted string slice (without null terminator).
-pub fn ipv4ToString(octets: [4]u8) []const u8 {
-    var buf: [15]u8 = undefined;
-    return std.fmt.bufPrint(&buf, "{}.{}.{}.{}", .{
+/// Format an IPv4 address into a caller-provided buffer.
+/// Returns a slice into the buffer on success.
+pub fn formatIpv4(octets: [4]u8, buf: []u8) ![]const u8 {
+    return std.fmt.bufPrint(buf, "{}.{}.{}.{}", .{
         octets[0],
         octets[1],
         octets[2],
         octets[3],
-    }) catch unreachable;
+    });
 }
 
 /// Parse a null-terminated string from a buffer at a given offset.
@@ -218,8 +217,9 @@ pub fn discoverPrivateAddresses(
 
     // Receive responses
     var buffer: [16384]u8 = undefined;
+    var done = false;
 
-    while (true) {
+    while (!done) {
         const recv_result = std.c.recv(sock, @ptrCast(&buffer), buffer.len, 0);
         if (recv_result < 0) return error.RecvFailed;
         if (recv_result == 0) break;
@@ -236,7 +236,10 @@ pub fn discoverPrivateAddresses(
             if (response_len < @sizeOf(nlmsghdr) or response_len > msg_len - offset) break;
 
             // NLMSG_DONE terminates the multipart message
-            if (nlhdr_ptr.nlmsg_type == NLMSG_DONE) break;
+            if (nlhdr_ptr.nlmsg_type == NLMSG_DONE) {
+                done = true;
+                break;
+            }
 
             if (nlhdr_ptr.nlmsg_type == RTM_NEWADDR) {
                 // Parse the ifaddrmsg header
@@ -285,7 +288,7 @@ pub fn discoverPrivateAddresses(
                     }
 
                     if (attr_type == IFA_ADDRESS and data_end >= data_start + 4) {
-                        @memcpy(address_octets[0..4], buffer[data_start..data_end]);
+                        @memcpy(address_octets[0..4], buffer[data_start .. data_start + 4]);
                         has_address = true;
                     }
 
@@ -308,7 +311,7 @@ pub fn discoverPrivateAddresses(
                         const data_end = attr_pos + attr_full_len;
 
                         if (attr_type == IFA_LOCAL and data_end >= data_start + 4) {
-                            @memcpy(address_octets[0..4], buffer[data_start..data_end]);
+                            @memcpy(address_octets[0..4], buffer[data_start .. data_start + 4]);
                             has_address = true;
                             break;
                         }
@@ -323,7 +326,8 @@ pub fn discoverPrivateAddresses(
 
                     if (classification == .private) {
                         const iface_name = interface_name.?;
-                        const addr_str = ipv4ToString(address_octets);
+                        var addr_buf: [15]u8 = undefined;
+                        const addr_str = formatIpv4(address_octets, &addr_buf) catch return error.InvalidMessage;
 
                         const iface_copy = try allocator.dupe(u8, iface_name);
                         errdefer allocator.free(iface_copy);
@@ -356,92 +360,3 @@ pub fn freeAddresses(allocator: std.mem.Allocator, addresses: []interface_filter
     allocator.free(addresses);
 }
 
-// ============================================================================
-// Linux Smoke Test
-// ============================================================================
-
-test "linux smoke: discoverPrivateAddresses compiles and runs" {
-    if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
-
-    const allocator = std.heap.page_allocator;
-    const result = discoverPrivateAddresses(allocator, "/sys/class/net");
-
-    // Result can be error or empty slice - both are valid
-    if (result) |addrs| {
-        defer freeAddresses(allocator, addrs);
-        // Verify basic contract
-        for (addrs) |addr| {
-            try std.testing.expect(addr.iface.len > 0);
-            try std.testing.expect(addr.address.len > 0);
-            // Verify address contains dots (IPv4 format)
-            try std.testing.expect(std.mem.indexOfScalar(u8, addr.address, '.') != null);
-        }
-    } else |_| {
-        // Expected if no permissions or kernel interface unavailable
-    }
-}
-
-// ============================================================================
-// Unit Tests for Helpers
-// ============================================================================
-
-test "align4: aligns to 4-byte boundary" {
-    try std.testing.expectEqual(@as(usize, 0), align4(0));
-    try std.testing.expectEqual(@as(usize, 4), align4(1));
-    try std.testing.expectEqual(@as(usize, 4), align4(4));
-    try std.testing.expectEqual(@as(usize, 8), align4(5));
-    try std.testing.expectEqual(@as(usize, 8), align4(7));
-    try std.testing.expectEqual(@as(usize, 8), align4(8));
-    try std.testing.expectEqual(@as(usize, 12), align4(9));
-}
-
-test "ipv4ToString: formats correctly" {
-    const octets: [4]u8 = .{ 192, 168, 1, 10 };
-    const result = ipv4ToString(octets);
-    try std.testing.expectEqualSlices(u8, "192.168.1.10", result);
-}
-
-test "ipv4ToString: handles all ranges" {
-    // 10.0.0.1
-    const oct1: [4]u8 = .{ 10, 0, 0, 1 };
-    try std.testing.expectEqualSlices(u8, "10.0.0.1", ipv4ToString(oct1));
-
-    // 172.16.0.1
-    const oct2: [4]u8 = .{ 172, 16, 0, 1 };
-    try std.testing.expectEqualSlices(u8, "172.16.0.1", ipv4ToString(oct2));
-
-    // 127.0.0.1
-    const oct3: [4]u8 = .{ 127, 0, 0, 1 };
-    try std.testing.expectEqualSlices(u8, "127.0.0.1", ipv4ToString(oct3));
-}
-
-test "parseLabel: extracts null-terminated string" {
-    // "eth0\0foo"
-    const buffer = [_]u8{ 'e', 't', 'h', '0', 0, 'f', 'o', 'o' };
-    const result = parseLabel(&buffer, 0, buffer.len);
-    try std.testing.expect(result != null);
-    try std.testing.expectEqualSlices(u8, "eth0", result.?);
-}
-
-test "parseLabel: handles missing null" {
-    // "wg0" without null terminator
-    const buffer = [_]u8{ 'w', 'g', '0', 'x', 'y' };
-    const result = parseLabel(&buffer, 0, 3);
-    try std.testing.expect(result != null);
-    try std.testing.expectEqualSlices(u8, "wg0", result.?);
-}
-
-test "parseLabel: handles empty at end" {
-    // Only null byte
-    const buffer = [_]u8{ 0 };
-    const result = parseLabel(&buffer, 0, 1);
-    try std.testing.expect(result == null);
-}
-
-test "parseLabel: handles offset" {
-    // "\0eth0\0"
-    const buffer = [_]u8{ 0, 'e', 't', 'h', '0', 0 };
-    const result = parseLabel(&buffer, 1, 5);
-    try std.testing.expect(result != null);
-    try std.testing.expectEqualSlices(u8, "eth0", result.?);
-}

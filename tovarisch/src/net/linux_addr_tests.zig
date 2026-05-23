@@ -135,27 +135,31 @@ test "align4: beyond boundary" {
     try testing.expectEqual(@as(usize, 8), linux_addr.align4(8));
 }
 
-test "ipv4ToString: standard address" {
+test "formatIpv4: standard address" {
     const octets: [4]u8 = .{ 192, 168, 1, 10 };
-    const result = linux_addr.ipv4ToString(octets);
+    var buf: [15]u8 = undefined;
+    const result = try linux_addr.formatIpv4(octets, &buf);
     try testing.expectEqualSlices(u8, "192.168.1.10", result);
 }
 
-test "ipv4ToString: loopback" {
+test "formatIpv4: loopback" {
     const octets: [4]u8 = .{ 127, 0, 0, 1 };
-    const result = linux_addr.ipv4ToString(octets);
+    var buf: [15]u8 = undefined;
+    const result = try linux_addr.formatIpv4(octets, &buf);
     try testing.expectEqualSlices(u8, "127.0.0.1", result);
 }
 
-test "ipv4ToString: all zeros" {
+test "formatIpv4: all zeros" {
     const octets: [4]u8 = .{ 0, 0, 0, 0 };
-    const result = linux_addr.ipv4ToString(octets);
+    var buf: [15]u8 = undefined;
+    const result = try linux_addr.formatIpv4(octets, &buf);
     try testing.expectEqualSlices(u8, "0.0.0.0", result);
 }
 
-test "ipv4ToString: max values" {
+test "formatIpv4: max values" {
     const octets: [4]u8 = .{ 255, 255, 255, 255 };
-    const result = linux_addr.ipv4ToString(octets);
+    var buf: [15]u8 = undefined;
+    const result = try linux_addr.formatIpv4(octets, &buf);
     try testing.expectEqualSlices(u8, "255.255.255.255", result);
 }
 
