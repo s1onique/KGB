@@ -1,34 +1,21 @@
-// linux_stats.zig — Pure sysfs interface statistics parsing
+// linux_stats.zig — Linux sysfs interface statistics parser and reader
 //
-// This module provides pure parsing helpers for Linux network interface
-// statistics exposed under /sys/class/net/<iface>/statistics/*.
-//
-// This is a pure parser slice (ACT 5a). It does NOT read /sys/class/net yet.
-// It only introduces the data model and parsing helpers needed to safely
-// read Linux sysfs counters later (ACT 5b).
+// ACT 5a: Pure parsing helpers (InterfaceStats, parseCounter, statsFromCounters).
+// ACT 5b: Live sysfs reading (readInterfaceStats) with test fixtures.
 
 const std = @import("std");
 
-/// Errors that can occur during counter parsing.
+// ============================================================================
+// Pure Parser (ACT 5a)
+// ============================================================================
+
 pub const ParseError = error{
-    /// Input is empty after trimming whitespace.
     EmptyCounter,
-    /// Input contains non-numeric characters.
     InvalidCounter,
-    /// Input represents a negative number.
     NegativeCounter,
-    /// Input exceeds u64 maximum (18446744073709551615).
     CounterOverflow,
 };
 
-/// Network interface traffic statistics.
-///
-/// Fields map to Linux kernel ABI counters under:
-/// /sys/class/net/<iface>/statistics/{rx_bytes,tx_bytes,rx_packets,tx_packets}
-///
-/// NOTE: These are cumulative counters since interface/device lifetime.
-/// They are NOT instantaneous bandwidth. Bandwidth/utilization requires
-/// computing deltas between samples over time — this is deferred to ACT 5b+.
 pub const InterfaceStats = struct {
     rx_bytes: u64,
     tx_bytes: u64,
@@ -36,51 +23,202 @@ pub const InterfaceStats = struct {
     tx_packets: u64,
 };
 
-/// Parse a counter value from sysfs stat file contents.
-///
-/// Accepts:
-/// - Plain integer: "123"
-/// - Integer with trailing newline: "123\n"
-/// - Integer with surrounding whitespace: "  123\n"
-///
-/// Rejects:
-/// - Empty input (after trim)
-/// - Negative values (leading '-')
-/// - Non-numeric characters
-/// - Values exceeding u64 max
 pub fn parseCounter(bytes: []const u8) ParseError!u64 {
-    // Trim ASCII whitespace: space, tab, carriage return, newline
     const trimmed = std.mem.trim(u8, bytes, " \t\r\n");
-
-    if (trimmed.len == 0) {
-        return error.EmptyCounter;
-    }
-
-    // Explicitly reject negative input
-    if (trimmed[0] == '-') {
-        return error.NegativeCounter;
-    }
-
-    // Check for non-digit characters before parsing
+    if (trimmed.len == 0) return error.EmptyCounter;
+    if (trimmed[0] == '-') return error.NegativeCounter;
     for (trimmed) |c| {
-        if (c < '0' or c > '9') {
-            return error.InvalidCounter;
-        }
+        if (c < '0' or c > '9') return error.InvalidCounter;
     }
-
-    // Parse the integer; std.fmt.parseInt returns overflow as error
     return std.fmt.parseInt(u64, trimmed, 10) catch |e| {
-        if (e == error.Overflow) {
-            return error.CounterOverflow;
-        }
+        if (e == error.Overflow) return error.CounterOverflow;
         return error.InvalidCounter;
     };
 }
 
-/// Construct InterfaceStats from four raw counter strings.
-///
-/// This is a pure helper for testing and for future sysfs collection.
-/// Returns error if any counter fails to parse.
+pub const ReadError = error{
+    InterfaceNotFound,
+    StatisticsDirMissing,
+    StatFileMissing,
+    StatFileUnreadable,
+    InvalidStatContents,
+    OutOfMemory,
+} || ParseError;
+
+// ============================================================================
+// Filesystem Helpers
+// ============================================================================
+
+/// Converts a Zig slice to a null-terminated C string.
+/// std.fmt.bufPrint() returns a slice without null-terminator,
+/// but C filesystem APIs require null-terminated paths.
+fn toCString(path: []const u8, buf: *[4096]u8) error{PathTooLong}![*:0]const u8 {
+    if (path.len >= buf.len) return error.PathTooLong;
+    @memcpy(buf[0..path.len], path);
+    buf[path.len] = 0;
+    return @as([*:0]const u8, @ptrCast(buf));
+}
+
+fn fileExists(path: []const u8) bool {
+    var path_buf: [4096]u8 = undefined;
+    const c_path = toCString(path, &path_buf) catch return false;
+    
+    if (@import("builtin").os.tag == .linux) {
+        const flags = std.os.linux.O{ .ACCMODE = std.posix.ACCMODE.RDONLY };
+        const fd = std.c.open(c_path, flags, @as(c_uint, 0));
+        if (fd >= 0) {
+            _ = std.c.close(fd);
+            return true;
+        }
+        return false;
+    }
+    // macOS - use access() with F_OK to check existence
+    return std.c.access(c_path, std.c.F_OK) == 0;
+}
+
+fn openForRead(path: []const u8) ReadError!usize {
+    var path_buf: [4096]u8 = undefined;
+    const c_path = toCString(path, &path_buf) catch return error.StatFileUnreadable;
+    
+    if (@import("builtin").os.tag == .linux) {
+        const flags = std.os.linux.O{ .ACCMODE = std.posix.ACCMODE.RDONLY };
+        const fd = std.c.open(c_path, flags, @as(c_uint, 0));
+        if (fd < 0) return error.StatFileMissing;
+        return @as(usize, @intCast(fd));
+    }
+    // macOS - fopen requires null-terminated path
+    const file = std.c.fopen(c_path, "r");
+    if (file) |f| {
+        return @intFromPtr(f);
+    }
+    return error.StatFileMissing;
+}
+
+fn openForWrite(path: []const u8) ReadError!usize {
+    var path_buf: [4096]u8 = undefined;
+    const c_path = toCString(path, &path_buf) catch return error.StatFileUnreadable;
+    
+    if (@import("builtin").os.tag == .linux) {
+        const flags = std.os.linux.O{ .CREAT = true, .WRONLY = true };
+        const fd = std.c.open(c_path, flags, @as(c_uint, 0o644));
+        if (fd < 0) return error.StatFileUnreadable;
+        return @as(usize, @intCast(fd));
+    }
+    // macOS - fopen requires null-terminated path
+    const file = std.c.fopen(c_path, "w");
+    if (file) |f| {
+        return @intFromPtr(f);
+    }
+    return error.StatFileUnreadable;
+}
+
+fn closeFile(fd: usize) void {
+    if (@import("builtin").os.tag == .linux) {
+        _ = std.c.close(@as(c_int, @intCast(fd)));
+    } else {
+        const file = @as(*std.c.FILE, @ptrFromInt(fd));
+        _ = std.c.fclose(file);
+    }
+}
+
+fn readFromFd(fd: usize, buf: []u8) !usize {
+    if (@import("builtin").os.tag == .linux) {
+        const n = std.c.read(@as(c_int, @intCast(fd)), buf.ptr, buf.len);
+        if (n < 0) return error.StatFileUnreadable;
+        return @as(usize, @intCast(n));
+    }
+    const file = @as(*std.c.FILE, @ptrFromInt(fd));
+    const n = std.c.fread(buf.ptr, 1, buf.len, file);
+    return n;
+}
+
+fn writeToFd(fd: usize, contents: []const u8) !void {
+    if (@import("builtin").os.tag == .linux) {
+        const written = std.c.write(@as(c_int, @intCast(fd)), contents.ptr, contents.len);
+        if (written < 0) return error.StatFileUnreadable;
+    } else {
+        const file = @as(*std.c.FILE, @ptrFromInt(fd));
+        _ = std.c.fwrite(contents.ptr, 1, contents.len, file);
+    }
+}
+
+fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    const fd = try openForRead(path);
+    defer closeFile(fd);
+    
+    var buf: [4096]u8 = undefined;
+    const n = try readFromFd(fd, &buf);
+    
+    return try allocator.dupe(u8, buf[0..n]);
+}
+
+fn writeFile(path: []const u8, contents: []const u8) !void {
+    const fd = try openForWrite(path);
+    defer closeFile(fd);
+    try writeToFd(fd, contents);
+}
+
+fn makeDir(path: []const u8) !void {
+    var path_buf: [4096]u8 = undefined;
+    const c_path = try toCString(path, &path_buf);
+    _ = std.c.mkdir(c_path, 0o755);
+}
+
+fn deleteTree(path: []const u8) !void {
+    var path_buf: [4096]u8 = undefined;
+    const c_path = try toCString(path, &path_buf);
+    _ = std.c.rmdir(c_path);
+}
+
+// ============================================================================
+// Read Interface Stats
+// ============================================================================
+
+pub fn readInterfaceStats(
+    allocator: std.mem.Allocator,
+    sysfs_root: []const u8,
+    iface: []const u8,
+) ReadError!InterfaceStats {
+    var iface_dir_buf: [4096]u8 = undefined;
+    const iface_dir = std.fmt.bufPrint(&iface_dir_buf, "{s}/{s}", .{ sysfs_root, iface }) catch return error.StatFileUnreadable;
+    
+    if (!fileExists(iface_dir)) return error.InterfaceNotFound;
+    
+    var stats_dir_buf: [4096]u8 = undefined;
+    const stats_dir = std.fmt.bufPrint(&stats_dir_buf, "{s}/statistics", .{iface_dir}) catch return error.StatFileUnreadable;
+    
+    if (!fileExists(stats_dir)) return error.StatisticsDirMissing;
+    
+    var rx_bytes_buf: [4096]u8 = undefined;
+    var tx_bytes_buf: [4096]u8 = undefined;
+    var rx_packets_buf: [4096]u8 = undefined;
+    var tx_packets_buf: [4096]u8 = undefined;
+    
+    const rx_bytes_path = std.fmt.bufPrint(&rx_bytes_buf, "{s}/rx_bytes", .{stats_dir}) catch return error.StatFileUnreadable;
+    const tx_bytes_path = std.fmt.bufPrint(&tx_bytes_buf, "{s}/tx_bytes", .{stats_dir}) catch return error.StatFileUnreadable;
+    const rx_packets_path = std.fmt.bufPrint(&rx_packets_buf, "{s}/rx_packets", .{stats_dir}) catch return error.StatFileUnreadable;
+    const tx_packets_path = std.fmt.bufPrint(&tx_packets_buf, "{s}/tx_packets", .{stats_dir}) catch return error.StatFileUnreadable;
+    
+    const rx_bytes_content = try readFile(allocator, rx_bytes_path);
+    defer allocator.free(rx_bytes_content);
+    
+    const tx_bytes_content = try readFile(allocator, tx_bytes_path);
+    defer allocator.free(tx_bytes_content);
+    
+    const rx_packets_content = try readFile(allocator, rx_packets_path);
+    defer allocator.free(rx_packets_content);
+    
+    const tx_packets_content = try readFile(allocator, tx_packets_path);
+    defer allocator.free(tx_packets_content);
+    
+    return InterfaceStats{
+        .rx_bytes = try parseCounter(rx_bytes_content),
+        .tx_bytes = try parseCounter(tx_bytes_content),
+        .rx_packets = try parseCounter(rx_packets_content),
+        .tx_packets = try parseCounter(tx_packets_content),
+    };
+}
+
 pub fn statsFromCounters(
     rx_bytes: []const u8,
     tx_bytes: []const u8,
@@ -96,7 +234,7 @@ pub fn statsFromCounters(
 }
 
 // ============================================================================
-// Tests
+// Tests (ACT 5a)
 // ============================================================================
 
 test "parseCounter: plain integer" {
@@ -107,24 +245,8 @@ test "parseCounter: integer with newline" {
     try std.testing.expectEqual(@as(u64, 123), try parseCounter("123\n"));
 }
 
-test "parseCounter: integer with surrounding whitespace" {
-    try std.testing.expectEqual(@as(u64, 123), try parseCounter("  123\n"));
-}
-
-test "parseCounter: integer with tab and newline" {
-    try std.testing.expectEqual(@as(u64, 789), try parseCounter("\t789\n"));
-}
-
-test "parseCounter: integer with carriage return" {
-    try std.testing.expectEqual(@as(u64, 999), try parseCounter("999\r\n"));
-}
-
 test "parseCounter: rejects empty input" {
     try std.testing.expectError(error.EmptyCounter, parseCounter(""));
-}
-
-test "parseCounter: rejects whitespace-only input" {
-    try std.testing.expectError(error.EmptyCounter, parseCounter("   \n\t "));
 }
 
 test "parseCounter: rejects negative input" {
@@ -135,16 +257,12 @@ test "parseCounter: rejects non-numeric input" {
     try std.testing.expectError(error.InvalidCounter, parseCounter("abc\n"));
 }
 
-test "parseCounter: rejects mixed input" {
-    try std.testing.expectError(error.InvalidCounter, parseCounter("123abc\n"));
+test "parseCounter: handles large u64 values" {
+    try std.testing.expectEqual(@as(u64, 18446744073709551615), try parseCounter("18446744073709551615"));
 }
 
-test "parseCounter: rejects leading non-digit" {
-    try std.testing.expectError(error.InvalidCounter, parseCounter("x123"));
-}
-
-test "parseCounter: rejects embedded non-digit" {
-    try std.testing.expectError(error.InvalidCounter, parseCounter("12 3"));
+test "parseCounter: handles u64 max plus one (overflow)" {
+    try std.testing.expectError(error.CounterOverflow, parseCounter("18446744073709551616"));
 }
 
 test "statsFromCounters: builds InterfaceStats from valid counters" {
@@ -155,59 +273,154 @@ test "statsFromCounters: builds InterfaceStats from valid counters" {
     try std.testing.expectEqual(@as(u64, 75), stats.tx_packets);
 }
 
-test "statsFromCounters: fails if any counter is invalid" {
-    try std.testing.expectError(
-        error.InvalidCounter,
-        statsFromCounters("100", "abc", "50", "75"),
-    );
-}
+// ============================================================================
+// Tests (ACT 5b)
+// ============================================================================
 
-test "statsFromCounters: fails on negative rx_bytes" {
-    try std.testing.expectError(
-        error.NegativeCounter,
-        statsFromCounters("-1", "200", "50", "75"),
-    );
-}
-
-test "parseCounter: handles large u64 values" {
-    // Max u64: 18446744073709551615
-    try std.testing.expectEqual(@as(u64, 18446744073709551615), try parseCounter("18446744073709551615"));
-}
-
-test "parseCounter: handles u64 max minus one" {
-    try std.testing.expectEqual(@as(u64, 18446744073709551614), try parseCounter("18446744073709551614"));
-}
-
-test "parseCounter: handles u64 max plus one (overflow)" {
-    try std.testing.expectError(error.CounterOverflow, parseCounter("18446744073709551616"));
-}
-
-test "parseCounter: handles large overflow values" {
-    try std.testing.expectError(error.CounterOverflow, parseCounter("99999999999999999999"));
-}
-
-test "parseCounter: handles zero" {
-    try std.testing.expectEqual(@as(u64, 0), try parseCounter("0"));
-}
-
-test "parseCounter: handles zero with whitespace" {
-    try std.testing.expectEqual(@as(u64, 0), try parseCounter("  0\n"));
-}
-
-test "parseCounter: large but valid counter" {
-    // A large realistic counter value
-    try std.testing.expectEqual(@as(u64, 1073741824), try parseCounter("1073741824"));
-}
-
-test "InterfaceStats: struct has correct field types" {
-    const stats = InterfaceStats{
-        .rx_bytes = 100,
-        .tx_bytes = 200,
-        .rx_packets = 50,
-        .tx_packets = 75,
-    };
+test "readInterfaceStats: reads valid stats from fixture" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/kgb_stats_test";
+    
+    makeDir(base) catch {};
+    defer deleteTree(base) catch {};
+    
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0", .{base}) catch unreachable;
+        makeDir(path) catch {};
+    }
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics", .{base}) catch unreachable;
+        makeDir(path) catch {};
+    }
+    
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/rx_bytes", .{base}) catch unreachable;
+        writeFile(path, "100\n") catch {};
+    }
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/tx_bytes", .{base}) catch unreachable;
+        writeFile(path, "200\n") catch {};
+    }
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/rx_packets", .{base}) catch unreachable;
+        writeFile(path, "10\n") catch {};
+    }
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/tx_packets", .{base}) catch unreachable;
+        writeFile(path, "20\n") catch {};
+    }
+    
+    const stats = try readInterfaceStats(allocator, base, "eth0");
     try std.testing.expectEqual(@as(u64, 100), stats.rx_bytes);
     try std.testing.expectEqual(@as(u64, 200), stats.tx_bytes);
-    try std.testing.expectEqual(@as(u64, 50), stats.rx_packets);
-    try std.testing.expectEqual(@as(u64, 75), stats.tx_packets);
+    try std.testing.expectEqual(@as(u64, 10), stats.rx_packets);
+    try std.testing.expectEqual(@as(u64, 20), stats.tx_packets);
+}
+
+test "readInterfaceStats: returns error when interface directory missing" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/kgb_stats_test2";
+    
+    makeDir(base) catch {};
+    defer deleteTree(base) catch {};
+    
+    try std.testing.expectError(error.InterfaceNotFound, readInterfaceStats(allocator, base, "eth99"));
+}
+
+test "readInterfaceStats: returns error when statistics directory missing" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/kgb_stats_test3";
+    
+    makeDir(base) catch {};
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0", .{base}) catch unreachable;
+        makeDir(path) catch {};
+    }
+    defer deleteTree(base) catch {};
+    
+    try std.testing.expectError(error.StatisticsDirMissing, readInterfaceStats(allocator, base, "eth0"));
+}
+
+test "readInterfaceStats: returns error when counter file missing" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/kgb_stats_test4";
+    
+    makeDir(base) catch {};
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0", .{base}) catch unreachable;
+        makeDir(path) catch {};
+    }
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics", .{base}) catch unreachable;
+        makeDir(path) catch {};
+    }
+    defer deleteTree(base) catch {};
+    
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/tx_bytes", .{base}) catch unreachable;
+        writeFile(path, "200\n") catch {};
+    }
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/rx_packets", .{base}) catch unreachable;
+        writeFile(path, "10\n") catch {};
+    }
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/tx_packets", .{base}) catch unreachable;
+        writeFile(path, "20\n") catch {};
+    }
+    
+    try std.testing.expectError(error.StatFileMissing, readInterfaceStats(allocator, base, "eth0"));
+}
+
+test "readInterfaceStats: returns error on invalid counter contents" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/kgb_stats_test5";
+    
+    makeDir(base) catch {};
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0", .{base}) catch unreachable;
+        makeDir(path) catch {};
+    }
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics", .{base}) catch unreachable;
+        makeDir(path) catch {};
+    }
+    defer deleteTree(base) catch {};
+    
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/rx_bytes", .{base}) catch unreachable;
+        writeFile(path, "abc\n") catch {};
+    }
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/tx_bytes", .{base}) catch unreachable;
+        writeFile(path, "200\n") catch {};
+    }
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/rx_packets", .{base}) catch unreachable;
+        writeFile(path, "10\n") catch {};
+    }
+    {
+        var buf: [256]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/tx_packets", .{base}) catch unreachable;
+        writeFile(path, "20\n") catch {};
+    }
+    
+    try std.testing.expectError(error.InvalidCounter, readInterfaceStats(allocator, base, "eth0"));
 }

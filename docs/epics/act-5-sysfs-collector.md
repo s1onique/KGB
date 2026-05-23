@@ -1,6 +1,6 @@
 # ACT 5: Add private interface traffic collector from Linux sysfs
 
-**Status: open** (slice ACT 5a ✅)
+**Status: open** (slices ACT 5a ✅, ACT 5b ✅)
 
 Linux exposes per-interface statistics under:
 `/sys/class/net/<iface>/statistics/`
@@ -36,9 +36,60 @@ It does NOT enumerate live interfaces or read `/sys/class/net` yet.
 - [x] Tests are wired via `test_all.zig`.
 - [x] `make tovarisch-test` passes (140 tests).
 - [x] `make gate` passes.
-- [ ] Live sysfs collection (ACT 5b) is deferred.
-- [ ] Interface stats are available for private interfaces.
-- [ ] Non-private interfaces are filtered out by default.
+- [x] Live sysfs collection (ACT 5b) is deferred (now done).
+
+## ACT 5b: Explicit-interface sysfs stat file reader (slice)
+
+**Status: ✅ done**
+
+This slice adds filesystem reading for one explicit interface name.
+It does NOT enumerate interfaces, does NOT filter private interfaces,
+and does NOT wire `/metrics.json` yet.
+
+### Board
+
+| ID | Work Item | Status |
+|---|---|---|
+| webservice-032 | Add `ReadError` error set for filesystem errors | ✅ done |
+| webservice-033 | Add `readCounterFile()` helper | ✅ done |
+| webservice-034 | Add `readInterfaceStats()` function | ✅ done |
+| webservice-035 | Add fixture-based tests | ✅ done |
+| webservice-036 | Run `make gate` and verify | ✅ done |
+
+### Acceptance
+
+- [x] `readInterfaceStats()` exists and reads four sysfs stat files.
+- [x] Uses `parseCounter()` / `statsFromCounters()` — no duplicated parsing.
+- [x] `sysfs_root` is injectable for test fixtures.
+- [x] Tests use temporary fixture directories/files.
+- [x] Tests do not read real `/sys/class/net`.
+- [x] Missing files/directories produce errors.
+- [x] Invalid/overflow counter contents produce errors.
+- [x] `make tovarisch-test` passes.
+- [x] `make gate` passes.
+- [x] No live interface enumeration was added.
+- [x] No `/metrics.json` wiring was added.
+
+### Implementation
+
+The filesystem reader provides:
+
+- `ReadError` error set supplementing `ParseError`:
+  - `InterfaceNotFound` — interface directory missing
+  - `StatisticsDirMissing` — statistics/ subdirectory missing
+  - `StatFileMissing` — required stat file missing
+  - `StatFileUnreadable` — failed to read/open a stat file
+  - `InvalidStatContents` — parsing failed for file contents
+  (merged with `ParseError` variants like `InvalidCounter`, `CounterOverflow`)
+- `readInterfaceStats(allocator, sysfs_root, iface) !InterfaceStats`
+- `readCounterFile(allocator, path) !u64` — internal helper
+
+### Future: ACT 5c
+
+ACT 5c will handle:
+- Interface enumeration from `/sys/class/net`
+- Private interface filtering
+- Or metrics wiring, depending on the next slice chosen
 
 ### Files Changed
 

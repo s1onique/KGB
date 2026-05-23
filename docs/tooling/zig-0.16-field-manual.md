@@ -179,6 +179,37 @@ test "parseServeArgs defaults to loopback" {
 
 The blocking accept loop is not executed by unit tests. Use manual smoke tests or integration tests for the daemon path.
 
+## C Path APIs Require Null-Terminated Strings
+
+`std.fmt.bufPrint()` returns a `[]u8` slice and does **not** append a null terminator.
+
+C filesystem APIs (`open`, `fopen`, `access`, `mkdir`, `rmdir`) require null-terminated paths. Always copy the slice into a stack buffer, append `0`, and pass `[*:0]const u8`.
+
+**Centralized helper pattern:**
+
+```zig
+/// Converts a Zig slice to a null-terminated C string.
+/// std.fmt.bufPrint() returns a slice without null-terminator,
+/// but C filesystem APIs require null-terminated paths.
+fn toCString(path: []const u8, buf: *[4096]u8) error{PathTooLong}![*:0]const u8 {
+    if (path.len >= buf.len) return error.PathTooLong;
+    @memcpy(buf[0..path.len], path);
+    buf[path.len] = 0;
+    return @as([*:0]const u8, @ptrCast(buf));
+}
+
+// Usage:
+var path_buf: [4096]u8 = undefined;
+const c_path = try toCString(path, &path_buf);
+const fd = std.c.open(c_path, flags, mode);
+```
+
+**Why this matters:**
+- `[]u8` is a length-carrying Zig slice (no implicit null terminator)
+- `path.ptr` from a slice is type `[*]const u8` (pointer without null termination)
+- C path APIs expect `[*:0]const u8` (pointer with null terminator)
+- String literals in Zig are null-terminated, but `bufPrint()` output is not
+
 ## HTTP Method Parsing
 
 `std.meta.stringToEnum()` is exact and does not map uppercase protocol strings such as `GET` to lowercase enum tags such as `.get`.
@@ -351,3 +382,4 @@ Key points:
 - Cast the perm argument to `c_uint` for variadic function compatibility
 - We link libc anyway for socket support, so `std.c.*` functions are available
 - Cross-compiled tests cannot execute on non-Linux hosts; compile-only verification
+
