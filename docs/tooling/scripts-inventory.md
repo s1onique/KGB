@@ -31,6 +31,7 @@ Canonical reference for gate scripts and tooling in KGB.
 |--------|---------|-------------|
 | `scripts/verify_tovarisch_status_contract.sh` | Validates status JSON contract | `make verify-status-contract` |
 | `scripts/verify_status_json.sh` | JSON schema validation for status output | auto-invoked |
+| `scripts/verify_structured_logs.sh` | Verifies no prose runtime logs; uses structured logging | `make verify-structured-logs` |
 
 ## Coverage
 

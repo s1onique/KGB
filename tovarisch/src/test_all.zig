@@ -10,6 +10,7 @@ const std = @import("std");
 // Import all source modules to ensure they are compiled and their tests discovered
 const _cli = @import("cli.zig");
 const _status = @import("status.zig");
+const _logging = @import("logging.zig");
 const _net_private_ip = @import("net/private_ip.zig");
 const _net_linux_stats = @import("net/linux_stats.zig");
 const _net_linux_stats_tests = @import("net/linux_stats_tests.zig");
@@ -84,4 +85,8 @@ test {
 
 test {
     std.testing.refAllDecls(@import("runtime/telemetry.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("logging.zig"));
 }

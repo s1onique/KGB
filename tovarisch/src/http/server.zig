@@ -1,6 +1,7 @@
 const std = @import("std");
 const c = std.c;
 const routes = @import("routes.zig");
+const logging = @import("../logging.zig");
 
 /// Server configuration.
 pub const Config = struct {
@@ -30,7 +31,6 @@ pub const Server = struct {
     }
 
     /// Start the server: create socket, bind, and listen.
-    /// Does NOT enter the accept loop - that is handled by pollOnce.
     pub fn listen(self: *Self) !void {
         // Create socket
         const fd = c.socket(c.AF.INET, c.SOCK.STREAM, 0);
@@ -54,8 +54,7 @@ pub const Server = struct {
             return error.SetsockoptFailed;
         }
 
-        // Construct sockaddr_in using standard nested struct from c.sockaddr
-        // c.sockaddr.in is the correct cross-platform approach for both Linux and macOS
+        // Construct sockaddr_in
         var addr: c.sockaddr.in = std.mem.zeroes(c.sockaddr.in);
         addr.family = c.AF.INET;
         addr.port = std.mem.nativeToBig(u16, self.config.port);
@@ -98,65 +97,9 @@ pub fn defaultConfig() Config {
     };
 }
 
-/// Simple serve function for CLI use.
-/// Creates a server with the given config and listens until interrupted.
-pub fn serve(config: Config) !void {
-    var server = Server.init(config);
-    defer server.deinit();
-
-    try server.listen();
-    std.debug.print("Listening on {s}:{d}\n", .{ config.address, config.port });
-}
-
-/// Accept one connection and handle it (blocking).
-/// This is the simple accept loop for production CLI use.
-fn acceptOneBlocking(server: *Server) !void {
-    var client_addr: c.sockaddr = undefined;
-    var client_len: c.socklen_t = @sizeOf(c.sockaddr);
-
-    const conn_fd = c.accept(server.listener_fd, &client_addr, &client_len);
-    if (conn_fd < 0) {
-        const errno_val = std.c._errno().*;
-        // EAGAIN (11 on Linux, 35 on macOS) means no connection ready yet
-        // EWOULDBLOCK is the same value on most platforms
-        if (errno_val == 11 or errno_val == 35) {
-            std.Thread.yield() catch {};
-            return;
-        }
-        // For other errors, just retry
-        std.Thread.yield() catch {};
-        return;
-    }
-
-    handleConnection(conn_fd);
-}
-
-/// Daemon-style serve loop for production CLI use.
-/// This is the correct CLI entry point - the process stays alive
-/// until interrupted by a signal.
-pub fn serveForever(config: Config) !void {
-    var server = Server.init(config);
-    defer server.deinit();
-
-    try server.listen();
-    std.debug.print("Listening on {s}:{d}\n", .{ config.address, config.port });
-    std.debug.print("🚩📻 Listen to UVB-76 signals...\n", .{});
-    std.debug.print("Entering accept loop\n", .{});
-
-    // Blocking accept loop - stays alive until interrupted.
-    // This is the correct daemon behavior.
-    while (true) {
-        acceptOneBlocking(&server) catch |err| {
-            std.debug.print("accept loop error: {}\n", .{err});
-        };
-    }
-}
-
 /// Parse an IPv4 address string and return host-order u32.
-/// Callers must convert to network byte order via nativeToBig before use.
 fn parseIpAddress(addr: []const u8) u32 {
     const octets = parseIpOctets(addr);
-    // Host byte order: first octet is MSB
     return (@as(u32, octets[0]) << 24) | (@as(u32, octets[1]) << 16) | (@as(u32, octets[2]) << 8) | @as(u32, octets[3]);
 }
 
@@ -177,7 +120,6 @@ fn parseIpOctets(addr: []const u8) [4]u8 {
         }
     }
 
-    // Parse the last octet
     if (idx < 4) {
         const octet_str = addr[start..];
         octets[idx] = @intCast(parseU8(octet_str));
@@ -212,12 +154,86 @@ fn handleConnection(conn_fd: i32) void {
 
     // Parse the request
     const req = routes.parseRequestLine(request_line) orelse {
-        // Invalid request, just close
         return;
     };
 
     // Route and handle the request
     _ = routes.routeRequestFd(conn_fd, req) catch return;
+}
+
+/// Accept one connection and handle it (blocking).
+/// Returns error.AcceptFailed for non-transient failures.
+/// EAGAIN/EWOULDBLOCK are treated as transient and return successfully.
+fn acceptOneBlocking(server: *Server) !void {
+    var client_addr: c.sockaddr = undefined;
+    var client_len: c.socklen_t = @sizeOf(c.sockaddr);
+
+    const conn_fd = c.accept(server.listener_fd, &client_addr, &client_len);
+    if (conn_fd < 0) {
+        const errno_val = std.c._errno().*;
+        // EAGAIN (11 on Linux, 35 on macOS) and EWOULDBLOCK are transient
+        if (errno_val == 11 or errno_val == 35) {
+            std.Thread.yield() catch {};
+            return;
+        }
+        // Non-transient error - return typed error for logging
+        return error.AcceptFailed;
+    }
+
+    handleConnection(conn_fd);
+}
+
+/// Emit startup log events after successful server listen.
+fn emitStartupLogs(config: Config, out_writer: anytype) !void {
+    var log_buf = logging.BufferedWriter.init();
+    try logging.emit(.http_server_listening, &log_buf, &.{
+        .{ .name = "bind_address", .value = logging.FieldValue{ .string = config.address } },
+        .{ .name = "port", .value = logging.FieldValue{ .integer = config.port } },
+    });
+    try out_writer.writeAll(log_buf.slice());
+
+    // Emit UVB-76 signal ready event
+    log_buf.reset();
+    try logging.emit(.uvb76_signal_ready, &log_buf, &.{
+        .{ .name = "signal", .value = logging.FieldValue{ .string = "🚩📻" } },
+        .{ .name = "message", .value = logging.FieldValue{ .string = "Listen to UVB-76 signals..." } },
+    });
+    try out_writer.writeAll(log_buf.slice());
+}
+
+/// Simple serve function for CLI use.
+pub fn serve(config: Config, out_writer: anytype) !void {
+    var server = Server.init(config);
+    defer server.deinit();
+
+    try server.listen();
+    try emitStartupLogs(config, out_writer);
+}
+
+/// Daemon-style serve loop for production CLI use.
+pub fn serveForever(config: Config, out_writer: anytype) !void {
+    var server = Server.init(config);
+    defer server.deinit();
+
+    try server.listen();
+    try emitStartupLogs(config, out_writer);
+
+    // Structured JSON log: accept loop started
+    var log_buf = logging.BufferedWriter.init();
+    try logging.emit(.http_accept_loop_started, &log_buf, &.{});
+    try out_writer.writeAll(log_buf.slice());
+
+    // Blocking accept loop - stays alive until interrupted.
+    while (true) {
+        acceptOneBlocking(&server) catch |err| {
+            // Build log record in buffer, then write to output
+            log_buf.reset();
+            try logging.emit(.http_accept_loop_error, &log_buf, &.{
+                .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(err) } },
+            });
+            try out_writer.writeAll(log_buf.slice());
+        };
+    }
 }
 
 // --- Tests ---
@@ -243,10 +259,6 @@ test "parseIpOctets parses 127.0.0.1" {
 }
 
 test "parseIpAddress returns host-order u32" {
-    // 127.0.0.1 in host byte order: 127 << 24 | 0 << 16 | 0 << 8 | 1 = 0x7F000001
-    // Callers must use nativeToBig for network byte order storage.
     const addr = parseIpAddress("127.0.0.1");
     try std.testing.expectEqual(@as(u32, 0x7F000001), addr);
 }
-
-

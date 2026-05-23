@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 83
@@ -81,6 +81,11 @@ verify-status-contract:
 
 test-final-newlines-regression:
 	./scripts/check_final_newlines_regression.sh
+
+# === Structured Logs Verification ===
+
+verify-structured-logs:
+	./scripts/verify_structured_logs.sh
 
 # === Debian Package ===
 

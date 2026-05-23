@@ -193,5 +193,9 @@ echo "[gate] checking status contract"
 
 ./scripts/verify_tovarisch_status_contract.sh
 
+echo "[gate] checking structured logs"
+
+./scripts/verify_structured_logs.sh
+
 echo ""
 echo "[gate] PASS"

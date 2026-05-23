@@ -3,6 +3,7 @@ const cli_args = @import("args.zig");
 const usage = @import("usage.zig");
 const status = @import("../status.zig");
 const http = @import("../http/server.zig");
+const logging = @import("../logging.zig");
 
 pub const ExitCode = enum(u8) {
     ok = 0,
@@ -57,13 +58,16 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
     switch (parsed) {
         .usage => return .usage,
         .ok => |config| {
-            stdout.print("Starting tovarisch HTTP service on port {d}...\n", .{config.port}) catch {};
-            stdout.writeAll("Press Ctrl+C to stop.\n") catch {};
-
             // Use serveForever for daemon-style blocking - the process stays alive
             // until interrupted by a signal. This is the correct CLI behavior.
-            http.serveForever(config) catch |err| {
-                stderr.print("error: failed to run HTTP server: {}\n", .{err}) catch {};
+            // Structured JSON logs go to stdout.
+            http.serveForever(config, stdout) catch |err| {
+                // Log error as structured JSON to stderr using logging module
+                var log_buf = logging.BufferedWriter.init();
+                logging.emit(.server_error, &log_buf, &.{
+                    .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(err) } },
+                }) catch {};
+                stderr.writeAll(log_buf.slice()) catch {};
                 return .serve_error;
             };
 
