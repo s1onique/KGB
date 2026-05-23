@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness coverage coverage-report
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 60
@@ -56,6 +56,24 @@ tovarisch-status:
 
 tovarisch-serve-liveness: tovarisch-build
 	./scripts/check_tovarisch_serve_liveness.sh ./tovarisch/zig-out/bin/tovarisch
+
+# === Cross-Platform Compile Checks ===
+# These targets verify Linux-only code paths compile correctly on non-Linux hosts.
+# Required because Zig does not semantically analyze Linux branches on macOS/Windows.
+# NOTE: Cross-compiled tests cannot execute on non-Linux hosts; compile-only verification.
+
+tovarisch-compile-linux:
+	# Compile tovarisch for Linux target from non-Linux host.
+	# This catches platform-specific API drift in @import("builtin").os.tag branches.
+	cd tovarisch && zig build -Dtarget=x86_64-linux-gnu
+
+# === Platform-Specific Semantic Analysis Gate ===
+
+# Cross-platform compile gate: catches platform-specific API drift that local gate misses.
+# On macOS, Linux-only code in @import("builtin").os.tag == .linux branches is not analyzed.
+# On Linux CI, those branches become live and expose any API mismatches.
+cross-platform-gate: tovarisch-compile-linux
+	@echo "=== Cross-platform compile gate passed ==="
 
 verify-status-contract:
 	./scripts/verify_tovarisch_status_contract.sh

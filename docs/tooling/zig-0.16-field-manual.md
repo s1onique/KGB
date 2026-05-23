@@ -299,3 +299,55 @@ const unit_tests = b.addTest(.{
 When `test_all.zig` uses `std.testing.refAllDecls`, it forces compilation of all imported declarations, including code that references `std.c.write`, `std.c.socket`, etc. This requires libc linkage at **test compile time** as well.
 
 **Rule:** Apply `.link_libc = true` to every `b.createModule()` that imports code which can reference `std.c.*` functions.
+
+## Cross-Platform Semantic Analysis
+
+### Platform-Specific Code Analysis Gap
+
+A branch guarded by `@import("builtin").os.tag` may hide platform-specific API drift on non-target hosts. Linux-only code that compiles cleanly on macOS local gate may not be validated because the Linux branch is not semantically analyzed. On Linux CI, that branch becomes live, exposing any API mismatches.
+
+**Example:** `std.fs.cwd().openFile()` was rejected in Linux CI for the `/proc/self/status` RSS reader, while macOS local gate stayed green because the Linux branch was not active.
+
+**Mitigation:** Use cross-platform compile targets to verify:
+
+```bash
+zig build -Dtarget=x86_64-linux-gnu
+```
+
+**Rule:** Do not add a cross-target test target unless the build graph is confirmed to compile tests without executing them, or the target runs on native Linux.
+
+### General KGB/tovarisch Doctrine
+
+Any platform-specific branch gets a matching compile target before it is trusted:
+
+```make
+tovarisch-compile-linux:
+	cd tovarisch && zig build -Dtarget=x86_64-linux-gnu
+
+tovarisch-compile-macos:
+	cd tovarisch && zig build -Dtarget=x86_64-macos
+```
+
+Also consider native architecture variants (e.g., `aarch64-macos` for Apple Silicon).
+
+### Reading Linux /proc Files from Zig 0.16
+
+For Linux-only file operations like reading `/proc/self/status`, use `std.c.open` with `std.os.linux.O` struct initializer:
+
+```zig
+const path: [*:0]const u8 = "/proc/self/status";
+const flags = std.os.linux.O{ .ACCMODE = std.posix.ACCMODE.RDONLY };
+const fd = std.c.open(path, flags, @as(c_uint, 0));
+if (fd < 0) return null;
+defer _ = std.c.close(fd);
+
+// Read content
+var buf: [4096]u8 = undefined;
+const bytes_read = std.c.read(fd, &buf, buf.len);
+```
+
+Key points:
+- `std.os.linux.O` is a packed struct; use `.ACCMODE = std.posix.ACCMODE.RDONLY` for O_RDONLY
+- Cast the perm argument to `c_uint` for variadic function compatibility
+- We link libc anyway for socket support, so `std.c.*` functions are available
+- Cross-compiled tests cannot execute on non-Linux hosts; compile-only verification

@@ -67,15 +67,20 @@ fn getVmRssKiB() ?u64 {
 
 fn linuxGetVmRssKiB() ?u64 {
     // /proc/self/status is always available for the current process
-    const file = std.fs.cwd().openFile("/proc/self/status", .{}) catch return null;
-    defer file.close();
+    // Use std.c.open with libc linking (we already link libc for sockets)
+    // Use struct initializer syntax for the O type (O.ACCMODE = .RDONLY)
+    const path: [*:0]const u8 = "/proc/self/status";
+    const flags = std.os.linux.O{ .ACCMODE = std.posix.ACCMODE.RDONLY };
+    const fd = std.c.open(path, flags, @as(c_uint, 0));
+    if (fd < 0) return null;
+    defer _ = std.c.close(fd);
 
     // Read into a fixed buffer to avoid heap allocation
     var buf: [4096]u8 = undefined;
-    const bytes_read = file.read(&buf) catch return null;
+    const bytes_read = std.c.read(fd, &buf, buf.len);
     if (bytes_read == 0) return null;
 
-    const content = buf[0..bytes_read];
+    const content = buf[0..@as(usize, @intCast(bytes_read))];
     return parseVmRssKiB(content);
 }
 
