@@ -1,6 +1,6 @@
 # ACT 5: Add private interface traffic collector from Linux sysfs
 
-**Status: open** (slices ACT 5a ✅, ACT 5b ✅, ACT 5c ✅)
+**Status: open** (slices ACT 5a ✅, ACT 5b ✅, ACT 5c ✅, ACT 5d ✅)
 
 Linux exposes per-interface statistics under:
 `/sys/class/net/<iface>/statistics/`
@@ -176,6 +176,65 @@ The interface enumerator provides:
 
 ACT 5d should combine enumeration + `readInterfaceStats()` into a list of interface stats,
 still without private filtering or metrics wiring.
+
+## ACT 5d: Combine interface enumeration with stats reading (slice)
+
+**Status: ✅ done**
+
+This slice adds a composition layer that combines `listInterfaces()` with
+`readInterfaceStats()` to return a list of interface names with their traffic
+counters. It does NOT filter private interfaces, does NOT wire `/metrics.json`.
+
+### Board
+
+| ID | Work Item | Status |
+|---|---|---|
+| webservice-044 | Create `net/linux_interface_stats.zig` | ✅ done |
+| webservice-045 | Define `InterfaceStatsSnapshot` struct | ✅ done |
+| webservice-046 | Add `collectInterfaceStats()` function | ✅ done |
+| webservice-047 | Add `freeInterfaceStatsSnapshots()` function | ✅ done |
+| webservice-048 | Add fixture-based tests | ✅ done |
+| webservice-049 | Add Linux-only smoke test | ✅ done |
+| webservice-050 | Update test_all.zig | ✅ done |
+| webservice-051 | Run `make gate` and verify | ✅ done |
+
+### Acceptance
+
+- [x] `collectInterfaceStats()` exists and composes enumeration + stats reading.
+- [x] `InterfaceStatsSnapshot` struct holds name and stats.
+- [x] `freeInterfaceStatsSnapshots()` properly frees allocator-owned copies.
+- [x] `sysfs_root` is injectable for test fixtures.
+- [x] Tests use temporary fixture directories.
+- [x] Missing/unreadable stats skip that interface, not fail the collection.
+- [x] Empty fixture root returns empty snapshot list.
+- [x] Missing root returns error from enumeration.
+- [x] No private interface filtering was added.
+- [x] No `/metrics.json` wiring was added.
+- [x] `make tovarisch-test` passes.
+- [x] `make gate` passes.
+- [x] ACT 5 remains open.
+
+### Implementation
+
+The composition layer provides:
+
+- `InterfaceStatsSnapshot` struct with `name: []const u8` and `stats: InterfaceStats`
+- `collectInterfaceStats(allocator, sysfs_root) ![]InterfaceStatsSnapshot`
+  - Calls `listInterfaces()` to enumerate interface names
+  - Calls `readInterfaceStats()` for each interface
+  - Skips interfaces with missing, unreadable, or malformed stats
+  - Returns owned snapshots with allocator-owned name copies
+- `freeInterfaceStatsSnapshots(allocator, snapshots) void`
+
+### Files Changed
+
+- `tovarisch/src/net/linux_interface_stats.zig` — collectInterfaceStats, freeInterfaceStatsSnapshots
+- `tovarisch/src/net/linux_interface_stats_tests.zig` — fixture tests, Linux smoke test
+- `tovarisch/src/test_all.zig` — Added refAllDecls for linux_interface_stats modules
+
+### Next: ACT 5e
+
+ACT 5e should add private-interface filtering based on existing `private_ip.zig` logic.
 
 ## Future: ACT 5b (live sysfs collection)
 

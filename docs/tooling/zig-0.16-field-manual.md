@@ -383,3 +383,7 @@ Use the same allocator throughout the list lifetime.
 
 In this Zig 0.16 environment, `std.c.dirent` exposes the directory-entry name as `name`, not `d_name`.
 
+## bufPrint aliasing with format arguments
+
+> **See also:** `zig-0.16-observations.md` — this section documents a known Zig 0.16 `@memcpy arguments alias` panic in chained `bufPrint()` calls. Full details and solution pattern are documented there.
+

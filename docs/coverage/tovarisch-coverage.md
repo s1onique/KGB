@@ -176,7 +176,8 @@ The following table inventories all known platform-specific branches in `tovaris
 | `runtime/telemetry.zig` | `getVmRssKiB()` — `builtin.os.tag == .linux` gate | **Linux CI smoke test** | Covered by smoke test on Linux; null fallback remains for non-Linux |
 | `net/linux_stats.zig` | `readInterfaceStats()` — live sysfs read | **Linux CI smoke test** | Zig-native smoke test probes `/sys/class/net` and calls `readInterfaceStats()`; exercised in CI |
 | `net/linux_stats.zig` | `fileExists()` — Linux `std.c.open` path | **Linux CI smoke test** | Exercise via live sysfs smoke test; probes common Linux interface names directly |
-| `net/linux_stats.zig` | `openForRead()` — Linux `std.c.open` path | **Linux CI smoke test** | Exercise via live sysfs smoke test; reads `/sys/class/net/{iface}/statistics/*` directly |
+| `net/linux_interface_stats.zig` | `collectInterfaceStats()` — composition layer | **Linux CI smoke test** | Exercise via live sysfs smoke test; composes listInterfaces() + readInterfaceStats() |
+| `net/linux_interface_stats.zig` | `freeInterfaceStatsSnapshots()` — cleanup helper | **Pure fixture tests** | Cross-platform, tested via fixture tests |
 | `net/linux_stats.zig` | `openForWrite()` — Linux `std.c.open` path | **Compile-gated only** | Used only for test fixtures; no production write path needed |
 | `net/linux_stats.zig` | `closeFile()` — Linux `std.c.close` path | **Linux CI smoke test** | Exercise via live sysfs smoke test; closes file descriptors after reading stats |
 | `net/linux_stats.zig` | `readFromFd()` — Linux `std.c.read` path | **Linux CI smoke test** | Exercise via live sysfs smoke test; reads counter values from sysfs files |

@@ -180,3 +180,37 @@ Recording field notes from Zig 0.16 experiments. Confidence varies; do not promo
 - **Recommendation:** Investigate `std.fs.Dir.stat()` or another simpler API for directory existence checking. The old `std.fs.cwd().stat(path)` pattern is invalid in Zig 0.16.
 
 **Confidence:** high; verified with compiler errors and successful builds.
+
+---
+
+## 2026-05-23 — `@memcpy arguments alias` panic in chained `std.fmt.bufPrint()` calls
+
+- **Context:** Implementing fixture tests in `tovarisch/src/net/linux_interface_stats_tests.zig` that build paths like `{base}/{iface}/statistics/{file}` and write counter values.
+- **Symptom:** `panic: @memcpy arguments alias` when the same buffer was used as both the destination of `bufPrint()` and as data referenced by a format argument.
+- **Root cause:** When `std.fmt.bufPrint()` internally calls `write()` to format into a buffer, if that buffer slice is also passed as a format argument, Zig 0.16 detects aliasing and panics.
+
+**Failed assumption:** Reusing a single buffer for sequential path construction and number formatting was assumed to be safe.
+
+**Working fix:** Use distinct buffers for each path construction:
+
+```zig
+// BAD: Aliasing panic in Zig 0.16
+var buf: [4096]u8 = undefined;
+const parent = try std.fmt.bufPrint(&buf, "{s}/{s}", .{ base, iface });
+const child = try std.fmt.bufPrint(&buf, "{s}/statistics", .{parent}); // PANIC
+
+// GOOD: Separate buffers
+var parent_buf: [4096]u8 = undefined;
+var child_buf: [4096]u8 = undefined;
+const parent = try std.fmt.bufPrint(&parent_buf, "{s}/{s}", .{ base, iface });
+const child = try std.fmt.bufPrint(&child_buf, "{s}/statistics", .{parent}); // OK
+
+// For test fixture counters, use a dedicated number buffer:
+var num_buf: [64]u8 = undefined;
+const num_str = std.fmt.bufPrint(&num_buf, "{d}\n", .{counter_value}) catch unreachable;
+```
+
+- **Files affected:** `tovarisch/src/net/linux_interface_stats_tests.zig`
+- **Promote to field manual:** Yes — added cross-reference section in `zig-0.16-field-manual.md`.
+
+**Confidence:** high; verified with `make tovarisch-test` passing (144 tests, 3 skip, no crashes).
