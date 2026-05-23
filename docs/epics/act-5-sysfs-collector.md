@@ -1,6 +1,6 @@
 # ACT 5: Add private interface traffic collector from Linux sysfs
 
-**Status: open** (slices ACT 5a ✅, ACT 5b ✅, ACT 5c ✅, ACT 5d ✅, ACT 5e ✅, ACT 5f ✅)
+**Status: open** (slices ACT 5a ✅, ACT 5b ✅, ACT 5c ✅, ACT 5d ✅, ACT 5e ✅, ACT 5f ✅, ACT 5g ✅)
 
 Linux exposes per-interface statistics under:
 `/sys/class/net/<iface>/statistics/`
@@ -389,6 +389,79 @@ IPv6 support remains deferred. The rtnetlink implementation only processes `AF_I
 
 ACT 5g should wire the address discovery into the private-interface filtering pipeline,
 enabling the full stats collection path to use live addresses instead of fixtures.
+
+## ACT 5g: Wire live address discovery into private-interface stats pipeline
+
+**Status: ✅ done**
+
+This slice adds a composition layer that combines live sysfs stats collection
+with live rtnetlink address discovery to produce a filtered list of private
+interface stats. It does NOT wire `/metrics.json`.
+
+### Board
+
+| ID | Work Item | Status |
+|---|---|---|
+| webservice-065 | Create `net/private_interface_stats.zig` | ✅ done |
+| webservice-066 | Add `filterCollectedPrivateInterfaceStats()` pure helper | ✅ done |
+| webservice-067 | Add `collectPrivateInterfaceStats()` live function | ✅ done |
+| webservice-068 | Add fixture-based tests | ✅ done |
+| webservice-069 | Add Linux-only smoke test | ✅ done |
+| webservice-070 | Update test_all.zig | ✅ done |
+| webservice-071 | Run `make gate` and verify | ✅ done |
+
+### Acceptance
+
+- [x] `private_interface_stats.zig` exists with composition pipeline.
+- [x] `filterCollectedPrivateInterfaceStats()` pure helper for fixture-tested composition.
+- [x] `collectPrivateInterfaceStats()` composes live stats + live addresses + filtering.
+- [x] Intermediate allocations are freed before returning.
+- [x] Caller owns returned filtered snapshots and frees via `freeInterfaceStatsSnapshots()`.
+- [x] Address discovery failures propagate as errors (not silently treated as "no private").
+- [x] Per-interface unreadable stats skip that interface (already handled by `collectInterfaceStats()`).
+- [x] Tests cover all required cases: RFC1918 include, public exclude, empty inputs.
+- [x] Input snapshots remain untouched by filtering.
+- [x] Output snapshots are owned and freeable.
+- [x] Linux smoke test uses `error.SkipZigTest` for environmental failures.
+- [x] No `/metrics.json` wiring added.
+- [x] No IPv6 support (per deferral).
+- [x] `make tovarisch-test` passes.
+- [x] `make gate` passes.
+- [x] ACT 5 remains open.
+
+### Implementation
+
+The composition module provides:
+
+- `CollectError` error set combining stats/address discovery errors
+- `filterCollectedPrivateInterfaceStats(allocator, snapshots, addresses) ![]InterfaceStatsSnapshot`
+  - Pure helper that just calls `filterPrivateInterfaceStats()`
+  - Gives cross-platform deterministic test coverage for composition boundary
+- `collectPrivateInterfaceStats(allocator, sysfs_root) ![]InterfaceStatsSnapshot`
+  - Calls `collectInterfaceStats()` for all interface stats
+  - Calls `discoverPrivateAddresses()` for IPv4 private addresses via rtnetlink
+  - Calls `filterPrivateInterfaceStats()` to filter by private addresses
+  - Frees intermediate allocations (all_stats, addresses) before returning
+  - Returns owned filtered snapshots
+
+### Files Changed
+
+- `tovarisch/src/net/private_interface_stats.zig` — collectPrivateInterfaceStats, filterCollectedPrivateInterfaceStats
+- `tovarisch/src/net/private_interface_stats_tests.zig` — fixture tests, Linux smoke test
+- `tovarisch/src/test_all.zig` — Added refAllDecls for private_interface_stats modules
+- `docs/epics/act-5-sysfs-collector.md` — Added ACT 5g documentation
+- `docs/coverage/tovarisch-coverage.md` — Added coverage entries
+
+### IPv6 scope (unchanged from ACT 5e/5f)
+
+IPv6 support remains deferred. This composition layer only processes IPv4 addresses
+discovered via rtnetlink (`AF_INET`). IPv6 addresses are ignored, consistent with
+the IPv4-only scope of ACTs 5e/5f/5g.
+
+### Next: ACT 5h
+
+ACT 5h should wire `collectPrivateInterfaceStats()` into the `/metrics.json` model
+and endpoint. This will expose the private interface stats via the HTTP API.
 
 ## Future: IPv6 private-interface support
 

@@ -180,6 +180,10 @@ The following table inventories all known platform-specific branches in `tovaris
 | `net/linux_interface_stats.zig` | `freeInterfaceStatsSnapshots()` — cleanup helper | **Pure fixture tests** | Cross-platform, tested via fixture tests |
 | `net/interface_filter.zig` | `interfaceHasPrivateAddress()` — pure predicate | **Pure fixture tests** | Cross-platform, tested via fixture tests |
 | `net/interface_filter.zig` | `filterPrivateInterfaceStats()` — filtering function | **Pure fixture tests** | Cross-platform, tested via fixture tests |
+| `net/linux_addr.zig` | `discoverPrivateAddresses()` — rtnetlink-backed address discovery | **Linux CI smoke test** | Exercise via live rtnetlink smoke test; queries kernel for IPv4 addresses |
+| `net/linux_addr.zig` | `freeAddresses()` — cleanup helper | **Pure fixture tests** | Cross-platform, tested via fixture tests |
+| `net/private_interface_stats.zig` | `collectPrivateInterfaceStats()` — live private interface stats pipeline | **Linux CI smoke test** | Exercise via live sysfs + rtnetlink smoke test; composes stats + addresses + filtering |
+| `net/private_interface_stats.zig` | `filterCollectedPrivateInterfaceStats()` — pure helper | **Pure fixture tests** | Cross-platform, tested via fixture tests |
 | `net/linux_stats.zig` | `openForWrite()` — Linux `std.c.open` path | **Compile-gated only** | Used only for test fixtures; no production write path needed |
 | `net/linux_stats.zig` | `closeFile()` — Linux `std.c.close` path | **Linux CI smoke test** | Exercise via live sysfs smoke test; closes file descriptors after reading stats |
 | `net/linux_stats.zig` | `readFromFd()` — Linux `std.c.read` path | **Linux CI smoke test** | Exercise via live sysfs smoke test; reads counter values from sysfs files |

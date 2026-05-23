@@ -48,3 +48,12 @@ tovarisch/.ziggy/
 # Add specific files here only with explicit justification comments.
 # Example:
 # path/to/large_fixture.json  # Required for integration tests; too large to inline
+
+# =============================================================================
+# Epic documents — intentionally grow across multiple ACTs
+# =============================================================================
+
+# ACT 5 epic grows horizontally as each ACT slice adds ~50-80 lines of docs.
+# Splitting by ACT would break the "one epic, linear narrative" readability.
+# Each ACT subsection is self-contained; the file structure is the feature.
+docs/epics/act-5-sysfs-collector.md  # ACT 5 epic; grows with each slice per epic pattern
