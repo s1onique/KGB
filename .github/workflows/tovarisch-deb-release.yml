@@ -54,16 +54,16 @@ jobs:
           ldd "$(command -v kcov)" || true
           kcov --version
 
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
       - name: Show tool versions
         run: |
           zig version
           kcov --version
           dpkg-deb --version
-
-      - name: Install Zig
-        uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
 
       - name: Run quality gate
         run: make gate
