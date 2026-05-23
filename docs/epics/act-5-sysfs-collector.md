@@ -1,6 +1,6 @@
 # ACT 5: Add private interface traffic collector from Linux sysfs
 
-**Status: open** (slices ACT 5a ✅, ACT 5b ✅)
+**Status: open** (slices ACT 5a ✅, ACT 5b ✅, ACT 5c ✅)
 
 Linux exposes per-interface statistics under:
 `/sys/class/net/<iface>/statistics/`
@@ -113,6 +113,69 @@ Parser behavior:
 - Propagates u64 overflow as `CounterOverflow`
 
 Tests cover all edge cases including u64 max (18446744073709551615) and overflow values.
+
+## ACT 5c: Sysfs interface enumeration without filtering (slice)
+
+**Status: ✅ done**
+
+This slice adds interface name enumeration from an injectable sysfs-style root.
+It does NOT filter private interfaces, does NOT read statistics,
+and does NOT wire `/metrics.json` yet.
+
+### Board
+
+| ID | Work Item | Status |
+|---|---|---|
+| webservice-037 | Create `net/linux_interfaces.zig` | ✅ done |
+| webservice-038 | Add `listInterfaces()` function | ✅ done |
+| webservice-039 | Add `freeInterfaceList()` helper | ✅ done |
+| webservice-040 | Add fixture-based tests | ✅ done |
+| webservice-041 | Add Linux-only smoke test | ✅ done |
+| webservice-042 | Update test_all.zig | ✅ done |
+| webservice-043 | Run `make gate` and verify | ✅ done |
+
+### Acceptance
+
+- [x] `listInterfaces()` exists and enumerates names from injectable sysfs root.
+- [x] `freeInterfaceList()` properly frees allocator-owned copies.
+- [x] `sysfs_root` is injectable for test fixtures.
+- [x] Tests use temporary fixture directories.
+- [x] Tests do not read real `/sys/class/net` (except Linux smoke test).
+- [x] Missing root directory produces `RootDirMissing` error.
+- [x] Empty fixture root returns empty list.
+- [x] Interface names with safe characters (eth0, wg0, br-lan, veth1234) are handled.
+- [x] No private interface filtering was added.
+- [x] No statistics reading was added inside enumeration.
+- [x] No `/metrics.json` wiring was added.
+- [x] `make tovarisch-test` passes (142 tests, 2 skipped).
+- [x] `make gate` passes.
+- [x] ACT 5 remains open.
+
+### Implementation
+
+The interface enumerator provides:
+
+- `ListError` error set:
+  - `RootDirMissing` — sysfs root directory does not exist
+  - `RootDirUnreadable` — sysfs root directory cannot be opened
+  - `OutOfMemory` — allocation failure
+- `listInterfaces(allocator, sysfs_root) ![][]const u8`
+  - Opens sysfs root directory
+  - Iterates directory entries using `opendir()`/`readdir()`/`closedir()`
+  - Skips "." and ".."
+  - Returns allocator-owned copies of interface names
+- `freeInterfaceList(allocator, names) void`
+
+### Files Changed
+
+- `tovarisch/src/net/linux_interfaces.zig` — listInterfaces, freeInterfaceList
+- `tovarisch/src/net/linux_interfaces_tests.zig` — fixture tests, Linux smoke test
+- `tovarisch/src/test_all.zig` — Added refAllDecls for linux_interfaces modules
+
+### Next: ACT 5d
+
+ACT 5d should combine enumeration + `readInterfaceStats()` into a list of interface stats,
+still without private filtering or metrics wiring.
 
 ## Future: ACT 5b (live sysfs collection)
 

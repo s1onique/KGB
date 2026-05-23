@@ -207,6 +207,8 @@ These functions reach Linux-specific syscalls that are exercised in Linux CI via
 | `readFromFd()` (Linux path) | `std.c.read()` | **Linux CI smoke test** (`linux_stats.zig: live sysfs smoke test`) |
 | `writeToFd()` (Linux path) | `std.c.write()` | **Compile-gated only** (used in fixture tests only; no production write path) |
 | `readInterfaceStats()` (live sysfs) | All above via `readFile()` | **Linux CI smoke test** (`linux_stats.zig: live sysfs smoke test`) |
+| `listInterfaces()` (Linux path) | `std.c.opendir()`, `std.c.readdir()`, `std.c.closedir()` | **Linux CI smoke test** (`linux_interfaces_tests.zig: live sysfs smoke test`) |
+| `freeInterfaceList()` | N/A (allocation helper) | **Pure fixture tests** — cross-platform, fully tested |
 
 #### Accepted Uncovered Risk (Remaining)
 
