@@ -108,9 +108,17 @@ jobs:
 
           echo "PACKAGE_VERSION=${version}" >> "${GITHUB_ENV}"
 
-      - name: Build deb
+      - name: Build deb package
         run: |
           VERSION="${PACKAGE_VERSION}" make package-deb
+
+      # Debian package verification is Linux-only because it uses dpkg-deb.
+      # This statically verifies payload files (binary, systemd unit) plus
+      # control maintainer scripts (postinst, prerm, postrm) using dpkg-deb -x
+      # and dpkg-deb -e. No root required, no install, no service start.
+      # Uses verify-deb-systemd (not deb-gate) to avoid rebuilding the package.
+      - name: Verify deb package (Linux only)
+        run: make verify-deb-systemd
 
       - name: Smoke-test deb install
         run: |

@@ -90,10 +90,40 @@ Runs `systemctl daemon-reload` after package removal. Does NOT delete:
 ## Building the Package
 
 ```bash
-make package-deb          # Build the .deb package
-make verify-deb-systemd   # Static verification of package contents
-make deb-gate            # Full package verification (Linux only)
+make package-deb          # Build the .deb package (macOS or Linux)
+make verify-deb-systemd   # Static verification of package contents (Linux only)
+make deb-gate            # Full package verification: build + verify (Linux only)
 ```
+
+### Linux CI Verification
+
+`make deb-gate` is **Linux-only** because it requires `dpkg-deb` to inspect
+Debian package contents. macOS does not ship `dpkg-deb`, so the verification
+step cannot run locally on macOS development machines.
+
+**GitHub Actions CI** runs `make verify-deb-systemd` in the `build-deb` job after
+building the versioned `.deb` package and **before** smoke install / artifact upload:
+
+```yaml
+- name: Verify deb package (Linux only)
+  run: make verify-deb-systemd
+```
+
+This ensures that broken packages are never published as release artifacts.
+Failed verification blocks the workflow, preventing upload and release steps.
+
+### Local Development on macOS
+
+macOS developers can still build the package and run local gate checks:
+
+```bash
+make gate                  # Run local hygiene, build, test gates (macOS OK)
+make package-deb           # Build the .deb (uses cross-compilation)
+# make deb-gate fails on macOS - requires Linux CI
+```
+
+The local `make gate` remains portable and does not include Debian verification.
+Linux CI owns that contract.
 
 ## Design Decisions
 
