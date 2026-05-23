@@ -130,6 +130,12 @@ pub fn routeRequestFd(fd: i32, req: Request) !bool {
         return true;
     }
 
+    // /status is an ergonomic alias for /status.json
+    if (std.mem.eql(u8, req.path, "/status")) {
+        try handleStatus(fd);
+        return true;
+    }
+
     if (std.mem.eql(u8, req.path, "/status.json")) {
         try handleStatus(fd);
         return true;
@@ -202,4 +208,20 @@ test "parseMethod maps uppercase HTTP methods to enum" {
     try std.testing.expect(parseMethod("HEAD") == .head);
     try std.testing.expect(parseMethod("OPTIONS") == .options);
     try std.testing.expect(parseMethod("INVALID") == .unknown);
+}
+
+// --- Route path tests ---
+
+test "parseRequestLine parses /status alias request" {
+    const req = parseRequestLine("GET /status HTTP/1.1");
+    try std.testing.expect(req != null);
+    try std.testing.expect(req.?.method == .get);
+    try std.testing.expect(std.mem.eql(u8, req.?.path, "/status"));
+}
+
+test "parseRequestLine parses /unknown path for 404" {
+    const req = parseRequestLine("GET /unknown HTTP/1.1");
+    try std.testing.expect(req != null);
+    try std.testing.expect(req.?.method == .get);
+    try std.testing.expect(std.mem.eql(u8, req.?.path, "/unknown"));
 }
