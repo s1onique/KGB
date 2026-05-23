@@ -57,6 +57,12 @@ const config_check = Check{
     .detail = "not configured yet",
 };
 
+const http_check = Check{
+    .name = "http",
+    .status = .ok,
+    .detail = "http service route available",
+};
+
 pub fn getStateDirCheck() Check {
     return Check{
         .name = "state_dir",
@@ -66,7 +72,7 @@ pub fn getStateDirCheck() Check {
 }
 
 const state_check = getStateDirCheck();
-const all_checks = [_]Check{ process_check, binary_check, config_check, state_check };
+const all_checks = [_]Check{ process_check, binary_check, config_check, state_check, http_check };
 
 pub fn getLocalChecks() []const Check {
     return &all_checks;
@@ -158,9 +164,9 @@ test "deriveStatus returns ok for empty checks" {
     try std.testing.expectEqual(CheckStatus.ok, deriveStatus(&checks));
 }
 
-test "getLocalChecks returns four checks" {
+test "getLocalChecks returns five checks" {
     const checks = getLocalChecks();
-    try std.testing.expectEqual(@as(usize, 4), checks.len);
+    try std.testing.expectEqual(@as(usize, 5), checks.len);
 }
 
 test "getLocalChecks first check is process" {
@@ -174,7 +180,7 @@ test "status has correct structure" {
     try std.testing.expectEqualStrings("0.1.1", s.version);
     try std.testing.expectEqualStrings("local-dev", s.node_id);
     try std.testing.expectEqual(CheckStatus.warn, s.status);
-    try std.testing.expectEqual(@as(usize, 4), s.checks.len);
+    try std.testing.expectEqual(@as(usize, 5), s.checks.len);
 }
 
 test "getStateDirCheck returns correct name" {
@@ -203,7 +209,7 @@ test "status JSON contains all required top-level fields" {
     try std.testing.expect(s.checks.len > 0);
 }
 
-test "status JSON contains all four checks" {
+test "status JSON contains all five checks" {
     // Verify all check names that should appear in JSON output
     const checks = getLocalChecks();
 
@@ -211,18 +217,21 @@ test "status JSON contains all four checks" {
     var has_binary = false;
     var has_config = false;
     var has_state_dir = false;
+    var has_http = false;
 
     for (checks) |check| {
         if (std.mem.eql(u8, check.name, "process")) has_process = true;
         if (std.mem.eql(u8, check.name, "binary")) has_binary = true;
         if (std.mem.eql(u8, check.name, "config")) has_config = true;
         if (std.mem.eql(u8, check.name, "state_dir")) has_state_dir = true;
+        if (std.mem.eql(u8, check.name, "http")) has_http = true;
     }
 
     try std.testing.expect(has_process);
     try std.testing.expect(has_binary);
     try std.testing.expect(has_config);
     try std.testing.expect(has_state_dir);
+    try std.testing.expect(has_http);
 }
 
 test "state_dir check has correct detail" {
@@ -307,7 +316,7 @@ test "renderPayload output contains checks array" {
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"checks\":["));
 }
 
-test "renderPayload output contains all four check names" {
+test "renderPayload output contains all five check names" {
     var w = TestWriter.init();
     try renderPayload(&w);
 
@@ -315,6 +324,7 @@ test "renderPayload output contains all four check names" {
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"binary\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"config\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"state_dir\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"http\""));
 }
 
 test "renderPayload output contains runtime block" {

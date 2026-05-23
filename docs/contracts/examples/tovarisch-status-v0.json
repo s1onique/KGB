@@ -23,6 +23,11 @@
       "name": "state_dir",
       "status": "warn",
       "detail": "state directory not found"
+    },
+    {
+      "name": "http",
+      "status": "ok",
+      "detail": "http service route available"
     }
   ],
   "runtime": {

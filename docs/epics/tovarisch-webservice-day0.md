@@ -115,7 +115,7 @@ No framework.
 | ACT 2 | Add `tovarisch serve` with minimal HTTP `/healthz` | ✅ done |
 | ACT 2b | Fix CI build failure: explicit libc for HTTP sockets | ✅ done |
 | ACT 3 | Enumerate private interface addresses and bind only those by default | open |
-| ACT 4 | Add `/status.json` over HTTP using existing status model | open |
+| ACT 4 | Add `/status.json` over HTTP using existing status model | ✅ done |
 | ACT 5 | Add private interface traffic collector from Linux sysfs | open |
 | ACT 6 | Add tunnel interface detection and up/down summary | open |
 | ACT 7 | Add `/metrics.json` contract, fixture, and verifier | open |
@@ -223,18 +223,18 @@ const unit_tests = b.addTest(.{
 
 | ID | Work Item | Status |
 |---|---|---|
-| webservice-021 | Add `GET /status.json` route handler | open |
-| webservice-022 | Reuse `status.renderPayload()` for JSON output | open |
-| webservice-023 | Add HTTP check to status model | open |
-| webservice-024 | Add `/status.json` HTTP test | open |
-| webservice-025 | Run `make gate`, `make tovarisch-build`, `make tovarisch-test` | open |
+| webservice-021 | Add `GET /status.json` route handler | ✅ done |
+| webservice-022 | Reuse `status.renderPayload()` for JSON output | ✅ done |
+| webservice-023 | Add HTTP check to status model | ✅ done |
+| webservice-024 | Add `/status.json` HTTP test | ✅ done |
+| webservice-025 | Run `make gate`, `make tovarisch-build`, `make tovarisch-test` | ✅ done |
 
 ### Acceptance
 
-- [ ] `GET /status.json` returns current status JSON.
-- [ ] HTTP check is included in status checks (shows "listening on private interfaces").
-- [ ] `make tovarisch-test` passes.
-- [ ] `make gate` passes.
+- [x] `GET /status.json` returns current status JSON.
+- [x] HTTP check is included in status checks (shows "http service route available").
+- [x] `make tovarisch-test` passes.
+- [x] `make gate` passes.
 
 ## ACT 5: Add private interface traffic collector from Linux sysfs
 

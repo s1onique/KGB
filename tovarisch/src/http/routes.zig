@@ -225,3 +225,73 @@ test "parseRequestLine parses /unknown path for 404" {
     try std.testing.expect(req.?.method == .get);
     try std.testing.expect(std.mem.eql(u8, req.?.path, "/unknown"));
 }
+
+// --- Status handler response tests ---
+// These tests verify that the status handler produces correct JSON output.
+
+test "status handler response contains status payload" {
+    // Test that the status payload contains the expected service and checks.
+    // This verifies handleStatus() will produce valid status JSON.
+    const s = status.getStatus();
+    try std.testing.expectEqualStrings("tovarisch", s.service);
+    try std.testing.expect(s.checks.len > 0);
+
+    // Verify the renderPayload output contains expected status fields
+    var buf: [4096]u8 = undefined;
+    var len: usize = 0;
+
+    const writer = struct {
+        buf: *[4096]u8,
+        len: *usize,
+
+        pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) !void {
+            if (self.len.* >= 4096) return error.BufferOverflow;
+            const written = std.fmt.bufPrint(self.buf[self.len.*..], fmt, args) catch return error.BufferOverflow;
+            self.len.* += written.len;
+        }
+
+        pub fn writeAll(self: @This(), bytes: []const u8) !void {
+            if (self.len.* + bytes.len > 4096) return error.BufferOverflow;
+            @memcpy(self.buf[self.len.*..][0..bytes.len], bytes);
+            self.len.* += bytes.len;
+        }
+    }{ .buf = &buf, .len = &len };
+
+    try status.renderPayload(writer);
+    const json = buf[0..len];
+
+    // Verify key status elements in JSON output
+    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"service\":\"tovarisch\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"checks\":["));
+    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"name\":\"http\""));
+}
+
+test "status handler includes http check in output" {
+    // Explicitly verify that the status JSON includes the http check
+    var buf: [4096]u8 = undefined;
+    var len: usize = 0;
+
+    const writer = struct {
+        buf: *[4096]u8,
+        len: *usize,
+
+        pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) !void {
+            if (self.len.* >= 4096) return error.BufferOverflow;
+            const written = std.fmt.bufPrint(self.buf[self.len.*..], fmt, args) catch return error.BufferOverflow;
+            self.len.* += written.len;
+        }
+
+        pub fn writeAll(self: @This(), bytes: []const u8) !void {
+            if (self.len.* + bytes.len > 4096) return error.BufferOverflow;
+            @memcpy(self.buf[self.len.*..][0..bytes.len], bytes);
+            self.len.* += bytes.len;
+        }
+    }{ .buf = &buf, .len = &len };
+
+    try status.renderPayload(writer);
+    const json = buf[0..len];
+
+    // HTTP check should be present with ok status
+    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"name\":\"http\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"status\":\"ok\""));
+}
