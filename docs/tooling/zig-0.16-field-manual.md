@@ -361,40 +361,7 @@ tovarisch-compile-macos:
 
 Also consider native architecture variants (e.g., `aarch64-macos` for Apple Silicon).
 
-### Linux File Operations
+## Linux-Specific Patterns
 
-Use `std.c.open` with `std.os.linux.O` packed struct. **Never use boolean fields** like `.WRONLY = true` — use `.ACCMODE` enum:
-
-```zig
-// Reading: RDONLY
-const flags = std.os.linux.O{ .ACCMODE = std.posix.ACCMODE.RDONLY };
-const fd = std.c.open(c_path, flags, @as(c_uint, 0));
-
-// Writing: WRONLY with CREAT/TRUNC
-const flags = std.os.linux.O{
-    .ACCMODE = std.posix.ACCMODE.WRONLY,
-    .CREAT = true,
-    .TRUNC = true,
-};
-const fd = std.c.open(c_path, flags, @as(c_uint, 0o644));
-```
-
-**Key insight:** `.ACCMODE` values: `.RDONLY`, `.WRONLY`, `.RDWR`. Cast perm to `c_uint`. Link libc via module options for cross-platform targets.
-
-### libc Directory APIs with Optional C Pointers
-
-`std.c.opendir()` returns `?*c.DIR` (optional). `std.c.readdir()` and `std.c.closedir()` expect `*c.DIR` (non-optional). Zig 0.16 does not implicitly unwrap.
-
-```zig
-const dir_optional = std.c.opendir("/sys/class/net");
-const dir = dir_optional orelse return error.SkipZigTest;
-defer _ = std.c.closedir(dir);
-
-while (true) {
-    const entry = std.c.readdir(dir) orelse break;  // also optional
-    // ...
-}
-```
-
-**Linux-only code path** — macOS tests skip this path; type errors surface only on Linux CI.
+For Linux-specific patterns (file operations, directory APIs, cross-platform compilation, etc.), see [`zig-0.16-linux-patterns.md`](./zig-0.16-linux-patterns.md).
 

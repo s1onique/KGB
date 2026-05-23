@@ -33,7 +33,31 @@ Recording field notes from Zig 0.16 experiments. Confidence varies; do not promo
 - Module options like `.test_files` are NOT valid in `b.createModule()` options for `addTest`.
 - Tests are discovered from all source files in the module; explicit test files not required.
 
-**Confidence:** high; verified with compiler errors and successful builds.
+---
+
+## 2026-05-23 — `std.c.dirent.d_name` field not exposed in Zig 0.16/Linux
+
+- **Context:** Linux CI fails in `tovarisch/src/net/linux_stats_tests.zig` with `error: no field named 'd_name' in struct 'c.dirent__struct_...'`
+- **Symptom:** `@offsetOf(std.c.dirent, "d_name")` fails because `std.c.dirent` in Zig 0.16/Linux does not expose the `d_name` field.
+- **Failed assumption:** The libc `dirent` struct layout was assumed to be reliably introspectable via `@offsetOf`. This depends on platform-specific libc implementation details.
+- **Root cause:** The test used a brittle offset-hack to extract interface names from directory entries:
+  ```zig
+  const name_ptr = @as([*:0]const u8, @ptrFromInt(@intFromPtr(entry) + @offsetOf(std.c.dirent, "d_name")));
+  ```
+- **Working fix:** Replace dirent iteration with bounded candidate probing:
+  ```zig
+  const candidates = [_][]const u8{ "lo", "eth0", "ens3", "enp0s1", "enp0s3" };
+  for (candidates) |iface| {
+      readInterfaceStats(allocator, sysfs_root, iface) catch continue;
+      exercised = true;
+      break;
+  }
+  ```
+- **Why this is better:** Removes libc layout dependency, directly exercises the Zig reader, fewer moving parts.
+- **Files affected:** `tovarisch/src/net/linux_stats_tests.zig`
+- **Promote to field manual:** Yes — added "Avoiding libc `dirent` Layout Fragility" section.
+
+**Confidence:** high; verified by replacing brittle dirent code with candidate probing.
 
 ---
 
