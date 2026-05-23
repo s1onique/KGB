@@ -184,6 +184,11 @@ The following table inventories all known platform-specific branches in `tovaris
 | `net/linux_addr.zig` | `freeAddresses()` — cleanup helper | **Pure fixture tests** | Cross-platform, tested via fixture tests |
 | `net/private_interface_stats.zig` | `collectPrivateInterfaceStats()` — live private interface stats pipeline | **Linux CI smoke test** | Exercise via live sysfs + rtnetlink smoke test; composes stats + addresses + filtering |
 | `net/private_interface_stats.zig` | `filterCollectedPrivateInterfaceStats()` — pure helper | **Pure fixture tests** | Cross-platform, tested via fixture tests |
+| `metrics.zig` | `renderMetricsPayloadFromSnapshots()` — pure metrics renderer | **Pure fixture tests** | Cross-platform, tested via metrics_tests.zig |
+| `metrics.zig` | `renderMetricsFallbackPayload()` — fallback warning renderer | **Pure fixture tests** | Cross-platform, tested via metrics_tests.zig |
+| `metrics.zig` | `renderLiveMetricsPayload()` — live metrics collection + render | **Linux CI smoke test** | Exercise via live sysfs + rtnetlink smoke test in metrics_tests.zig |
+| `metrics.zig` | `writeJsonString()` — JSON string escaping | **Pure fixture tests** | Cross-platform, tested via metrics_tests.zig |
+| `http/routes.zig` | `handleMetrics()` — /metrics.json endpoint wired to live collection | **Unit tests** | Tests verify JSON contract without starting server; fallback tested on non-Linux |
 | `net/linux_stats.zig` | `openForWrite()` — Linux `std.c.open` path | **Compile-gated only** | Used only for test fixtures; no production write path needed |
 | `net/linux_stats.zig` | `closeFile()` — Linux `std.c.close` path | **Linux CI smoke test** | Exercise via live sysfs smoke test; closes file descriptors after reading stats |
 | `net/linux_stats.zig` | `readFromFd()` — Linux `std.c.read` path | **Linux CI smoke test** | Exercise via live sysfs smoke test; reads counter values from sysfs files |

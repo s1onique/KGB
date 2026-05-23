@@ -98,21 +98,58 @@ Content-Type: application/json
 
 ### `GET /metrics.json`
 
-Interface and tunnel metrics payload.
+Private interface traffic metrics payload (IPv4 only, no rates).
 
 **Request:** `GET /metrics.json HTTP/1.1`
 
-**Response:**
+**Response (success):**
 ```
 HTTP/1.1 200 OK
 Content-Type: application/json
 
-{"service":"tovarisch","version":"0.1.1","node_id":"local-dev","captured_at":"...","interfaces":[...],"tunnels":[...]}
+{"service":"tovarisch","version":"0.1.1","metrics_version":"0.1","private_interfaces":[{"name":"eth0","rx_bytes":123,"tx_bytes":456,"rx_packets":7,"tx_packets":8}],"notes":["interface counters are cumulative, not rates","IPv4 private interfaces only; IPv6 is deferred"]}
+```
+
+**Response (live collection failure):**
+```
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"service":"tovarisch","version":"0.1.1","metrics_version":"0.1","status":"warn","private_interfaces":[],"error":"metrics_unavailable","detail":"private interface stats unavailable","notes":["interface counters are cumulative, not rates","IPv4 private interfaces only; IPv6 is deferred"]}
 ```
 
 **Status Codes:**
-- `200 OK` - metrics retrieved
-- `500 Internal Server Error` - metrics retrieval failed
+- `200 OK` - metrics retrieved (or fallback warning payload)
+- Note: Even when live collection fails, HTTP 200 is returned with `"status":"warn"` to provide a valid, actionable payload.
+
+**Field Descriptions:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `service` | string | Always `"tovarisch"` |
+| `version` | string | Tovarisch binary version (e.g., `"0.1.1"`) |
+| `metrics_version` | string | Metrics schema version (e.g., `"0.1"`) |
+| `status` | string | `"warn"` only on fallback; absent on success |
+| `private_interfaces` | array | List of private interface stats (empty on fallback) |
+| `error` | string | `"metrics_unavailable"` only on fallback |
+| `detail` | string | Human-readable detail (fallback only) |
+| `notes` | array | Array of two strings: cumulative counter note and IPv4-only note |
+
+**Interface Object Fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Interface name (e.g., `"eth0"`, `"wg0"`) |
+| `rx_bytes` | integer | Cumulative receive bytes (not rate) |
+| `tx_bytes` | integer | Cumulative transmit bytes (not rate) |
+| `rx_packets` | integer | Cumulative receive packets (not rate) |
+| `tx_packets` | integer | Cumulative transmit packets (not rate) |
+
+**Important Notes:**
+- All counters are **cumulative**, not instantaneous bandwidth/rates.
+- Only **IPv4 private interfaces** are included (RFC1918: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16).
+- **IPv6 is deferred** to a future ACT.
+- Counters are collected from Linux `/sys/class/net/<iface>/statistics/*`.
+- Interface addresses are discovered via rtnetlink.
+- Public interfaces, loopback (without private IPv4), and IPv6-only interfaces are excluded.
 
 **Security:** May reveal network topology. Expose only on private interfaces.
 

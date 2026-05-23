@@ -57,3 +57,4 @@ tovarisch/.ziggy/
 # Splitting by ACT would break the "one epic, linear narrative" readability.
 # Each ACT subsection is self-contained; the file structure is the feature.
 docs/epics/act-5-sysfs-collector.md  # ACT 5 epic; grows with each slice per epic pattern
+

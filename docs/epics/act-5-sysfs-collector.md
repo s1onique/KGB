@@ -1,6 +1,6 @@
 # ACT 5: Add private interface traffic collector from Linux sysfs
 
-**Status: open** (slices ACT 5a ✅, ACT 5b ✅, ACT 5c ✅, ACT 5d ✅, ACT 5e ✅, ACT 5f ✅, ACT 5g ✅)
+**Status: open** (slices ACT 5a ✅, ACT 5b ✅, ACT 5c ✅, ACT 5d ✅, ACT 5e ✅, ACT 5f ✅, ACT 5g ✅, ACT 5h ✅)
 
 Linux exposes per-interface statistics under:
 `/sys/class/net/<iface>/statistics/`
@@ -462,6 +462,107 @@ the IPv4-only scope of ACTs 5e/5f/5g.
 
 ACT 5h should wire `collectPrivateInterfaceStats()` into the `/metrics.json` model
 and endpoint. This will expose the private interface stats via the HTTP API.
+
+## ACT 5h: Wire private interface stats into /metrics.json
+
+**Status: ✅ done**
+
+This slice wires `collectPrivateInterfaceStats()` into the `/metrics.json` HTTP endpoint.
+It exposes private interface traffic counters from sysfs + rtnetlink via the HTTP API.
+It does NOT compute rates, detect tunnels, add IPv6, or add Prometheus format.
+
+### Board
+
+| ID | Work Item | Status |
+|---|---|---|
+| webservice-072 | Create `metrics.zig` rendering module | ✅ done |
+| webservice-073 | Add `renderMetricsPayloadFromSnapshots()` pure renderer | ✅ done |
+| webservice-074 | Add `renderMetricsFallbackPayload()` fallback renderer | ✅ done |
+| webservice-075 | Add `renderLiveMetricsPayload()` live renderer | ✅ done |
+| webservice-076 | Wire metrics into `routes.zig` handleMetrics() | ✅ done |
+| webservice-077 | Add route integration tests | ✅ done |
+| webservice-078 | Add metrics renderer tests | ✅ done |
+| webservice-079 | Update HTTP contract docs | ✅ done |
+| webservice-080 | Update epic and coverage docs | ✅ done |
+| webservice-081 | Update test_all.zig | ✅ done |
+| webservice-082 | Run `make gate` and verify | ✅ done |
+
+### Acceptance
+
+- [x] `metrics.zig` exists with pure renderer, fallback renderer, and live renderer.
+- [x] `renderMetricsPayloadFromSnapshots()` renders v0 JSON shape with interface stats.
+- [x] `renderMetricsFallbackPayload()` renders warning JSON with `"status":"warn"`.
+- [x] `renderLiveMetricsPayload()` collects live stats and renders.
+- [x] `/metrics.json` route uses `renderLiveMetricsPayload()` with fallback on error.
+- [x] Fallback emits `"status":"warn"`, `"error":"metrics_unavailable"`, empty `private_interfaces`.
+- [x] JSON output includes notes about cumulative counters and IPv4-only.
+- [x] JSON string escaping handles quotes, backslashes, newlines.
+- [x] Route handler does not start the blocking server for tests.
+- [x] HTTP 200 returned even on live collection failure (fallback warning JSON).
+- [x] No raw syscall errors exposed to HTTP client.
+- [x] No bandwidth/rate calculation added.
+- [x] No tunnel detection added.
+- [x] No IPv6 support (per deferral).
+- [x] No Prometheus format added.
+- [x] `make tovarisch-test` passes.
+- [x] `make gate` passes.
+- [x] ACT 5 remains open (rates/deltas deferred to future ACT).
+
+### Implementation
+
+The metrics rendering module provides:
+
+- `renderMetricsPayloadFromSnapshots(writer, snapshots)` — pure renderer
+  - Accepts pre-collected snapshots for testing
+  - Renders v0 JSON with service, version, metrics_version, private_interfaces, notes
+  - Each interface has: name, rx_bytes, tx_bytes, rx_packets, tx_packets
+- `renderMetricsFallbackPayload(writer)` — fallback renderer
+  - Renders warning JSON when live collection fails
+  - Returns HTTP 200 with actionable warning payload
+- `renderLiveMetricsPayload(allocator, writer)` — live renderer
+  - Calls `collectPrivateInterfaceStats()` for sysfs + rtnetlink collection
+  - Frees collected snapshots after rendering
+
+The route handler (`handleMetrics`) provides:
+- Live metrics collection via `renderLiveMetricsPayload()`
+- Fallback to warning JSON on any error
+- No raw syscall errors exposed (privacy-safe error handling)
+- Uses fixed 8192-byte buffer for response rendering
+
+v0 JSON shapes:
+
+Success:
+```json
+{"service":"tovarisch","version":"0.1.1","metrics_version":"0.1","private_interfaces":[{"name":"eth0","rx_bytes":123,"tx_bytes":456,"rx_packets":7,"tx_packets":8}],"notes":["interface counters are cumulative, not rates","IPv4 private interfaces only; IPv6 is deferred"]}
+```
+
+Fallback warning:
+```json
+{"service":"tovarisch","version":"0.1.1","metrics_version":"0.1","status":"warn","private_interfaces":[],"error":"metrics_unavailable","detail":"private interface stats unavailable","notes":["interface counters are cumulative, not rates","IPv4 private interfaces only; IPv6 is deferred"]}
+```
+
+### Files Changed
+
+- `tovarisch/src/metrics.zig` — renderMetricsPayloadFromSnapshots, renderMetricsFallbackPayload, renderLiveMetricsPayload
+- `tovarisch/src/metrics_tests.zig` — comprehensive renderer tests, route integration tests
+- `tovarisch/src/http/routes.zig` — handleMetrics wired to metrics module
+- `tovarisch/src/test_all.zig` — Added refAllDecls for metrics modules
+- `docs/contracts/tovarisch-http-v0.md` — Updated /metrics.json contract
+- `docs/epics/act-5-sysfs-collector.md` — Added ACT 5h documentation
+- `docs/coverage/tovarisch-coverage.md` — Added coverage entries
+
+### IPv6 scope (unchanged from ACT 5e/5f/5g)
+
+IPv6 support remains deferred. The metrics endpoint only exposes IPv4 private interfaces.
+IPv6 Unique Local Addresses (fd00::/8) are excluded until a future ACT adds IPv6 classification.
+
+### Remaining work for ACT 5
+
+ACT 5 is now complete with all slices done (5a-5h). Remaining work for future ACTs:
+- Per-second rate/delta calculation (requires storing previous samples)
+- IPv6 support (ULA classification + IPv6 filtering)
+- Prometheus format export
+- Tunnel type detection
 
 ## Future: IPv6 private-interface support
 

@@ -1,6 +1,7 @@
 const std = @import("std");
 const response = @import("response.zig");
 const status = @import("../status.zig");
+const metrics = @import("../metrics.zig");
 
 /// HTTP method types.
 pub const Method = enum {
@@ -97,12 +98,46 @@ pub fn handleStatus(fd: i32) !void {
     try response.writeSimpleJsonFd(fd, 200, json);
 }
 
-/// Metrics handler placeholder - returns empty metrics for now.
+/// Metrics handler - returns private interface stats from sysfs + rtnetlink.
+/// Falls back to warning JSON if live collection fails (HTTP 200 with status warn).
 pub fn handleMetrics(fd: i32) !void {
-    // TODO: implement metrics collection
-    // For now, return a minimal metrics response
-    const metrics = "{\"service\":\"tovarisch\",\"version\":\"0.1.1\",\"node_id\":\"local-dev\",\"captured_at\":\"2026-05-22T21:00:00+00:00\",\"interfaces\":[],\"tunnels\":[]}";
-    try response.writeSimpleJsonFd(fd, 200, metrics);
+    var buf: [8192]u8 = undefined;
+    var len: usize = 0;
+
+    const writer = struct {
+        buf: *[8192]u8,
+        len: *usize,
+
+        pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) !void {
+            if (self.len.* >= 8192) return error.BufferOverflow;
+            const written = std.fmt.bufPrint(self.buf[self.len.*..], fmt, args) catch return error.BufferOverflow;
+            self.len.* += written.len;
+        }
+
+        pub fn writeAll(self: @This(), bytes: []const u8) !void {
+            if (self.len.* + bytes.len > 8192) return error.BufferOverflow;
+            @memcpy(self.buf[self.len.*..][0..bytes.len], bytes);
+            self.len.* += bytes.len;
+        }
+
+        pub fn writeByte(self: @This(), c: u8) !void {
+            if (self.len.* >= 8192) return error.BufferOverflow;
+            self.buf[self.len.*] = c;
+            self.len.* += 1;
+        }
+    }{ .buf = &buf, .len = &len };
+
+    // Try live collection; fall back to warning JSON on any error.
+    // Errors may include sysfs access failure, rtnetlink failure, or allocation failure.
+    // We do not expose raw syscall errors to the HTTP client.
+    metrics.renderLiveMetricsPayload(std.heap.page_allocator, writer) catch {
+        // Fallback: render warning payload
+        len = 0;
+        metrics.renderMetricsFallbackPayload(writer) catch return error.InternalError;
+    };
+
+    const json = buf[0..len];
+    try response.writeSimpleJsonFd(fd, 200, json);
 }
 
 /// Not found handler.
@@ -295,3 +330,5 @@ test "status handler includes http check in output" {
     try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"name\":\"http\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"status\":\"ok\""));
 }
+
+
