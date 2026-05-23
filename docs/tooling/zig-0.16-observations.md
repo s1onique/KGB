@@ -248,6 +248,66 @@ const num_str = std.fmt.bufPrint(&num_buf, "{d}\n", .{counter_value}) catch unre
 
 ---
 
+## 2026-05-24 — rtnetlink recv() loops MUST be bounded to prevent CI hangs
+
+- **Context:** GitHub Actions arm64 CI job appeared stuck in `zig build test`, likely in live rtnetlink tests calling `discoverPrivateAddresses()`.
+- **Symptom:** CI job sits indefinitely in `cd tovarisch && zig build test` without progress or failure.
+- **Root cause:** The rtnetlink recv loop was unbounded. If `NLMSG_DONE` was missed due to malformed kernel response, or if inner-loop parsing broke early without advancing `offset`, another blocking `recv()` would wait forever.
+
+**Failed assumption:** A healthy rtnetlink dump will always complete quickly, so unbounded recv() was acceptable.
+
+**Working fix — bounded outer loop:**
+
+```zig
+const max_recv_iterations: usize = 16;
+var done = false;
+var recv_iterations: usize = 0;
+
+while (!done and recv_iterations < max_recv_iterations) : (recv_iterations += 1) {
+    const recv_result = std.c.recv(sock, @ptrCast(&buffer), buffer.len, 0);
+    if (recv_result < 0) return error.RecvFailed;
+    if (recv_result == 0) break;
+    // ... parse messages ...
+}
+
+if (!done) return error.RecvFailed; // Timeout: return error instead of hanging
+```
+
+**Working fix — progress protection:**
+
+```zig
+const next_offset = offset + align4(response_len);
+if (next_offset <= offset) return error.InvalidMessage; // Stalled: malformed message
+```
+
+**Doctrine:**
+- rtnetlink `recv()` loops MUST be bounded.
+- Production `/metrics.json` has fallback semantics; returning error is fine. Hanging is not.
+- Live smoke tests must never depend on unbounded kernel response loops.
+- Route tests should NOT exercise live kernel APIs (rtnetlink, sysfs). Use fallback renderer to verify JSON contract shape.
+
+**Important nuance — bounded loop ≠ bounded individual recv:**
+
+The bounded loop prevents repeated empty/blocking recv() cycles from hanging forever. However, each individual `std.c.recv()` call can still block indefinitely if the kernel doesn't respond at all:
+
+```zig
+const recv_result = std.c.recv(sock, @ptrCast(&buffer), buffer.len, 0); // Can block forever
+```
+
+If arm64 CI still hangs after this patch, the next hardening fix is **per-recv timeout**, not another loop bound. Options:
+
+1. **SO_RCVTIMEO** — set socket receive timeout via `setsockopt()`
+2. **Non-blocking socket** — make netlink socket non-blocking; treat `EAGAIN`/`EWOULDBLOCK` as `RecvFailed`
+3. **poll/select with timeout** — use `poll()` or `select()` before `recv()` to detect stuck sockets
+
+This patch is sufficient if the previous hang was caused by missed `NLMSG_DONE` after receiving at least one response. If the kernel never responds on the first `recv()`, timeout hardening is required.
+
+**Files affected:** `tovarisch/src/net/linux_addr.zig`, `tovarisch/src/http/routes_tests.zig`
+
+- **Promote to field manual:** Yes — add "Linux rtnetlink Socket Pattern" with bounded recv section and per-recv timeout options.
+
+---
+
 ## 2026-05-24 — rtnetlink NETLINK_ROUTE socket implementation lessons
 
 - **Context:** Implementing `discoverPrivateAddresses()` in `tovarisch/src/net/linux_addr.zig` using `AF_NETLINK` socket for live interface address discovery.

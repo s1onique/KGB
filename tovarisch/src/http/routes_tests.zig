@@ -79,13 +79,11 @@ test "metrics handler response contains service field" {
         }
     }{ .buf = &buf, .len = &len };
 
-    // Verify renderLiveMetricsPayload produces valid metrics JSON with service field.
-    // This test does not start the blocking server.
-    metrics.renderLiveMetricsPayload(std.heap.page_allocator, &writer) catch {
-        // Fallback to verify fallback payload has service field
-        len = 0;
-        try metrics.renderMetricsFallbackPayload(&writer);
-    };
+    // Route tests should NOT exercise live kernel APIs (rtnetlink, sysfs).
+    // Use fallback renderer to verify JSON contract shape without blocking.
+    // Live rtnetlink coverage is in: linux_addr_tests, private_interface_stats_tests,
+    // and metrics_tests smoke test.
+    try metrics.renderMetricsFallbackPayload(&writer);
 
     const json = buf[0..len];
     try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"service\":\"tovarisch\""));

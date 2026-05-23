@@ -21,6 +21,12 @@
 // - Raw []u8 network/kernel buffers are byte-aligned.
 // - Do NOT @alignCast them into extern structs.
 // - Copy bytes into aligned local structs using readStruct() instead.
+//
+// Bounded Receive Doctrine:
+// - rtnetlink recv() loops MUST be bounded to prevent hangs.
+// - NLMSG_DONE may be missed if kernel response is malformed.
+// - If parsing breaks early without progress, another recv() would block forever.
+// - Production /metrics.json has fallback semantics; returning error is fine.
 
 const std = @import("std");
 const private_ip = @import("private_ip.zig");
@@ -212,11 +218,15 @@ pub fn discoverPrivateAddresses(
         addresses.deinit(allocator);
     }
 
-    // Receive responses
+    // Receive responses with bounded loop to prevent hangs.
+    // A healthy rtnetlink dump should complete in a few recv() calls.
+    // If NLMSG_DONE is missed or parsing breaks early, unbounded recv() would block forever.
+    const max_recv_iterations: usize = 16;
     var buffer: [16384]u8 = undefined;
     var done = false;
+    var recv_iterations: usize = 0;
 
-    while (!done) {
+    while (!done and recv_iterations < max_recv_iterations) : (recv_iterations += 1) {
         const recv_result = std.c.recv(sock, @ptrCast(&buffer), buffer.len, 0);
         if (recv_result < 0) return error.RecvFailed;
         if (recv_result == 0) break;
@@ -230,6 +240,12 @@ pub fn discoverPrivateAddresses(
             const nlhdr = try readStruct(nlmsghdr, buffer[offset..msg_len]);
             const response_len = @as(usize, @intCast(nlhdr.nlmsg_len));
 
+            // Progress protection: ensure message advances the offset.
+            // If response_len is 0 or malformed, offset wouldn't advance,
+            // leading to infinite inner loop or another blocking recv().
+            const next_offset = offset + align4(response_len);
+            if (next_offset <= offset) return error.InvalidMessage;
+
             if (response_len < @sizeOf(nlmsghdr) or response_len > msg_len - offset) break;
 
             // NLMSG_DONE terminates the multipart message
@@ -242,7 +258,7 @@ pub fn discoverPrivateAddresses(
                 // Parse the ifaddrmsg header
                 const addrmsg_offset = offset + @sizeOf(nlmsghdr);
                 if (addrmsg_offset + @sizeOf(ifaddrmsg) > msg_len) {
-                    offset += align4(response_len);
+                    offset = next_offset;
                     continue;
                 }
 
@@ -251,7 +267,7 @@ pub fn discoverPrivateAddresses(
 
                 // Only process IPv4 addresses (AF_INET)
                 if (addrmsg_hdr.ifa_family != AF_INET) {
-                    offset += align4(response_len);
+                    offset = next_offset;
                     continue;
                 }
 
@@ -341,9 +357,13 @@ pub fn discoverPrivateAddresses(
             }
 
             // Advance by aligned response message length, not request length
-            offset += align4(response_len);
+            offset = next_offset;
         }
     }
+
+    // If we exited due to hitting max iterations without NLMSG_DONE,
+    // the kernel response was malformed or incomplete. Return error instead of hanging.
+    if (!done) return error.RecvFailed;
 
     return try addresses.toOwnedSlice(allocator);
 }
