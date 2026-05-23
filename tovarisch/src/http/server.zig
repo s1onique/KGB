@@ -59,7 +59,7 @@ pub const Server = struct {
         var addr: c.sockaddr.in = std.mem.zeroes(c.sockaddr.in);
         addr.family = c.AF.INET;
         addr.port = std.mem.nativeToBig(u16, self.config.port);
-        addr.addr = parseIpAddress(self.config.address);
+        addr.addr = std.mem.nativeToBig(u32, parseIpAddress(self.config.address));
 
         const bind_result = c.bind(
             self.listener_fd,
@@ -151,10 +151,11 @@ pub fn serveForever(config: Config) !void {
     }
 }
 
-/// Parse an IPv4 address string and return network byte order u32.
+/// Parse an IPv4 address string and return host-order u32.
+/// Callers must convert to network byte order via nativeToBig before use.
 fn parseIpAddress(addr: []const u8) u32 {
     const octets = parseIpOctets(addr);
-    // Network byte order: MSB first
+    // Host byte order: first octet is MSB
     return (@as(u32, octets[0]) << 24) | (@as(u32, octets[1]) << 16) | (@as(u32, octets[2]) << 8) | @as(u32, octets[3]);
 }
 
@@ -240,9 +241,11 @@ test "parseIpOctets parses 127.0.0.1" {
     try std.testing.expect(octets[3] == 1);
 }
 
-test "parseIpAddress returns network byte order" {
-    // 127.0.0.1 in network byte order (big-endian): MSB first
-    // 127 = 0x7F, so 127.0.0.1 = 0x7F000001 = 2130706433
+test "parseIpAddress returns host-order u32" {
+    // 127.0.0.1 in host byte order: 127 << 24 | 0 << 16 | 0 << 8 | 1 = 0x7F000001
+    // Callers must use nativeToBig for network byte order storage.
     const addr = parseIpAddress("127.0.0.1");
     try std.testing.expectEqual(@as(u32, 0x7F000001), addr);
 }
+
+
