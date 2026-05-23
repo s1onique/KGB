@@ -248,63 +248,43 @@ const num_str = std.fmt.bufPrint(&num_buf, "{d}\n", .{counter_value}) catch unre
 
 ---
 
-## 2026-05-24 — rtnetlink recv() loops MUST be bounded to prevent CI hangs
+## 2026-05-24 — Per-Recv Timeout: Bounded Loop Alone Is Insufficient
 
-- **Context:** GitHub Actions arm64 CI job appeared stuck in `zig build test`, likely in live rtnetlink tests calling `discoverPrivateAddresses()`.
-- **Symptom:** CI job sits indefinitely in `cd tovarisch && zig build test` without progress or failure.
-- **Root cause:** The rtnetlink recv loop was unbounded. If `NLMSG_DONE` was missed due to malformed kernel response, or if inner-loop parsing broke early without advancing `offset`, another blocking `recv()` would wait forever.
+- **Context:** GitHub CI still hangs in `zig build test` after adding bounded recv loop. The screenshot shows Ubuntu amd64 deb job stuck in `cd tovarisch && zig build test` after hygiene/build succeeded.
+- **Symptom:** CI test binary is still running, not failing. The remaining blocker is a live kernel path: individual `std.c.recv()` blocking forever before loop counter advances.
+- **Root cause:** Bounded outer loop limits the number of recv() iterations, but each individual `std.c.recv()` can block indefinitely if the kernel never responds.
+- **Failed assumption:** Adding loop bounds prevents hangs. It does NOT — each syscall can still block forever.
 
-**Failed assumption:** A healthy rtnetlink dump will always complete quickly, so unbounded recv() was acceptable.
-
-**Working fix — bounded outer loop:**
+**Working fix — per-recv timeout using std.c.pollfd:**
 
 ```zig
-const max_recv_iterations: usize = 16;
-var done = false;
-var recv_iterations: usize = 0;
+const POLLIN: c_short = 0x001;
 
-while (!done and recv_iterations < max_recv_iterations) : (recv_iterations += 1) {
-    const recv_result = std.c.recv(sock, @ptrCast(&buffer), buffer.len, 0);
-    if (recv_result < 0) return error.RecvFailed;
-    if (recv_result == 0) break;
-    // ... parse messages ...
+fn waitReadable(sock: c_int) AddrError!void {
+    var fds = [_]std.c.pollfd{
+        .{ .fd = sock, .events = POLLIN, .revents = 0 },
+    };
+    const rc = std.c.poll(&fds, 1, 250); // 250ms timeout
+    if (rc <= 0) return error.RecvFailed;
+    if ((fds[0].revents & POLLIN) == 0) return error.RecvFailed;
 }
 
-if (!done) return error.RecvFailed; // Timeout: return error instead of hanging
+// Before every recv():
+try waitReadable(sock);
+const recv_result = std.c.recv(sock, @ptrCast(&buffer), buffer.len, 0);
 ```
 
-**Working fix — progress protection:**
+**Final defense-in-depth doctrine:**
 
-```zig
-const next_offset = offset + align4(response_len);
-if (next_offset <= offset) return error.InvalidMessage; // Stalled: malformed message
-```
+1. **Per-recv timeout** — poll() before recv(); fail fast on timeout
+2. **Bounded recv loop** — max iterations (e.g., 16); prevent runaway loops
+3. **Progress protection** — ensure parsing advances offset; invalid message on stall
+4. **Fallback JSON** — `/metrics.json` renders warning on live collection failure
 
-**Doctrine:**
-- rtnetlink `recv()` loops MUST be bounded.
-- Production `/metrics.json` has fallback semantics; returning error is fine. Hanging is not.
-- Live smoke tests must never depend on unbounded kernel response loops.
-- Route tests should NOT exercise live kernel APIs (rtnetlink, sysfs). Use fallback renderer to verify JSON contract shape.
+**Key insight:** All three layers are needed. Per-recv timeout is the critical fix — without it, the first blocking recv() hangs CI before any loop bound is ever checked.
 
-**Important nuance — bounded loop ≠ bounded individual recv:**
-
-The bounded loop prevents repeated empty/blocking recv() cycles from hanging forever. However, each individual `std.c.recv()` call can still block indefinitely if the kernel doesn't respond at all:
-
-```zig
-const recv_result = std.c.recv(sock, @ptrCast(&buffer), buffer.len, 0); // Can block forever
-```
-
-If arm64 CI still hangs after this patch, the next hardening fix is **per-recv timeout**, not another loop bound. Options:
-
-1. **SO_RCVTIMEO** — set socket receive timeout via `setsockopt()`
-2. **Non-blocking socket** — make netlink socket non-blocking; treat `EAGAIN`/`EWOULDBLOCK` as `RecvFailed`
-3. **poll/select with timeout** — use `poll()` or `select()` before `recv()` to detect stuck sockets
-
-This patch is sufficient if the previous hang was caused by missed `NLMSG_DONE` after receiving at least one response. If the kernel never responds on the first `recv()`, timeout hardening is required.
-
-**Files affected:** `tovarisch/src/net/linux_addr.zig`, `tovarisch/src/http/routes_tests.zig`
-
-- **Promote to field manual:** Yes — add "Linux rtnetlink Socket Pattern" with bounded recv section and per-recv timeout options.
+- **Files affected:** `tovarisch/src/net/linux_addr.zig`
+- **Promote to field manual:** Yes — update "Linux rtnetlink Socket Pattern" section with per-recv timeout pattern.
 
 ---
 

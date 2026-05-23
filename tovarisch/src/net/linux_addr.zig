@@ -124,6 +124,27 @@ const sockaddr_nl = extern struct {
 };
 
 // ============================================================================
+// Poll-based Readability Check (Per-Recv Timeout)
+// ============================================================================
+
+// POLLIN bitmask for pollfd.events/revents
+const POLLIN: c_short = 0x001;
+
+/// Waits up to 250ms for the socket to become readable.
+/// Returns error.RecvFailed on timeout or poll error.
+/// This bounds individual recv() calls to prevent infinite blocking.
+fn waitReadable(sock: c_int) AddrError!void {
+    var fds = [_]std.c.pollfd{
+        .{ .fd = sock, .events = POLLIN, .revents = 0 },
+    };
+
+    // Poll with 250ms timeout.
+    const rc = std.c.poll(&fds, 1, 250);
+    if (rc <= 0) return error.RecvFailed;
+    if ((fds[0].revents & POLLIN) == 0) return error.RecvFailed;
+}
+
+// ============================================================================
 // Errors
 // ============================================================================
 
@@ -227,6 +248,9 @@ pub fn discoverPrivateAddresses(
     var recv_iterations: usize = 0;
 
     while (!done and recv_iterations < max_recv_iterations) : (recv_iterations += 1) {
+        // Per-recv timeout: wait up to 250ms for data to be available.
+        // If poll times out, return error instead of blocking forever.
+        try waitReadable(sock);
         const recv_result = std.c.recv(sock, @ptrCast(&buffer), buffer.len, 0);
         if (recv_result < 0) return error.RecvFailed;
         if (recv_result == 0) break;
