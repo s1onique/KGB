@@ -14,6 +14,7 @@ DEB_PATH="${DIST_DIR}/${APP_NAME}_${VERSION}_${ARCH}.deb"
 rm -rf "${PKG_ROOT}" "${DEB_PATH}"
 mkdir -p \
   "${PKG_ROOT}/usr/bin" \
+  "${PKG_ROOT}/lib/systemd/system" \
   "${PKG_ROOT}/DEBIAN"
 
 # Change to tovarisch/ directory so zig build finds build.zig
@@ -21,6 +22,7 @@ cd "${TOVARISCH_DIR}"
 zig build -Dtarget="${TARGET}" -Doptimize=ReleaseSafe
 
 install -m 0755 "zig-out/bin/${APP_NAME}" "${PKG_ROOT}/usr/bin/${APP_NAME}"
+install -m 0644 "${SCRIPT_DIR}/../packaging/systemd/${APP_NAME}.service" "${PKG_ROOT}/lib/systemd/system/${APP_NAME}.service"
 
 cat > "${PKG_ROOT}/DEBIAN/control" <<EOF
 Package: ${APP_NAME}

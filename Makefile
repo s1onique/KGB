@@ -87,5 +87,11 @@ test-final-newlines-regression:
 package-deb:
 	./scripts/package_deb.sh
 
+verify-deb-systemd:
+	./scripts/verify_deb_systemd_package.sh
+
+deb-gate: package-deb verify-deb-systemd
+	@echo "=== deb-gate passed ==="
+
 release-artifacts: package-deb
 	ls -lh dist/*.deb
