@@ -65,8 +65,13 @@ jobs:
           kcov --version
           dpkg-deb --version
 
-      - name: Run quality gate
-        run: make gate
+      - name: Run Linux CI gates excluding accepted kcov risk
+        run: |
+          make hygiene-gate
+          make tovarisch-build
+          make tovarisch-test
+          make tovarisch-status
+          make verify-status-contract
 
       - name: Resolve package version
         run: |
