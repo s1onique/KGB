@@ -20,6 +20,8 @@ const _net_linux_interface_stats = @import("net/linux_interface_stats.zig");
 const _net_linux_interface_stats_tests = @import("net/linux_interface_stats_tests.zig");
 const _net_interface_filter = @import("net/interface_filter.zig");
 const _net_interface_filter_tests = @import("net/interface_filter_tests.zig");
+const _net_linux_addr = @import("net/linux_addr.zig");
+const _net_linux_addr_tests = @import("net/linux_addr_tests.zig");
 const _http_response = @import("http/response.zig");
 const _http_routes = @import("http/routes.zig");
 const _http_server = @import("http/server.zig");
@@ -61,6 +63,14 @@ test {
 
 test {
     std.testing.refAllDecls(@import("net/interface_filter_tests.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("net/linux_addr.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("net/linux_addr_tests.zig"));
 }
 
 test {

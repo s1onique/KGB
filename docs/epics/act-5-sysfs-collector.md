@@ -1,6 +1,6 @@
 # ACT 5: Add private interface traffic collector from Linux sysfs
 
-**Status: open** (slices ACT 5a ✅, ACT 5b ✅, ACT 5c ✅, ACT 5d ✅, ACT 5e ✅)
+**Status: open** (slices ACT 5a ✅, ACT 5b ✅, ACT 5c ✅, ACT 5d ✅, ACT 5e ✅, ACT 5f ✅)
 
 Linux exposes per-interface statistics under:
 `/sys/class/net/<iface>/statistics/`
@@ -317,18 +317,83 @@ Note: Linux rtnetlink is the proper kernel interface for reading network address
 `rtnetlink(7)` documents that NETLINK_ROUTE sockets control network routes, IP addresses,
 link parameters, neighbors, and related state. This is deferred until ACT 5f.
 
-## Future: ACT 5b (live sysfs collection)
+## ACT 5f: Live Linux IPv4 address discovery via rtnetlink
 
-ACT 5b will add:
-- Reading `/sys/class/net/<iface>/statistics/*` files
-- Enumerating network interfaces
-- Filtering to private interfaces
-- Wiring stats into the metrics model
+**Status: ✅ done**
+
+This slice adds live IPv4 address discovery using NETLINK_ROUTE sockets.
+It provides interface address-to-name mappings for private-interface filtering.
+The `/metrics.json` endpoint remains unwired until the complete pipeline exists.
+
+### Board
+
+| ID | Work Item | Status |
+|---|---|---|
+| webservice-059 | Create `net/linux_addr.zig` | ✅ done |
+| webservice-060 | Add `discoverPrivateAddresses()` function | ✅ done |
+| webservice-061 | Add `freeAddresses()` helper | ✅ done |
+| webservice-062 | Add fixture-based tests | ✅ done |
+| webservice-063 | Update test_all.zig | ✅ done |
+| webservice-064 | Run `make gate` and verify | ✅ done |
+
+### Acceptance
+
+- [x] `linux_addr.zig` exists with rtnetlink-backed address discovery.
+- [x] `discoverPrivateAddresses()` queries kernel via NETLINK_ROUTE socket.
+- [x] Returns allocator-owned `InterfaceAddress` structs for interface_filter.
+- [x] Filters for RFC1918 private addresses only (no IPv6 per deferral).
+- [x] `freeAddresses()` properly frees allocator-owned strings.
+- [x] Tests cover error paths, contract, and Linux smoke test.
+- [x] Uses `@alignCast` for proper pointer alignment in struct casting.
+- [x] No `/metrics.json` wiring added.
+- [x] No IPv6 support (per deferral).
+- [x] `make tovarisch-test` passes (147+ tests).
+- [x] `make gate` passes (84.38% coverage).
+- [x] ACT 5 remains open.
+
+### Implementation
+
+The live discovery module provides:
+
+- `AddrError` error set with socket/send/recv failures
+- `discoverPrivateAddresses(allocator, sys_class_net) ![]InterfaceAddress`
+  - Creates `NETLINK_ROUTE` socket (AF_NETLINK family)
+  - Sends `RTM_GETADDR` request
+  - Parses `RTM_NEWADDR` responses
+  - Classifies addresses via `private_ip.classifyIpv4Octets()`
+  - Filters for `.private` only (IPv4-only per deferral)
+- `freeAddresses(allocator, addresses) void` — frees owned memory
+
+Key implementation details:
+- Uses `AF_NETLINK` (16) as socket family, `NETLINK_ROUTE` (0) as protocol
+- Custom C structs for `nlmsghdr`, `ifaddrmsg`, `rtattr`, `sockaddr_nl`
+- Uses `@ptrCast(@alignCast(...))` for proper pointer alignment
+- Uses `@constCast` when mutating slice for write operations
+- Netlink message iteration uses `align4()` for 4-byte alignment
+- Attribute iteration uses buffer offsets instead of pointer arithmetic
+- Parses `IFA_LABEL` for real interface names (eth0, wg0, etc.)
+- Helper functions: `align4()`, `ipv4ToString()`, `parseLabel()`
+- Bounds checking in `parseLabel` prevents panics
+
+### Files Changed
+
+- `tovarisch/src/net/linux_addr.zig` — discoverPrivateAddresses, freeAddresses, rtnetlink implementation
+- `tovarisch/src/net/linux_addr_tests.zig` — unit tests, interface contract tests, Linux smoke test
+- `tovarisch/src/test_all.zig` — Added refAllDecls for linux_addr modules
+
+### IPv6 scope (unchanged from ACT 5e)
+
+IPv6 support remains deferred. The rtnetlink implementation only processes `AF_INET` (IPv4) addresses. IPv6 addresses would be ignored, consistent with the IPv4-only scope of ACTs 5e/5f.
+
+### Next: ACT 5g
+
+ACT 5g should wire the address discovery into the private-interface filtering pipeline,
+enabling the full stats collection path to use live addresses instead of fixtures.
 
 ## Future: IPv6 private-interface support
 
 Deferred. A future ACT should add IPv6 parsing/classification and update interface filtering to include IPv6 Unique Local Addresses. RFC 4193 defines Unique Local IPv6 Unicast Addresses for local communications; in practice, locally assigned ULAs use the `fd00::/8` space within the broader `fc00::/7` ULA block.
 
-This is intentionally out of scope for ACT 5e/5f.
+This is intentionally out of scope for ACT 5e/5f/5g.
 
 See main epic `tovarisch-webservice-day0.md` for full board.
