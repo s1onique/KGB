@@ -181,6 +181,9 @@ const CaptureWriter = struct {
     pub fn slice(self: *const Self) []const u8 {
         return self.buf[0..self.len];
     }
+
+    /// No-op flush for test writers. Required for writeLogRecord compatibility.
+    pub fn flush(_: *Self) error{}!void {}
 };
 
 test "--help output contains usage" {

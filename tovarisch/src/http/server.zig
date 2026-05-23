@@ -183,6 +183,29 @@ fn acceptOneBlocking(server: *Server) !void {
     handleConnection(conn_fd);
 }
 
+/// Write a log record to the output and flush.
+///
+/// Flushes all writer types except *logging.BufferedWriter (which has no
+/// flush method). All other writers reaching the else branch must provide flush().
+/// This ensures NDJSON records are visible immediately.
+fn writeLogRecord(out_writer: anytype, bytes: []const u8) !void {
+    try out_writer.writeAll(bytes);
+
+    // Flush if the writer supports it. This handles:
+    // - Zig 0.16 BufferedWriter (e.g., Io.File.Writer with buffer)
+    // - Raw file writers (flush is a no-op on unbuffered)
+    // - Test writers (flush is a no-op on VoidWriter/CaptureWriter)
+    //
+    // Comptime branch: only the valid check is compiled based on writer type.
+    if (comptime @TypeOf(out_writer) == *logging.BufferedWriter) {
+        // No-op: BufferedWriter doesn't have flush, this branch is dead code
+        // but compiles because the writer type is checked at comptime
+    } else {
+        // Writer types reaching this branch must provide flush().
+        out_writer.flush() catch {};
+    }
+}
+
 /// Emit startup log events after successful server listen.
 fn emitStartupLogs(config: Config, out_writer: anytype) !void {
     var log_buf = logging.BufferedWriter.init();
@@ -190,7 +213,7 @@ fn emitStartupLogs(config: Config, out_writer: anytype) !void {
         .{ .name = "bind_address", .value = logging.FieldValue{ .string = config.address } },
         .{ .name = "port", .value = logging.FieldValue{ .integer = config.port } },
     });
-    try out_writer.writeAll(log_buf.slice());
+    try writeLogRecord(out_writer, log_buf.slice());
 
     // Emit UVB-76 signal ready event
     log_buf.reset();
@@ -198,7 +221,7 @@ fn emitStartupLogs(config: Config, out_writer: anytype) !void {
         .{ .name = "signal", .value = logging.FieldValue{ .string = "🚩📻" } },
         .{ .name = "message", .value = logging.FieldValue{ .string = "Listen to UVB-76 signals..." } },
     });
-    try out_writer.writeAll(log_buf.slice());
+    try writeLogRecord(out_writer, log_buf.slice());
 }
 
 /// Simple serve function for CLI use.
@@ -221,7 +244,7 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
     // Structured JSON log: accept loop started
     var log_buf = logging.BufferedWriter.init();
     try logging.emit(.http_accept_loop_started, &log_buf, &.{});
-    try out_writer.writeAll(log_buf.slice());
+    try writeLogRecord(out_writer, log_buf.slice());
 
     // Blocking accept loop - stays alive until interrupted.
     while (true) {
@@ -231,7 +254,7 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
             try logging.emit(.http_accept_loop_error, &log_buf, &.{
                 .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(err) } },
             });
-            try out_writer.writeAll(log_buf.slice());
+            try writeLogRecord(out_writer, log_buf.slice());
         };
     }
 }

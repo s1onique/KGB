@@ -214,3 +214,34 @@ const num_str = std.fmt.bufPrint(&num_buf, "{d}\n", .{counter_value}) catch unre
 - **Promote to field manual:** Yes — added cross-reference section in `zig-0.16-field-manual.md`.
 
 **Confidence:** high; verified with `make tovarisch-test` passing (144 tests, 3 skip, no crashes).
+
+---
+
+## 2026-05-23 — `@hasDecl` with pointer dereference and writer type compatibility
+
+- **Context:** Implementing `writeLogRecord()` helper in `server.zig` to flush NDJSON records immediately.
+- **Symptom:** Two compilation errors:
+  1. `error: cannot dereference non-pointer type 'cli.commands.VoidWriter'` — `@hasDecl(@TypeOf(out_writer.*), "flush")` fails when writer is passed by value.
+  2. `error: no field or member function named 'flush' in 'cli.commands.CaptureWriter'` — writer without `flush` method doesn't compile.
+- **Failed assumptions:**
+  1. `@hasDecl(@TypeOf(out_writer.*), "flush")` would work for all writer types (pointer or value).
+  2. `std.meta.trait(.Pointer)` could be used to detect pointer types (does not exist in this Zig 0.16).
+  3. A catch-all `out_writer.flush() catch {}` would work for writers without flush (Zig requires method to exist at compile time).
+- **Root cause:** Zig's compile-time type checking with `anytype` requires explicit handling for both pointer and value writer types. The test writers (`VoidWriter`, `CaptureWriter`) have different shapes than the real CLI writer.
+- **Working fix:**
+  1. Use comptime type check to skip flush for `logging.BufferedWriter` (no flush method):
+     ```zig
+     if (comptime @TypeOf(out_writer) == *logging.BufferedWriter) {
+         // No-op: BufferedWriter doesn't have flush
+     } else {
+         out_writer.flush() catch {};
+     }
+     ```
+  2. Add no-op `flush` method to test writers for compatibility:
+     ```zig
+     pub fn flush(_: *Self) error{}!void {}
+     ```
+- **Files affected:** `tovarisch/src/http/server.zig`, `tovarisch/src/cli/commands.zig`
+- **Promote to field manual:** No — specific to the `writeLogRecord` pattern. This is a working fix pattern.
+
+**Confidence:** high; verified with `make tovarisch-build`, `make tovarisch-test`, `make gate` all passing.
