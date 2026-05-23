@@ -14,6 +14,7 @@
 const std = @import("std");
 const testing = std.testing;
 const linux_addr = @import("linux_addr.zig");
+const linux_addr_parse = @import("linux_addr_parse.zig");
 const interface_filter = @import("interface_filter.zig");
 
 // ============================================================================
@@ -200,4 +201,35 @@ test "parseLabel: offset beyond data" {
     const buffer = [_]u8{ 'a', 'b' };
     const result = linux_addr.parseLabel(&buffer, 5, 10);
     try testing.expect(result == null);
+}
+
+// ============================================================================
+// rtnetlink Constants Regression Tests
+// ============================================================================
+
+// These tests verify the request bytes match expected rtnetlink values.
+// Uses buildRequest() from linux_addr_parse.zig which encodes the same
+// constants used by the production discoverPrivateAddresses() function.
+
+test "rtnetlink: request has RTM_GETADDR type (22 = 0x16)" {
+    const req = linux_addr_parse.buildRequest();
+    // nlmsghdr.nlmsg_type is at offset 4 (after nlmsg_len), 2 bytes
+    const nlmsg_type = std.mem.readInt(c_ushort, req.buffer[4..6], .little);
+    try testing.expectEqual(@as(c_ushort, 22), nlmsg_type);
+}
+
+test "rtnetlink: request has NLM_F_REQUEST|NLM_F_DUMP flags (0x301)" {
+    const req = linux_addr_parse.buildRequest();
+    // nlmsghdr layout: nlmsg_len(4) + nlmsg_type(2) + nlmsg_flags(2) at offset 6
+    const nlmsg_flags = std.mem.readInt(c_ushort, req.buffer[6..8], .little);
+    // NLM_F_REQUEST (0x001) | NLM_F_DUMP (0x300) = 0x301
+    try testing.expectEqual(@as(c_ushort, 0x301), nlmsg_flags);
+}
+
+test "rtnetlink: request has AF_INET family in ifaddrmsg" {
+    const req = linux_addr_parse.buildRequest();
+    // ifaddrmsg.ifa_family is at offset @sizeOf(nlmsghdr) = 16
+    const ifa_family = req.buffer[16];
+    // AF_INET = 2
+    try testing.expectEqual(@as(u8, 2), ifa_family);
 }

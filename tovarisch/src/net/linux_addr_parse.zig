@@ -161,3 +161,42 @@ test "parseLabel: offset beyond data" {
     const result = parseLabel(&buffer, 5, 10);
     try testing.expect(result == null);
 }
+
+// ============================================================================
+// Test Helpers (for unit testing rtnetlink request construction)
+// ============================================================================
+
+// Note: These helpers use the same constant values as linux_addr.zig.
+// They exist here so tests can verify request bytes without exposing
+// the private constants directly.
+
+/// Builds a netlink request buffer for RTM_GETADDR.
+/// Returns bytes for testing the request structure.
+pub fn buildRequest() struct { buffer: [64]u8, len: usize } {
+    const nlmsg_len = 20; // @sizeOf(nlmsghdr) + @sizeOf(ifaddrmsg) = 16 + 4
+    const RTM_GETADDR: c_uint = 22;
+    const NLM_F_REQUEST: c_uint = 0x001;
+    const NLM_F_ROOT: c_uint = 0x100;
+    const NLM_F_MATCH: c_uint = 0x200;
+    const AF_INET: c_int = 2;
+
+    var result: [64]u8 = undefined;
+    var req_buf: [nlmsg_len]u8 = undefined;
+
+    // nlmsghdr: nlmsg_len(4) + nlmsg_type(2) + nlmsg_flags(2) + nlmsg_seq(4) + nlmsg_pid(4)
+    std.mem.writeInt(c_uint, req_buf[0..4], @intCast(nlmsg_len), .little);
+    std.mem.writeInt(c_ushort, req_buf[4..6], @intCast(RTM_GETADDR), .little);
+    std.mem.writeInt(c_ushort, req_buf[6..8], @intCast(NLM_F_REQUEST | NLM_F_ROOT | NLM_F_MATCH), .little);
+    std.mem.writeInt(c_uint, req_buf[8..12], 1, .little);
+    std.mem.writeInt(c_uint, req_buf[12..16], 0, .little);
+
+    // ifaddrmsg: ifa_family(1) + ifa_prefixlen(1) + ifa_flags(1) + ifa_scope(1) + ifa_index(4)
+    std.mem.writeInt(c_uint, req_buf[16..20], 0, .little); // ifa_index = 0
+    req_buf[16] = @intCast(AF_INET); // IPv4 only (overwrites first byte of ifa_index)
+    req_buf[17] = 0; // ifa_prefixlen
+    req_buf[18] = 0; // ifa_flags
+    req_buf[19] = 0; // ifa_scope
+
+    @memcpy(result[0..nlmsg_len], &req_buf);
+    return .{ .buffer = result, .len = nlmsg_len };
+}

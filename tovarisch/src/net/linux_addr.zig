@@ -70,13 +70,28 @@ const NETLINK_ROUTE: c_int = 0;
 const SOCK_RAW: c_int = 3;
 
 // rtnetlink message types
-const RTM_GETADDR: c_uint = 20; // 0x14
-const RTM_NEWADDR: c_uint = 20; // Same value, response type
+// Correct values per Linux rtnetlink.h:
+// - RTM_NEWADDR = 20
+// - RTM_DELADDR = 21
+// - RTM_GETADDR = 22
+const RTM_NEWADDR: c_uint = 20;
+const RTM_DELADDR: c_uint = 21;
+const RTM_GETADDR: c_uint = 22;
+const NLMSG_ERROR: c_uint = 2;
 const NLMSG_DONE: c_uint = 3;
 
 // RTM flags
+// Correct values per Linux/netlink.h:
+// - NLM_F_REQUEST = 0x001
+// - NLM_F_MULTI = 0x002
+// - NLM_F_ROOT = 0x100
+// - NLM_F_MATCH = 0x200
+// - NLM_F_DUMP = NLM_F_ROOT | NLM_F_MATCH = 0x300
 const NLM_F_REQUEST: c_uint = 0x001;
-const NLM_F_DUMP: c_uint = 0x003; // NLM_F_ROOT | NLM_F_MATCH
+const NLM_F_MULTI: c_uint = 0x002;
+const NLM_F_ROOT: c_uint = 0x100;
+const NLM_F_MATCH: c_uint = 0x200;
+const NLM_F_DUMP: c_uint = NLM_F_ROOT | NLM_F_MATCH;
 
 // Address family
 const AF_INET: c_int = 2;
@@ -202,7 +217,7 @@ pub fn discoverPrivateAddresses(
     };
 
     var msg = ifaddrmsg{
-        .ifa_family = 0, // AF_UNSPEC = all families
+        .ifa_family = @intCast(AF_INET), // IPv4 only
         .ifa_prefixlen = 0,
         .ifa_flags = 0,
         .ifa_scope = 0,
@@ -271,6 +286,12 @@ pub fn discoverPrivateAddresses(
             if (next_offset <= offset) return error.InvalidMessage;
 
             if (response_len < @sizeOf(nlmsghdr) or response_len > msg_len - offset) break;
+
+            // NLMSG_ERROR indicates kernel rejected the request (e.g., wrong type/flags).
+            // Fail fast instead of polling again and timing out.
+            if (nlhdr.nlmsg_type == NLMSG_ERROR) {
+                return error.InvalidMessage;
+            }
 
             // NLMSG_DONE terminates the multipart message
             if (nlhdr.nlmsg_type == NLMSG_DONE) {

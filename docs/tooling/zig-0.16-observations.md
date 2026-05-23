@@ -185,35 +185,23 @@ Recording field notes from Zig 0.16 experiments. Confidence varies; do not promo
 
 ## 2026-05-23 — `@memcpy arguments alias` panic in chained `std.fmt.bufPrint()` calls
 
-- **Context:** Implementing fixture tests in `tovarisch/src/net/linux_interface_stats_tests.zig` that build paths like `{base}/{iface}/statistics/{file}` and write counter values.
-- **Symptom:** `panic: @memcpy arguments alias` when the same buffer was used as both the destination of `bufPrint()` and as data referenced by a format argument.
-- **Root cause:** When `std.fmt.bufPrint()` internally calls `write()` to format into a buffer, if that buffer slice is also passed as a format argument, Zig 0.16 detects aliasing and panics.
+- **Context:** Fixture tests in `tovarisch/src/net/linux_interface_stats_tests.zig` building paths like `{base}/{iface}/statistics/{file}`.
+- **Symptom:** `panic: @memcpy arguments alias` when the same buffer was used as both bufPrint destination and as a format argument.
+- **Failed assumption:** Reusing a single buffer for sequential path construction and number formatting was safe.
 
-**Failed assumption:** Reusing a single buffer for sequential path construction and number formatting was assumed to be safe.
-
-**Working fix:** Use distinct buffers for each path construction:
+**Working fix — use distinct buffers:**
 
 ```zig
-// BAD: Aliasing panic in Zig 0.16
-var buf: [4096]u8 = undefined;
-const parent = try std.fmt.bufPrint(&buf, "{s}/{s}", .{ base, iface });
-const child = try std.fmt.bufPrint(&buf, "{s}/statistics", .{parent}); // PANIC
-
-// GOOD: Separate buffers
 var parent_buf: [4096]u8 = undefined;
 var child_buf: [4096]u8 = undefined;
 const parent = try std.fmt.bufPrint(&parent_buf, "{s}/{s}", .{ base, iface });
-const child = try std.fmt.bufPrint(&child_buf, "{s}/statistics", .{parent}); // OK
-
-// For test fixture counters, use a dedicated number buffer:
-var num_buf: [64]u8 = undefined;
-const num_str = std.fmt.bufPrint(&num_buf, "{d}\n", .{counter_value}) catch unreachable;
+const child = try std.fmt.bufPrint(&child_buf, "{s}/statistics", .{parent});
 ```
 
 - **Files affected:** `tovarisch/src/net/linux_interface_stats_tests.zig`
-- **Promote to field manual:** Yes — added cross-reference section in `zig-0.16-field-manual.md`.
+- **Promote to field manual:** Yes.
 
-**Confidence:** high; verified with `make tovarisch-test` passing (144 tests, 3 skip, no crashes).
+**Confidence:** high; verified with `make tovarisch-test` passing.
 
 ---
 
@@ -373,3 +361,33 @@ var msg = ifaddrmsg{ ... };
 
 - **Files affected:** `tovarisch/src/net/linux_addr.zig`
 - **Promote to field manual:** Yes — refine the alignment section to cover network buffers.
+
+---
+
+## 2026-05-24 — rtnetlink Constants Bug: RTM_GETADDR=20, NLM_F_DUMP=0x003
+
+- **Context:** Live strace showed `nlmsg_type=0x14` (20) with `NLM_F_REQUEST|NLM_F_MULTI` and kernel returning `NLMSG_ERROR -EOPNOTSUPP`.
+- **Symptom:** `/metrics.json` falls back to warning; rtnetlink address discovery fails.
+- **Root cause:** Two wrong constants:
+  1. `RTM_GETADDR` was 20 (actually `RTM_NEWADDR`). Correct: `RTM_GETADDR = 22`.
+  2. `NLM_F_DUMP` was 0x003 (actually `REQUEST|MULTI`). Correct: `NLM_F_DUMP = 0x300` (`NLM_F_ROOT|NLM_F_MATCH`).
+
+- **Working fix — corrected constants:**
+  ```zig
+  const RTM_NEWADDR: c_uint = 20;
+  const RTM_DELADDR: c_uint = 21;
+  const RTM_GETADDR: c_uint = 22;
+  const NLMSG_ERROR: c_uint = 2;
+  const NLM_F_REQUEST: c_uint = 0x001;
+  const NLM_F_ROOT: c_uint = 0x100;
+  const NLM_F_MATCH: c_uint = 0x200;
+  const NLM_F_DUMP: c_uint = NLM_F_ROOT | NLM_F_MATCH; // 0x300
+  ```
+
+- **Also fix: set `ifa_family = @intCast(AF_INET)` and handle `NLMSG_ERROR`:**
+  ```zig
+  if (nlhdr.nlmsg_type == NLMSG_ERROR) return error.InvalidMessage;
+  ```
+
+- **Files affected:** `tovarisch/src/net/linux_addr.zig`, `tovarisch/src/net/linux_addr_tests.zig`
+- **Promote to field manual:** Yes.
