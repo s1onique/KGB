@@ -144,6 +144,13 @@ grep -q 'AGENTS.md' .clinerules/00-bootstrap.md
 grep -q 'docs/tooling/zig-0.16-field-manual.md' .clinerules/20-zig-016.md
 grep -q 'make gate' .clinerules/30-verification.md
 
+echo "[gate] checking forbidden Zig dev toolchain pin"
+
+if grep -R "0\.16\.0-dev\.732" .github scripts Makefile 2>/dev/null; then
+  echo "[gate] FAIL: forbidden Zig dev toolchain pin found" >&2
+  exit 2
+fi
+
 echo "[gate] checking coverage ledger mentions all public commands"
 
 grep -q '`--help`' docs/coverage/tovarisch-coverage.md
