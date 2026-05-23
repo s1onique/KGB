@@ -26,4 +26,4 @@
 
 ### Why UVB-76?
 
-The name is weird and memorable — perfect for a mysterious control tower that keeps escape routes alive. It evokes the Cold War listener stations of folklore while staying operator-log friendly.
+The name is weird and memorable — perfect for a mysterious control tower that keeps escape routes alive. It evokes the Cold War listener stations of folklore while staying operator-log friendly. Runtime messages may use 🚩📻 as the UVB-76 signal marker.
