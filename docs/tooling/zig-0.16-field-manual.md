@@ -55,6 +55,21 @@ const exe = b.addExecutable(.{
 - **Old stdout patterns** — Do NOT use `std.io.getStdOut().writer()`.
 - **Old allocator patterns** — Do NOT use `std.heap.GeneralPurposeAllocator` for trivial CLI main.
 - **Downgrading Zig** — Never downgrade Zig to satisfy stale examples.
+- **CI Zig dev builds** — CI uses `0.16.0-dev.732+2f3234c76` which may lack `std.process.Init`. This is a CI configuration issue, not a code issue.
+
+## Zig 0.16 entrypoint compatibility
+
+The `std.process.Init` entrypoint pattern is the correct approach for Zig 0.16.x:
+
+```zig
+pub fn main(init: std.process.Init) !void {
+    const arena = init.arena.allocator();
+    const args = try init.minimal.args.toSlice(arena);
+    // ... use arena and args
+}
+```
+
+This works on stable Zig 0.16.0. CI failures may be due to CI using an incompatible dev build.
 
 ## Agent Instructions
 

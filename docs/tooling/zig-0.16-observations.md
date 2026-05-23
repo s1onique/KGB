@@ -37,6 +37,26 @@ Recording field notes from Zig 0.16 experiments. Confidence varies; do not promo
 
 ---
 
+## 2026-05-23 — CI Zig dev build lacks `std.process.Init`
+
+- **Context:** GitHub CI fails during Zig build because CI uses `0.16.0-dev.732+2f3234c76`.
+- **Symptom:** CI compiler does not have `std.process.Init`, causing `pub fn main(init: std.process.Init) !void` to fail.
+- **Local verification:** Stable Zig 0.16.0 (macOS) HAS `std.process.Init` and the original code compiles and works.
+- **Failed assumption:** The task suggested CI lacks `Init` and recommended a fallback pattern using `std.process.argsAlloc` and `GeneralPurposeAllocator`.
+- **Working fix:** Confirmed the original `std.process.Init` entrypoint works on local stable Zig 0.16.0. The CI failure is specific to that dev build.
+- **Alternative patterns attempted (failed on stable Zig 0.16.0):**
+  1. `std.heap.GeneralPurposeAllocator` — does not exist in stable 0.16.0
+  2. `std.process.argsAlloc(allocator)` — does not exist in stable 0.16.0  
+  3. `std.process.args.iterator()` — `std.process.args` does not exist in stable 0.16.0
+  4. `std.process.args.toSlice(...)` — `std.process.args` does not exist in stable 0.16.0
+- **Files affected:** `tovarisch/src/main.zig` (no changes needed — original works on stable)
+- **Promote to field manual:** Yes — documented the `Init`-based entrypoint as the stable pattern.
+- **Epic status:** Keep Debian package release ACT open until CI Zig drift is resolved.
+
+**Confidence:** high; verified locally with `make gate`, `make tovarisch-build`, `make tovarisch-test`, `make tovarisch-status`.
+
+---
+
 ## 2026-05-22 — Io.Dir API not directly usable in status.zig
 
 - **Context:** Attempted to use `std.fs.cwd()` and `std.Io.Dir.cwd()` to check directory existence.
