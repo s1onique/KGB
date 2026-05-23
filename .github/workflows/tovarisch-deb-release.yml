@@ -13,6 +13,29 @@ permissions:
   contents: read
 
 jobs:
+  cross-platform-verify:
+    name: Cross-platform compile gate
+    runs-on: ubuntu-latest
+    # Cross-platform compile gate is compile-only verification for Linux target.
+    # This catches platform-specific API drift in @import("builtin").os.tag branches
+    # that would pass macOS local gate but fail on Linux CI.
+    # NOTE: Cross-compiled tests cannot execute on non-Linux hosts; compile-only.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Show Zig version
+        run: zig version
+
+      - name: Run cross-platform compile gate
+        run: make cross-platform-gate
+
   build-deb:
     name: Build Ubuntu 24.04 amd64 deb
     runs-on: ubuntu-24.04

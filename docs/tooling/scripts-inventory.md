@@ -10,6 +10,15 @@ Canonical reference for gate scripts and tooling in KGB.
 | `scripts/check_llm_friendliness.sh` | LLM-friendliness checks (file limits, no broken refs) | auto-invoked |
 | `scripts/coverage_gate.sh` | Real line coverage via kcov | auto-invoked |
 
+## Cross-Platform Compile Gate
+
+| Target | Purpose | Entry Point |
+|--------|---------|-------------|
+| `tovarisch-compile-linux` | Cross-compile tovarisch for Linux target (x86_64-linux-gnu) | `make tovarisch-compile-linux` |
+| `cross-platform-gate` | Compile-only gate to catch platform-specific API drift | `make cross-platform-gate` |
+
+**Rationale:** Zig does not semantically analyze inactive platform branches on non-target hosts. Linux-only code in `@import("builtin").os.tag == .linux` branches can pass macOS local gate and still fail Linux CI. The cross-platform gate catches this drift before merge.
+
 ## Regression Tests
 
 | Script | Purpose | Entry Point |
