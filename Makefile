@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status coverage coverage-report
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness coverage coverage-report
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 60
@@ -53,6 +53,9 @@ tovarisch-run:
 
 tovarisch-status:
 	cd tovarisch && zig build run -- status --json
+
+tovarisch-serve-liveness: tovarisch-build
+	./scripts/check_tovarisch_serve_liveness.sh ./tovarisch/zig-out/bin/tovarisch
 
 verify-status-contract:
 	./scripts/verify_tovarisch_status_contract.sh

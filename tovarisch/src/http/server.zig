@@ -39,8 +39,8 @@ pub const Server = struct {
         self.stop();
     }
 
-    /// Start the server and listen for connections.
-    /// This function blocks until stop() is called.
+    /// Start the server: create socket, bind, and listen.
+    /// Does NOT enter the accept loop - that is handled by pollOnce.
     pub fn listen(self: *Self) !void {
         // Create socket
         const fd = c.socket(c.AF.INET, c.SOCK.STREAM, 0);
@@ -70,21 +70,6 @@ pub const Server = struct {
         // Listen
         const listen_result = c.listen(self.listener_fd, 128);
         if (listen_result < 0) return error.ListenFailed;
-
-        // Accept connections
-        while (true) {
-            var client_addr: c.sockaddr = undefined;
-            var client_len: c.socklen_t = @sizeOf(c.sockaddr);
-
-            const conn_fd = c.accept(self.listener_fd, &client_addr, &client_len);
-            if (conn_fd < 0) {
-                // No connection ready, yield to allow other work
-                std.Thread.yield() catch {};
-                continue;
-            }
-
-            handleConnection(conn_fd);
-        }
     }
 
     /// Stop the server.
@@ -113,6 +98,47 @@ pub fn serve(config: Config) !void {
     std.debug.print("Listening on {s}:{d}\n", .{ config.address, config.port });
 
     try server.listen();
+}
+
+/// Accept one connection and handle it (blocking).
+/// This is the simple accept loop for production CLI use.
+fn acceptOneBlocking(server: *Server) !void {
+    var client_addr: c.sockaddr = undefined;
+    var client_len: c.socklen_t = @sizeOf(c.sockaddr);
+
+    const conn_fd = c.accept(server.listener_fd, &client_addr, &client_len);
+    if (conn_fd < 0) {
+        const errno_val = std.c._errno().*;
+        // EAGAIN (11 on Linux, 35 on macOS) means no connection ready yet
+        // EWOULDBLOCK is the same value on most platforms
+        if (errno_val == 11 or errno_val == 35) {
+            std.Thread.yield() catch {};
+            return;
+        }
+        // For other errors, just retry
+        std.Thread.yield() catch {};
+        return;
+    }
+
+    handleConnection(conn_fd);
+}
+
+/// Daemon-style serve loop for production CLI use.
+/// This is the correct CLI entry point - the process stays alive
+/// until interrupted by a signal.
+pub fn serveForever(config: Config) !void {
+    var server = Server.init(config);
+    defer server.deinit();
+
+    std.debug.print("Listening on {s}:{d}\n", .{ config.address, config.port });
+    
+    try server.listen();
+
+    // Blocking accept loop - stays alive until interrupted.
+    // This is the correct daemon behavior.
+    while (true) {
+        acceptOneBlocking(&server) catch {};
+    }
 }
 
 /// Parse an IPv4 address string and return network byte order u32.

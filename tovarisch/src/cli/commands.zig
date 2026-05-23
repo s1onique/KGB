@@ -60,8 +60,10 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
             stdout.print("Starting tovarisch HTTP service on port {d}...\n", .{config.port}) catch {};
             stdout.writeAll("Press Ctrl+C to stop.\n") catch {};
 
-            http.serve(config) catch {
-                stderr.writeAll("error: failed to start HTTP server\n") catch {};
+            // Use serveForever for daemon-style blocking - the process stays alive
+            // until interrupted by a signal. This is the correct CLI behavior.
+            http.serveForever(config) catch |err| {
+                stderr.print("error: failed to run HTTP server: {}\n", .{err}) catch {};
                 return .serve_error;
             };
 
