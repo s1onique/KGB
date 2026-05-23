@@ -10,7 +10,7 @@ Establish the initial KGB repository doctrine, architecture boundaries, and firs
 |---|---|---|
 | kgb-0001 | Add Factory doctrine docs | open |
 | kgb-0002 | Add KGB-specific doctrine docs | open |
-| kgb-0003 | Define station/tovarisch split | open |
+| kgb-0003 | Define UVB-76/tovarisch split | open |
 | kgb-0004 | Define privacy and non-surveillance doctrine | open |
 | kgb-0005 | Define exotic metrics/vital signs doctrine | open |
 | kgb-0006 | Add tiny-leaf constraints | open |
@@ -21,7 +21,7 @@ Establish the initial KGB repository doctrine, architecture boundaries, and firs
 
 - Repo explains what KGB is and is not.
 - Repo names the leaf service `tovarisch`.
-- Repo documents station vs leaf split.
+- Repo documents UVB-76 vs leaf split.
 - Repo forbids user-behavior monitoring.
 - Repo documents tiny-leaf constraints.
 - Repo has a basic quality gate.

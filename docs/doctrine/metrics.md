@@ -17,7 +17,7 @@ They are vital signs for escape routes.
 
 ### Control-plane reachability
 
-- station reachable
+- UVB-76 reachable
 - last successful pull
 - last successful report
 - desired-state version

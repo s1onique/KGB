@@ -4,7 +4,7 @@
 
 This document defines the v0 machine-readable status contract for `tovarisch status --json`.
 
-The contract provides a stable JSON shape that station/control-plane can parse to observe leaf-node health without requiring dynamic health probes or network access from the leaf.
+The contract provides a stable JSON shape that UVB-76/control-plane can parse to observe leaf-node health without requiring dynamic health probes or network access from the leaf.
 
 ## Command
 
@@ -86,7 +86,7 @@ The status payload must NOT include:
 - No daemon loop yet
 - No transport backend supervision yet
 - No real health probes yet
-- No station upload yet
+- No UVB-76 upload yet
 - No Prometheus/metrics platform
 
 ## Example

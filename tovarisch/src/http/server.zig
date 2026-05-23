@@ -140,6 +140,7 @@ pub fn serveForever(config: Config) !void {
 
     try server.listen();
     std.debug.print("Listening on {s}:{d}\n", .{ config.address, config.port });
+    std.debug.print("Listen to UVB-76 signals...\n", .{});
     std.debug.print("Entering accept loop\n", .{});
 
     // Blocking accept loop - stays alive until interrupted.

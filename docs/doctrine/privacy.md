@@ -9,7 +9,7 @@ KGB may record:
 - node identity
 - transport state
 - last handshake age
-- station reachability
+- UVB-76 reachability
 - probe success/failure
 - fallback readiness
 - config version

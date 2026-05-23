@@ -20,12 +20,12 @@ KGB answers:
 - Which tunnel backend currently works?
 - Which fallback is ready?
 - Which config is active?
-- Which stations are reachable?
+- Which UVB-76s are reachable?
 - Can trusted users still reach the outside?
 
 ## Core split
 
-Stations may be civilized.
+UVB-76s may be civilized.
 
 Leafs must survive barbarism.
 

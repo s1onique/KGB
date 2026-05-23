@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines the v0 HTTP service contract for `tovarisch serve`. The HTTP service provides local-first observability endpoints for leaf-node health monitoring by KGB station.
+This document defines the v0 HTTP service contract for `tovarisch serve`. The HTTP service provides local-first observability endpoints for leaf-node health monitoring by a KGB UVB-76.
 
 ## Canonical Runtime
 

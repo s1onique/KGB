@@ -7,7 +7,7 @@ Canonical doctrine documents for KGB project hygiene and architecture.
 | Document | Purpose |
 |----------|---------|
 | [factory.md](./factory.md) | Factory workflow, ACTs, epics, verification |
-| [kgb.md](./kgb.md) | KGB architecture, station vs tovarisch split |
+| [kgb.md](./kgb.md) | KGB architecture, UVB-76 vs tovarisch split |
 | [privacy.md](./privacy.md) | Privacy principles, allowed/forbidden data |
 | [tiny-leafs.md](./tiny-leafs.md) | Leaf node constraints |
 | [metrics.md](./metrics.md) | Observable metrics philosophy |
@@ -22,6 +22,6 @@ Canonical doctrine documents for KGB project hygiene and architecture.
 ## Quick Reference
 
 - **KGB** observes infrastructure health, not people.
-- **`tovarisch`** is the leaf; **`station`** is the control tower.
+- **`tovarisch`** is the leaf; **`UVB-76`** is the control tower.
 - Coverage is tracked from Day 0; it is a signal, not a vanity metric.
 - Leafs must NOT include: Kubernetes, containers by default, embedded TSDB.

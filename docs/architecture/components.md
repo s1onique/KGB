@@ -1,6 +1,6 @@
 # Components
 
-## station
+## UVB-76
 
 Language: Go
 
@@ -16,7 +16,7 @@ Responsibilities:
 - dashboard
 - report collection
 - desired-state signing
-- station federation
+- UVB-76 federation
 - history storage
 
 ## tovarisch

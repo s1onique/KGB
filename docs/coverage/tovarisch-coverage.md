@@ -52,7 +52,7 @@ This document tracks which specific behaviors are covered by automated checks.
 | Tunnel supervision | Tunnel backend not designed yet | Design tunnel interface and add coverage |
 | Signed status reports | Report schema TBD; no signing implementation | Define report schema and add coverage |
 | Desired-state pull | Desired-state model not designed | Design desired-state interface and add coverage |
-| Transport to station | Station-side not implemented | Implement station transport and add coverage |
+| Transport to UVB-76 | UVB-76-side not implemented | Implement UVB-76 transport and add coverage |
 | state_dir (directory exists) | Io.Dir API not yet understood in Zig 0.16; placeholder returns warn | Investigate std.fs.Dir.stat() or simpler API |
 | state_dir (path is file, not dir) | Io.Dir API not yet understood; placeholder only | Implement real filesystem check |
 | state_dir (permission denied) | Io.Dir API not yet understood; placeholder only | Implement real filesystem check |

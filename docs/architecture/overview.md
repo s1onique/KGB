@@ -2,11 +2,11 @@
 
 KGB consists of control towers and leaf nodes.
 
-## Station
+## UVB-76
 
-A station is a control tower.
+UVB-76 is the control tower.
 
-Stations run on trusted or home infrastructure and may use Go, a database, and a denser web UI.
+UVB-76 runs on trusted or home infrastructure and may use Go, a database, and a denser web UI.
 
 Responsibilities:
 
@@ -14,7 +14,7 @@ Responsibilities:
 - sign desired state
 - manage node inventory
 - show operational dashboard
-- synchronize with peer stations
+- synchronize with peer UVB-76s
 - manage transport configuration
 
 ## Tovarisch
@@ -36,7 +36,7 @@ Responsibilities:
 
 Leafs pull.
 
-Stations do not require inbound access to leafs.
+UVB-76s do not require inbound access to leafs.
 
 Desired state is signed.
 
