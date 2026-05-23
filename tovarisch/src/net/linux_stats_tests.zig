@@ -238,11 +238,9 @@ test "readInterfaceStats: live sysfs smoke test on Linux" {
     }
 
     // Use opendir/readdir to find interfaces with statistics directories
-    const dir = std.c.opendir(sysfs_root);
-    if (dir == null) {
-        // Cannot open /sys/class/net — skip
-        return error.SkipZigTest;
-    }
+    // std.c.opendir() returns ?*c.DIR — unwrap once, pass non-optional to readdir/closedir
+    const dir_optional = std.c.opendir(sysfs_root);
+    const dir = dir_optional orelse return error.SkipZigTest;
     defer _ = std.c.closedir(dir);
 
     var found_iface: [64]u8 = undefined;
@@ -250,8 +248,8 @@ test "readInterfaceStats: live sysfs smoke test on Linux" {
     var found = false;
 
     while (true) {
-        const entry = std.c.readdir(dir);
-        if (entry == null) break;
+        // std.c.readdir() returns ?*c.dirent — unwrap with orelse break
+        const entry = std.c.readdir(dir) orelse break;
 
         // Get null-terminated name from dirent
         const name_ptr = @as([*:0]const u8, @ptrFromInt(@intFromPtr(entry) + @offsetOf(std.c.dirent, "d_name")));

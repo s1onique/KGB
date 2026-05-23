@@ -37,6 +37,30 @@ Recording field notes from Zig 0.16 experiments. Confidence varies; do not promo
 
 ---
 
+## 2026-05-23 — `std.c.opendir()` returns optional C pointer
+
+- **Context:** Linux CI fails in `tovarisch/src/net/linux_stats_tests.zig` on `std.c.opendir()` result passed to `std.c.readdir()`.
+- **Symptom:** `error: expected type '*c.DIR', found '?*c.DIR'`
+- **Failed assumption:** The optional DIR pointer from `opendir()` could be passed directly to `readdir()`. Zig 0.16 does not implicitly unwrap optional C pointers.
+- **Working fix:** Unwrap `opendir()` result once with `orelse`, pass non-optional to both `readdir()` and `closedir()`:
+  ```zig
+  const dir_optional = std.c.opendir(sysfs_root);
+  const dir = dir_optional orelse return error.SkipZigTest;
+  defer _ = std.c.closedir(dir);
+
+  while (true) {
+      const entry = std.c.readdir(dir) orelse break;
+      // ... process entry ...
+  }
+  ```
+- **Why this escaped:** macOS local tests skip the Linux-only smoke test, so the type mismatch only surfaces on Linux CI.
+- **Files affected:** `tovarisch/src/net/linux_stats_tests.zig`
+- **Promote to field manual:** Yes — added "libc Directory APIs with Optional C Pointers" section.
+
+**Confidence:** high; same class as the `.WRONLY` ACCMODE issue — platform-specific branch not validated until Linux CI runs.
+
+---
+
 ## 2026-05-23 — Linux open flags: ACCMODE, not boolean `.WRONLY`
 
 - **Context:** Linux CI fails in `tovarisch/src/net/linux_stats.zig` on open flags.
