@@ -2,6 +2,7 @@
 //
 // ACT 5a: Pure parsing helpers (InterfaceStats, parseCounter, statsFromCounters).
 // ACT 5b: Live sysfs reading (readInterfaceStats) with test fixtures.
+// ACT 5c: Live sysfs smoke test in linux_stats_tests.zig.
 
 const std = @import("std");
 
@@ -59,10 +60,12 @@ fn toCString(path: []const u8, buf: *[4096]u8) error{PathTooLong}![*:0]const u8 
     return @as([*:0]const u8, @ptrCast(buf));
 }
 
-fn fileExists(path: []const u8) bool {
+/// Check if a file or directory exists.
+/// Exported for test access (linux_stats_tests.zig).
+pub fn fileExists(path: []const u8) bool {
     var path_buf: [4096]u8 = undefined;
     const c_path = toCString(path, &path_buf) catch return false;
-    
+
     if (@import("builtin").os.tag == .linux) {
         const flags = std.os.linux.O{ .ACCMODE = std.posix.ACCMODE.RDONLY };
         const fd = std.c.open(c_path, flags, @as(c_uint, 0));
@@ -79,7 +82,7 @@ fn fileExists(path: []const u8) bool {
 fn openForRead(path: []const u8) ReadError!usize {
     var path_buf: [4096]u8 = undefined;
     const c_path = toCString(path, &path_buf) catch return error.StatFileUnreadable;
-    
+
     if (@import("builtin").os.tag == .linux) {
         const flags = std.os.linux.O{ .ACCMODE = std.posix.ACCMODE.RDONLY };
         const fd = std.c.open(c_path, flags, @as(c_uint, 0));
@@ -97,7 +100,7 @@ fn openForRead(path: []const u8) ReadError!usize {
 fn openForWrite(path: []const u8) ReadError!usize {
     var path_buf: [4096]u8 = undefined;
     const c_path = toCString(path, &path_buf) catch return error.StatFileUnreadable;
-    
+
     if (@import("builtin").os.tag == .linux) {
         const flags = std.os.linux.O{ .CREAT = true, .WRONLY = true };
         const fd = std.c.open(c_path, flags, @as(c_uint, 0o644));
@@ -145,29 +148,35 @@ fn writeToFd(fd: usize, contents: []const u8) !void {
 fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     const fd = try openForRead(path);
     defer closeFile(fd);
-    
+
     var buf: [4096]u8 = undefined;
     const n = try readFromFd(fd, &buf);
-    
+
     return try allocator.dupe(u8, buf[0..n]);
 }
 
-fn writeFile(path: []const u8, contents: []const u8) !void {
-    const fd = try openForWrite(path);
-    defer closeFile(fd);
-    try writeToFd(fd, contents);
-}
-
-fn makeDir(path: []const u8) !void {
+/// Create a directory.
+/// Exported for test access (linux_stats_tests.zig).
+pub fn makeDir(path: []const u8) !void {
     var path_buf: [4096]u8 = undefined;
     const c_path = try toCString(path, &path_buf);
     _ = std.c.mkdir(c_path, 0o755);
 }
 
-fn deleteTree(path: []const u8) !void {
+/// Delete an empty directory.
+/// Exported for test access (linux_stats_tests.zig).
+pub fn deleteTree(path: []const u8) !void {
     var path_buf: [4096]u8 = undefined;
     const c_path = try toCString(path, &path_buf);
     _ = std.c.rmdir(c_path);
+}
+
+/// Write contents to a file.
+/// Exported for test access (linux_stats_tests.zig).
+pub fn writeFile(path: []const u8, contents: []const u8) !void {
+    const fd = try openForWrite(path);
+    defer closeFile(fd);
+    try writeToFd(fd, contents);
 }
 
 // ============================================================================
@@ -181,36 +190,36 @@ pub fn readInterfaceStats(
 ) ReadError!InterfaceStats {
     var iface_dir_buf: [4096]u8 = undefined;
     const iface_dir = std.fmt.bufPrint(&iface_dir_buf, "{s}/{s}", .{ sysfs_root, iface }) catch return error.StatFileUnreadable;
-    
+
     if (!fileExists(iface_dir)) return error.InterfaceNotFound;
-    
+
     var stats_dir_buf: [4096]u8 = undefined;
     const stats_dir = std.fmt.bufPrint(&stats_dir_buf, "{s}/statistics", .{iface_dir}) catch return error.StatFileUnreadable;
-    
+
     if (!fileExists(stats_dir)) return error.StatisticsDirMissing;
-    
+
     var rx_bytes_buf: [4096]u8 = undefined;
     var tx_bytes_buf: [4096]u8 = undefined;
     var rx_packets_buf: [4096]u8 = undefined;
     var tx_packets_buf: [4096]u8 = undefined;
-    
+
     const rx_bytes_path = std.fmt.bufPrint(&rx_bytes_buf, "{s}/rx_bytes", .{stats_dir}) catch return error.StatFileUnreadable;
     const tx_bytes_path = std.fmt.bufPrint(&tx_bytes_buf, "{s}/tx_bytes", .{stats_dir}) catch return error.StatFileUnreadable;
     const rx_packets_path = std.fmt.bufPrint(&rx_packets_buf, "{s}/rx_packets", .{stats_dir}) catch return error.StatFileUnreadable;
     const tx_packets_path = std.fmt.bufPrint(&tx_packets_buf, "{s}/tx_packets", .{stats_dir}) catch return error.StatFileUnreadable;
-    
+
     const rx_bytes_content = try readFile(allocator, rx_bytes_path);
     defer allocator.free(rx_bytes_content);
-    
+
     const tx_bytes_content = try readFile(allocator, tx_bytes_path);
     defer allocator.free(tx_bytes_content);
-    
+
     const rx_packets_content = try readFile(allocator, rx_packets_path);
     defer allocator.free(rx_packets_content);
-    
+
     const tx_packets_content = try readFile(allocator, tx_packets_path);
     defer allocator.free(tx_packets_content);
-    
+
     return InterfaceStats{
         .rx_bytes = try parseCounter(rx_bytes_content),
         .tx_bytes = try parseCounter(tx_bytes_content),
@@ -231,196 +240,4 @@ pub fn statsFromCounters(
         .rx_packets = try parseCounter(rx_packets),
         .tx_packets = try parseCounter(tx_packets),
     };
-}
-
-// ============================================================================
-// Tests (ACT 5a)
-// ============================================================================
-
-test "parseCounter: plain integer" {
-    try std.testing.expectEqual(@as(u64, 123), try parseCounter("123"));
-}
-
-test "parseCounter: integer with newline" {
-    try std.testing.expectEqual(@as(u64, 123), try parseCounter("123\n"));
-}
-
-test "parseCounter: rejects empty input" {
-    try std.testing.expectError(error.EmptyCounter, parseCounter(""));
-}
-
-test "parseCounter: rejects negative input" {
-    try std.testing.expectError(error.NegativeCounter, parseCounter("-1\n"));
-}
-
-test "parseCounter: rejects non-numeric input" {
-    try std.testing.expectError(error.InvalidCounter, parseCounter("abc\n"));
-}
-
-test "parseCounter: handles large u64 values" {
-    try std.testing.expectEqual(@as(u64, 18446744073709551615), try parseCounter("18446744073709551615"));
-}
-
-test "parseCounter: handles u64 max plus one (overflow)" {
-    try std.testing.expectError(error.CounterOverflow, parseCounter("18446744073709551616"));
-}
-
-test "statsFromCounters: builds InterfaceStats from valid counters" {
-    const stats = try statsFromCounters("100", "200", "50", "75");
-    try std.testing.expectEqual(@as(u64, 100), stats.rx_bytes);
-    try std.testing.expectEqual(@as(u64, 200), stats.tx_bytes);
-    try std.testing.expectEqual(@as(u64, 50), stats.rx_packets);
-    try std.testing.expectEqual(@as(u64, 75), stats.tx_packets);
-}
-
-// ============================================================================
-// Tests (ACT 5b)
-// ============================================================================
-
-test "readInterfaceStats: reads valid stats from fixture" {
-    const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_stats_test";
-    
-    makeDir(base) catch {};
-    defer deleteTree(base) catch {};
-    
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0", .{base}) catch unreachable;
-        makeDir(path) catch {};
-    }
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics", .{base}) catch unreachable;
-        makeDir(path) catch {};
-    }
-    
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/rx_bytes", .{base}) catch unreachable;
-        writeFile(path, "100\n") catch {};
-    }
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/tx_bytes", .{base}) catch unreachable;
-        writeFile(path, "200\n") catch {};
-    }
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/rx_packets", .{base}) catch unreachable;
-        writeFile(path, "10\n") catch {};
-    }
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/tx_packets", .{base}) catch unreachable;
-        writeFile(path, "20\n") catch {};
-    }
-    
-    const stats = try readInterfaceStats(allocator, base, "eth0");
-    try std.testing.expectEqual(@as(u64, 100), stats.rx_bytes);
-    try std.testing.expectEqual(@as(u64, 200), stats.tx_bytes);
-    try std.testing.expectEqual(@as(u64, 10), stats.rx_packets);
-    try std.testing.expectEqual(@as(u64, 20), stats.tx_packets);
-}
-
-test "readInterfaceStats: returns error when interface directory missing" {
-    const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_stats_test2";
-    
-    makeDir(base) catch {};
-    defer deleteTree(base) catch {};
-    
-    try std.testing.expectError(error.InterfaceNotFound, readInterfaceStats(allocator, base, "eth99"));
-}
-
-test "readInterfaceStats: returns error when statistics directory missing" {
-    const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_stats_test3";
-    
-    makeDir(base) catch {};
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0", .{base}) catch unreachable;
-        makeDir(path) catch {};
-    }
-    defer deleteTree(base) catch {};
-    
-    try std.testing.expectError(error.StatisticsDirMissing, readInterfaceStats(allocator, base, "eth0"));
-}
-
-test "readInterfaceStats: returns error when counter file missing" {
-    const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_stats_test4";
-    
-    makeDir(base) catch {};
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0", .{base}) catch unreachable;
-        makeDir(path) catch {};
-    }
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics", .{base}) catch unreachable;
-        makeDir(path) catch {};
-    }
-    defer deleteTree(base) catch {};
-    
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/tx_bytes", .{base}) catch unreachable;
-        writeFile(path, "200\n") catch {};
-    }
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/rx_packets", .{base}) catch unreachable;
-        writeFile(path, "10\n") catch {};
-    }
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/tx_packets", .{base}) catch unreachable;
-        writeFile(path, "20\n") catch {};
-    }
-    
-    try std.testing.expectError(error.StatFileMissing, readInterfaceStats(allocator, base, "eth0"));
-}
-
-test "readInterfaceStats: returns error on invalid counter contents" {
-    const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_stats_test5";
-    
-    makeDir(base) catch {};
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0", .{base}) catch unreachable;
-        makeDir(path) catch {};
-    }
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics", .{base}) catch unreachable;
-        makeDir(path) catch {};
-    }
-    defer deleteTree(base) catch {};
-    
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/rx_bytes", .{base}) catch unreachable;
-        writeFile(path, "abc\n") catch {};
-    }
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/tx_bytes", .{base}) catch unreachable;
-        writeFile(path, "200\n") catch {};
-    }
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/rx_packets", .{base}) catch unreachable;
-        writeFile(path, "10\n") catch {};
-    }
-    {
-        var buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "{s}/eth0/statistics/tx_packets", .{base}) catch unreachable;
-        writeFile(path, "20\n") catch {};
-    }
-    
-    try std.testing.expectError(error.InvalidCounter, readInterfaceStats(allocator, base, "eth0"));
 }

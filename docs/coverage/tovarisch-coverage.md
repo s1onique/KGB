@@ -194,27 +194,23 @@ The following code is **fully tested** via pure parser unit tests on macOS:
 
 #### Runtime Paths (Linux-only, Mixed Coverage)
 
-These functions reach Linux-specific syscalls that are exercised in Linux CI via `linux_smoke_test.sh`:
+These functions reach Linux-specific syscalls that are exercised in Linux CI via `linux_smoke_test.sh` and/or Zig unit tests:
 
 | Function | Linux API | Coverage |
 |----------|-----------|----------|
 | `linuxGetVmRssKiB()` | `std.c.open("/proc/self/status")`, `std.c.read()`, `std.c.close()` | **Linux CI smoke test** (`linux_smoke_test.sh: test_rss_read`) |
-| `fileExists()` (Linux path) | `std.c.open()` | **Compile-gated only** (fixture tests cover logic; real sysfs exercised in future ACT) |
-| `openForRead()` (Linux path) | `std.c.open()` | **Compile-gated only** (fixture tests cover logic; real sysfs exercised in future ACT) |
-| `openForWrite()` (Linux path) | `std.c.open(O.CREAT)` | **Compile-gated only** (used in fixture tests only) |
-| `closeFile()` (Linux path) | `std.c.close()` | **Compile-gated only** (fixture tests cover logic; real sysfs exercised in future ACT) |
-| `readFromFd()` (Linux path) | `std.c.read()` | **Compile-gated only** (fixture tests cover logic; real sysfs exercised in future ACT) |
-| `writeToFd()` (Linux path) | `std.c.write()` | **Compile-gated only** (used in fixture tests only) |
+| `fileExists()` (Linux path) | `std.c.open()` | **Linux CI smoke test** (`linux_stats.zig: live sysfs smoke test`) |
+| `openForRead()` (Linux path) | `std.c.open()` | **Linux CI smoke test** (`linux_stats.zig: live sysfs smoke test`) |
+| `openForWrite()` (Linux path) | `std.c.open(O.CREAT)` | **Compile-gated only** (used in fixture tests only; no production write path) |
+| `closeFile()` (Linux path) | `std.c.close()` | **Linux CI smoke test** (`linux_stats.zig: live sysfs smoke test`) |
+| `readFromFd()` (Linux path) | `std.c.read()` | **Linux CI smoke test** (`linux_stats.zig: live sysfs smoke test`) |
+| `writeToFd()` (Linux path) | `std.c.write()` | **Compile-gated only** (used in fixture tests only; no production write path) |
+| `readInterfaceStats()` (live sysfs) | All above via `readFile()` | **Linux CI smoke test** (`linux_stats.zig: live sysfs smoke test`) |
 
-#### Accepted Uncovered Risk
+#### Accepted Uncovered Risk (Remaining)
 
 | Path | Reason Uncovered | Follow-up |
 |------|------------------|-----------|
-| `readInterfaceStats()` live sysfs read | Shell sysfs smoke proves counters readable, not that Zig reader works on Linux | **Next ACT**: Add Linux-only Zig test that calls `readInterfaceStats()` with real sysfs root |
-| `fileExists()` (Linux path) | Fixture tests prove logic; real sysfs not exercised through `tovarisch` | **Future ACT**: Wire `readInterfaceStats()` into a public command or internal test |
-| `openForRead()` (Linux path) | Fixture tests prove logic; real sysfs not exercised through `tovarisch` | **Future ACT**: Wire `readInterfaceStats()` into a public command or internal test |
-| `closeFile()` (Linux path) | Fixture tests prove logic; real sysfs not exercised through `tovarisch` | **Future ACT**: Wire `readInterfaceStats()` into a public command or internal test |
-| `readFromFd()` (Linux path) | Fixture tests prove logic; real sysfs not exercised through `tovarisch` | **Future ACT**: Wire `readInterfaceStats()` into a public command or internal test |
 | `openForWrite()` (Linux path) | Used only for test fixtures; no production write path needed | Acceptable — no production write path needed |
 | `writeToFd()` (Linux path) | Used only for test fixtures; no production write path needed | Acceptable — no production write path needed |
 
