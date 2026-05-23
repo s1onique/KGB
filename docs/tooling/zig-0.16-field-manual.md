@@ -365,3 +365,21 @@ Also consider native architecture variants (e.g., `aarch64-macos` for Apple Sili
 
 For Linux-specific patterns (file operations, directory APIs, cross-platform compilation, etc.), see [`zig-0.16-linux-patterns.md`](./zig-0.16-linux-patterns.md).
 
+## ArrayList allocator-passing pattern
+
+In Zig 0.16-era `std.ArrayList`, initialize with `.empty` and pass the allocator to mutating/ownership methods:
+
+```zig
+var names = std.ArrayList([]const u8).empty;
+defer names.deinit(allocator);
+
+try names.append(allocator, item);
+const owned = try names.toOwnedSlice(allocator);
+```
+
+Use the same allocator throughout the list lifetime.
+
+## dirent name field
+
+In this Zig 0.16 environment, `std.c.dirent` exposes the directory-entry name as `name`, not `d_name`.
+
