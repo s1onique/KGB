@@ -136,6 +136,54 @@ const VoidWriter = struct {
     pub fn flush(_: Self) error{}!void {}
 };
 
+/// A writer that captures output into a fixed buffer for testing stderr content.
+fn CapturingWriter(comptime capacity: usize) type {
+    return struct {
+        const Self = @This();
+        const Overflow = error{BufferOverflow};
+
+        buffer: [capacity]u8 = undefined,
+        len: usize = 0,
+
+        pub fn writeAll(self: *Self, data: []const u8) Overflow!void {
+            if (self.len + data.len > capacity) return error.BufferOverflow;
+            @memcpy(self.buffer[self.len..][0..data.len], data);
+            self.len += data.len;
+        }
+
+        pub fn write(self: *Self, data: []const u8) Overflow!usize {
+            if (self.len + data.len > capacity) return error.BufferOverflow;
+            @memcpy(self.buffer[self.len..][0..data.len], data);
+            self.len += data.len;
+            return data.len;
+        }
+
+        pub fn print(self: *Self, comptime fmt: []const u8, args: anytype) Overflow!void {
+            const slice = self.buffer[self.len..];
+            const written = std.fmt.bufPrint(slice, fmt, args) catch return error.BufferOverflow;
+            self.len += written.len;
+        }
+
+        pub fn writeByte(self: *Self, byte: u8) Overflow!void {
+            if (self.len >= capacity) return error.BufferOverflow;
+            self.buffer[self.len] = byte;
+            self.len += 1;
+        }
+
+        pub fn flush(_: Self) error{}!void {}
+
+        /// Check if the captured output contains the given substring.
+        pub fn contains(self: *Self, needle: []const u8) bool {
+            return std.mem.indexOf(u8, self.buffer[0..self.len], needle) != null;
+        }
+
+        /// Reset the buffer for reuse.
+        pub fn reset(self: *Self) void {
+            self.len = 0;
+        }
+    };
+}
+
 test "parseServeArgs defaults to loopback port 8317" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{}, w);
@@ -256,4 +304,25 @@ test "parseServeArgs with other public IP rejected without dangerous flag" {
 test "parseServeArgs with --listen-all still returns usage" {
     const w = VoidWriter{};
     try std.testing.expect(parseServeArgs(&.{"--listen-all"}, w) == .usage);
+}
+
+// --- Stderr content tests for bind rejection safety messages ---
+
+test "parseServeArgs rejects public IP and mentions safety phrase" {
+    var w = CapturingWriter(256){};
+    try std.testing.expect(parseServeArgs(&.{ "--listen", "8.8.8.8:8317" }, &w) == .usage);
+    try std.testing.expect(w.contains("refusing to bind to public IP address"));
+    try std.testing.expect(w.contains("--listen-all-public-dangerous"));
+}
+
+test "parseServeArgs rejects 0.0.0.0 and mentions wildcard phrase" {
+    var w = CapturingWriter(256){};
+    try std.testing.expect(parseServeArgs(&.{ "--listen", "0.0.0.0:8317" }, &w) == .usage);
+    try std.testing.expect(w.contains("0.0.0.0 bind requires --listen-all-public-dangerous"));
+}
+
+test "parseServeArgs deprecated --listen-all mentions dangerous flag" {
+    var w = CapturingWriter(256){};
+    try std.testing.expect(parseServeArgs(&.{"--listen-all"}, &w) == .usage);
+    try std.testing.expect(w.contains("--listen-all-public-dangerous"));
 }
