@@ -245,3 +245,47 @@ const num_str = std.fmt.bufPrint(&num_buf, "{d}\n", .{counter_value}) catch unre
 - **Promote to field manual:** No — specific to the `writeLogRecord` pattern. This is a working fix pattern.
 
 **Confidence:** high; verified with `make tovarisch-build`, `make tovarisch-test`, `make gate` all passing.
+
+---
+
+## 2026-05-24 — rtnetlink NETLINK_ROUTE socket implementation lessons
+
+- **Context:** Implementing `discoverPrivateAddresses()` in `tovarisch/src/net/linux_addr.zig` using `AF_NETLINK` socket for live interface address discovery.
+- **Key lessons learned:**
+
+### AF_NETLINK = 16, not a named constant
+- `AF_NETLINK` is not exposed as a named constant in `std.c`; use literal `16`.
+- `NETLINK_ROUTE` protocol is `0`.
+- `SOCK_RAW` socket type is `3`.
+
+### Message alignment with `align4()`
+- Netlink messages and attributes must be aligned to 4-byte boundaries.
+- Use `(len + 3) & ~@as(usize, 3)` for alignment; advance offsets by aligned lengths.
+- Buffer offset-based iteration avoids pointer arithmetic pitfalls.
+
+### Multipart response handling via `NLMSG_DONE`
+- Kernel may return multipart messages; outer loop continues until `nlhdr.nlmsg_type == NLMSG_DONE`.
+- Use a `done` flag: `if (nlhdr_ptr.nlmsg_type == NLMSG_DONE) { done = true; break; }`
+- `RTM_NEWADDR` responses contain interface address attributes.
+
+### Attribute parsing: buffer offsets, not pointers
+- `rtattr.rta_len` includes header size; attribute data starts at `pos + @sizeOf(rtattr)`.
+- Use explicit bounds checking: `if (data_end >= data_start + 4)` for IPv4.
+- `@memcpy` with exact length: `@memcpy(address_octets[0..4], buffer[data_start .. data_start + 4])`.
+
+### IFA_ADDRESS vs IFA_LOCAL fallback
+- IPv4 addresses come in `IFA_ADDRESS` (peer/destination) and `IFA_LOCAL` (local interface).
+- For point-to-point links, `IFA_LOCAL` may be the only address present.
+- Parse `IFA_ADDRESS` first, then fall back to `IFA_LOCAL` if not found.
+
+### IFA_LABEL for interface names
+- Interface names (eth0, wg0, lo) appear in `IFA_LABEL` attribute.
+- `parseLabel()` extracts null-terminated strings from netlink buffer: handles both null-terminated and length-bounded strings.
+- Labels may contain null bytes in the middle; only return up to first null.
+
+### AF_INET filter for IPv4-only
+- Check `ifa_family == AF_INET` (2) to filter out IPv6 addresses.
+- Set `ifa_family = 0` (AF_UNSPEC) in request to get all families, filter in response.
+
+- **Files affected:** `tovarisch/src/net/linux_addr.zig`, `tovarisch/src/net/linux_addr_parse.zig`
+- **Promote to field manual:** Yes — add "Linux rtnetlink Socket Pattern" section.

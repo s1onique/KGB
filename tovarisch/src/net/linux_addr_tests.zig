@@ -4,7 +4,7 @@
 // 1. Error handling for invalid socket operations
 // 2. InterfaceAddress struct contract
 // 3. Linux smoke test for rtnetlink operations
-// 4. Helper function unit tests (align4, ipv4ToString, parseLabel)
+// 4. Helper function unit tests (via linux_addr_parse.zig)
 //
 // Note: Full fixture-based testing of rtnetlink is complex because it requires
 // mocking kernel responses. The primary test strategy is:

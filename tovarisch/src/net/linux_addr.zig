@@ -20,6 +20,12 @@
 const std = @import("std");
 const private_ip = @import("private_ip.zig");
 const interface_filter = @import("interface_filter.zig");
+const linux_addr_parse = @import("linux_addr_parse.zig");
+
+// Re-export parser helpers for convenience
+pub const align4 = linux_addr_parse.align4;
+pub const formatIpv4 = linux_addr_parse.formatIpv4;
+pub const parseLabel = linux_addr_parse.parseLabel;
 
 // ============================================================================
 // C Socket Definitions
@@ -102,44 +108,6 @@ pub const AddrError = error{
     OutOfMemory,
     MissingInterfaceName,
 };
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-/// Align a length to 4 bytes for netlink message alignment.
-pub fn align4(len: usize) usize {
-    return (len + 3) & ~@as(usize, 3);
-}
-
-/// Format an IPv4 address into a caller-provided buffer.
-/// Returns a slice into the buffer on success.
-pub fn formatIpv4(octets: [4]u8, buf: []u8) ![]const u8 {
-    return std.fmt.bufPrint(buf, "{}.{}.{}.{}", .{
-        octets[0],
-        octets[1],
-        octets[2],
-        octets[3],
-    });
-}
-
-/// Parse a null-terminated string from a buffer at a given offset.
-/// Returns the string if found and non-empty.
-pub fn parseLabel(buffer: []const u8, start_offset: usize, end_offset: usize) ?[]const u8 {
-    // Check bounds before slicing
-    if (start_offset >= buffer.len or end_offset > buffer.len) return null;
-    if (start_offset >= end_offset) return null;
-    const data_len = end_offset - start_offset;
-    if (data_len < 1) return null;
-
-    // Find null terminator or use full data
-    const data = buffer[start_offset..end_offset];
-    const null_pos = std.mem.indexOfScalar(u8, data, 0);
-    const label_len = if (null_pos) |pos| pos else data_len;
-
-    if (label_len == 0) return null;
-    return data[0..label_len];
-}
 
 // ============================================================================
 // Core Discovery Function
