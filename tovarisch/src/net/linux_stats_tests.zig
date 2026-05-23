@@ -252,7 +252,7 @@ test "readInterfaceStats: live sysfs smoke test on Linux" {
         // readInterfaceStats returns InterfaceNotFound or StatisticsDirMissing
         // if the interface or its statistics directory doesn't exist.
         // We treat any error as "try next candidate".
-        readInterfaceStats(allocator, sysfs_root, iface) catch continue;
+        _ = readInterfaceStats(allocator, sysfs_root, iface) catch continue;
 
         // Successful read is the smoke assertion.
         // No tautological assertions like stats.rx_bytes >= 0 for unsigned integers.
