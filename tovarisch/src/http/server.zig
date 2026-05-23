@@ -44,7 +44,11 @@ pub const Server = struct {
     pub fn listen(self: *Self) !void {
         // Create socket
         const fd = c.socket(c.AF.INET, c.SOCK.STREAM, 0);
-        if (fd < 0) return error.SocketCreateFailed;
+        if (fd < 0) {
+            const errno_val = std.c._errno().*;
+            std.debug.print("socket failed errno={d}\n", .{errno_val});
+            return error.SocketCreateFailed;
+        }
         self.listener_fd = @as(i32, fd);
         errdefer {
             _ = c.close(self.listener_fd);
@@ -54,7 +58,11 @@ pub const Server = struct {
         // Set SO_REUSEADDR
         const one: c_int = 1;
         const so_result = c.setsockopt(self.listener_fd, c.SOL.SOCKET, c.SO.REUSEADDR, &one, @sizeOf(c_int));
-        if (so_result < 0) return error.SetsockoptFailed;
+        if (so_result < 0) {
+            const errno_val = std.c._errno().*;
+            std.debug.print("setsockopt failed errno={d}\n", .{errno_val});
+            return error.SetsockoptFailed;
+        }
 
         // Construct sockaddr_in
         var addr = SockaddrIn{
@@ -65,11 +73,19 @@ pub const Server = struct {
         };
 
         const bind_result = c.bind(self.listener_fd, @as(*c.sockaddr, @ptrFromInt(@intFromPtr(&addr))), @sizeOf(SockaddrIn));
-        if (bind_result < 0) return error.BindFailed;
+        if (bind_result < 0) {
+            const errno_val = std.c._errno().*;
+            std.debug.print("bind failed errno={d}\n", .{errno_val});
+            return error.BindFailed;
+        }
 
         // Listen
         const listen_result = c.listen(self.listener_fd, 128);
-        if (listen_result < 0) return error.ListenFailed;
+        if (listen_result < 0) {
+            const errno_val = std.c._errno().*;
+            std.debug.print("listen failed errno={d}\n", .{errno_val});
+            return error.ListenFailed;
+        }
     }
 
     /// Stop the server.
@@ -95,9 +111,8 @@ pub fn serve(config: Config) !void {
     var server = Server.init(config);
     defer server.deinit();
 
-    std.debug.print("Listening on {s}:{d}\n", .{ config.address, config.port });
-
     try server.listen();
+    std.debug.print("Listening on {s}:{d}\n", .{ config.address, config.port });
 }
 
 /// Accept one connection and handle it (blocking).
@@ -130,14 +145,16 @@ pub fn serveForever(config: Config) !void {
     var server = Server.init(config);
     defer server.deinit();
 
-    std.debug.print("Listening on {s}:{d}\n", .{ config.address, config.port });
-    
     try server.listen();
+    std.debug.print("Listening on {s}:{d}\n", .{ config.address, config.port });
+    std.debug.print("Entering accept loop\n", .{});
 
     // Blocking accept loop - stays alive until interrupted.
     // This is the correct daemon behavior.
     while (true) {
-        acceptOneBlocking(&server) catch {};
+        acceptOneBlocking(&server) catch |err| {
+            std.debug.print("accept loop error: {}\n", .{err});
+        };
     }
 }
 
