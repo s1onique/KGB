@@ -238,24 +238,9 @@ const unit_tests = b.addTest(.{
 
 ## ACT 5: Add private interface traffic collector from Linux sysfs
 
-### Board
+**Status: open** (slice ACT 5a ✅ done)
 
-| ID | Work Item | Status |
-|---|---|---|
-| webservice-026 | Create `net/linux_stats.zig` - read /sys/class/net/*/statistics | open |
-| webservice-027 | Implement `getInterfaceStats()` function | open |
-| webservice-028 | Filter to private interfaces only | open |
-| webservice-029 | Add interface stats to metrics model | open |
-| webservice-030 | Add tests for Linux stats collection | open |
-| webservice-031 | Run `make gate`, `make tovarisch-build`, `make tovarisch-test` | open |
-
-### Acceptance
-
-- [ ] `linux_stats.zig` reads rx_bytes, tx_bytes, rx_packets, tx_packets from sysfs.
-- [ ] Interface stats are available for private interfaces.
-- [ ] Non-private interfaces are filtered out by default.
-- [ ] Tests verify stats reading.
-- [ ] `make gate` passes.
+See [`act-5-sysfs-collector.md`](act-5-sysfs-collector.md) for full details.
 
 ## ACT 6: Add tunnel interface detection and up/down summary
 

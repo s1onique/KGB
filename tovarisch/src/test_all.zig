@@ -11,6 +11,7 @@ const std = @import("std");
 const _cli = @import("cli.zig");
 const _status = @import("status.zig");
 const _net_private_ip = @import("net/private_ip.zig");
+const _net_linux_stats = @import("net/linux_stats.zig");
 const _http_response = @import("http/response.zig");
 const _http_routes = @import("http/routes.zig");
 const _http_server = @import("http/server.zig");
@@ -20,6 +21,10 @@ const _runtime_telemetry = @import("runtime/telemetry.zig");
 // This ensures the test binary actually runs the tests from these modules
 test {
     std.testing.refAllDecls(@import("net/private_ip.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("net/linux_stats.zig"));
 }
 
 test {
