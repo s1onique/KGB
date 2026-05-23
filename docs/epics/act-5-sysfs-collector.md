@@ -300,6 +300,14 @@ The filtering module provides:
 - `tovarisch/src/net/interface_filter_tests.zig` — comprehensive fixture tests
 - `tovarisch/src/test_all.zig` — Added refAllDecls for interface_filter modules
 
+### IPv6 scope
+
+ACT 5e is intentionally IPv4-only.
+
+The current filtering path uses `private_ip.classifyIpv4Text()`. IPv6 addresses, including Unique Local Addresses such as `fd00::/8`, are treated as unsupported and therefore excluded from private-interface filtering for now.
+
+This is deliberate. IPv6 support, including ULA classification and IPv6-aware filtering, is deferred to a future dedicated ACT. Do not add IPv6 support opportunistically while implementing live Linux address discovery or `/metrics.json` wiring.
+
 ### Next: ACT 5f
 
 ACT 5f should add live Linux address discovery (likely via rtnetlink).
@@ -316,5 +324,11 @@ ACT 5b will add:
 - Enumerating network interfaces
 - Filtering to private interfaces
 - Wiring stats into the metrics model
+
+## Future: IPv6 private-interface support
+
+Deferred. A future ACT should add IPv6 parsing/classification and update interface filtering to include IPv6 Unique Local Addresses. RFC 4193 defines Unique Local IPv6 Unicast Addresses for local communications; in practice, locally assigned ULAs use the `fd00::/8` space within the broader `fc00::/7` ULA block.
+
+This is intentionally out of scope for ACT 5e/5f.
 
 See main epic `tovarisch-webservice-day0.md` for full board.
