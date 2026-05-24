@@ -1,0 +1,37 @@
+{
+  "service": "tovarisch",
+  "version": "0.1.1",
+  "metrics_version": "0.4",
+  "runtime": {
+    "pid": 1234,
+    "rss_kib": 1920
+  },
+  "private_interfaces": [
+    {
+      "name": "eth0",
+      "rx_bytes": 123,
+      "tx_bytes": 456,
+      "rx_packets": 7,
+      "tx_packets": 8,
+      "rate": null,
+      "is_tunnel": false
+    },
+    {
+      "name": "wg0",
+      "rx_bytes": 1000,
+      "tx_bytes": 2000,
+      "rx_packets": 10,
+      "tx_packets": 20,
+      "rate": null,
+      "is_tunnel": true
+    }
+  ],
+  "tunnel_interfaces": ["wg0"],
+  "notes": [
+    "rate is null until a previous sample exists",
+    "interface counters are cumulative",
+    "IPv4 private interfaces only; IPv6 is deferred",
+    "runtime RSS is best-effort platform telemetry",
+    "tunnel_interfaces are name-based (wg*, tun*, tap*, etc.)"
+  ]
+}

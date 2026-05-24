@@ -11,6 +11,7 @@
 
 const std = @import("std");
 const rates = @import("rates.zig");
+const interface_filter = @import("interface_filter.zig");
 
 // ============================================================================
 // Data Structures
@@ -20,6 +21,8 @@ const rates = @import("rates.zig");
 pub const SampledInterface = struct {
     sample: rates.InterfaceCounterSample,
     rate: ?rates.InterfaceRate,
+    /// Whether this interface is a tunnel (WireGuard, TUN, TAP, etc.)
+    is_tunnel: bool,
 };
 
 /// Full sample data stored per interface in the sampler.
@@ -126,6 +129,7 @@ pub const InterfaceSampler = struct {
             try result.append(self.allocator, .{
                 .sample = result_sample,
                 .rate = rate,
+                .is_tunnel = interface_filter.isTunnelInterface(sample.name),
             });
 
             // Update sampler state - check if key already exists

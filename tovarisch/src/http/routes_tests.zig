@@ -115,7 +115,7 @@ test "metrics handler response contains metrics_version field" {
     try metrics.renderMetricsFallbackPayload(&writer);
 
     const json = buf[0..len];
-    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"metrics_version\":\"0.3\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"metrics_version\":\"0.4\""));
 }
 
 test "metrics handler response contains private_interfaces field" {

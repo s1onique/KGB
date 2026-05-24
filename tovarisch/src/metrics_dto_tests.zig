@@ -65,6 +65,7 @@ fn makeTestSampledInterface(
     tx_packets: u64,
     sampled_at_ms: i64,
     rate: ?rates.InterfaceRate,
+    is_tunnel: bool,
 ) !sampler.SampledInterface {
     const owned_name = try allocator.dupe(u8, name);
     return .{
@@ -77,6 +78,7 @@ fn makeTestSampledInterface(
             .sampled_at_ms = sampled_at_ms,
         },
         .rate = rate,
+        .is_tunnel = is_tunnel,
     };
 }
 
@@ -91,11 +93,11 @@ test "renderSampledInterfacesPayload: zero interfaces emits service" {
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"service\":\"tovarisch\""));
 }
 
-test "renderSampledInterfacesPayload: zero interfaces emits metrics_version 0.3" {
+test "renderSampledInterfacesPayload: zero interfaces emits metrics_version 0.4" {
     var w = TestWriter.init();
     const sampled: [0]SampledInterface = .{};
     try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
-    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.3\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.4\""));
 }
 
 test "renderSampledInterfacesPayload: zero interfaces emits empty array" {
@@ -118,7 +120,7 @@ test "renderSampledInterfacesPayload: emits rate is null note" {
 
 test "renderSampledInterfacesPayload: one interface without rate emits rate:null" {
     const allocator = std.testing.allocator;
-    const si = try makeTestSampledInterface(allocator, "wg0", 1000, 2000, 10, 20, 1000, null);
+    const si = try makeTestSampledInterface(allocator, "wg0", 1000, 2000, 10, 20, 1000, null, true);
     defer allocator.free(si.sample.name);
 
     var w = TestWriter.init();
@@ -150,7 +152,7 @@ test "renderSampledInterfacesPayload: one interface with rate" {
         .rx_packets_per_second = 10,
         .tx_packets_per_second = 20,
     };
-    const si = try makeTestSampledInterface(allocator, "eth0", 31000, 62000, 310, 620, 30000, rate);
+    const si = try makeTestSampledInterface(allocator, "eth0", 31000, 62000, 310, 620, 30000, rate, false);
     defer allocator.free(si.sample.name);
 
     var w = TestWriter.init();
@@ -182,10 +184,10 @@ test "renderSampledInterfacesPayload: two interfaces one with rate one without" 
         .rx_packets_per_second = 10,
         .tx_packets_per_second = 20,
     };
-    const si1 = try makeTestSampledInterface(allocator, "wg0", 31000, 62000, 310, 620, 30000, rate);
+    const si1 = try makeTestSampledInterface(allocator, "wg0", 31000, 62000, 310, 620, 30000, rate, true);
     defer allocator.free(si1.sample.name);
 
-    const si2 = try makeTestSampledInterface(allocator, "eth0", 1000, 2000, 10, 20, 1000, null);
+    const si2 = try makeTestSampledInterface(allocator, "eth0", 1000, 2000, 10, 20, 1000, null, false);
     defer allocator.free(si2.sample.name);
 
     var w = TestWriter.init();
@@ -204,7 +206,7 @@ test "renderSampledInterfacesPayload: two interfaces one with rate one without" 
 
 test "renderSampledInterfacesPayload: output is valid JSON structure" {
     const allocator = std.testing.allocator;
-    const si = try makeTestSampledInterface(allocator, "eth0", 100, 200, 1, 2, 1000, null);
+    const si = try makeTestSampledInterface(allocator, "eth0", 100, 200, 1, 2, 1000, null, false);
     defer allocator.free(si.sample.name);
 
     var w = TestWriter.init();

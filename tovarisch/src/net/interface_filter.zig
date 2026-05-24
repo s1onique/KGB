@@ -37,6 +37,52 @@ pub const InterfaceAddress = struct {
 };
 
 // ============================================================================
+// Tunnel Classification
+// ============================================================================
+
+/// Tunnel interface name prefixes that indicate tunnel-like interfaces.
+/// These are name-based heuristics for Linux network interfaces:
+/// - wg*  : WireGuard interfaces (digits only, e.g., wg0, wg1, wg42)
+/// - tun* : TUN (network tunnel) interfaces (OpenVPN, etc.)
+/// - tap* : TAP (ethernet tunnel) interfaces
+/// - sit* : SIT (Simple Internet Transition) tunnel
+/// - ip6tnl*: IPv6 tunnel interfaces
+/// - gre* : GRE tunnel interfaces
+/// - ipip* : IP-in-IP tunnel interfaces
+pub const tunnel_prefixes = [_][]const u8{
+    "wg",
+    "tun",
+    "tap",
+    "sit",
+    "ip6tnl",
+    "gre",
+    "ipip",
+};
+
+/// Checks if an interface name matches tunnel interface patterns.
+///
+/// This is a name-based heuristic classifier for Linux network interfaces.
+/// It does NOT inspect interface flags, metadata, or actual tunnel configuration.
+///
+/// WireGuard (wg*) requires digit after "wg" to distinguish from other wg* names.
+/// Other prefixes match if the interface name starts with the prefix.
+pub fn isTunnelInterface(iface: []const u8) bool {
+    // Check WireGuard specifically: must be "wg" followed by digit(s)
+    if (std.mem.startsWith(u8, iface, "wg")) {
+        if (iface.len < 3) return true; // exactly "wg" is valid
+        // Must be followed by digit to be a valid WireGuard interface
+        const c = iface[2];
+        return c >= '0' and c <= '9';
+    }
+
+    // Check other prefixes
+    for (tunnel_prefixes[1..]) |prefix| {
+        if (std.mem.startsWith(u8, iface, prefix)) return true;
+    }
+    return false;
+}
+
+// ============================================================================
 // Predicate
 // ============================================================================
 

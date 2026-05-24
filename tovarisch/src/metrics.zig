@@ -59,6 +59,7 @@
 const std = @import("std");
 const private_interface_stats = @import("net/private_interface_stats.zig");
 const linux_interface_stats = @import("net/linux_interface_stats.zig");
+const interface_filter = @import("net/interface_filter.zig");
 const metrics_dto = @import("metrics_dto.zig");
 const telemetry = @import("runtime/telemetry.zig");
 
@@ -112,6 +113,7 @@ pub fn sampledInterfacesFromSnapshots(
                 .sampled_at_ms = 0, // Placeholder: no timestamp from live collection yet
             },
             .rate = null, // No sampler state wired yet
+            .is_tunnel = interface_filter.isTunnelInterface(snap.name),
         };
 
         try sampled.append(allocator, sample);

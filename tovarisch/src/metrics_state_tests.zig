@@ -336,7 +336,7 @@ test "reappeared interface returns rate:null" {
     try testing.expect(!std.mem.containsAtLeast(u8, json, 1, "\"name\":\"eth0\",\"rate\":null"));
     // wg0 should have rate:null (reappeared, previous state was cleared)
     try testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"name\":\"wg0\""));
-    try testing.expect(std.mem.containsAtLeast(u8, json, 1, ",\"rate\":null}"));
+    try testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"rate\":null"));
 }
 
 // ============================================================================
@@ -358,7 +358,7 @@ test "output uses metrics_version 0.3" {
 
     const json = writer.slice();
 
-    try testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"metrics_version\":\"0.3\""));
+    try testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"metrics_version\":\"0.4\""));
 }
 
 test "output uses service tovarisch" {

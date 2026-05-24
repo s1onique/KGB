@@ -33,7 +33,8 @@
 //       "tx_bytes_per_second": 2000,
 //       "rx_packets_per_second": 10,
 //       "tx_packets_per_second": 20
-//     }
+//     },
+//     "is_tunnel": false
 //   }
 //
 // JSON shape for a sampled interface without rate (first sample):
@@ -43,20 +44,24 @@
 //     "tx_bytes": 456,
 //     "rx_packets": 7,
 //     "tx_packets": 8,
-//     "rate": null
+//     "rate": null,
+//     "is_tunnel": true
 //   }
 //
 // Top-level payload shape:
 //   {
 //     "service": "tovarisch",
 //     "version": "0.1.1",
-//     "metrics_version": "0.3",
+//     "metrics_version": "0.4",
 //     "runtime": { "pid": 123, "rss_kib": 1920 },
 //     "private_interfaces": [ ... ],
+//     "tunnel_interfaces": [ ... ],
 //     "notes": [ ... ]
 //   }
 //
-// Version 0.3 adds runtime telemetry (pid, rss_kib) - process telemetry, not interface metrics.
+// Version 0.4 adds:
+// - is_tunnel field per interface (name-based classification)
+// - tunnel_interfaces dedicated array for tunnel interfaces (wg*, tun*, tap*, etc.)
 
 const std = @import("std");
 const rates = @import("net/rates.zig");
@@ -69,7 +74,7 @@ pub const InterfaceRate = rates.InterfaceRate;
 
 // Version constants
 const service_version = "0.1.1";
-const metrics_version = "0.3";
+const metrics_version = "0.4";
 
 // ============================================================================
 // JSON String Escaping
@@ -127,12 +132,26 @@ pub fn renderSampledInterfacesPayload(
         try renderSampledInterface(writer, si);
     }
 
-    // Notes footer - include runtime RSS note
-    try writer.writeAll("],\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\",\"runtime RSS is best-effort platform telemetry\"]}");
+    // Render tunnel interfaces as a dedicated list
+    try writer.writeAll("],\"tunnel_interfaces\":[");
+    var tunnel_count: usize = 0;
+    for (sampled) |si| {
+        if (si.is_tunnel) {
+            if (tunnel_count > 0) try writer.writeAll(",");
+            try writer.print("\"", .{});
+            try writeJsonString(writer, si.sample.name);
+            try writer.writeAll("\"");
+            tunnel_count += 1;
+        }
+    }
+
+    // Notes footer - include runtime RSS note and tunnel note
+    try writer.writeAll("],\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\",\"runtime RSS is best-effort platform telemetry\",\"tunnel_interfaces are name-based (wg*, tun*, tap*, etc.)\"]}");
 }
 
 /// Renders a single SampledInterface as JSON.
 /// The rate field is always present: null if unavailable, object if calculated.
+/// The is_tunnel field indicates tunnel interface classification.
 fn renderSampledInterface(writer: anytype, si: SampledInterface) !void {
     try writer.writeAll("{\"name\":\"");
     try writeJsonString(writer, si.sample.name);
@@ -165,6 +184,9 @@ fn renderSampledInterface(writer: anytype, si: SampledInterface) !void {
     } else {
         try writer.writeAll(",\"rate\":null");
     }
+
+    // is_tunnel field - name-based tunnel classification
+    try writer.print(",\"is_tunnel\":{}", .{si.is_tunnel});
 
     try writer.writeAll("}");
 }
@@ -199,5 +221,5 @@ pub fn renderFallbackPayload(writer: anytype, runtime: telemetry.RuntimeTelemetr
     } else {
         try writer.writeAll(",\"rss_kib\":null");
     }
-    try writer.writeAll("},\"private_interfaces\":[],\"error\":\"metrics_unavailable\",\"detail\":\"private interface stats unavailable\",\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\",\"runtime RSS is best-effort platform telemetry\"]}");
+    try writer.writeAll("},\"private_interfaces\":[],\"tunnel_interfaces\":[],\"error\":\"metrics_unavailable\",\"detail\":\"private interface stats unavailable\",\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\",\"runtime RSS is best-effort platform telemetry\",\"tunnel_interfaces are name-based (wg*, tun*, tap*, etc.)\"]}");
 }

@@ -80,7 +80,7 @@ test "renderFallbackPayload: emits version" {
 test "renderFallbackPayload: emits metrics_version 0.3" {
     var w = TestWriter.init();
     try renderFallbackPayload(&w, testRuntime);
-    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.3\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.4\""));
 }
 
 test "renderFallbackPayload: emits status warn" {

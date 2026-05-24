@@ -83,7 +83,7 @@ test "renderMetricsPayloadFromSnapshots: zero snapshots emits metrics_version" {
     var w = TestWriter.init();
     const snapshots: [0]InterfaceStatsSnapshot = .{};
     try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
-    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.3\""));
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.4\""));
 }
 
 test "renderMetricsPayloadFromSnapshots: zero snapshots emits empty private_interfaces" {
@@ -356,10 +356,10 @@ test "renderMetricsPayloadFromSnapshots: no populated rate object in output" {
 // Tests: Fallback renderer updated notes (ACT 4)
 // ============================================================================
 
-test "renderMetricsFallbackPayload: emits metrics_version 0.3" {
+test "renderMetricsFallbackPayload: emits metrics_version 0.4" {
     var w = TestWriter.init();
     try renderMetricsFallbackPayload(&w);
-    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.3\""));
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.4\""));
 }
 
 test "renderMetricsFallbackPayload: emits rate null note" {
