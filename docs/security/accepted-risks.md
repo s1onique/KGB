@@ -126,15 +126,20 @@ Each risk entry contains:
 
 **Reason**: Redaction requires knowing what is sensitive. Current logs are local-only by default (localhost binding).
 
-**Expiry/Review Trigger**:
+**Expiry/Review Trigger**: 
 - Before any log aggregation setup
 - When logs leave the local machine
-- Minimum: ACT 3 (secrets/log redaction doctrine)
+- Re-evaluate when config parsing is implemented
 
-**Mitigation**:
+**Mitigation (Partially Mitigated)**:
 - Logs on localhost by default
 - No log forwarding in default config
-- Planned: explicit redaction for known sensitive fields (ACT 3)
+- **ACT 3 complete**: Redaction doctrine established with sensitive data classes and patterns
+  - [redaction-policy.md](./redaction-policy.md) defines Class S1 (critical secrets), Class S2 (sensitive endpoints), Class S3 (identifier-sensitive), Class N (non-sensitive)
+  - Patterns R1-R6 provide concrete redaction guidance
+  - Forbidden patterns F1-F7 explicitly enumerate what must not appear in logs
+- **Implementation status**: Status and metrics JSON are adequate for v0; log output and CLI stderr require future implementation when config parsing is added
+- **Planned**: Full redaction implementation when config fields are added (see redaction-policy.md integration points)
 
 ---
 

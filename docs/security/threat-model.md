@@ -129,6 +129,7 @@ Operator Machine          Trusted Infrastructure         Constrained Leaf
 | AC-12 | Metrics topology disclosure: network peer learns interface names/counts | tovarisch `/metrics.json` | Medium | Loopback default, private bind only |
 | AC-13 | Status enumeration: network peer learns node identity and runtime state | tovarisch `/status`, `/status.json` | Low | Loopback default, no auth yet |
 | AC-14 | Error leak: unknown routes expose internal state via error messages | tovarisch all routes | Low | `handleNotFound` is silent |
+| AC-15 | Log redaction failure: sensitive data (tokens, keys, paths) appears in logs | tovarisch, logs, status JSON | Medium | Redaction doctrine established (ACT 3) |
 
 ## Attack Surface Inventory
 
@@ -160,6 +161,7 @@ See [tovarisch-attack-surface.md](./tovarisch-attack-surface.md) for the complet
 | Config file permissions | Now | Implemented | Operator controls file ownership |
 | Local-only status endpoint | Now | Implemented | Status on localhost, not 0.0.0.0 |
 | Structured logging | Now | Implemented | JSON logs, machine-parseable |
+| Secrets redaction doctrine | Now | Implemented | [redaction-policy.md](./redaction-policy.md) defines classes, patterns, forbidden patterns |
 | Node identity bootstrapping | Near-term | Deferred | ACT 2 |
 | Signed desired-state | Near-term | Deferred | ACT 2 |
 | Signed config bundles | Near-term | Deferred | ACT 5 |
