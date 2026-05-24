@@ -1,6 +1,6 @@
 /// Heartbeat thread for tovarisch.
 /// 
-/// Implements a detached thread that emits heartbeat logs every 30 seconds
+/// Implements a daemon-lifetime thread that emits heartbeat logs every 30 seconds
 /// independently of HTTP request traffic. Uses std.c.nanosleep for blocking
 /// sleep (Zig 0.16 std.Thread does not expose a sleep function).
 
@@ -19,6 +19,8 @@ pub const HeartbeatContext = struct {
     const Self = @This();
 
     /// Mutex for protecting shared state (pthread_mutex_t).
+    /// Uses PTHREAD_MUTEX_INITIALIZER for static initialization.
+    /// This is the portable POSIX way - no runtime init needed.
     mutex: c.pthread_mutex_t,
     /// Current uptime in seconds (updated by heartbeat thread).
     uptime_seconds: u64,
@@ -26,10 +28,24 @@ pub const HeartbeatContext = struct {
     done: bool,
 };
 
+/// Initialize heartbeat context for the daemon-lifetime heartbeat thread.
+/// Uses PTHREAD_MUTEX_INITIALIZER for static, compile-time initialization.
+/// No runtime initialization required - the mutex is valid after struct creation.
+pub fn initHeartbeatContext() HeartbeatContext {
+    return HeartbeatContext{
+        // PTHREAD_MUTEX_INITIALIZER is a compile-time constant with default attributes.
+        // This is the portable POSIX approach - no pthread_mutex_init() runtime call needed.
+        .mutex = c.PTHREAD_MUTEX_INITIALIZER,
+        .uptime_seconds = 0,
+        .done = false,
+    };
+}
+
 /// Heartbeat thread entry point.
 /// Loops every HEARTBEAT_INTERVAL_SECS and emits heartbeat logs.
 /// Uses std.c.nanosleep for cross-platform blocking sleep (Zig 0.16 doesn't have std.Thread.sleep).
-pub fn heartbeatThread(ctx: *HeartbeatContext) void {
+/// Note: parameter is *const because Zig thread spawn passes const pointer.
+pub fn heartbeatThread(ctx: *const HeartbeatContext) void {
     while (true) {
         // Sleep for HEARTBEAT_INTERVAL_SECS using libc nanosleep.
         // Zig 0.16 std.Thread does not expose a sleep function.
@@ -41,17 +57,21 @@ pub fn heartbeatThread(ctx: *HeartbeatContext) void {
         };
         _ = c.nanosleep(&ts, null);
 
-        _ = c.pthread_mutex_lock(&ctx.mutex);
+        // @constCast needed: Zig passes *const, but pthread_mutex_lock needs *T
+        // and we need to modify uptime_seconds
+        var mutable_ctx = @constCast(ctx);
 
-        if (ctx.done) {
-            _ = c.pthread_mutex_unlock(&ctx.mutex);
+        _ = c.pthread_mutex_lock(&mutable_ctx.mutex);
+
+        if (mutable_ctx.done) {
+            _ = c.pthread_mutex_unlock(&mutable_ctx.mutex);
             return;
         }
 
-        ctx.uptime_seconds += HEARTBEAT_INTERVAL_SECS;
-        const uptime = ctx.uptime_seconds;
+        mutable_ctx.uptime_seconds += HEARTBEAT_INTERVAL_SECS;
+        const uptime = mutable_ctx.uptime_seconds;
 
-        _ = c.pthread_mutex_unlock(&ctx.mutex);
+        _ = c.pthread_mutex_unlock(&mutable_ctx.mutex);
 
         // Emit heartbeat log to stdout fd (fd=1).
         emitHeartbeatToFd(uptime);
@@ -80,13 +100,4 @@ fn emitHeartbeatToFd(uptime_seconds: u64) void {
     // Write to stdout fd. Ignore partial writes to not disrupt thread.
     const bytes = log_buf.slice();
     _ = c.write(1, bytes.ptr, bytes.len);
-}
-
-/// Initialize heartbeat context for a detached heartbeat thread.
-pub fn initHeartbeatContext() HeartbeatContext {
-    return HeartbeatContext{
-        .mutex = std.mem.zeroes(c.pthread_mutex_t),
-        .uptime_seconds = 0,
-        .done = false,
-    };
 }

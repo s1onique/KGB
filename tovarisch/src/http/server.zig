@@ -298,32 +298,37 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
     // handleMetrics() casts this back to *metrics_state.MetricsState.
     const state_ptr: *anyopaque = &state.metrics;
 
-    // Initialize heartbeat context for the detached heartbeat thread.
-    // The heartbeat thread emits logs independently of HTTP request traffic.
+    // Initialize heartbeat context with static PTHREAD_MUTEX_INITIALIZER.
+    // Heartbeat startup failures are non-fatal - daemon continues serving.
+    // A decorative heartbeat must never crash the leaf daemon.
     //
     // NOTE: heartbeat_ctx is stack-owned and lives on serveForever()'s stack.
     // This is acceptable because serveForever() is an infinite daemon loop
     // that never returns under normal operation. If graceful shutdown ever
     // appears, this must become owned lifecycle state or be explicitly
     // joined/shutdown to avoid use-after-free.
-    //
-    // Log interleaving risk: heartbeat thread writes directly to fd 1 via
-    // c.write() while main server path uses its writer helper. A single
-    // small write() is fine for NDJSON in practice, but it is not the same
-    // serialization path. This is acceptable for this ACT. Log record
-    // interleaving is low risk for small records and should be revisited
-    // if log records grow or multiple background emitters are added.
-    var heartbeat_ctx = heartbeat.initHeartbeatContext();
+    const heartbeat_ctx = heartbeat.initHeartbeatContext();
 
-    // Spawn detached heartbeat thread.
-    // The thread loops every heartbeat.HEARTBEAT_INTERVAL_SECS and emits heartbeat logs.
-    // It uses std.c.nanosleep for blocking sleep (Zig 0.16 std.Thread has no sleep).
-    const heartbeat_t = try std.Thread.spawn(
+    // Spawn heartbeat thread. Thread spawn failures are non-fatal -
+    // daemon continues serving HTTP without heartbeat.
+    _ = std.Thread.spawn(
         .{ .stack_size = 65536 },
         heartbeat.heartbeatThread,
         .{&heartbeat_ctx},
-    );
-    heartbeat_t.detach();
+    ) catch |err| {
+        // Log error as structured JSON - heartbeat is optional, daemon continues
+        log_buf.reset();
+        try logging.emit(.heartbeat_thread_start_failed, &log_buf, &.{
+            .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(err) } },
+            .{ .name = "reason", .value = logging.FieldValue{ .string = "heartbeat_degraded_continue_serving" } },
+        });
+        try writeLogRecord(out_writer, log_buf.slice());
+        // heartbeat_ctx is stack-owned and will be abandoned on function exit.
+        // This is acceptable for daemon-lifetime - function never returns.
+    };
+    // NOTE: We do NOT call detach() on the thread.
+    // detach() in Zig 0.16 can trigger unreachable in certain thread states on Linux.
+    // The thread runs until process exit (daemon lifetime), which is correct behavior.
 
     // Blocking accept loop - stays alive until interrupted.
     while (true) {

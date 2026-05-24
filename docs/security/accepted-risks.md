@@ -184,6 +184,31 @@ Each risk entry contains:
 
 ---
 
+## R-009: Heartbeat Thread Lifecycle (Unjoined Daemon Thread)
+
+**Description**: Heartbeat thread is spawned but intentionally not joined or detached. The context lives on `serveForever()` stack and remains valid because `serveForever()` does not return under normal operation. The thread mutates context via `@constCast`.
+
+**Owner**: maintainer
+
+**Reason**: For daemon-lifetime threads, an unjoined thread is acceptable as long as the process lifetime matches the thread lifetime. Proper join requires shutdown signal handling which is out of scope for v0. `detach()` was removed to avoid potential Zig 0.16 thread state edge cases.
+
+**Expiry/Review Trigger**:
+- When graceful shutdown is designed
+- When any shutdown signal handler is added
+- When restarting heartbeat without process restart
+- Any move away from infinite `serveForever()` pattern
+
+**Mitigation**:
+- Heartbeat is decorative (non-fatal if it fails)
+- Heartbeat thread spawn failures are logged and daemon continues
+- `done` flag exists in `HeartbeatContext` for future graceful shutdown signaling
+- Context is stack-owned on `serveForever()` stack (safe for daemon-lifetime, not for returning functions)
+- Thread runs until process exit (correct for daemon lifetime)
+- **Fixed in ACT**: `PTHREAD_MUTEX_INITIALIZER` now used instead of `std.mem.zeroes()`
+- `@constCast` is used to get mutable pointer from thread spawn's const context
+
+---
+
 ## Risk Review Process
 
 1. Before any ACT completion, review accepted risks

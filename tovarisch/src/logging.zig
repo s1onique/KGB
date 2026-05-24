@@ -25,6 +25,10 @@ pub const Event = enum(u8) {
     server_error,
     /// UVB-76 signal ready for monitoring.
     uvb76_signal_ready,
+    /// Heartbeat context initialization failed (non-fatal, daemon continues).
+    heartbeat_init_failed,
+    /// Heartbeat thread spawn failed (non-fatal, daemon continues).
+    heartbeat_thread_start_failed,
 };
 
 /// Get the log level string for a given event.
@@ -38,7 +42,9 @@ fn levelFor(event: Event) []const u8 {
         .uvb76_signal_ready => "info",
 
         .http_accept_loop_error,
-        .server_error => "error",
+        .server_error,
+        .heartbeat_init_failed,
+        .heartbeat_thread_start_failed => "error",
     };
 }
 
