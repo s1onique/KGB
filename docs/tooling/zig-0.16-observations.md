@@ -391,3 +391,10 @@ var msg = ifaddrmsg{ ... };
 
 - **Files affected:** `tovarisch/src/net/linux_addr.zig`, `tovarisch/src/net/linux_addr_tests.zig`
 - **Promote to field manual:** Yes.
+
+---
+
+## 2026-05-24 — `std.os.linux.timespec`: `.sec`/`.nsec`, not `.tv_sec`/`.tv_nsec`
+
+- Zig 0.16 Linux uses `.sec` and `.nsec`; fix `@intCast(ts.sec)` in `metrics_state.zig`.
+- **Doctrine:** Do not assume libc field names for Zig stdlib OS structs.
