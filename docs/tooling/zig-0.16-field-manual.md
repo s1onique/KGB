@@ -260,8 +260,6 @@ For Zig 0.16-dev, verify standard library APIs against the installed local stdli
 
 When implementing HTTP servers with socket operations, be aware:
 
-### std.posix Limitations in Zig 0.16
-
 The `std.posix` namespace does **NOT** expose socket functions directly:
 - `std.posix.socket` — **NOT AVAILABLE**
 - `std.posix.bind` — **NOT AVAILABLE**

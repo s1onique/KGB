@@ -16,8 +16,7 @@
 const std = @import("std");
 const telemetry = @import("runtime/telemetry.zig");
 const tunnel_check = @import("tunnel_check.zig");
-
-pub const version = "0.1.1";
+const build_info = @import("build_info.zig");
 
 /// Default state directory path relative to working directory.
 pub const DEFAULT_STATE_DIR = ".tovarisch/state";
@@ -166,7 +165,7 @@ pub fn getStatus() Status {
     const checks = getLocalChecks();
     return Status{
         .service = "tovarisch",
-        .version = version,
+        .version = build_info.version,
         .node_id = "local-dev",
         .status = deriveStatus(checks),
         .checks = checks,
@@ -215,8 +214,12 @@ fn renderStatus(writer: anytype, s: Status) !void {
 
 // --- Tests ---
 
-test "version constant is 0.1.1" {
-    try std.testing.expectEqualStrings("0.1.1", version);
+// Version shape test: version must contain base_version (0.1.2) and '+'
+test "version contains base_version prefix" {
+    try std.testing.expect(std.mem.startsWith(u8, build_info.version, build_info.base_version));
+}
+test "version contains plus sign separator" {
+    try std.testing.expect(std.mem.containsAtLeast(u8, build_info.version, 1, "+"));
 }
 
 test "deriveStatus returns ok for all-ok checks" {
@@ -269,7 +272,9 @@ test "getLocalChecks first check is process" {
 test "status has correct structure" {
     const s = getStatus();
     try std.testing.expectEqualStrings("tovarisch", s.service);
-    try std.testing.expectEqualStrings("0.1.1", s.version);
+    // Version is shape-based: must contain base_version prefix and '+'
+    try std.testing.expect(std.mem.startsWith(u8, s.version, build_info.base_version));
+    try std.testing.expect(std.mem.containsAtLeast(u8, s.version, 1, "+"));
     try std.testing.expectEqualStrings("local-dev", s.node_id);
     try std.testing.expect(s.status == .ok or s.status == .warn or s.status == .@"error");
     try std.testing.expectEqual(@as(usize, 6), s.checks.len);
@@ -283,7 +288,9 @@ test "getStateDirCheck returns correct name" {
 test "status JSON contains all required top-level fields" {
     const s = getStatus();
     try std.testing.expectEqualStrings("tovarisch", s.service);
-    try std.testing.expectEqualStrings("0.1.1", s.version);
+    // Version is shape-based: must contain base_version prefix and '+'
+    try std.testing.expect(std.mem.startsWith(u8, s.version, build_info.base_version));
+    try std.testing.expect(std.mem.containsAtLeast(u8, s.version, 1, "+"));
     try std.testing.expectEqualStrings("local-dev", s.node_id);
     try std.testing.expect(s.status == .ok or s.status == .warn or s.status == .@"error");
     try std.testing.expect(s.checks.len > 0);
@@ -366,10 +373,13 @@ test "renderPayload output contains service:tovarisch" {
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"service\":\"tovarisch\""));
 }
 
-test "renderPayload output contains version:0.1.1" {
+test "renderPayload output contains version prefix from build_info" {
     var w = TestWriter.init();
     try renderPayload(&w);
-    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"version\":\"0.1.1\""));
+    // Version output contains base_version prefix with '+' separator
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"version\":\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, build_info.base_version));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "+"));
 }
 
 test "renderPayload output contains node_id:local-dev" {

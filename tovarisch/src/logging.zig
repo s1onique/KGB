@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const status = @import("status.zig");
+const build_info = @import("build_info.zig");
 
 /// Stable event identifiers.
 /// Each event has a defined log level to ensure consistency.
@@ -142,7 +143,7 @@ pub fn emit(comptime event: Event, writer: *BufferedWriter, fields: anytype) !vo
     try writer.writeAll("\",\"event\":\"");
     try writer.writeAll(@tagName(event));
     try writer.writeAll("\",\"service\":\"tovarisch\",\"version\":\"");
-    try writer.writeAll(status.version);
+    try writer.writeAll(build_info.version);
     try writer.writeAll("\",\"fields\":{");
 
     inline for (fields, 0..) |field, i| {

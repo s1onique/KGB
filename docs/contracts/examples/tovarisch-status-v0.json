@@ -1,6 +1,6 @@
 {
   "service": "tovarisch",
-  "version": "0.1.1",
+  "version": "0.1.2+<sha>",
   "node_id": "local-dev",
   "status": "warn",
   "checks": [

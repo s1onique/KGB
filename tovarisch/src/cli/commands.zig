@@ -2,6 +2,7 @@ const std = @import("std");
 const cli_args = @import("args.zig");
 const usage = @import("usage.zig");
 const status = @import("../status.zig");
+const build_info = @import("../build_info.zig");
 const http = @import("../http/server.zig");
 const logging = @import("../logging.zig");
 
@@ -26,7 +27,7 @@ pub fn run(argv: []const []const u8, stdout: anytype, stderr: anytype) ExitCode 
     }
 
     if (std.mem.eql(u8, command, "--version")) {
-        stdout.print("tovarisch {s}\n", .{status.version}) catch return .usage;
+        stdout.print("tovarisch {s}\n", .{build_info.version}) catch return .usage;
         return .ok;
     }
 
@@ -331,11 +332,13 @@ test "--version output contains tovarisch" {
     try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "tovarisch"));
 }
 
-test "--version output contains 0.1.1" {
+test "--version output contains base_version prefix" {
     var cw = CaptureWriter.init();
     const code = run(&.{ "tovarisch", "--version" }, &cw, &cw);
     try std.testing.expect(code == .ok);
-    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "0.1.1"));
+    // Version output must contain base_version prefix and '+'
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, build_info.base_version));
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "+"));
 }
 
 test "check output contains tovarisch check: ok" {

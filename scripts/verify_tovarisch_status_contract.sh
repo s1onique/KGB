@@ -82,7 +82,7 @@ if command -v jq >/dev/null 2>&1; then
     echo "[status-contract] Verifying fixture fields"
 
     jq -e '.service == "tovarisch"' docs/contracts/examples/tovarisch-status-v0.json >/dev/null && echo "  OK: service == tovarisch"
-    jq -e '.version == "0.1.1"' docs/contracts/examples/tovarisch-status-v0.json >/dev/null && echo "  OK: version == 0.1.1"
+    jq -e '.version | test("^0\\.1\\.2\\+")' docs/contracts/examples/tovarisch-status-v0.json >/dev/null && echo "  OK: version matches 0.1.2+<sha> pattern"
     jq -e '.node_id == "local-dev"' docs/contracts/examples/tovarisch-status-v0.json >/dev/null && echo "  OK: node_id == local-dev"
     jq -e '.status == "warn" or .status == "ok"' docs/contracts/examples/tovarisch-status-v0.json >/dev/null && echo "  OK: status is valid"
     jq -e '.checks[0].name == "process"' docs/contracts/examples/tovarisch-status-v0.json >/dev/null && echo "  OK: first check is process"
@@ -108,9 +108,11 @@ if command -v jq >/dev/null 2>&1; then
 
         # Normalize runtime values (they vary by platform/run)
         # Use same sentinel string for rss_kib regardless of null vs non-null
+        # Also normalize version to pattern (since version includes dynamic SHA)
         normalized_filter='
           .runtime.pid = 1
           | .runtime.rss_kib = "normalized"
+          | .version = "0.1.2+<sha>"
         '
 
         cli_normalized=$(printf '%s\n' "$cli_output" | jq -c "$normalized_filter" 2>/dev/null)
@@ -142,8 +144,8 @@ else
         echo "[status-contract] FAIL: fixture missing service field" >&2
         exit 1
     }
-    grep -Eq '"version"[[:space:]]*:[[:space:]]*"0.1.1"' docs/contracts/examples/tovarisch-status-v0.json || {
-        echo "[status-contract] FAIL: fixture missing version field" >&2
+    grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\\.1\\.2\\+' docs/contracts/examples/tovarisch-status-v0.json || {
+        echo "[status-contract] FAIL: fixture version does not match 0.1.2+ pattern" >&2
         exit 1
     }
     grep -Eq '"node_id"[[:space:]]*:[[:space:]]*"local-dev"' docs/contracts/examples/tovarisch-status-v0.json || {
