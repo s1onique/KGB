@@ -36,6 +36,7 @@ const _metrics_dto_tests = @import("metrics_dto_tests.zig");
 const _metrics_fallback_dto_tests = @import("metrics_fallback_dto_tests.zig");
 const _metrics_state = @import("metrics_state.zig");
 const _metrics_state_tests = @import("metrics_state_tests.zig");
+const _metrics_tunnel_contract_tests = @import("metrics_tunnel_contract_tests.zig");
 const _http_response = @import("http/response.zig");
 const _http_routes = @import("http/routes.zig");
 const _http_routes_tests = @import("http/routes_tests.zig");
@@ -143,6 +144,10 @@ test {
 
 test {
     std.testing.refAllDecls(@import("metrics_state_tests.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("metrics_tunnel_contract_tests.zig"));
 }
 
 test {

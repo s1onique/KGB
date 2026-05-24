@@ -329,6 +329,67 @@ if (c.getenv("TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE") != null) {
 
 ---
 
+---
+
+## 2026-05-24 — Zig 0.16 test declarations and doc comments
+
+**symptom:** `error: documentation comments cannot be attached to tests` when using `///` before test declarations.
+
+**wrong assumption:** `/// doc comments` could be used before `test` blocks.
+
+**working fix:** Use `//` regular comments before `test`:
+```zig
+// Contract test: tunnel_count field exists in output.
+test "tunnel contract: tunnel_count field exists" {
+    ...
+}
+```
+
+**files affected:**
+- `tovarisch/src/metrics_tunnel_contract_tests.zig`
+
+**promote to field manual?** Yes — test documentation patterns are common.
+
+---
+
+## 2026-05-24 — Zig 0.16 integer overflow on unsigned subtraction
+
+**symptom:** `panic: integer overflow` when decrementing unsigned `usize` counters (e.g., brace-depth) without guards.
+
+**wrong assumption:** Unchecked `brace_depth -= 1` would work for unsigned integers.
+
+**working fix:** Guard before subtracting:
+```zig
+if (brace_depth > 0) brace_depth -= 1;
+```
+
+**files affected:**
+- `tovarisch/src/metrics_tunnel_contract_tests.zig`
+
+**promote to field manual?** Yes — unsigned arithmetic guard patterns are common.
+
+---
+
+## 2026-05-24 — Zig 0.16 std.mem.indexOf returns optional usize, not index
+
+**symptom:** Integer arithmetic errors when treating `std.mem.indexOf` result as direct offset without unwrapping.
+
+**wrong assumption:** `std.mem.indexOf` returns the index directly; could use position + 20 directly.
+
+**working fix:** Use `marker.len` pattern with `orelse`:
+```zig
+const marker = "\"tunnel_interfaces\":[";
+const tunnel_start = std.mem.indexOf(u8, slice, marker) orelse return error.MissingField;
+const after_bracket = slice[tunnel_start + marker.len..];  // Add marker.len to position
+```
+
+**files affected:**
+- `tovarisch/src/metrics_tunnel_contract_tests.zig`
+
+**promote to field manual?** Yes — string search offset patterns are common.
+
+---
+
 Recording field notes from Zig 0.16 experiments. Confidence varies; do not promote to field manual until verified with a minimal reproducer.
 
 Old entries have been promoted to `zig-0.16-field-manual.md`. This file tracks experimental observations.
