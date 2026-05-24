@@ -188,6 +188,9 @@ The following table inventories all known platform-specific branches in `tovaris
 | `metrics.zig` | `renderMetricsFallbackPayload()` — fallback warning renderer | **Pure fixture tests** | Cross-platform, tested via metrics_tests.zig |
 | `metrics.zig` | `renderLiveMetricsPayload()` — live metrics collection + render | **Linux CI smoke test** | Exercise via live sysfs + rtnetlink smoke test in metrics_tests.zig |
 | `metrics.zig` | `writeJsonString()` — JSON string escaping | **Pure fixture tests** | Cross-platform, tested via metrics_tests.zig |
+| `metrics.zig` | `rate:null` per interface row (ACT 4) | **Pure fixture tests** | 3 tests verify rate field present with null, no populated rate object |
+| `metrics.zig` | `sampledInterfacesFromSnapshots()` — snapshot-to-DTO conversion (ACT 4a/4b) | **Pure fixture tests** | Tested via metrics_conversion_tests.zig; 4 tests covering rate null, order, name lifetime, empty input |
+| `metrics.zig` | `renderMetricsPayloadFromSnapshots()` — delegates to DTO (ACT 4a) | **Pure fixture tests** | Cross-platform, tested via metrics_tests.zig |
 | `http/routes.zig` | `handleMetrics()` — /metrics.json endpoint wired to live collection | **Unit tests** | Tests verify JSON contract without starting server; fallback tested on non-Linux |
 | `net/linux_stats.zig` | `openForWrite()` — Linux `std.c.open` path | **Compile-gated only** | Used only for test fixtures; no production write path needed |
 | `net/linux_stats.zig` | `closeFile()` — Linux `std.c.close` path | **Linux CI smoke test** | Exercise via live sysfs smoke test; closes file descriptors after reading stats |

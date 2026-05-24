@@ -30,6 +30,7 @@ const _net_private_interface_stats = @import("net/private_interface_stats.zig");
 const _net_private_interface_stats_tests = @import("net/private_interface_stats_tests.zig");
 const _metrics = @import("metrics.zig");
 const _metrics_tests = @import("metrics_tests.zig");
+const _metrics_conversion_tests = @import("metrics_conversion_tests.zig");
 const _metrics_dto = @import("metrics_dto.zig");
 const _metrics_dto_tests = @import("metrics_dto_tests.zig");
 const _http_response = @import("http/response.zig");
@@ -114,6 +115,10 @@ test {
 
 test {
     std.testing.refAllDecls(@import("metrics_tests.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("metrics_conversion_tests.zig"));
 }
 
 test {

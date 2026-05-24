@@ -102,13 +102,25 @@ pub const InterfaceRate = struct {
 - ✅ Integer-only arithmetic
 - ✅ Edge case handling (zero/negative elapsed, divide-by-zero prevention)
 
+## ACT 4: Live Metrics DTO Wiring
+
+**Status**: ✅ **Implemented**
+
+ACT 4 wired the DTO format into the live `/metrics.json` route:
+
+- Live `/metrics.json` now uses the DTO row shape
+- Every interface row includes `"rate":null`
+- `metrics_version` updated to `"0.2"`
+- Notes updated to reflect null rates until sampler state is wired
+
 ## Future Work
 
 The following work is deferred to future ACTs:
 
 1. ~~**ACT 2**: Add sampler state that matches interfaces by name and produces `rate: null | InterfaceRate` per current counter row~~ ✅ **Implemented in `interface_sampler.zig`**
-2. **Metrics wiring**: Wire rates into `/metrics.json` response
-3. **IPv6 support**: Extend to handle IPv6 interface counters
+2. ~~**ACT 4**: Wire DTO format into live `/metrics.json` with null rates~~ ✅ **Implemented**
+3. **ACT 5**: Wire persistent sampler state across HTTP requests for live rates
+4. **IPv6 support**: Extend to handle IPv6 interface counters
 
 ## Sampler State
 

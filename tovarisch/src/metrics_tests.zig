@@ -1,6 +1,6 @@
 // metrics_tests.zig — Tests for metrics rendering
 //
-// ACT 5h: Tests for metrics payload rendering.
+// ACT 4a: Tests for metrics payload rendering using metrics_dto.
 //
 // Tests cover:
 // 1. Pure renderer with zero snapshots emits correct fields
@@ -9,6 +9,8 @@
 // 4. JSON output escapes interface names safely
 // 5. Fallback renderer emits warning status
 // 6. Live metrics on Linux (smoke test)
+// 7. Rate field is present with null value (ACT 4)
+// 8. Updated notes reflect null rates until sampler state is wired
 //
 // This file is imported by test_all.zig and refAllDecls forces test discovery.
 
@@ -73,36 +75,43 @@ const TestWriter = struct {
 test "renderMetricsPayloadFromSnapshots: zero snapshots emits service" {
     var w = TestWriter.init();
     const snapshots: [0]InterfaceStatsSnapshot = .{};
-    try renderMetricsPayloadFromSnapshots(&w, &snapshots);
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
     try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"service\":\"tovarisch\""));
 }
 
 test "renderMetricsPayloadFromSnapshots: zero snapshots emits metrics_version" {
     var w = TestWriter.init();
     const snapshots: [0]InterfaceStatsSnapshot = .{};
-    try renderMetricsPayloadFromSnapshots(&w, &snapshots);
-    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.1\""));
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.2\""));
 }
 
 test "renderMetricsPayloadFromSnapshots: zero snapshots emits empty private_interfaces" {
     var w = TestWriter.init();
     const snapshots: [0]InterfaceStatsSnapshot = .{};
-    try renderMetricsPayloadFromSnapshots(&w, &snapshots);
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
     try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"private_interfaces\":[]"));
 }
 
 test "renderMetricsPayloadFromSnapshots: zero snapshots emits cumulative counter note" {
     var w = TestWriter.init();
     const snapshots: [0]InterfaceStatsSnapshot = .{};
-    try renderMetricsPayloadFromSnapshots(&w, &snapshots);
-    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "interface counters are cumulative, not rates"));
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "interface counters are cumulative"));
 }
 
 test "renderMetricsPayloadFromSnapshots: zero snapshots emits IPv4-only note" {
     var w = TestWriter.init();
     const snapshots: [0]InterfaceStatsSnapshot = .{};
-    try renderMetricsPayloadFromSnapshots(&w, &snapshots);
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
     try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "IPv4 private interfaces only"));
+}
+
+test "renderMetricsPayloadFromSnapshots: zero snapshots emits rate null note" {
+    var w = TestWriter.init();
+    const snapshots: [0]InterfaceStatsSnapshot = .{};
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "rate is optional"));
 }
 
 // ============================================================================
@@ -124,7 +133,7 @@ test "renderMetricsPayloadFromSnapshots: one snapshot emits interface name" {
             },
         },
     };
-    try renderMetricsPayloadFromSnapshots(&w, &snapshots);
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
     try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"eth0\""));
 }
 
@@ -138,7 +147,7 @@ test "renderMetricsPayloadFromSnapshots: one snapshot emits rx_bytes" {
             .stats = .{ .rx_bytes = 12345, .tx_bytes = 0, .rx_packets = 0, .tx_packets = 0 },
         },
     };
-    try renderMetricsPayloadFromSnapshots(&w, &snapshots);
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
     try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rx_bytes\":12345"));
 }
 
@@ -152,7 +161,7 @@ test "renderMetricsPayloadFromSnapshots: one snapshot emits tx_bytes" {
             .stats = .{ .rx_bytes = 0, .tx_bytes = 67890, .rx_packets = 0, .tx_packets = 0 },
         },
     };
-    try renderMetricsPayloadFromSnapshots(&w, &snapshots);
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
     try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"tx_bytes\":67890"));
 }
 
@@ -166,7 +175,7 @@ test "renderMetricsPayloadFromSnapshots: one snapshot emits rx_packets" {
             .stats = .{ .rx_bytes = 0, .tx_bytes = 0, .rx_packets = 99, .tx_packets = 0 },
         },
     };
-    try renderMetricsPayloadFromSnapshots(&w, &snapshots);
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
     try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rx_packets\":99"));
 }
 
@@ -180,7 +189,7 @@ test "renderMetricsPayloadFromSnapshots: one snapshot emits tx_packets" {
             .stats = .{ .rx_bytes = 0, .tx_bytes = 0, .rx_packets = 0, .tx_packets = 42 },
         },
     };
-    try renderMetricsPayloadFromSnapshots(&w, &snapshots);
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
     try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"tx_packets\":42"));
 }
 
@@ -204,7 +213,7 @@ test "renderMetricsPayloadFromSnapshots: two snapshots emits both interface name
             .stats = .{ .rx_bytes = 3000, .tx_bytes = 4000, .rx_packets = 30, .tx_packets = 40 },
         },
     };
-    try renderMetricsPayloadFromSnapshots(&w, &snapshots);
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
     try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"eth0\""));
     try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"wg0\""));
 }
@@ -223,7 +232,7 @@ test "renderMetricsPayloadFromSnapshots: interface name with normal characters" 
             .stats = .{ .rx_bytes = 100, .tx_bytes = 200, .rx_packets = 1, .tx_packets = 2 },
         },
     };
-    try renderMetricsPayloadFromSnapshots(&w, &snapshots);
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
     try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "eth0"));
 }
 
@@ -252,7 +261,7 @@ test "renderMetricsFallbackPayload: emits empty private_interfaces" {
 test "renderMetricsFallbackPayload: emits cumulative counter note" {
     var w = TestWriter.init();
     try renderMetricsFallbackPayload(&w);
-    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "interface counters are cumulative, not rates"));
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "interface counters are cumulative"));
 }
 
 // ============================================================================
@@ -269,7 +278,7 @@ test "renderMetricsPayloadFromSnapshots: output is valid JSON structure" {
             .stats = .{ .rx_bytes = 100, .tx_bytes = 200, .rx_packets = 1, .tx_packets = 2 },
         },
     };
-    try renderMetricsPayloadFromSnapshots(&w, &snapshots);
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
 
     // Check top-level structure
     try testing.expect(std.mem.startsWith(u8, w.slice(), "{\"service\":"));
@@ -286,6 +295,77 @@ test "renderMetricsFallbackPayload: output is valid JSON structure" {
     try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"status\":\"warn\""));
     try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"error\":\"metrics_unavailable\""));
     try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"private_interfaces\":[]"));
+}
+
+// ============================================================================
+// Tests: rate:null per interface row (ACT 4)
+// ============================================================================
+
+test "renderMetricsPayloadFromSnapshots: one snapshot emits rate null" {
+    var w = TestWriter.init();
+    const name = try testing.allocator.dupe(u8, "wg0");
+    defer testing.allocator.free(name);
+    const snapshots = [_]InterfaceStatsSnapshot{
+        .{
+            .name = name,
+            .stats = .{ .rx_bytes = 123, .tx_bytes = 456, .rx_packets = 7, .tx_packets = 8 },
+        },
+    };
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rate\":null"));
+}
+
+test "renderMetricsPayloadFromSnapshots: two snapshots each have rate null" {
+    var w = TestWriter.init();
+    const eth0_name = try testing.allocator.dupe(u8, "eth0");
+    defer testing.allocator.free(eth0_name);
+    const wg0_name = try testing.allocator.dupe(u8, "wg0");
+    defer testing.allocator.free(wg0_name);
+    const snapshots = [_]InterfaceStatsSnapshot{
+        .{
+            .name = eth0_name,
+            .stats = .{ .rx_bytes = 1000, .tx_bytes = 2000, .rx_packets = 10, .tx_packets = 20 },
+        },
+        .{
+            .name = wg0_name,
+            .stats = .{ .rx_bytes = 3000, .tx_bytes = 4000, .rx_packets = 30, .tx_packets = 40 },
+        },
+    };
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
+    // Each interface row should have its own "rate":null
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 2, "\"rate\":null"));
+}
+
+test "renderMetricsPayloadFromSnapshots: no populated rate object in output" {
+    var w = TestWriter.init();
+    const name = try testing.allocator.dupe(u8, "eth0");
+    defer testing.allocator.free(name);
+    const snapshots = [_]InterfaceStatsSnapshot{
+        .{
+            .name = name,
+            .stats = .{ .rx_bytes = 100, .tx_bytes = 200, .rx_packets = 1, .tx_packets = 2 },
+        },
+    };
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
+    // Should NOT contain any populated rate object fields
+    try testing.expect(!std.mem.containsAtLeast(u8, w.slice(), 1, "\"rx_bytes_per_second\":"));
+    try testing.expect(!std.mem.containsAtLeast(u8, w.slice(), 1, "\"window_seconds\":"));
+}
+
+// ============================================================================
+// Tests: Fallback renderer updated notes (ACT 4)
+// ============================================================================
+
+test "renderMetricsFallbackPayload: emits metrics_version 0.2" {
+    var w = TestWriter.init();
+    try renderMetricsFallbackPayload(&w);
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.2\""));
+}
+
+test "renderMetricsFallbackPayload: emits rate null note" {
+    var w = TestWriter.init();
+    try renderMetricsFallbackPayload(&w);
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "rate is optional"));
 }
 
 // ============================================================================

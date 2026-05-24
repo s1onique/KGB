@@ -98,16 +98,16 @@ Content-Type: application/json
 
 ### `GET /metrics.json`
 
-Private interface traffic metrics payload (IPv4 only, no rates).
+Private interface traffic metrics payload (IPv4 only, with optional rate field).
 
 **Request:** `GET /metrics.json HTTP/1.1`
 
-**Response (success):**
+**Response (success, v0.2 — rate field present but null):**
 ```
 HTTP/1.1 200 OK
 Content-Type: application/json
 
-{"service":"tovarisch","version":"0.1.1","metrics_version":"0.1","private_interfaces":[{"name":"eth0","rx_bytes":123,"tx_bytes":456,"rx_packets":7,"tx_packets":8}],"notes":["interface counters are cumulative, not rates","IPv4 private interfaces only; IPv6 is deferred"]}
+{"service":"tovarisch","version":"0.1.1","metrics_version":"0.2","private_interfaces":[{"name":"eth0","rx_bytes":123,"tx_bytes":456,"rx_packets":7,"tx_packets":8,"rate":null}],"notes":["rate is optional (null until sampler state is wired)","interface counters are cumulative","IPv4 private interfaces only; IPv6 is deferred"]}
 ```
 
 **Response (live collection failure):**
@@ -115,7 +115,7 @@ Content-Type: application/json
 HTTP/1.1 200 OK
 Content-Type: application/json
 
-{"service":"tovarisch","version":"0.1.1","metrics_version":"0.1","status":"warn","private_interfaces":[],"error":"metrics_unavailable","detail":"private interface stats unavailable","notes":["interface counters are cumulative, not rates","IPv4 private interfaces only; IPv6 is deferred"]}
+{"service":"tovarisch","version":"0.1.1","metrics_version":"0.2","status":"warn","private_interfaces":[],"error":"metrics_unavailable","detail":"private interface stats unavailable","notes":["rate is optional (null until sampler state is wired)","interface counters are cumulative","IPv4 private interfaces only; IPv6 is deferred"]}
 ```
 
 **Status Codes:**
@@ -127,12 +127,12 @@ Content-Type: application/json
 |-------|------|-------------|
 | `service` | string | Always `"tovarisch"` |
 | `version` | string | Tovarisch binary version (e.g., `"0.1.1"`) |
-| `metrics_version` | string | Metrics schema version (e.g., `"0.1"`) |
+| `metrics_version` | string | Metrics schema version (`"0.2"` with rate field) |
 | `status` | string | `"warn"` only on fallback; absent on success |
 | `private_interfaces` | array | List of private interface stats (empty on fallback) |
 | `error` | string | `"metrics_unavailable"` only on fallback |
 | `detail` | string | Human-readable detail (fallback only) |
-| `notes` | array | Array of two strings: cumulative counter note and IPv4-only note |
+| `notes` | array | Array of three strings: rate optional note, cumulative note, IPv4-only note |
 
 **Interface Object Fields:**
 | Field | Type | Description |
@@ -142,6 +142,20 @@ Content-Type: application/json
 | `tx_bytes` | integer | Cumulative transmit bytes (not rate) |
 | `rx_packets` | integer | Cumulative receive packets (not rate) |
 | `tx_packets` | integer | Cumulative transmit packets (not rate) |
+| `rate` | null or object | `null` until sampler state is wired (ACT 5); populated object when rate is available |
+
+**Rate Object Fields** (when `rate` is not null):
+| Field | Type | Description |
+|-------|------|-------------|
+| `window_seconds` | integer | Elapsed time between samples in seconds |
+| `rx_bytes_delta` | integer | Bytes received since previous sample |
+| `tx_bytes_delta` | integer | Bytes transmitted since previous sample |
+| `rx_packets_delta` | integer | Packets received since previous sample |
+| `tx_packets_delta` | integer | Packets transmitted since previous sample |
+| `rx_bytes_per_second` | integer | Receive bandwidth in bytes/second |
+| `tx_bytes_per_second` | integer | Transmit bandwidth in bytes/second |
+| `rx_packets_per_second` | integer | Receive packet rate in packets/second |
+| `tx_packets_per_second` | integer | Transmit packet rate in packets/second |
 
 **Important Notes:**
 - All counters are **cumulative**, not instantaneous bandwidth/rates.
