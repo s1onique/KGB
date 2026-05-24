@@ -37,20 +37,20 @@ Create foundational security documents:
 
 ### ACT 1 Acceptance
 
-- [ ] `docs/security/doctrine.md` exists with Day-0 posture, OWASP framework, Orange Book reference, auth rejection statement, secure defaults principle
-- [ ] `docs/security/threat-model.md` exists with component inventory, asset inventory, trust boundaries, abuse case table, controls table (now/near-term/deferred), review triggers
-- [ ] `docs/security/accepted-risks.md` exists with at least 5 deferred risks (node identity, signed config, release signing, fuzzing, privilege separation), each with owner, reason, expiry/review trigger, mitigation path
-- [ ] `docs/security/security-review-ceremony.md` exists with review triggers (8 types), 6 review questions, lightweight process, required outputs (threat model update, accepted risk, or no-change note)
-- [ ] This epic doc exists with 6 ACTs marked appropriately
-- [ ] `make gate` passes
-- [ ] Files are small and LLM-friendly (< 200 lines each)
-- [ ] No large generated diagrams
+- [x] `docs/security/doctrine.md` exists with Day-0 posture, OWASP framework, Orange Book reference, auth rejection statement, secure defaults principle
+- [x] `docs/security/threat-model.md` exists with component inventory, asset inventory, trust boundaries, abuse case table, controls table (now/near-term/deferred), review triggers
+- [x] `docs/security/accepted-risks.md` exists with at least 5 deferred risks (node identity, signed config, release signing, fuzzing, privilege separation), each with owner, reason, expiry/review trigger, mitigation path
+- [x] `docs/security/security-review-ceremony.md` exists with review triggers (8 types), 6 review questions, lightweight process, required outputs (threat model update, accepted risk, or no-change note)
+- [x] This epic doc exists with 6 ACTs marked appropriately
+- [x] `make gate` passes
+- [x] Files are small and LLM-friendly (< 200 lines each)
+- [x] No large generated diagrams
 
 ---
 
 ## ACT 2: Route/Listener Attack Surface Inventory
 
-**Status**: Not Started
+**Status**: Complete
 
 Inventory all network routes and listeners in tovarisch:
 - Document each HTTP endpoint (path, method, auth requirements)
@@ -63,19 +63,24 @@ Inventory all network routes and listeners in tovarisch:
 
 | ID | Work Item | Status |
 |---|---|---|
-| sec-007 | Document all HTTP routes in tovarisch | **pending** |
-| sec-008 | Document listener binding behavior | **pending** |
-| sec-009 | Map data flows for each endpoint | **pending** |
-| sec-010 | Update threat model with attack surface | **pending** |
-| sec-011 | Run `make gate` | **pending** |
+| sec-007 | Document all HTTP routes in tovarisch | **done** |
+| sec-008 | Document listener binding behavior | **done** |
+| sec-009 | Map data flows for each endpoint | **done** |
+| sec-010 | Update threat model with attack surface | **done** |
+| sec-011 | Run `make gate` | **done** |
 
 ### ACT 2 Acceptance
 
-- [ ] All HTTP routes documented with path, method, purpose, data handled
-- [ ] All listeners documented with address, port, binding logic
-- [ ] Public binds identified and rationale documented
-- [ ] Threat model updated with attack surface inventory section
-- [ ] `make gate` passes
+- [x] All HTTP routes documented with path, method, purpose, data handled
+- [x] All listeners documented with address, port, binding logic
+- [x] Public binds identified and rationale documented
+- [x] Threat model updated with attack surface inventory section
+- [x] `make gate` passes
+
+### ACT 2 Deliverables
+
+- **New**: `docs/security/tovarisch-attack-surface.md` — complete HTTP route and listener inventory
+- **Updated**: `docs/security/threat-model.md` — added AC-11 through AC-14, attack surface section
 
 ---
 

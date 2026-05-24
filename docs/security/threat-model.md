@@ -125,6 +125,30 @@ Operator Machine          Trusted Infrastructure         Constrained Leaf
 | AC-08 | Signing key theft: attacker steals operator signing key | kgbctl, operator intent | Critical | Deferred |
 | AC-09 | UVB-76 impersonation: attacker runs fake UVB-76 | operator, tovarisch | High | HTTPS + future pinning |
 | AC-10 | Probe target manipulation: attacker changes probe target config | tovarisch | Medium | Config integrity deferred |
+| AC-11 | Public bind exposure: tovarisch mistakenly bound to public IP | tovarisch HTTP listener | High | `classifyServeBindHost` blocks without flag |
+| AC-12 | Metrics topology disclosure: network peer learns interface names/counts | tovarisch `/metrics.json` | Medium | Loopback default, private bind only |
+| AC-13 | Status enumeration: network peer learns node identity and runtime state | tovarisch `/status`, `/status.json` | Low | Loopback default, no auth yet |
+| AC-14 | Error leak: unknown routes expose internal state via error messages | tovarisch all routes | Low | `handleNotFound` is silent |
+
+## Attack Surface Inventory
+
+See [tovarisch-attack-surface.md](./tovarisch-attack-surface.md) for the complete HTTP route and listener attack surface inventory.
+
+**Quick reference** (read this before reading Zig):
+
+| Route | Sensitivity | Bind Scope | Key Risk |
+|-------|-------------|------------|----------|
+| `/healthz` | Low | Any | None |
+| `/status`, `/status.json` | Medium | Private only | Node identity disclosure |
+| `/metrics.json` | Medium/High | Private only | Topology and counter disclosure |
+| Unknown paths | Low | Any | Internal leak via error messages |
+
+**Listener defaults**:
+- Default bind: `127.0.0.1:8317` (loopback only)
+- Private bind: allowed without flag
+- Public bind: requires `--listen-all-public-dangerous`
+
+**Public bind misuse** is tracked in AC-11 above.
 
 ## Controls Table
 
