@@ -14,7 +14,7 @@
 //   {
 //     "service": "tovarisch",
 //     "version": "0.1.1",
-//     "metrics_version": "0.2",
+//     "metrics_version": "0.3",
 //     "private_interfaces": [
 //       {
 //         "name": "eth0",
@@ -37,7 +37,7 @@
 //   {
 //     "service": "tovarisch",
 //     "version": "0.1.1",
-//     "metrics_version": "0.2",
+//     "metrics_version": "0.3",
 //     "status": "warn",
 //     "private_interfaces": [],
 //     "error": "metrics_unavailable",
@@ -160,17 +160,11 @@ pub fn renderMetricsPayloadFromSnapshots(
 
 /// Renders the fallback warning payload when live metrics collection fails.
 /// Returns HTTP 200 with a valid JSON payload indicating the warning state.
+///
+/// Delegates to metrics_dto.renderFallbackPayload for single source of truth.
 pub fn renderMetricsFallbackPayload(writer: anytype) !void {
-    // Fallback payload with runtime telemetry
     const runtime = telemetry.getRuntimeTelemetry();
-    try writer.writeAll("{\"service\":\"tovarisch\",\"version\":\"0.1.1\",\"metrics_version\":\"0.3\",\"status\":\"warn\",\"runtime\":{");
-    try writer.print("\"pid\":{d}", .{runtime.pid});
-    if (runtime.rss_kib) |rss| {
-        try writer.print(",\"rss_kib\":{d}", .{rss});
-    } else {
-        try writer.writeAll(",\"rss_kib\":null");
-    }
-    try writer.writeAll("},\"private_interfaces\":[],\"error\":\"metrics_unavailable\",\"detail\":\"private interface stats unavailable\",\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\",\"runtime RSS is best-effort platform telemetry\"]}");
+    try metrics_dto.renderFallbackPayload(writer, runtime);
 }
 
 // ============================================================================

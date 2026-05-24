@@ -177,3 +177,27 @@ pub fn freeSampledInterfaces(allocator: std.mem.Allocator, sampled: []SampledInt
     }
     allocator.free(sampled);
 }
+
+// ============================================================================
+// Fallback Renderer: renderFallbackPayload
+// ============================================================================
+
+/// Renders the fallback warning payload when live metrics collection fails.
+/// Returns HTTP 200 with a valid JSON payload indicating the warning state.
+///
+/// This is the single source of truth for the fallback metrics JSON shape.
+/// Used by both metrics.zig and metrics_state.zig when interface collection fails.
+pub fn renderFallbackPayload(writer: anytype, runtime: telemetry.RuntimeTelemetry) !void {
+    try writer.writeAll("{\"service\":\"tovarisch\",\"version\":\"");
+    try writer.writeAll(service_version);
+    try writer.writeAll("\",\"metrics_version\":\"");
+    try writer.writeAll(metrics_version);
+    try writer.writeAll("\",\"status\":\"warn\",\"runtime\":{");
+    try writer.print("\"pid\":{d}", .{runtime.pid});
+    if (runtime.rss_kib) |rss| {
+        try writer.print(",\"rss_kib\":{d}", .{rss});
+    } else {
+        try writer.writeAll(",\"rss_kib\":null");
+    }
+    try writer.writeAll("},\"private_interfaces\":[],\"error\":\"metrics_unavailable\",\"detail\":\"private interface stats unavailable\",\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\",\"runtime RSS is best-effort platform telemetry\"]}");
+}

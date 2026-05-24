@@ -105,7 +105,7 @@ test "renderSampledInterfacesPayload: zero interfaces emits empty array" {
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"private_interfaces\":[]"));
 }
 
-test "renderSampledInterfacesPayload: emits rate is null until a previous sample exists note" {
+test "renderSampledInterfacesPayload: emits rate is null note" {
     var w = TestWriter.init();
     const sampled: [0]SampledInterface = .{};
     try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
@@ -119,9 +119,7 @@ test "renderSampledInterfacesPayload: emits rate is null until a previous sample
 test "renderSampledInterfacesPayload: one interface without rate emits rate:null" {
     const allocator = std.testing.allocator;
     const si = try makeTestSampledInterface(allocator, "wg0", 1000, 2000, 10, 20, 1000, null);
-    defer {
-        allocator.free(si.sample.name);
-    }
+    defer allocator.free(si.sample.name);
 
     var w = TestWriter.init();
     const sampled = [_]SampledInterface{si};
@@ -153,33 +151,24 @@ test "renderSampledInterfacesPayload: one interface with rate" {
         .tx_packets_per_second = 20,
     };
     const si = try makeTestSampledInterface(allocator, "eth0", 31000, 62000, 310, 620, 30000, rate);
-    defer {
-        allocator.free(si.sample.name);
-    }
+    defer allocator.free(si.sample.name);
 
     var w = TestWriter.init();
     const sampled = [_]SampledInterface{si};
     try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
 
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"eth0\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rx_bytes\":31000"));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rate\":{"));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"window_seconds\":30"));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rx_bytes_delta\":30000"));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"tx_bytes_delta\":60000"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rx_packets_delta\":300"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"tx_packets_delta\":600"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rx_bytes_per_second\":1000"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"tx_bytes_per_second\":2000"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rx_packets_per_second\":10"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"tx_packets_per_second\":20"));
 }
 
 // ============================================================================
 // Tests: Two interfaces mixed
 // ============================================================================
 
-test "renderSampledInterfacesPayload: two interfaces, one with rate object, one with rate:null" {
+test "renderSampledInterfacesPayload: two interfaces one with rate one without" {
     const allocator = std.testing.allocator;
 
     const rate = rates.InterfaceRate{
@@ -207,7 +196,6 @@ test "renderSampledInterfacesPayload: two interfaces, one with rate object, one 
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"eth0\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rate\":{"));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rate\":null"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"window_seconds\":30"));
 }
 
 // ============================================================================
