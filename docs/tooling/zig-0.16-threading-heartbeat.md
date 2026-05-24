@@ -166,14 +166,17 @@ const std = @import("std");
 const c = std.c;
 
 // Thread spawn with explicit stack size (no context argument)
-// NOTE: We do NOT call detach() on the thread.
-// detach() in Zig 0.16 can trigger unreachable in certain thread states on Linux.
-// The thread runs until process exit (daemon lifetime), which is correct behavior.
-_ = std.Thread.spawn(
+// The thread must be detached for daemon-lifetime operation.
+if (std.Thread.spawn(
     .{ .stack_size = 65536 },  // 64KB stack for heartbeat worker
     heartbeat.heartbeatThread,
     .{},  // Empty tuple - thread owns local state
-) catch |err| {
+)) |thread| {
+    // Detach the thread for daemon-lifetime operation.
+    // The thread runs until process exit; detach() allows it to continue
+    // independently without blocking the main thread on join.
+    thread.detach();
+} else |err| {
     // Log error, continue serving HTTP
 };
 

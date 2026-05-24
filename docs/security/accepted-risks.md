@@ -184,13 +184,13 @@ Each risk entry contains:
 
 ---
 
-## R-009: Heartbeat Thread Lifecycle (Unjoined Daemon Thread)
+## R-009: Heartbeat Thread Lifecycle (Detached Daemon Thread)
 
-**Description**: Heartbeat thread is spawned but intentionally not joined or detached. The thread owns its state locally (uptime_seconds counter) with no shared mutable context, no mutex, and no `@constCast`.
+**Description**: Heartbeat thread is spawned and detached for daemon-lifetime operation. The thread owns its state locally (uptime_seconds counter) with no shared mutable context, no mutex, and no `@constCast`. `detach()` is called immediately after successful spawn.
 
 **Owner**: maintainer
 
-**Reason**: For daemon-lifetime threads, an unjoined thread is acceptable as long as the process lifetime matches the thread lifetime. Proper join requires shutdown signal handling which is out of scope for v0. `detach()` was removed to avoid potential Zig 0.16 thread state edge cases. The simplified design (local state only) eliminates stack-owned cross-thread coupling that caused crashes.
+**Reason**: For daemon-lifetime threads, the thread must be explicitly detached or joined. Detaching the thread allows it to continue running until process exit without blocking the main thread on join. The heartbeat thread runs until process exit (correct for daemon lifetime). Proper join requires shutdown signal handling which is out of scope for v0.
 
 **Expiry/Review Trigger**:
 - When graceful shutdown is designed
@@ -201,6 +201,7 @@ Each risk entry contains:
 **Mitigation**:
 - Heartbeat is decorative (non-fatal if it fails)
 - Heartbeat thread spawn failures are logged and daemon continues
+- Thread is explicitly detached after spawn (`thread.detach()`)
 - Thread owns its state locally (uptime_seconds counter)
 - No shared context, no mutex, no `@constCast`
 - Thread runs until process exit (correct for daemon lifetime)

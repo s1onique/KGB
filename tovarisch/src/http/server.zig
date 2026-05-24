@@ -304,11 +304,16 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
     // for a decorative daemon-lifetime thread.
     //
     // Heartbeat startup failures are non-fatal - daemon continues serving.
-    _ = std.Thread.spawn(
+    if (std.Thread.spawn(
         .{ .stack_size = 65536 },
         heartbeat.heartbeatThread,
         .{},
-    ) catch |err| {
+    )) |thread| {
+        // Detach the thread for daemon-lifetime operation.
+        // The thread runs until process exit; detach() allows it to continue
+        // independently without blocking the main thread on join.
+        thread.detach();
+    } else |err| {
         // Log error as structured JSON - heartbeat is optional, daemon continues
         log_buf.reset();
         try logging.emit(.heartbeat_thread_start_failed, &log_buf, &.{
@@ -316,10 +321,7 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
             .{ .name = "reason", .value = logging.FieldValue{ .string = "heartbeat_degraded_continue_serving" } },
         });
         try writeLogRecord(out_writer, log_buf.slice());
-    };
-    // NOTE: We do NOT call detach() on the thread.
-    // detach() in Zig 0.16 can trigger unreachable in certain thread states on Linux.
-    // The thread runs until process exit (daemon lifetime), which is correct behavior.
+    }
 
     // Blocking accept loop - stays alive until interrupted.
     while (true) {
