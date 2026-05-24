@@ -1,4 +1,6 @@
-# Zig 0.16 Observations---
+# Zig 0.16 Observations
+
+---
 
 ## 2026-05-24 — Zig 0.16 std.time API limitations for heartbeat implementation
 
