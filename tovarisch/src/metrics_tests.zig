@@ -83,7 +83,7 @@ test "renderMetricsPayloadFromSnapshots: zero snapshots emits metrics_version" {
     var w = TestWriter.init();
     const snapshots: [0]InterfaceStatsSnapshot = .{};
     try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
-    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.2\""));
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.3\""));
 }
 
 test "renderMetricsPayloadFromSnapshots: zero snapshots emits empty private_interfaces" {
@@ -356,16 +356,65 @@ test "renderMetricsPayloadFromSnapshots: no populated rate object in output" {
 // Tests: Fallback renderer updated notes (ACT 4)
 // ============================================================================
 
-test "renderMetricsFallbackPayload: emits metrics_version 0.2" {
+test "renderMetricsFallbackPayload: emits metrics_version 0.3" {
     var w = TestWriter.init();
     try renderMetricsFallbackPayload(&w);
-    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.2\""));
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.3\""));
 }
 
 test "renderMetricsFallbackPayload: emits rate null note" {
     var w = TestWriter.init();
     try renderMetricsFallbackPayload(&w);
     try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "rate is null until a previous sample exists"));
+}
+
+// ============================================================================
+// Tests: Runtime telemetry (v0.3)
+// ============================================================================
+
+test "renderMetricsPayloadFromSnapshots: emits runtime block" {
+    var w = TestWriter.init();
+    const snapshots: [0]InterfaceStatsSnapshot = .{};
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"runtime\":{"));
+}
+
+test "renderMetricsPayloadFromSnapshots: emits runtime pid" {
+    var w = TestWriter.init();
+    const snapshots: [0]InterfaceStatsSnapshot = .{};
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"pid\":"));
+}
+
+test "renderMetricsPayloadFromSnapshots: emits runtime rss_kib" {
+    var w = TestWriter.init();
+    const snapshots: [0]InterfaceStatsSnapshot = .{};
+    try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rss_kib\":"));
+}
+
+test "renderMetricsFallbackPayload: emits runtime block" {
+    var w = TestWriter.init();
+    try renderMetricsFallbackPayload(&w);
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"runtime\":{"));
+}
+
+test "renderMetricsFallbackPayload: emits runtime pid" {
+    var w = TestWriter.init();
+    try renderMetricsFallbackPayload(&w);
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"pid\":"));
+}
+
+test "renderMetricsFallbackPayload: emits runtime rss_kib" {
+    var w = TestWriter.init();
+    try renderMetricsFallbackPayload(&w);
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rss_kib\":"));
+}
+
+test "renderMetricsFallbackPayload: emits runtime RSS best-effort note" {
+    var w = TestWriter.init();
+    try renderMetricsFallbackPayload(&w);
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "runtime RSS is best-effort platform telemetry"));
 }
 
 // ============================================================================

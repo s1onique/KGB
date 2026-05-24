@@ -60,6 +60,7 @@ const std = @import("std");
 const private_interface_stats = @import("net/private_interface_stats.zig");
 const linux_interface_stats = @import("net/linux_interface_stats.zig");
 const metrics_dto = @import("metrics_dto.zig");
+const telemetry = @import("runtime/telemetry.zig");
 
 // Re-export types for convenience
 pub const InterfaceStatsSnapshot = linux_interface_stats.InterfaceStatsSnapshot;
@@ -68,7 +69,7 @@ pub const SampledInterface = metrics_dto.SampledInterface;
 
 // Service version constant (matches status.zig)
 const service_version = "0.1.1";
-const metrics_version = "0.2";
+const metrics_version = "0.3";
 
 // ============================================================================
 // Conversion: InterfaceStatsSnapshot -> SampledInterface
@@ -146,8 +147,11 @@ pub fn renderMetricsPayloadFromSnapshots(
     const sampled = try sampledInterfacesFromSnapshots(allocator, snapshots);
     defer freeSampledInterfaces(allocator, sampled);
 
+    // Get runtime telemetry
+    const runtime = telemetry.getRuntimeTelemetry();
+
     // Delegate JSON serialization to DTO
-    try metrics_dto.renderSampledInterfacesPayload(writer, sampled);
+    try metrics_dto.renderSampledInterfacesPayload(writer, sampled, runtime);
 }
 
 // ============================================================================
@@ -157,9 +161,16 @@ pub fn renderMetricsPayloadFromSnapshots(
 /// Renders the fallback warning payload when live metrics collection fails.
 /// Returns HTTP 200 with a valid JSON payload indicating the warning state.
 pub fn renderMetricsFallbackPayload(writer: anytype) !void {
-    try writer.writeAll(
-        "{\"service\":\"tovarisch\",\"version\":\"0.1.1\",\"metrics_version\":\"0.2\",\"status\":\"warn\",\"private_interfaces\":[],\"error\":\"metrics_unavailable\",\"detail\":\"private interface stats unavailable\",\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\"]}",
-    );
+    // Fallback payload with runtime telemetry
+    const runtime = telemetry.getRuntimeTelemetry();
+    try writer.writeAll("{\"service\":\"tovarisch\",\"version\":\"0.1.1\",\"metrics_version\":\"0.3\",\"status\":\"warn\",\"runtime\":{");
+    try writer.print("\"pid\":{d}", .{runtime.pid});
+    if (runtime.rss_kib) |rss| {
+        try writer.print(",\"rss_kib\":{d}", .{rss});
+    } else {
+        try writer.writeAll(",\"rss_kib\":null");
+    }
+    try writer.writeAll("},\"private_interfaces\":[],\"error\":\"metrics_unavailable\",\"detail\":\"private interface stats unavailable\",\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\",\"runtime RSS is best-effort platform telemetry\"]}");
 }
 
 // ============================================================================

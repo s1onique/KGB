@@ -24,6 +24,7 @@ const metrics_dto = @import("metrics_dto.zig");
 const rates = @import("net/rates.zig");
 const linux_interface_stats = @import("net/linux_interface_stats.zig");
 const private_interface_stats = @import("net/private_interface_stats.zig");
+const telemetry = @import("runtime/telemetry.zig");
 
 // Re-export types for convenience
 pub const SampledInterface = interface_sampler.SampledInterface;
@@ -140,8 +141,11 @@ pub const MetricsState = struct {
         // Note: sampled names are owned by caller; we free via metrics_dto helper
         defer metrics_dto.freeSampledInterfaces(allocator, sampled);
 
-        // Step 5: Render with DTO (single JSON serializer)
-        try metrics_dto.renderSampledInterfacesPayload(writer, sampled);
+        // Step 5: Get runtime telemetry
+        const runtime = telemetry.getRuntimeTelemetry();
+
+        // Step 6: Render with DTO (single JSON serializer)
+        try metrics_dto.renderSampledInterfacesPayload(writer, sampled, runtime);
     }
 
     /// Convert InterfaceStatsSnapshot to InterfaceCounterSample with timestamp.
@@ -185,10 +189,16 @@ pub const MetricsState = struct {
     /// Used when live collection fails.
     fn renderFallbackPayload(self: *Self, writer: anytype) !void {
         _ = self;
-        // Fallback payload - notes updated to reflect sampler wiring
-        try writer.writeAll(
-            "{\"service\":\"tovarisch\",\"version\":\"0.1.1\",\"metrics_version\":\"0.2\",\"status\":\"warn\",\"private_interfaces\":[],\"error\":\"metrics_unavailable\",\"detail\":\"private interface stats unavailable\",\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\"]}",
-        );
+        // Fallback payload with runtime telemetry
+        const runtime = telemetry.getRuntimeTelemetry();
+        try writer.writeAll("{\"service\":\"tovarisch\",\"version\":\"0.1.1\",\"metrics_version\":\"0.3\",\"status\":\"warn\",\"runtime\":{");
+        try writer.print("\"pid\":{d}", .{runtime.pid});
+        if (runtime.rss_kib) |rss| {
+            try writer.print(",\"rss_kib\":{d}", .{rss});
+        } else {
+            try writer.writeAll(",\"rss_kib\":null");
+        }
+        try writer.writeAll("},\"private_interfaces\":[],\"error\":\"metrics_unavailable\",\"detail\":\"private interface stats unavailable\",\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\",\"runtime RSS is best-effort platform telemetry\"]}");
     }
 
     /// Render metrics from already-collected snapshots using the persistent sampler.
@@ -217,8 +227,11 @@ pub const MetricsState = struct {
         const sampled = try self.sampler.update(samples);
         defer metrics_dto.freeSampledInterfaces(allocator, sampled);
 
+        // Get runtime telemetry
+        const runtime = telemetry.getRuntimeTelemetry();
+
         // Render with DTO
-        try metrics_dto.renderSampledInterfacesPayload(writer, sampled);
+        try metrics_dto.renderSampledInterfacesPayload(writer, sampled, runtime);
     }
 };
 

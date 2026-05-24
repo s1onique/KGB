@@ -134,20 +134,20 @@ Private interface traffic metrics payload (IPv4 only, with process-local sampler
 
 **Request:** `GET /metrics.json HTTP/1.1`
 
-**Response (success, v0.2 — first request: rate field null):**
+**Response (success, v0.3 — first request: rate field null):**
 ```
 HTTP/1.1 200 OK
 Content-Type: application/json
 
-{"service":"tovarisch","version":"0.1.1","metrics_version":"0.2","private_interfaces":[{"name":"eth0","rx_bytes":123,"tx_bytes":456,"rx_packets":7,"tx_packets":8,"rate":null}],"notes":["rate is null until a previous sample exists","interface counters are cumulative","IPv4 private interfaces only; IPv6 is deferred"]}
+{"service":"tovarisch","version":"0.1.1","metrics_version":"0.3","runtime":{"pid":1234,"rss_kib":1920},"private_interfaces":[{"name":"eth0","rx_bytes":123,"tx_bytes":456,"rx_packets":7,"tx_packets":8,"rate":null}],"notes":["rate is null until a previous sample exists","interface counters are cumulative","IPv4 private interfaces only; IPv6 is deferred","runtime RSS is best-effort platform telemetry"]}
 ```
 
-**Response (success, v0.2 — later request with rate):**
+**Response (success, v0.3 — later request with rate):**
 ```
 HTTP/1.1 200 OK
 Content-Type: application/json
 
-{"service":"tovarisch","version":"0.1.1","metrics_version":"0.2","private_interfaces":[{"name":"eth0","rx_bytes":3123,"tx_bytes":6456,"rx_packets":37,"tx_packets":48,"rate":{"window_seconds":30,"rx_bytes_delta":3000,"tx_bytes_delta":6000,"rx_packets_delta":30,"tx_packets_delta":40,"rx_bytes_per_second":100,"tx_bytes_per_second":200,"rx_packets_per_second":1,"tx_packets_per_second":1}}],"notes":["rate is null until a previous sample exists","interface counters are cumulative","IPv4 private interfaces only; IPv6 is deferred"]}
+{"service":"tovarisch","version":"0.1.1","metrics_version":"0.3","runtime":{"pid":1234,"rss_kib":1920},"private_interfaces":[{"name":"eth0","rx_bytes":3123,"tx_bytes":6456,"rx_packets":37,"tx_packets":48,"rate":{"window_seconds":30,"rx_bytes_delta":3000,"tx_bytes_delta":6000,"rx_packets_delta":30,"tx_packets_delta":40,"rx_bytes_per_second":100,"tx_bytes_per_second":200,"rx_packets_per_second":1,"tx_packets_per_second":1}}],"notes":["rate is null until a previous sample exists","interface counters are cumulative","IPv4 private interfaces only; IPv6 is deferred","runtime RSS is best-effort platform telemetry"]}
 ```
 
 **Response (live collection failure):**
@@ -155,7 +155,7 @@ Content-Type: application/json
 HTTP/1.1 200 OK
 Content-Type: application/json
 
-{"service":"tovarisch","version":"0.1.1","metrics_version":"0.2","status":"warn","private_interfaces":[],"error":"metrics_unavailable","detail":"private interface stats unavailable","notes":["rate is null until a previous sample exists","interface counters are cumulative","IPv4 private interfaces only; IPv6 is deferred"]}
+{"service":"tovarisch","version":"0.1.1","metrics_version":"0.3","status":"warn","runtime":{"pid":1234,"rss_kib":1920},"private_interfaces":[],"error":"metrics_unavailable","detail":"private interface stats unavailable","notes":["rate is null until a previous sample exists","interface counters are cumulative","IPv4 private interfaces only; IPv6 is deferred","runtime RSS is best-effort platform telemetry"]}
 ```
 
 **Status Codes:**
@@ -167,12 +167,19 @@ Content-Type: application/json
 |-------|------|-------------|
 | `service` | string | Always `"tovarisch"` |
 | `version` | string | Tovarisch binary version (e.g., `"0.1.1"`) |
-| `metrics_version` | string | Metrics schema version (`"0.2"` with rate field) |
+| `metrics_version` | string | Metrics schema version (`"0.3"` with runtime telemetry) |
+| `runtime` | object | Process runtime telemetry (pid, rss_kib) |
 | `status` | string | `"warn"` only on fallback; absent on success |
 | `private_interfaces` | array | List of private interface stats (empty on fallback) |
 | `error` | string | `"metrics_unavailable"` only on fallback |
 | `detail` | string | Human-readable detail (fallback only) |
-| `notes` | array | Array of three strings: rate null note, cumulative note, IPv4-only note |
+| `notes` | array | Array of four strings: rate null note, cumulative note, IPv4-only note, RSS note |
+
+**Runtime Object Fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `pid` | integer | Process ID of the tovarisch daemon |
+| `rss_kib` | integer or null | Resident Set Size in KiB (null on non-Linux platforms) |
 
 **Interface Object Fields:**
 | Field | Type | Description |
@@ -325,6 +332,7 @@ The HTTP endpoints must NOT expose:
 |---------|------|---------|
 | 0.1.0 | 2026-05-22 | Initial HTTP service contract |
 | 0.2 | 2026-05-24 | Add rate field, sampler state wiring (ACT 5) |
+| 0.3 | 2026-05-24 | Add runtime telemetry (pid, rss_kib) |
 
 ## Relationship to Other Contracts
 

@@ -50,16 +50,18 @@
 //   {
 //     "service": "tovarisch",
 //     "version": "0.1.1",
-//     "metrics_version": "0.2",
+//     "metrics_version": "0.3",
+//     "runtime": { "pid": 123, "rss_kib": 1920 },
 //     "private_interfaces": [ ... ],
 //     "notes": [ ... ]
 //   }
 //
-// Version bump to 0.2 because this adds new optional rate fields.
+// Version 0.3 adds runtime telemetry (pid, rss_kib) - process telemetry, not interface metrics.
 
 const std = @import("std");
 const rates = @import("net/rates.zig");
 const sampler = @import("net/interface_sampler.zig");
+const telemetry = @import("runtime/telemetry.zig");
 
 // Re-export types for convenience
 pub const SampledInterface = sampler.SampledInterface;
@@ -67,7 +69,7 @@ pub const InterfaceRate = rates.InterfaceRate;
 
 // Version constants
 const service_version = "0.1.1";
-const metrics_version = "0.2";
+const metrics_version = "0.3";
 
 // ============================================================================
 // JSON String Escaping
@@ -100,11 +102,24 @@ pub fn writeJsonString(writer: anytype, s: []const u8) !void {
 pub fn renderSampledInterfacesPayload(
     writer: anytype,
     sampled: []const SampledInterface,
+    runtime: telemetry.RuntimeTelemetry,
 ) !void {
     // Service and version header
     try writer.writeAll("{\"service\":\"tovarisch\",\"version\":\"");
-    try writer.print("{s}\",\"metrics_version\":\"", .{service_version});
-    try writer.print("{s}\",\"private_interfaces\":[", .{metrics_version});
+    try writer.writeAll(service_version);
+    try writer.writeAll("\",\"metrics_version\":\"");
+    try writer.writeAll(metrics_version);
+    try writer.writeAll("\",\"runtime\":{");
+
+    // Render runtime telemetry
+    try writer.print("\"pid\":{d}", .{runtime.pid});
+    if (runtime.rss_kib) |rss| {
+        try writer.print(",\"rss_kib\":{d}", .{rss});
+    } else {
+        try writer.writeAll(",\"rss_kib\":null");
+    }
+
+    try writer.writeAll("},\"private_interfaces\":[");
 
     // Render each interface
     for (sampled, 0..) |si, i| {
@@ -112,8 +127,8 @@ pub fn renderSampledInterfacesPayload(
         try renderSampledInterface(writer, si);
     }
 
-    // Notes footer
-    try writer.writeAll("],\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\"]}");
+    // Notes footer - include runtime RSS note
+    try writer.writeAll("],\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\",\"runtime RSS is best-effort platform telemetry\"]}");
 }
 
 /// Renders a single SampledInterface as JSON.

@@ -6,11 +6,15 @@ const std = @import("std");
 const rates = @import("net/rates.zig");
 const sampler = @import("net/interface_sampler.zig");
 const metrics_dto = @import("metrics_dto.zig");
+const telemetry = @import("runtime/telemetry.zig");
 
 // Re-export types for convenience
 const SampledInterface = metrics_dto.SampledInterface;
 const renderSampledInterfacesPayload = metrics_dto.renderSampledInterfacesPayload;
 const writeJsonString = metrics_dto.writeJsonString;
+
+// Test runtime telemetry - use known values for deterministic tests
+const testRuntime = telemetry.RuntimeTelemetry{ .pid = 1234, .rss_kib = 1920 };
 
 // ============================================================================
 // Test Writer Helper
@@ -83,28 +87,28 @@ fn makeTestSampledInterface(
 test "renderSampledInterfacesPayload: zero interfaces emits service" {
     var w = TestWriter.init();
     const sampled: [0]SampledInterface = .{};
-    try renderSampledInterfacesPayload(&w, &sampled);
+    try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"service\":\"tovarisch\""));
 }
 
-test "renderSampledInterfacesPayload: zero interfaces emits metrics_version 0.2" {
+test "renderSampledInterfacesPayload: zero interfaces emits metrics_version 0.3" {
     var w = TestWriter.init();
     const sampled: [0]SampledInterface = .{};
-    try renderSampledInterfacesPayload(&w, &sampled);
-    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.2\""));
+    try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"metrics_version\":\"0.3\""));
 }
 
 test "renderSampledInterfacesPayload: zero interfaces emits empty array" {
     var w = TestWriter.init();
     const sampled: [0]SampledInterface = .{};
-    try renderSampledInterfacesPayload(&w, &sampled);
+    try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"private_interfaces\":[]"));
 }
 
 test "renderSampledInterfacesPayload: emits rate is null until a previous sample exists note" {
     var w = TestWriter.init();
     const sampled: [0]SampledInterface = .{};
-    try renderSampledInterfacesPayload(&w, &sampled);
+    try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "rate is null until a previous sample exists"));
 }
 
@@ -121,7 +125,7 @@ test "renderSampledInterfacesPayload: one interface without rate emits rate:null
 
     var w = TestWriter.init();
     const sampled = [_]SampledInterface{si};
-    try renderSampledInterfacesPayload(&w, &sampled);
+    try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
 
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"wg0\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rx_bytes\":1000"));
@@ -155,7 +159,7 @@ test "renderSampledInterfacesPayload: one interface with rate" {
 
     var w = TestWriter.init();
     const sampled = [_]SampledInterface{si};
-    try renderSampledInterfacesPayload(&w, &sampled);
+    try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
 
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"eth0\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rx_bytes\":31000"));
@@ -197,7 +201,7 @@ test "renderSampledInterfacesPayload: two interfaces, one with rate object, one 
 
     var w = TestWriter.init();
     const sampled = [_]SampledInterface{ si1, si2 };
-    try renderSampledInterfacesPayload(&w, &sampled);
+    try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
 
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"wg0\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"eth0\""));
@@ -217,12 +221,44 @@ test "renderSampledInterfacesPayload: output is valid JSON structure" {
 
     var w = TestWriter.init();
     const sampled = [_]SampledInterface{si};
-    try renderSampledInterfacesPayload(&w, &sampled);
+    try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
 
     try std.testing.expect(std.mem.startsWith(u8, w.slice(), "{\"service\":"));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"private_interfaces\":["));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"notes\":["));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "}"));
+}
+
+// ============================================================================
+// Tests: Runtime telemetry in output
+// ============================================================================
+
+test "renderSampledInterfacesPayload: emits runtime pid" {
+    var w = TestWriter.init();
+    const sampled: [0]SampledInterface = .{};
+    try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"pid\":1234"));
+}
+
+test "renderSampledInterfacesPayload: emits runtime rss_kib" {
+    var w = TestWriter.init();
+    const sampled: [0]SampledInterface = .{};
+    try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rss_kib\":1920"));
+}
+
+test "renderSampledInterfacesPayload: emits runtime block" {
+    var w = TestWriter.init();
+    const sampled: [0]SampledInterface = .{};
+    try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"runtime\":{"));
+}
+
+test "renderSampledInterfacesPayload: emits runtime RSS best-effort note" {
+    var w = TestWriter.init();
+    const sampled: [0]SampledInterface = .{};
+    try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "runtime RSS is best-effort platform telemetry"));
 }
 
 // ============================================================================

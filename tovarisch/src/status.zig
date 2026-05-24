@@ -99,22 +99,35 @@ pub fn renderPayload(writer: anytype) !void {
 /// NOTE: This manual JSON construction does not escape special characters.
 /// All current values are static strings, so this is safe for now.
 fn renderStatus(writer: anytype, s: Status) !void {
-    try writer.print(
-        "{{\"service\":\"{s}\",\"version\":\"{s}\",\"node_id\":\"{s}\",\"status\":\"{s}\",\"checks\":[",
-        .{ s.service, s.version, s.node_id, @tagName(s.status) },
-    );
+    // Build header using writeAll for safety
+    try writer.writeAll("{\"service\":\"");
+    try writer.writeAll(s.service);
+    try writer.writeAll("\",\"version\":\"");
+    try writer.writeAll(s.version);
+    try writer.writeAll("\",\"node_id\":\"");
+    try writer.writeAll(s.node_id);
+    try writer.writeAll("\",\"status\":\"");
+    try writer.writeAll(@tagName(s.status));
+    try writer.writeAll("\",\"checks\":[");
+
+    // Render each check
     for (s.checks, 0..) |check, i| {
         if (i > 0) try writer.writeAll(",");
-        try writer.print(
-            "{{\"name\":\"{s}\",\"status\":\"{s}\",\"detail\":\"{s}\"}}",
-            .{ check.name, @tagName(check.status), check.detail },
-        );
+        try writer.writeAll("{\"name\":\"");
+        try writer.writeAll(check.name);
+        try writer.writeAll("\",\"status\":\"");
+        try writer.writeAll(@tagName(check.status));
+        try writer.writeAll("\",\"detail\":\"");
+        try writer.writeAll(check.detail);
+        try writer.writeAll("\"}");
     }
+
     // Render runtime block
-    try writer.writeAll("],\"runtime\":{");
-    try writer.print("\"pid\":{d}", .{s.runtime.pid});
+    try writer.writeAll("],\"runtime\":{\"pid\":");
+    try writer.print("{d}", .{s.runtime.pid});
     if (s.runtime.rss_kib) |rss| {
-        try writer.print(",\"rss_kib\":{d}", .{rss});
+        try writer.writeAll(",\"rss_kib\":");
+        try writer.print("{d}", .{rss});
     } else {
         try writer.writeAll(",\"rss_kib\":null");
     }

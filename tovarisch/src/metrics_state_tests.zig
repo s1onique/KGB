@@ -343,7 +343,7 @@ test "reappeared interface returns rate:null" {
 // Tests: Output still uses metrics_version 0.2
 // ============================================================================
 
-test "output uses metrics_version 0.2" {
+test "output uses metrics_version 0.3" {
     const allocator = testing.allocator;
     var state = MetricsState.init(allocator);
     defer state.deinit();
@@ -358,7 +358,7 @@ test "output uses metrics_version 0.2" {
 
     const json = writer.slice();
 
-    try testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"metrics_version\":\"0.2\""));
+    try testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"metrics_version\":\"0.3\""));
 }
 
 test "output uses service tovarisch" {
