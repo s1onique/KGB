@@ -3,6 +3,9 @@ const telemetry = @import("runtime/telemetry.zig");
 
 pub const version = "0.1.1";
 
+/// Default state directory path relative to working directory.
+pub const DEFAULT_STATE_DIR = ".tovarisch/state";
+
 // --- Canonical Status JSON Schema ---
 //
 // Minimal contract for `tovarisch status --json`.
@@ -11,6 +14,7 @@ pub const CheckStatus = enum {
     ok,
     warn,
     @"error",
+    unknown,
 };
 
 pub const Check = struct {
@@ -63,19 +67,82 @@ const http_check = Check{
     .detail = "http service route available",
 };
 
-pub fn getStateDirCheck() Check {
-    return Check{
-        .name = "state_dir",
-        .status = .warn,
-        .detail = "state directory not found",
-    };
+/// Performs a filesystem check for the given path.
+/// This is the core filesystem observation logic.
+/// Does not create, delete, or mutate filesystem state.
+///
+/// Uses opendir() to differentiate:
+/// - opendir succeeds → path is a directory → ok
+/// - opendir fails with ENOENT/ENOTDIR → path does not exist → warn
+/// - opendir fails with other error → inaccessible → unknown
+pub fn getStateDirCheckForPath(path: []const u8) Check {
+    var path_buf: [4096]u8 = undefined;
+    const c_path_result = toCString(path, &path_buf);
+    if (c_path_result) |c_path| {
+        // Try to open as directory
+        const dir = std.c.opendir(c_path);
+        if (dir) |d| {
+            // Path exists and is a directory
+            _ = std.c.closedir(d);
+            return Check{
+                .name = "state_dir",
+                .status = .ok,
+                .detail = "state directory ready",
+            };
+        }
+
+        // opendir failed - check the errno to determine the failure type
+        const errno = std.c._errno().*;
+        const e_noent = @intFromEnum(std.c.E.NOENT);
+        const e_notdir = @intFromEnum(std.c.E.NOTDIR);
+        if (errno == e_noent or errno == e_notdir) {
+            // Path does not exist (ENOENT) or exists but is not a directory (ENOTDIR)
+            return Check{
+                .name = "state_dir",
+                .status = .warn,
+                .detail = "state directory not found",
+            };
+        }
+
+        // Unexpected error (permission denied, I/O error, etc.)
+        return Check{
+            .name = "state_dir",
+            .status = .unknown,
+            .detail = "state directory inaccessible",
+        };
+    } else {
+        // Path too long
+        return Check{
+            .name = "state_dir",
+            .status = .unknown,
+            .detail = "state directory inaccessible",
+        };
+    }
 }
 
-const state_check = getStateDirCheck();
-const all_checks = [_]Check{ process_check, binary_check, config_check, state_check, http_check };
+/// Default state directory check using DEFAULT_STATE_DIR.
+pub fn getStateDirCheck() Check {
+    return getStateDirCheckForPath(DEFAULT_STATE_DIR);
+}
+
+/// Converts a Zig slice to a null-terminated C string.
+pub fn toCString(path: []const u8, buf: *[4096]u8) ?[*:0]const u8 {
+    if (path.len >= buf.len) return null;
+    @memcpy(buf[0..path.len], path);
+    buf[path.len] = 0;
+    return @as([*:0]const u8, @ptrCast(buf));
+}
+
+/// Static buffer for local checks. Ensures stable memory addresses.
+var local_checks_buf: [5]Check = undefined;
 
 pub fn getLocalChecks() []const Check {
-    return &all_checks;
+    local_checks_buf[0] = process_check;
+    local_checks_buf[1] = binary_check;
+    local_checks_buf[2] = config_check;
+    local_checks_buf[3] = getStateDirCheck();
+    local_checks_buf[4] = http_check;
+    return &local_checks_buf;
 }
 
 pub fn getStatus() Status {
@@ -96,10 +163,7 @@ pub fn renderPayload(writer: anytype) !void {
 }
 
 /// Renders the given status as JSON to the writer.
-/// NOTE: This manual JSON construction does not escape special characters.
-/// All current values are static strings, so this is safe for now.
 fn renderStatus(writer: anytype, s: Status) !void {
-    // Build header using writeAll for safety
     try writer.writeAll("{\"service\":\"");
     try writer.writeAll(s.service);
     try writer.writeAll("\",\"version\":\"");
@@ -110,7 +174,6 @@ fn renderStatus(writer: anytype, s: Status) !void {
     try writer.writeAll(@tagName(s.status));
     try writer.writeAll("\",\"checks\":[");
 
-    // Render each check
     for (s.checks, 0..) |check, i| {
         if (i > 0) try writer.writeAll(",");
         try writer.writeAll("{\"name\":\"");
@@ -122,7 +185,6 @@ fn renderStatus(writer: anytype, s: Status) !void {
         try writer.writeAll("\"}");
     }
 
-    // Render runtime block
     try writer.writeAll("],\"runtime\":{\"pid\":");
     try writer.print("{d}", .{s.runtime.pid});
     if (s.runtime.rss_kib) |rss| {
@@ -192,7 +254,7 @@ test "status has correct structure" {
     try std.testing.expectEqualStrings("tovarisch", s.service);
     try std.testing.expectEqualStrings("0.1.1", s.version);
     try std.testing.expectEqualStrings("local-dev", s.node_id);
-    try std.testing.expectEqual(CheckStatus.warn, s.status);
+    try std.testing.expect(s.status == .ok or s.status == .warn or s.status == .@"error");
     try std.testing.expectEqual(@as(usize, 5), s.checks.len);
 }
 
@@ -201,29 +263,16 @@ test "getStateDirCheck returns correct name" {
     try std.testing.expectEqualStrings("state_dir", check.name);
 }
 
-test "getStateDirCheck status is warn" {
-    const check = getStateDirCheck();
-    try std.testing.expectEqual(CheckStatus.warn, check.status);
-}
-
-// --- JSON Contract Tests ---
-// These tests verify the status JSON contract structure.
-// Actual JSON parseability is verified by verify_status_json.sh in the gate.
-
 test "status JSON contains all required top-level fields" {
-    // Verify that getStatus() returns correct field values
-    // which are rendered as JSON by renderPayload()
     const s = getStatus();
     try std.testing.expectEqualStrings("tovarisch", s.service);
     try std.testing.expectEqualStrings("0.1.1", s.version);
     try std.testing.expectEqualStrings("local-dev", s.node_id);
-    // status is "warn" because config and state_dir are warn
-    try std.testing.expectEqual(CheckStatus.warn, s.status);
+    try std.testing.expect(s.status == .ok or s.status == .warn or s.status == .@"error");
     try std.testing.expect(s.checks.len > 0);
 }
 
 test "status JSON contains all five checks" {
-    // Verify all check names that should appear in JSON output
     const checks = getLocalChecks();
 
     var has_process = false;
@@ -245,11 +294,6 @@ test "status JSON contains all five checks" {
     try std.testing.expect(has_config);
     try std.testing.expect(has_state_dir);
     try std.testing.expect(has_http);
-}
-
-test "state_dir check has correct detail" {
-    const check = getStateDirCheck();
-    try std.testing.expectEqualStrings("state directory not found", check.detail);
 }
 
 test "config check has warn status" {
@@ -296,9 +340,6 @@ const TestWriter = struct {
     }
 };
 
-// --- Rendered output tests ---
-// These tests verify that renderPayload() produces correct JSON output.
-
 test "renderPayload output contains service:tovarisch" {
     var w = TestWriter.init();
     try renderPayload(&w);
@@ -315,12 +356,6 @@ test "renderPayload output contains node_id:local-dev" {
     var w = TestWriter.init();
     try renderPayload(&w);
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"node_id\":\"local-dev\""));
-}
-
-test "renderPayload output contains status:warn" {
-    var w = TestWriter.init();
-    try renderPayload(&w);
-    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"status\":\"warn\""));
 }
 
 test "renderPayload output contains checks array" {
@@ -351,6 +386,5 @@ test "renderPayload output contains runtime block" {
 test "getStatus includes runtime telemetry" {
     const s = getStatus();
     try std.testing.expect(s.runtime.pid > 0);
-    // rss_kib can be null on non-Linux platforms or valid on Linux
     try std.testing.expect(s.runtime.rss_kib == null or s.runtime.rss_kib.? >= 0);
 }

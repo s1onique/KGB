@@ -271,6 +271,64 @@ if (c.getenv("TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE") != null) {
 
 ---
 
+## 2026-05-24 — Zig 0.16 opendir() for filesystem checks in status.zig
+
+- **Context:** Implementing `getStateDirCheckForPath()` in `tovarisch/src/status.zig` to replace the placeholder `state_dir` check.
+- **Symptom:** `std.c.stat` is not available in Zig 0.16's `std.c` namespace; compilation error.
+- **Working fix:** Use `std.c.opendir()` instead of `stat()`:
+  ```zig
+  const dir = std.c.opendir(c_path);
+  if (dir) |d| {
+      // Path is a directory - ok
+      _ = std.c.closedir(d);
+      return Check{ .name = "state_dir", .status = .ok, .detail = "state directory ready" };
+  }
+  // Check errno for ENOENT/ENOTDIR vs other errors
+  const errno = std.c._errno().*;
+  const e_noent = @intFromEnum(std.c.E.NOENT);
+  const e_notdir = @intFromEnum(std.c.E.NOTDIR);
+  if (errno == e_noent or errno == e_notdir) {
+      return Check{ .name = "state_dir", .status = .warn, .detail = "state directory not found" };
+  }
+  return Check{ .name = "state_dir", .status = .unknown, .detail = "state directory inaccessible" };
+  ```
+
+- **Limitation:** `opendir()` cannot distinguish between "file exists" (ENOTDIR) and "path doesn't exist" (ENOENT). Without `stat()`, we cannot return `error` for "path is not a directory". The honest behavior is to return `warn` for both cases.
+
+- **Files affected:**
+  - `tovarisch/src/status.zig` — new `getStateDirCheckForPath()` function
+  - `tovarisch/src/status_tests.zig` — new test file with isolated filesystem tests
+
+- **Promote to field manual?** Yes — filesystem observation patterns are common.
+
+## 2026-05-24 — std.c._errno() returns c_int, not enum
+
+- **Symptom:** `error: incompatible types: 'c_int' and 'c.darwin.E'` when comparing errno directly.
+- **Working fix:** Use `@intFromEnum()` to convert enum to integer:
+  ```zig
+  const errno = std.c._errno().*;
+  const e_noent = @intFromEnum(std.c.E.NOENT);
+  if (errno == e_noent) { ... }
+  ```
+
+- **Files affected:** `tovarisch/src/status.zig`
+
+- **Promote to field manual?** Yes — errno handling is a common pattern.
+
+## 2026-05-24 — std.c.open() mode parameter must be cast to c_uint
+
+- **Symptom:** `error: integer and float literals passed to variadic function must be casted to a fixed-size number type`
+- **Working fix:** Cast the mode argument:
+  ```zig
+  const fd = std.c.open(c_path, std.c.O{ .ACCMODE = std.posix.ACCMODE.WRONLY, .CREAT = true }, @as(c_uint, 0o644));
+  ```
+
+- **Files affected:** `tovarisch/src/status_tests.zig`
+
+- **Promote to field manual?** Yes — variadic C function call patterns are common.
+
+---
+
 Recording field notes from Zig 0.16 experiments. Confidence varies; do not promote to field manual until verified with a minimal reproducer.
 
 Old entries have been promoted to `zig-0.16-field-manual.md`. This file tracks experimental observations.

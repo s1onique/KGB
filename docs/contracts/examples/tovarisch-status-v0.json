@@ -21,8 +21,8 @@
     },
     {
       "name": "state_dir",
-      "status": "warn",
-      "detail": "state directory not found"
+      "status": "ok",
+      "detail": "state directory ready"
     },
     {
       "name": "http",

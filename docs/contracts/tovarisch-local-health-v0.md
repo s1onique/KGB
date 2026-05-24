@@ -19,7 +19,7 @@ All health checks are identified by a canonical name. Check names are stable; ad
 | `process` | Is `tovarisch` alive enough to report? | Always `ok` | Same |
 | `binary` | Is the running binary identifiable? | Always `ok` | Same |
 | `config` | Is local config present and parseable? | `warn` until config exists | Same |
-| `state_dir` | Can local state directory be found/created? | `warn` or `error` if inaccessible | Same |
+| `state_dir` | Can local state directory be found/used? | `warn` if missing, `ok` if usable | `opendir()` v0; file-vs-dir distinction is accepted uncovered |
 | `network` | Is basic local network usable? | `warn` until configured | `ok` with valid config |
 | `routes` | Are required routes/interfaces visible? | N/A | Later ACT |
 | `control_tower` | Can a configured tower be reached? | N/A | Later ACT |

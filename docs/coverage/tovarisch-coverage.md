@@ -39,7 +39,8 @@ This document tracks which specific behaviors are covered by automated checks.
 | Local checks: process | Static check in `status.zig` + output test | Yes (kcov + gate) | ✅ Covered | None |
 | Local checks: binary | Static check in `status.zig` + output test | Yes (kcov + gate) | ✅ Covered | None |
 | Local checks: config | Static check shows "not configured yet" as warn | Yes (kcov + gate) | ✅ Covered | None |
-| Local checks: state_dir (placeholder) | Emits warn with "state directory not found" | Yes (kcov + gate) | ✅ Covered | Temporary until real Io.Dir API used |
+| Local checks: state_dir (filesystem) | Uses `opendir()` to detect directory existence; returns ok/warn/unknown | Yes (kcov + gate) | ✅ Covered | Uses opendir() - cannot distinguish file from missing without stat() |
+| Local checks: state_dir (file vs directory) | `opendir()` cannot distinguish ENOTDIR from ENOENT | Accepted uncovered | ⚠️ Accepted | Requires stat/lstat — not available in Zig 0.16 std.c |
 | Multiple local checks in output | Unit test `status --json contains multiple checks` | Yes (kcov + gate) | ✅ Covered | None |
 
 ### Accepted Uncovered Future Behaviors
@@ -53,9 +54,6 @@ This document tracks which specific behaviors are covered by automated checks.
 | Signed status reports | Report schema TBD; no signing implementation | Define report schema and add coverage |
 | Desired-state pull | Desired-state model not designed | Design desired-state interface and add coverage |
 | Transport to UVB-76 | UVB-76-side not implemented | Implement UVB-76 transport and add coverage |
-| state_dir (directory exists) | Io.Dir API not yet understood in Zig 0.16; placeholder returns warn | Investigate std.fs.Dir.stat() or simpler API |
-| state_dir (path is file, not dir) | Io.Dir API not yet understood; placeholder only | Implement real filesystem check |
-| state_dir (permission denied) | Io.Dir API not yet understood; placeholder only | Implement real filesystem check |
 
 ## Coverage Mechanisms
 
