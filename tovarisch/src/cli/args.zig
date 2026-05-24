@@ -8,6 +8,14 @@ pub const CliError = error{
     UnsupportedDeprecatedFlag,
 };
 
+/// Log mode for serve command.
+pub const LogMode = enum {
+    /// Normal mode: emit all startup and runtime logs.
+    normal,
+    /// Stat-only mode: suppress info logs, print compact interface stats periodically.
+    statonly,
+};
+
 /// Result of validating a serve bind host.
 pub const BindValidation = enum {
     /// Host is safe for binding without dangerous flag.
@@ -60,6 +68,8 @@ pub fn parseServeArgs(args: []const []const u8, stderr: anytype) ServeParseResul
     var config = http.defaultConfig();
     var dangerous_flag_present = false;
     var explicit_listen_address = false;
+    var log_mode: LogMode = .normal;
+    var stats_interval_seconds: u16 = 30;
 
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
@@ -92,11 +102,28 @@ pub fn parseServeArgs(args: []const []const u8, stderr: anytype) ServeParseResul
         } else if (std.mem.eql(u8, arg, "--listen-all")) {
             stderr.writeAll("error: --listen-all is deprecated; use --listen-all-public-dangerous\n") catch {};
             return .usage;
+        } else if (std.mem.eql(u8, arg, "--statonly")) {
+            log_mode = .statonly;
+        } else if (std.mem.eql(u8, arg, "--stats-interval") and i + 1 < args.len) {
+            const interval = std.fmt.parseInt(u16, args[i + 1], 10) catch {
+                stderr.writeAll("invalid --stats-interval value\n") catch {};
+                return .usage;
+            };
+            if (interval == 0) {
+                stderr.writeAll("error: --stats-interval must be >= 1\n") catch {};
+                return .usage;
+            }
+            stats_interval_seconds = interval;
+            i += 1;
         } else {
             stderr.print("unknown serve option: {s}\n", .{arg}) catch {};
             return .usage;
         }
     }
+
+    // Store log_mode and stats_interval in config for runtime use
+    config.log_mode = log_mode;
+    config.stats_interval_seconds = stats_interval_seconds;
 
     // Validate bind address if an explicit host was set via --listen
     // (not if it was set by --listen-private or --listen-all-public-dangerous)
@@ -325,4 +352,61 @@ test "parseServeArgs deprecated --listen-all mentions dangerous flag" {
     var w = CapturingWriter(256){};
     try std.testing.expect(parseServeArgs(&.{"--listen-all"}, &w) == .usage);
     try std.testing.expect(w.contains("--listen-all-public-dangerous"));
+}
+
+// --- Tests for statonly mode ---
+
+test "parseServeArgs with --statonly sets statonly mode" {
+    const w = VoidWriter{};
+    const parsed = parseServeArgs(&.{"--statonly"}, w);
+    try std.testing.expect(parsed == .ok);
+    try std.testing.expect(parsed.ok.log_mode == .statonly);
+}
+
+test "parseServeArgs --statonly with --listen" {
+    const w = VoidWriter{};
+    const parsed = parseServeArgs(&.{ "--statonly", "--listen", "127.0.0.1:8317" }, w);
+    try std.testing.expect(parsed == .ok);
+    try std.testing.expect(parsed.ok.log_mode == .statonly);
+    try std.testing.expectEqualStrings("127.0.0.1", parsed.ok.address);
+}
+
+test "parseServeArgs --statonly with --stats-interval" {
+    const w = VoidWriter{};
+    const parsed = parseServeArgs(&.{ "--statonly", "--stats-interval", "10" }, w);
+    try std.testing.expect(parsed == .ok);
+    try std.testing.expect(parsed.ok.log_mode == .statonly);
+    try std.testing.expectEqual(@as(u16, 10), parsed.ok.stats_interval_seconds);
+}
+
+test "parseServeArgs --statonly --stats-interval combined" {
+    const w = VoidWriter{};
+    const parsed = parseServeArgs(&.{ "--statonly", "--stats-interval", "30" }, w);
+    try std.testing.expect(parsed == .ok);
+    try std.testing.expectEqual(@as(u16, 30), parsed.ok.stats_interval_seconds);
+}
+
+test "parseServeArgs invalid --stats-interval returns usage" {
+    const w = VoidWriter{};
+    try std.testing.expect(parseServeArgs(&.{ "--statonly", "--stats-interval", "abc" }, w) == .usage);
+}
+
+test "parseServeArgs defaults log_mode to normal" {
+    const w = VoidWriter{};
+    const parsed = parseServeArgs(&.{}, w);
+    try std.testing.expect(parsed == .ok);
+    try std.testing.expect(parsed.ok.log_mode == .normal);
+}
+
+test "parseServeArgs defaults stats_interval to 30" {
+    const w = VoidWriter{};
+    const parsed = parseServeArgs(&.{}, w);
+    try std.testing.expect(parsed == .ok);
+    try std.testing.expectEqual(@as(u16, 30), parsed.ok.stats_interval_seconds);
+}
+
+test "parseServeArgs rejects --stats-interval 0" {
+    var w = CapturingWriter(256){};
+    try std.testing.expect(parseServeArgs(&.{ "--statonly", "--stats-interval", "0" }, &w) == .usage);
+    try std.testing.expect(w.contains("--stats-interval must be >= 1"));
 }

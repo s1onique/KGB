@@ -40,7 +40,7 @@ pub const InterfaceSampler = interface_sampler.InterfaceSampler;
 /// Converts seconds + nanoseconds to milliseconds.
 ///
 /// Returns a positive value representing milliseconds since Unix epoch.
-fn currentWallClockMillis() i64 {
+pub fn currentWallClockMillis() i64 {
     // On Linux, use clock_gettime for real timestamps.
     // On non-Linux (macOS, etc.), return 0 and let tests inject timestamps.
     // Note: cross-platform builds may include std.os.linux but we only want it on native Linux.

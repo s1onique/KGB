@@ -4,6 +4,8 @@ const routes = @import("routes.zig");
 const logging = @import("../logging.zig");
 const metrics_state = @import("../metrics_state.zig");
 const heartbeat = @import("heartbeat.zig");
+const cli_args = @import("../cli/args.zig");
+const statonly = @import("statonly.zig");
 
 // ============================================================================
 // Server State
@@ -50,6 +52,12 @@ pub const Config = struct {
 
     /// Address to bind to.
     address: []const u8 = "127.0.0.1",
+
+    /// Log mode: normal or statonly.
+    log_mode: cli_args.LogMode = .normal,
+
+    /// Stats interval in seconds for statonly mode.
+    stats_interval_seconds: u16 = 30,
 };
 
 // ============================================================================
@@ -228,24 +236,13 @@ fn acceptOneBlocking(server: *Server, state: *anyopaque) !void {
 }
 
 /// Write a log record to the output and flush.
-///
-/// Flushes all writer types except *logging.BufferedWriter (which has no
-/// flush method). All other writers reaching the else branch must provide flush().
-/// This ensures NDJSON records are visible immediately.
 fn writeLogRecord(out_writer: anytype, bytes: []const u8) !void {
     try out_writer.writeAll(bytes);
 
-    // Flush if the writer supports it. This handles:
-    // - Zig 0.16 BufferedWriter (e.g., Io.File.Writer with buffer)
-    // - Raw file writers (flush is a no-op on unbuffered)
-    // - Test writers (flush is a no-op on VoidWriter/CaptureWriter)
-    //
-    // Comptime branch: only the valid check is compiled based on writer type.
+    // Flush if the writer supports it (not BufferedWriter).
     if (comptime @TypeOf(out_writer) == *logging.BufferedWriter) {
-        // No-op: BufferedWriter doesn't have flush, this branch is dead code
-        // but compiles because the writer type is checked at comptime
+        // No-op: BufferedWriter doesn't have flush
     } else {
-        // Writer types reaching this branch must provide flush().
         out_writer.flush() catch {};
     }
 }
@@ -259,13 +256,25 @@ fn emitStartupLogs(config: Config, out_writer: anytype) !void {
     });
     try writeLogRecord(out_writer, log_buf.slice());
 
-    // Emit UVB-76 signal ready event
     log_buf.reset();
     try logging.emit(.uvb76_signal_ready, &log_buf, &.{
         .{ .name = "signal", .value = logging.FieldValue{ .string = "🚩📻" } },
         .{ .name = "message", .value = logging.FieldValue{ .string = "Listen to UVB-76 signals..." } },
     });
     try writeLogRecord(out_writer, log_buf.slice());
+}
+
+/// Emit startup logs only in normal mode (not statonly).
+fn emitStartupLogsIfNormal(config: Config, out_writer: anytype) !void {
+    if (config.log_mode == .normal) {
+        try emitStartupLogs(config, out_writer);
+    }
+}
+
+/// Log a critical error message.
+fn logCritical(out_writer: anytype, comptime fmt: []const u8, args: anytype) void {
+    out_writer.print("critical: " ++ fmt, args) catch {};
+    out_writer.flush() catch {};
 }
 
 /// Simple serve function for CLI use (no persistent state).
@@ -287,46 +296,70 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
     defer state.deinit();
 
     try server.listen();
-    try emitStartupLogs(config, out_writer);
 
-    // Structured JSON log: accept loop started
-    var log_buf = logging.BufferedWriter.init();
-    try logging.emit(.http_accept_loop_started, &log_buf, &.{});
-    try writeLogRecord(out_writer, log_buf.slice());
+    // Emit startup logs only if not in statonly mode
+    try emitStartupLogsIfNormal(config, out_writer);
 
     // Get opaque pointer to MetricsState for passing to route handlers.
-    // handleMetrics() casts this back to *metrics_state.MetricsState.
     const state_ptr: *anyopaque = &state.metrics;
 
-    // Heartbeat thread: spawn with default stack, detach for daemon-lifetime.
-    //
-    // Root cause identified (R-009): explicit .stack_size = 65536 was too small
-    // for Zig 0.16 Linux/glibc release target. Default stack works reliably.
-    //
-    // Design: no mutex, no shared context, no @constCast. Heartbeat owns its
-    // local state. Spawn failure is non-fatal; structured-log the error.
-    if (std.Thread.spawn(.{}, heartbeat.heartbeatThread, .{})) |thread| {
-        // Detach thread for daemon-lifetime operation.
-        // The thread runs until process exit; detach() allows it to continue
-        // independently without blocking the main thread on join.
-        thread.detach();
-    } else |spawn_err| {
-        // Build structured log record for spawn failure.
-        log_buf.reset();
-        logging.emit(.heartbeat_thread_start_failed, &log_buf, &.{
-            .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(spawn_err) } },
-            .{ .name = "detail", .value = logging.FieldValue{ .string = "heartbeat spawn failed, continuing without heartbeat" } },
-        }) catch {};
-        writeLogRecord(out_writer, log_buf.slice()) catch {};
-        // Continue serving - heartbeat is decorative, not critical path
+    // Heartbeat thread: only spawn in normal mode.
+    // In statonly mode, we skip heartbeat to keep output clean.
+    var log_buf = logging.BufferedWriter.init();
+    if (config.log_mode == .normal) {
+        if (std.Thread.spawn(.{}, heartbeat.heartbeatThread, .{})) |thread| {
+            thread.detach();
+        } else |spawn_err| {
+            log_buf.reset();
+            logging.emit(.heartbeat_thread_start_failed, &log_buf, &.{
+                .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(spawn_err) } },
+                .{ .name = "detail", .value = logging.FieldValue{ .string = "heartbeat spawn failed, continuing without heartbeat" } },
+            }) catch {};
+            writeLogRecord(out_writer, log_buf.slice()) catch {};
+        }
     }
+
+    // Branch based on log mode
+    if (config.log_mode == .statonly) {
+        try statonly.serveStatonlyWithStderr(server.listener_fd, state_ptr, config.stats_interval_seconds, out_writer);
+    } else {
+        try serveForeverNormal(server.listener_fd, state_ptr, &log_buf, out_writer);
+    }
+}
+
+/// Normal mode accept loop with timeout for compatibility with statonly.
+pub fn acceptOneNormal(listener_fd: i32, state: *anyopaque) !void {
+    var client_addr: c.sockaddr = undefined;
+    var client_len: c.socklen_t = @sizeOf(c.sockaddr);
+
+    const conn_fd = c.accept(listener_fd, &client_addr, &client_len);
+    if (conn_fd < 0) {
+        const errno_val = std.c._errno().*;
+        if (errno_val == 11 or errno_val == 35) {
+            std.Thread.yield() catch {};
+            return;
+        }
+        return error.AcceptFailed;
+    }
+
+    handleConnection(conn_fd, state);
+}
+
+/// Normal mode serve loop with structured JSON logging.
+fn serveForeverNormal(
+    listener_fd: i32,
+    state_ptr: *anyopaque,
+    log_buf: *logging.BufferedWriter,
+    out_writer: anytype,
+) !void {
+    try logging.emit(.http_accept_loop_started, log_buf, &.{});
+    try writeLogRecord(out_writer, log_buf.slice());
 
     // Blocking accept loop - stays alive until interrupted.
     while (true) {
-        acceptOneBlocking(&server, state_ptr) catch |err| {
-            // Build log record in buffer, then write to output
+        acceptOneNormal(listener_fd, state_ptr) catch |err| {
             log_buf.reset();
-            try logging.emit(.http_accept_loop_error, &log_buf, &.{
+            try logging.emit(.http_accept_loop_error, log_buf, &.{
                 .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(err) } },
             });
             try writeLogRecord(out_writer, log_buf.slice());
@@ -365,12 +398,10 @@ test "ServerState.init creates empty sampler" {
     const allocator = std.testing.allocator;
     var state = ServerState.init(allocator);
     defer state.deinit();
-    // State should initialize without error; sampler is empty
 }
 
 test "ServerState.deinit handles empty sampler" {
     const allocator = std.testing.allocator;
     var state = ServerState.init(allocator);
-    // Should not panic on deinit with empty sampler
     state.deinit();
 }

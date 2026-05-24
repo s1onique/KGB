@@ -6,7 +6,7 @@ pub const usage_text =
     \\usage:
     \\  tovarisch --version
     \\  tovarisch check
-    \\  tovarisch serve [--listen ADDR:PORT] [--listen-private] [--listen-all-public-dangerous]
+    \\  tovarisch serve [--listen ADDR:PORT] [--listen-private] [--listen-all-public-dangerous] [--statonly] [--stats-interval SECONDS]
     \\  tovarisch status --json
     \\  tovarisch thread-smoke
     \\
