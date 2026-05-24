@@ -298,30 +298,11 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
     // handleMetrics() casts this back to *metrics_state.MetricsState.
     const state_ptr: *anyopaque = &state.metrics;
 
-    // Spawn heartbeat thread with no shared context.
-    // The heartbeat thread owns its state locally (uptime_seconds counter).
-    // No mutex, no shared context, no @constCast - cleaner engineering
-    // for a decorative daemon-lifetime thread.
-    //
-    // Heartbeat startup failures are non-fatal - daemon continues serving.
-    if (std.Thread.spawn(
-        .{ .stack_size = 65536 },
-        heartbeat.heartbeatThread,
-        .{},
-    )) |thread| {
-        // Detach the thread for daemon-lifetime operation.
-        // The thread runs until process exit; detach() allows it to continue
-        // independently without blocking the main thread on join.
-        thread.detach();
-    } else |err| {
-        // Log error as structured JSON - heartbeat is optional, daemon continues
-        log_buf.reset();
-        try logging.emit(.heartbeat_thread_start_failed, &log_buf, &.{
-            .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(err) } },
-            .{ .name = "reason", .value = logging.FieldValue{ .string = "heartbeat_degraded_continue_serving" } },
-        });
-        try writeLogRecord(out_writer, log_buf.slice());
-    }
+    // NOTE: Heartbeat thread is DISABLED for v0.
+    // std.Thread.spawn causes "reached unreachable code" panic on production
+    // Linux/glibc targets immediately after startup, before heartbeat body runs.
+    // See: docs/security/accepted-risks.md (R-009)
+    // Diagnostic command available: `tovarisch thread-smoke`
 
     // Blocking accept loop - stays alive until interrupted.
     while (true) {

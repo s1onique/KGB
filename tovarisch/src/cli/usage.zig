@@ -8,6 +8,7 @@ pub const usage_text =
     \\  tovarisch check
     \\  tovarisch serve [--listen ADDR:PORT] [--listen-private] [--listen-all-public-dangerous]
     \\  tovarisch status --json
+    \\  tovarisch thread-smoke
     \\
 ;
 
@@ -42,4 +43,8 @@ test "usage text does NOT contain deprecated --listen-all" {
 
 test "usage text contains tovarisch status --json" {
     try std.testing.expect(std.mem.indexOf(u8, usage_text, "tovarisch status --json") != null);
+}
+
+test "usage text contains tovarisch thread-smoke" {
+    try std.testing.expect(std.mem.indexOf(u8, usage_text, "tovarisch thread-smoke") != null);
 }

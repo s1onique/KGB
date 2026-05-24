@@ -2,9 +2,17 @@
 
 This document captures verified lessons from the heartbeat implementation in `tovarisch/src/http/heartbeat.zig` and its integration in `tovarisch/src/http/server.zig`.
 
-## Current design: Local state, no shared context
+## ⚠️ CURRENT STATUS: Heartbeat Disabled
 
-The heartbeat thread owns its state locally:
+**Threaded heartbeat is DISABLED for v0** due to `std.Thread.spawn` causing "reached unreachable code" panics on production Linux/glibc targets.
+
+See: [R-009 in docs/security/accepted-risks.md](../security/accepted-risks.md)
+
+---
+
+## Historical design: Local state, no shared context (DISABLED)
+
+The heartbeat thread was designed to own its state locally:
 
 ```zig
 pub fn heartbeatThread() void {
@@ -25,7 +33,9 @@ std.Thread.spawn(
 ) catch |err| { /* non-fatal */ };
 ```
 
-**No mutex, no shared context, no `@constCast`.** For a decorative daemon-lifetime heartbeat, this is the correct engineering choice.
+**No mutex, no shared context, no `@constCast`.** For a decorative daemon-lifetime heartbeat, this was the correct engineering choice.
+
+**PROBLEM**: `std.Thread.spawn` itself crashes on production Linux even with this clean design.
 
 ---
 

@@ -184,28 +184,44 @@ Each risk entry contains:
 
 ---
 
-## R-009: Heartbeat Thread Lifecycle (Detached Daemon Thread)
+## R-009: Threaded Heartbeat Disabled on Zig 0.16 Linux/glibc Target
 
-**Description**: Heartbeat thread is spawned and detached for daemon-lifetime operation. The thread owns its state locally (uptime_seconds counter) with no shared mutable context, no mutex, and no `@constCast`. `detach()` is called immediately after successful spawn.
+**Description**: `std.Thread.spawn` causes immediate "reached unreachable code" panic on production Linux/glibc targets after startup, before the heartbeat body executes. The crash occurs in the generated spawn wrapper path (`spawn__anon_*`), not in application logic.
 
 **Owner**: maintainer
 
-**Reason**: For daemon-lifetime threads, the thread must be explicitly detached or joined. Detaching the thread allows it to continue running until process exit without blocking the main thread on join. The heartbeat thread runs until process exit (correct for daemon lifetime). Proper join requires shutdown signal handling which is out of scope for v0.
+**Reason**: Production Linux systemd target consistently aborts when `std.Thread.spawn` is used for decorative heartbeat. The crash happens immediately after `http_accept_loop_started`, before the first 30s heartbeat interval. Falsified causes include:
+- pthread mutex initialization
+- shared context / `@constCast`
+- heartbeat JSON/logging buffer
+- orphaned thread handle lifecycle
+
+The heartbeat is decorative; stable HTTP /status and /metrics.json remain the authoritative liveness surfaces.
 
 **Expiry/Review Trigger**:
-- When graceful shutdown is designed
-- When any shutdown signal handler is added
-- When restarting heartbeat without process restart
-- Any move away from infinite `serveForever()` pattern
+- When `tovarisch thread-smoke` passes on the exact release target
+- When Zig 0.16.x threading is verified stable on production Linux/glibc
+- When heartbeat threading is re-enabled and verified in production
 
 **Mitigation**:
-- Heartbeat is decorative (non-fatal if it fails)
-- Heartbeat thread spawn failures are logged and daemon continues
-- Thread is explicitly detached after spawn (`thread.detach()`)
-- Thread owns its state locally (uptime_seconds counter)
-- No shared context, no mutex, no `@constCast`
-- Thread runs until process exit (correct for daemon lifetime)
-- Background decorative threads must not share mutable stack-owned state unless there is a real shutdown lifecycle
+- Heartbeat thread is DISABLED for v0
+- `tovarisch serve` no longer calls `std.Thread.spawn`
+- Diagnostic command available: `tovarisch thread-smoke`
+  - Run manually outside systemd on target system
+  - Tests both spawn+join and spawn+detach variants
+  - If it crashes, captures std.Thread.spawn as root cause
+- HTTP /status and /metrics.json remain liveness surfaces
+- Heartbeat may be re-enabled only after `thread-smoke` passes
+
+**Diagnostic Protocol**:
+```bash
+# Build and deploy package
+# Run thread-smoke manually on target
+sudo -u tovarisch /usr/bin/tovarisch thread-smoke
+
+# If it passes, heartbeat can be reconsidered
+# If it crashes, document Zig version, build mode, libc target
+```
 
 ---
 

@@ -35,6 +35,10 @@ pub fn run(argv: []const []const u8, stdout: anytype, stderr: anytype) ExitCode 
         return .ok;
     }
 
+    if (std.mem.eql(u8, command, "thread-smoke")) {
+        return threadSmokeCommand(stdout, stderr);
+    }
+
     if (std.mem.eql(u8, command, "serve")) {
         return serveCommand(argv[2..], stdout, stderr);
     }
@@ -86,6 +90,65 @@ fn statusCommand(status_args: []const []const u8, stdout: anytype, stderr: anyty
     stdout.writeByte('\n') catch return .usage;
 
     return .ok;
+}
+
+/// Diagnostic command to isolate std.Thread.spawn crash on Linux target.
+///
+/// This command spawns no-op threads to verify whether std.Thread.spawn
+/// itself is stable on the current build/runtime target.
+///
+/// Variants tested:
+/// 1. spawn + join: thread completes and is joined (bounded work pattern)
+/// 2. spawn + detach: thread is detached (daemon-lifetime pattern)
+///
+/// Exit codes:
+/// - 0: all variants passed
+/// - 1: thread smoke test failed
+///
+/// This is NOT run automatically by systemd. Operators should run it manually
+/// on the target system to diagnose threading issues before re-enabling
+/// threaded heartbeat.
+fn threadSmokeCommand(stdout: anytype, stderr: anytype) ExitCode {
+    // Variant 1: spawn + join (bounded work pattern)
+    stdout.writeAll("thread-smoke: variant 1 (spawn+join)... ") catch return .usage;
+
+    const spawn_result = std.Thread.spawn(.{}, noopThread, .{});
+    if (spawn_result) |thread| {
+        thread.join();
+        stdout.writeAll("ok\n") catch return .usage;
+    } else |err| {
+        stdout.writeAll("FAILED\n") catch {};
+        stderr.print("thread-smoke: spawn+join failed: {s}\n", .{@errorName(err)}) catch {};
+        return .usage;
+    }
+
+    // Variant 2: spawn + detach (daemon-lifetime pattern)
+    stdout.writeAll("thread-smoke: variant 2 (spawn+detach)... ") catch return .usage;
+
+    const detach_result = std.Thread.spawn(.{}, noopSleepThread, .{});
+    if (detach_result) |thread| {
+        thread.detach();
+        stdout.writeAll("ok\n") catch return .usage;
+    } else |err| {
+        stdout.writeAll("FAILED\n") catch {};
+        stderr.print("thread-smoke: spawn+detach failed: {s}\n", .{@errorName(err)}) catch {};
+        return .usage;
+    }
+
+    stdout.writeAll("thread-smoke: all variants passed\n") catch return .usage;
+    return .ok;
+}
+
+/// No-op thread function for smoke test variant 1.
+fn noopThread() void {
+    // Intentionally empty - verifies thread spawns without crash
+}
+
+/// No-op thread that sleeps briefly then exits for smoke test variant 2.
+fn noopSleepThread() void {
+    // Sleep for 100ms then exit - enough time to verify detach works
+    var ts: std.c.timespec = .{ .sec = 0, .nsec = 100_000_000 };
+    _ = std.c.nanosleep(&ts, null);
 }
 
 // --- Tests ---
