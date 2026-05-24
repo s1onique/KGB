@@ -1,5 +1,21 @@
+// status.zig — Status payload rendering for tovarisch
+//
+// Renders the v0 status JSON payload for `tovarisch status --json`.
+// Uses injectable checks for testability:
+// - getLocalChecks() returns all local health checks
+// - getStatus() builds the full status payload
+//
+// Check ordering (stable for operator readability):
+//   1. process  - daemon is running
+//   2. binary   - binary name is correct
+//   3. config   - configuration state
+//   4. state_dir - state directory exists
+//   5. http     - HTTP service route available
+//   6. tunnel   - tunnel interface presence
+
 const std = @import("std");
 const telemetry = @import("runtime/telemetry.zig");
+const tunnel_check = @import("tunnel_check.zig");
 
 pub const version = "0.1.1";
 
@@ -134,7 +150,7 @@ pub fn toCString(path: []const u8, buf: *[4096]u8) ?[*:0]const u8 {
 }
 
 /// Static buffer for local checks. Ensures stable memory addresses.
-var local_checks_buf: [5]Check = undefined;
+var local_checks_buf: [6]Check = undefined;
 
 pub fn getLocalChecks() []const Check {
     local_checks_buf[0] = process_check;
@@ -142,6 +158,7 @@ pub fn getLocalChecks() []const Check {
     local_checks_buf[2] = config_check;
     local_checks_buf[3] = getStateDirCheck();
     local_checks_buf[4] = http_check;
+    local_checks_buf[5] = tunnel_check.getTunnelCheckDefault();
     return &local_checks_buf;
 }
 
@@ -239,9 +256,9 @@ test "deriveStatus returns ok for empty checks" {
     try std.testing.expectEqual(CheckStatus.ok, deriveStatus(&checks));
 }
 
-test "getLocalChecks returns five checks" {
+test "getLocalChecks returns six checks" {
     const checks = getLocalChecks();
-    try std.testing.expectEqual(@as(usize, 5), checks.len);
+    try std.testing.expectEqual(@as(usize, 6), checks.len);
 }
 
 test "getLocalChecks first check is process" {
@@ -255,7 +272,7 @@ test "status has correct structure" {
     try std.testing.expectEqualStrings("0.1.1", s.version);
     try std.testing.expectEqualStrings("local-dev", s.node_id);
     try std.testing.expect(s.status == .ok or s.status == .warn or s.status == .@"error");
-    try std.testing.expectEqual(@as(usize, 5), s.checks.len);
+    try std.testing.expectEqual(@as(usize, 6), s.checks.len);
 }
 
 test "getStateDirCheck returns correct name" {
@@ -272,7 +289,7 @@ test "status JSON contains all required top-level fields" {
     try std.testing.expect(s.checks.len > 0);
 }
 
-test "status JSON contains all five checks" {
+test "status JSON contains all six checks including tunnel" {
     const checks = getLocalChecks();
 
     var has_process = false;
@@ -280,6 +297,7 @@ test "status JSON contains all five checks" {
     var has_config = false;
     var has_state_dir = false;
     var has_http = false;
+    var has_tunnel = false;
 
     for (checks) |check| {
         if (std.mem.eql(u8, check.name, "process")) has_process = true;
@@ -287,6 +305,7 @@ test "status JSON contains all five checks" {
         if (std.mem.eql(u8, check.name, "config")) has_config = true;
         if (std.mem.eql(u8, check.name, "state_dir")) has_state_dir = true;
         if (std.mem.eql(u8, check.name, "http")) has_http = true;
+        if (std.mem.eql(u8, check.name, "tunnel")) has_tunnel = true;
     }
 
     try std.testing.expect(has_process);
@@ -294,6 +313,7 @@ test "status JSON contains all five checks" {
     try std.testing.expect(has_config);
     try std.testing.expect(has_state_dir);
     try std.testing.expect(has_http);
+    try std.testing.expect(has_tunnel);
 }
 
 test "config check has warn status" {
@@ -364,7 +384,7 @@ test "renderPayload output contains checks array" {
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"checks\":["));
 }
 
-test "renderPayload output contains all five check names" {
+test "renderPayload output contains all six check names" {
     var w = TestWriter.init();
     try renderPayload(&w);
 
@@ -373,6 +393,7 @@ test "renderPayload output contains all five check names" {
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"config\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"state_dir\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"http\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"tunnel\""));
 }
 
 test "renderPayload output contains runtime block" {

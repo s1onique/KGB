@@ -28,6 +28,11 @@
       "name": "http",
       "status": "ok",
       "detail": "http service route available"
+    },
+    {
+      "name": "tunnel",
+      "status": "warn",
+      "detail": "no tunnel interfaces detected"
     }
   ],
   "runtime": {

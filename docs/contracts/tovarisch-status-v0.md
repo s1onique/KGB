@@ -1,5 +1,64 @@
 # `tovarisch status --json` v0 Contract
 
+## Tunnel Check (`tunnel`)
+
+The status payload includes a `tunnel` check that detects tunnel-like interfaces by name.
+
+### Classification
+
+Tunnel interfaces are detected using name-based classification:
+
+| Prefix | Type |
+|--------|------|
+| `wg*` | WireGuard (wg, wg0, wg1, ...) |
+| `tun*` | TUN interfaces |
+| `tap*` | TAP interfaces |
+| `sit*` | SIT tunnels |
+| `ip6tnl*` | IPv6 tunnels |
+| `gre*` | GRE tunnels |
+| `ipip*` | IP-in-IP tunnels |
+
+### What This Check Validates
+
+- **Presence only**: Reports `ok` when one or more tunnel-like interfaces are detected by name
+- **Interface existence**: Uses sysfs (`/sys/class/net`) enumeration
+
+### What This Check Does NOT Validate
+
+- WireGuard peer health or handshake status
+- Route validity
+- Remote endpoint reachability
+- Tunnel traffic rates or data liveness
+- Actual tunnel configuration validity
+
+The check is intentionally limited to presence detection only. A detected tunnel interface existing locally does not imply the tunnel is healthy, connected, or functional.
+
+### Status Values
+
+- `ok`: One or more tunnel-like interfaces detected
+- `warn`: No tunnel interfaces detected (including when sysfs is unavailable or unreadable)
+
+### Example Output
+
+Detected:
+```json
+{
+  "name": "tunnel",
+  "status": "ok",
+  "detail": "detected tunnel interfaces: wg0"
+}
+```
+
+Not detected:
+```json
+{
+  "name": "tunnel",
+  "status": "warn",
+  "detail": "no tunnel interfaces detected"
+}
+```
+
+
 ## Purpose
 
 This document defines the v0 machine-readable status contract for `tovarisch status --json`.
