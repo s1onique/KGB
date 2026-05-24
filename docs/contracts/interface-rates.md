@@ -106,9 +106,78 @@ pub const InterfaceRate = struct {
 
 The following work is deferred to future ACTs:
 
-1. **ACT 2**: Add sampler state that matches interfaces by name and produces `rate: null | InterfaceRate` per current counter row
+1. ~~**ACT 2**: Add sampler state that matches interfaces by name and produces `rate: null | InterfaceRate` per current counter row~~ ✅ **Implemented in `interface_sampler.zig`**
 2. **Metrics wiring**: Wire rates into `/metrics.json` response
 3. **IPv6 support**: Extend to handle IPv6 interface counters
+
+## Sampler State
+
+A sampler layer (`interface_sampler.zig`) provides stateful rate calculation across multiple update cycles:
+
+### Behavior
+
+| Scenario | Behavior |
+|----------|----------|
+| First observation for any interface | `rate = null` (no previous sample) |
+| Second+ observation with valid elapsed/counters | `rate = InterfaceRate` |
+| Newly appearing interface | `rate = null` (treated as first observation) |
+| Reappearing interface after disappearance | `rate = null` (previous state was cleared) |
+| Disappeared interface | Removed from previous state after update |
+| Counter reset for one interface | `rate = null` for that interface only; other interfaces unaffected |
+| Output order | Follows current input order |
+
+### Interface Matching
+
+Interfaces are matched by **exact name** comparison. No prefix matching or fuzzy logic.
+
+### Ownership Model
+
+- Sampler owns duplicated map keys (interface names duplicated on insertion)
+- `update()` returns `[]SampledInterface` owned by caller with separate caller-owned name duplicates
+- Caller passes `[]const rates.InterfaceCounterSample` (does not need to outlive sampler)
+- Call `deinit()` to free all sampler-owned map keys
+
+### Data Structures
+
+#### SampledInterface
+
+```zig
+pub const SampledInterface = struct {
+    sample: rates.InterfaceCounterSample,
+    rate: ?rates.InterfaceRate,
+};
+```
+
+#### InterfaceSampler
+
+```zig
+pub const InterfaceSampler = struct {
+    pub fn init(allocator: std.mem.Allocator) InterfaceSampler
+    pub fn deinit(self: *InterfaceSampler) void
+    pub fn update(
+        self: *InterfaceSampler,
+        current: []const rates.InterfaceCounterSample,
+    ) ![]SampledInterface
+};
+```
+
+### Scope and Limitations
+
+**This ACT (2) Does NOT Include:**
+
+- ❌ `/metrics.json` wiring (future ACT)
+- ❌ HTTP server integration (future ACT)
+- ❌ Sysfs counter collection (belongs in `linux_stats.zig`)
+
+**This ACT Includes:**
+
+- ✅ Sampler state that matches interfaces by name
+- ✅ First/new/reappearing interfaces return null rate
+- ✅ Existing interfaces get rates when valid
+- ✅ Disappeared interfaces are forgotten
+- ✅ Counter reset isolated per interface
+- ✅ Output order follows current input order
+- ✅ Safe name lifetime handling (sampler duplicates names)
 
 ## Module Location
 

@@ -205,6 +205,7 @@ The following code is **fully tested** via pure parser unit tests on macOS:
 | `linux_stats.zig: statsFromCounters()` | 1 unit test covering InterfaceStats construction |
 | `net/private_ip.zig: classifyIpv4Text()` | 30+ unit tests covering all RFC ranges and invalid inputs |
 | `net/rates.zig: calculateRate()` | 12 unit tests covering all edge cases (null, reset, elapsed, etc.) |
+| `net/interface_sampler.zig: InterfaceSampler` | 11 unit tests covering first/second update, packet counters, reset detection, multiple interfaces, new/disappeared/reappearing, counter reset isolation, order preservation, name lifetime, deinit |
 
 #### Runtime Paths (Linux-only, Mixed Coverage)
 

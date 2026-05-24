@@ -13,6 +13,8 @@ const _status = @import("status.zig");
 const _logging = @import("logging.zig");
 const _net_private_ip = @import("net/private_ip.zig");
 const _net_rates = @import("net/rates.zig");
+const _net_interface_sampler = @import("net/interface_sampler.zig");
+const _net_interface_sampler_tests = @import("net/interface_sampler_tests.zig");
 const _net_linux_stats = @import("net/linux_stats.zig");
 const _net_linux_stats_tests = @import("net/linux_stats_tests.zig");
 const _net_linux_interfaces = @import("net/linux_interfaces.zig");
@@ -42,6 +44,14 @@ test {
 
 test {
     std.testing.refAllDecls(@import("net/rates.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("net/interface_sampler.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("net/interface_sampler_tests.zig"));
 }
 
 test {
