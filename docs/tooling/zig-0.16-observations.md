@@ -249,6 +249,28 @@ defer _ = std.c.closedir(dir);
 
 ---
 
+---
+
+## 2026-05-24 — Zig 0.16 environment variable reading
+
+**symptom:** Attempting `std.os.getenv`, `std.process.getenv`, `std.posix.getenv` all fail with "has no member named 'getenv'"
+
+**wrong assumption:** Standard Zig API patterns for environment variable access would be available under common namespaces
+
+**working fix:** Use `std.c.getenv()` to read environment variables:
+```zig
+if (c.getenv("TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE") != null) {
+    // diagnostic code path
+}
+```
+
+**files affected:**
+- `tovarisch/src/http/server.zig`
+
+**promote to field manual?** No — this is a diagnostic-only pattern; heartbeat env var is temporary
+
+---
+
 Recording field notes from Zig 0.16 experiments. Confidence varies; do not promote to field manual until verified with a minimal reproducer.
 
 Old entries have been promoted to `zig-0.16-field-manual.md`. This file tracks experimental observations.

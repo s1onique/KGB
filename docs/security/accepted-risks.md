@@ -184,43 +184,61 @@ Each risk entry contains:
 
 ---
 
-## R-009: Threaded Heartbeat Disabled on Zig 0.16 Linux/glibc Target
+## R-009: Heartbeat Threading Isolated — Serve Context vs. Standalone Behavior Divergence
 
-**Description**: `std.Thread.spawn` causes immediate "reached unreachable code" panic on production Linux/glibc targets after startup, before the heartbeat body executes. The crash occurs in the generated spawn wrapper path (`spawn__anon_*`), not in application logic.
+**Description**: `std.Thread.spawn` is stable in a standalone CLI smoke test (`tovarisch thread-smoke`), but the `tovarisch serve` startup path still panics when a heartbeat thread is spawned. The failure is specific to the serve/runtime/logging context until isolated further.
 
 **Owner**: maintainer
 
-**Reason**: Production Linux systemd target consistently aborts when `std.Thread.spawn` is used for decorative heartbeat. The crash happens immediately after `http_accept_loop_started`, before the first 30s heartbeat interval. Falsified causes include:
-- pthread mutex initialization
-- shared context / `@constCast`
-- heartbeat JSON/logging buffer
-- orphaned thread handle lifecycle
+**Reason**: New evidence (2026-05-24) shows that `std.Thread.spawn` itself is NOT globally broken on the Linux/glibc target. Both lifecycle patterns pass in the standalone smoke test:
+- variant 1 (spawn+join): passes
+- variant 2 (spawn+detach): passes
+
+The crash remains specific to `tovarisch serve` when heartbeat threading is enabled in the serve context. The key difference between `thread-smoke` and `serve` is likely **writer type / logging path / stdout buffering state**, not `std.Thread` itself.
+
+The crash stack always says:
+```
+logging.zig:84:24 ... in spawn__anon_*
+cli/commands.zig:39:28 ... in run__anon_2704
+```
+
+This suggests the thread is not the only issue. The crash happens immediately after `http_accept_loop_started`, before the heartbeat interval. Suspected causes:
+1. `std.Thread.spawn` in `serve` is failing, and the **failure logging path** panics
+2. The spawned thread starts and immediately touches something unexpected despite the intended 30s sleep
+3. Source mapping is misleading, and `logging.zig:84` is the actual invariant being violated by startup logging, not heartbeat
 
 The heartbeat is decorative; stable HTTP /status and /metrics.json remain the authoritative liveness surfaces.
 
 **Expiry/Review Trigger**:
-- When `tovarisch thread-smoke` passes on the exact release target
-- When Zig 0.16.x threading is verified stable on production Linux/glibc
-- When heartbeat threading is re-enabled and verified in production
+- When `tovarisch thread-smoke` passes on the exact release target (DONE: passes)
+- When serve-context heartbeat diagnostic isolates the crash source
+- When heartbeat threading is re-enabled and verified in production with TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE=1
 
 **Mitigation**:
-- Heartbeat thread is DISABLED for v0
-- `tovarisch serve` no longer calls `std.Thread.spawn`
+- Heartbeat thread is DISABLED for v0 by default
+- `tovarisch serve` no longer calls `std.Thread.spawn` by default
 - Diagnostic command available: `tovarisch thread-smoke`
   - Run manually outside systemd on target system
   - Tests both spawn+join and spawn+detach variants
-  - If it crashes, captures std.Thread.spawn as root cause
+- Temporary gated diagnostic: Set `TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE=1` to enable heartbeat spawn with raw stderr markers
+  - Bypasses logging.emit entirely to test whether failure logging is the crash source
+  - Writes raw stderr markers to trace execution flow
 - HTTP /status and /metrics.json remain liveness surfaces
-- Heartbeat may be re-enabled only after `thread-smoke` passes
+- Heartbeat may be re-enabled only after the serve-context diagnostic isolates and fixes the interaction
 
 **Diagnostic Protocol**:
 ```bash
-# Build and deploy package
-# Run thread-smoke manually on target
+# Step 1: Verify thread-smoke passes (standalone spawn is stable)
 sudo -u tovarisch /usr/bin/tovarisch thread-smoke
 
-# If it passes, heartbeat can be reconsidered
-# If it crashes, document Zig version, build mode, libc target
+# Step 2: Deploy with diagnostic enabled (production testing)
+# Edit systemd unit or run manually:
+TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE=1 tovarisch serve
+
+# Interpretation of journal markers:
+# - Crash before "DIAG: after heartbeat spawn" → serve-context spawn issue
+# - "DIAG: after heartbeat spawn" appears then crash → heartbeat thread body or detach path
+# - No crash → structured failure logging path was the real panic source
 ```
 
 ---

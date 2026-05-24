@@ -299,10 +299,40 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
     const state_ptr: *anyopaque = &state.metrics;
 
     // NOTE: Heartbeat thread is DISABLED for v0.
-    // std.Thread.spawn causes "reached unreachable code" panic on production
-    // Linux/glibc targets immediately after startup, before heartbeat body runs.
     // See: docs/security/accepted-risks.md (R-009)
     // Diagnostic command available: `tovarisch thread-smoke`
+
+    // TEMPORARY DIAGNOSTIC: Heartbeat thread spawn with zero logging.
+    // Set TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE=1 to enable.
+    // This is a diagnostic probe to isolate the serve-context spawn crash.
+    // - Writes raw stderr markers to trace execution flow
+    // - Avoids logging.emit entirely to test whether failure logging is the crash source
+    // - Uses std.c.write directly to bypass BufferedWriter/logging path
+    if (c.getenv("TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE") != null) {
+        const before_msg = "DIAG: before heartbeat spawn\n";
+        _ = c.write(2, before_msg.ptr, before_msg.len);
+        const spawn_result = std.Thread.spawn(
+            .{ .stack_size = 65536 },
+            heartbeat.heartbeatThread,
+            .{},
+        );
+        const after_msg = "DIAG: after heartbeat spawn\n";
+        _ = c.write(2, after_msg.ptr, after_msg.len);
+
+        if (spawn_result) |thread| {
+            const success_msg = "DIAG: heartbeat spawn succeeded, detaching\n";
+            _ = c.write(2, success_msg.ptr, success_msg.len);
+            thread.detach();
+        } else |spawn_err| {
+            // Do NOT call logging.emit here - that was the suspected panic path.
+            // Write raw stderr only with no formatting.
+            const err_name = @errorName(spawn_err);
+            const fail_msg = "DIAG: heartbeat spawn failed, continuing without heartbeat\n";
+            _ = c.write(2, fail_msg.ptr, fail_msg.len);
+            _ = c.write(2, err_name.ptr, err_name.len);
+            _ = c.write(2, "\n", 1);
+        }
+    }
 
     // Blocking accept loop - stays alive until interrupted.
     while (true) {
