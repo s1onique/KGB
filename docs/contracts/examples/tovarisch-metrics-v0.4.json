@@ -27,6 +27,7 @@
     }
   ],
   "tunnel_interfaces": ["wg0"],
+  "tunnel_count": 1,
   "notes": [
     "rate is null until a previous sample exists",
     "interface counters are cumulative",

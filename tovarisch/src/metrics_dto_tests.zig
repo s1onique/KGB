@@ -252,6 +252,72 @@ test "renderSampledInterfacesPayload: emits runtime RSS best-effort note" {
 }
 
 // ============================================================================
+// Tests: Tunnel count (zero, one, multiple)
+// ============================================================================
+
+test "renderSampledInterfacesPayload: zero tunnels emits tunnel_count 0" {
+    const allocator = std.testing.allocator;
+    const si = try makeTestSampledInterface(allocator, "eth0", 100, 200, 1, 2, 1000, null, false);
+    defer allocator.free(si.sample.name);
+
+    var w = TestWriter.init();
+    const sampled = [_]SampledInterface{si};
+    try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
+
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"tunnel_count\":0"));
+}
+
+test "renderSampledInterfacesPayload: one tunnel emits tunnel_count 1" {
+    const allocator = std.testing.allocator;
+    const si = try makeTestSampledInterface(allocator, "wg0", 100, 200, 1, 2, 1000, null, true);
+    defer allocator.free(si.sample.name);
+
+    var w = TestWriter.init();
+    const sampled = [_]SampledInterface{si};
+    try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
+
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"tunnel_count\":1"));
+}
+
+test "renderSampledInterfacesPayload: multiple tunnels emits correct count" {
+    const allocator = std.testing.allocator;
+
+    const si1 = try makeTestSampledInterface(allocator, "wg0", 100, 200, 1, 2, 1000, null, true);
+    defer allocator.free(si1.sample.name);
+
+    const si2 = try makeTestSampledInterface(allocator, "wg1", 300, 400, 3, 4, 1000, null, true);
+    defer allocator.free(si2.sample.name);
+
+    const si3 = try makeTestSampledInterface(allocator, "eth0", 500, 600, 5, 6, 1000, null, false);
+    defer allocator.free(si3.sample.name);
+
+    var w = TestWriter.init();
+    const sampled = [_]SampledInterface{ si1, si2, si3 };
+    try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
+
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"tunnel_count\":2"));
+}
+
+test "renderSampledInterfacesPayload: tunnel_count matches tunnel_interfaces length" {
+    const allocator = std.testing.allocator;
+
+    const si1 = try makeTestSampledInterface(allocator, "wg0", 100, 200, 1, 2, 1000, null, true);
+    defer allocator.free(si1.sample.name);
+
+    const si2 = try makeTestSampledInterface(allocator, "wg1", 300, 400, 3, 4, 1000, null, true);
+    defer allocator.free(si2.sample.name);
+
+    var w = TestWriter.init();
+    const sampled = [_]SampledInterface{ si1, si2 };
+    try renderSampledInterfacesPayload(&w, &sampled, testRuntime);
+
+    const slice = w.slice();
+    // Both tunnel_count and tunnel_interfaces should be present
+    try std.testing.expect(std.mem.containsAtLeast(u8, slice, 1, "\"tunnel_interfaces\":[\"wg0\",\"wg1\"]"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, slice, 1, "\"tunnel_count\":2"));
+}
+
+// ============================================================================
 // Tests: JSON string escaping
 // ============================================================================
 

@@ -166,3 +166,9 @@ test "renderFallbackPayload: handles null rss_kib" {
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rss_kib\":null"));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"pid\":5678"));
 }
+
+test "renderFallbackPayload: emits tunnel_count 0" {
+    var w = TestWriter.init();
+    try renderFallbackPayload(&w, testRuntime);
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"tunnel_count\":0"));
+}

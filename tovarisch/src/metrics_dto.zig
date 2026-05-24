@@ -145,8 +145,11 @@ pub fn renderSampledInterfacesPayload(
         }
     }
 
+    // Tunnel count summary - operator-readable tunnel count
+    try writer.print("],\"tunnel_count\":{d}", .{tunnel_count});
+
     // Notes footer - include runtime RSS note and tunnel note
-    try writer.writeAll("],\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\",\"runtime RSS is best-effort platform telemetry\",\"tunnel_interfaces are name-based (wg*, tun*, tap*, etc.)\"]}");
+    try writer.writeAll(",\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\",\"runtime RSS is best-effort platform telemetry\",\"tunnel_interfaces are name-based (wg*, tun*, tap*, etc.)\"]}");
 }
 
 /// Renders a single SampledInterface as JSON.
@@ -221,5 +224,5 @@ pub fn renderFallbackPayload(writer: anytype, runtime: telemetry.RuntimeTelemetr
     } else {
         try writer.writeAll(",\"rss_kib\":null");
     }
-    try writer.writeAll("},\"private_interfaces\":[],\"tunnel_interfaces\":[],\"error\":\"metrics_unavailable\",\"detail\":\"private interface stats unavailable\",\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\",\"runtime RSS is best-effort platform telemetry\",\"tunnel_interfaces are name-based (wg*, tun*, tap*, etc.)\"]}");
+    try writer.writeAll("},\"private_interfaces\":[],\"tunnel_interfaces\":[],\"tunnel_count\":0,\"error\":\"metrics_unavailable\",\"detail\":\"private interface stats unavailable\",\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\",\"runtime RSS is best-effort platform telemetry\",\"tunnel_interfaces are name-based (wg*, tun*, tap*, etc.)\"]}");
 }
