@@ -23,6 +23,29 @@ fn getGitCommit(b: *std.Build) []const u8 {
     return "unknown";
 }
 
+/// Returns true if the Git working tree is dirty.
+/// Precedence: 1. BUILD_DIRTY env var, 2. git status --porcelain, 3. false.
+fn getGitDirty(b: *std.Build) bool {
+    const env_map = b.graph.environ_map;
+
+    // Check BUILD_DIRTY env var first
+    if (env_map.get("BUILD_DIRTY")) |value| {
+        const trimmed = std.mem.trim(u8, value, " \t\r\n");
+        if (std.ascii.eqlIgnoreCase(trimmed, "1") or std.ascii.eqlIgnoreCase(trimmed, "true")) {
+            return true;
+        }
+        // "0", "false", or any other value means not dirty
+        return false;
+    }
+
+    // Fall back to git status --porcelain
+    const argv = &.{ "git", "status", "--porcelain" };
+    var exit_code: u8 = undefined;
+    const result = b.runAllowFail(argv, &exit_code, .inherit) catch return false;
+    const trimmed = std.mem.trim(u8, result, " \t\r\n");
+    return trimmed.len > 0;
+}
+
 /// Reads VERSION file from tovarisch/ directory.
 /// Precedence: 1. VERSION env var, 2. tovarisch/VERSION file, 3. "0.0.0".
 fn readVersionFile(b: *std.Build) []const u8 {
@@ -59,22 +82,28 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const allocator = b.allocator;
 
-    // Derive build metadata from VERSION file
+    // Derive build metadata from VERSION file and Git state
     const base_version = readVersionFile(b);
     const commit = getGitCommit(b);
+    const dirty = getGitDirty(b);
 
-    // Build the full version string: base_version+commit
-    const version_len = base_version.len + 1 + commit.len;
+    // Build the full version string: base_version+commit or base_version+commit.dirty
+    const dirty_suffix_len: usize = if (dirty) 6 else 0; // ".dirty" = 6 chars
+    const version_len = base_version.len + 1 + commit.len + dirty_suffix_len;
     const version = allocator.alloc(u8, version_len) catch @panic("OOM");
     @memcpy(version[0..base_version.len], base_version);
     version[base_version.len] = '+';
-    @memcpy(version[base_version.len + 1 ..], commit);
+    @memcpy(version[base_version.len + 1 .. base_version.len + 1 + commit.len], commit);
+    if (dirty) {
+        @memcpy(version[base_version.len + 1 + commit.len ..], ".dirty");
+    }
 
     // Inject build options into the root module
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "base_version", base_version);
     build_options.addOption([]const u8, "commit", commit);
     build_options.addOption([]const u8, "version", version);
+    build_options.addOption(bool, "dirty", dirty);
 
     const exe = b.addExecutable(.{
         .name = "tovarisch",
