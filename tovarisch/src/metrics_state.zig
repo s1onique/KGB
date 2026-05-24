@@ -43,13 +43,17 @@ fn currentWallClockMillis() i64 {
     // On Linux, use clock_gettime for real timestamps.
     // On non-Linux (macOS, etc.), return 0 and let tests inject timestamps.
     // Note: cross-platform builds may include std.os.linux but we only want it on native Linux.
+    // Note: Zig dev builds (e.g., 0.16.0-dev) use tv_sec/tv_nsec; stable 0.16.0 uses sec/nsec.
     if (comptime @import("builtin").os.tag == .linux and @hasDecl(std.os.linux, "clock_gettime")) {
         var ts: std.os.linux.timespec = undefined;
         if (std.os.linux.clock_gettime(@enumFromInt(0), &ts) < 0) return 0;  // CLOCK_REALTIME = 0
         // Convert to milliseconds: seconds * 1000 + nanoseconds / 1_000_000
         // Use u128 to avoid overflow when multiplying seconds by 1000
-        const sec_val: u128 = @intCast(ts.sec);
-        const nsec_val: u128 = @intCast(ts.nsec);
+        // Detect field names: stable Zig 0.16.0 uses .sec/.nsec; dev builds use .tv_sec/.tv_nsec
+        const sec_val: u128 = if (@hasDecl(std.os.linux.timespec, "tv_sec"))
+            @intCast(ts.tv_sec) else @intCast(ts.sec);
+        const nsec_val: u128 = if (@hasDecl(std.os.linux.timespec, "tv_nsec"))
+            @intCast(ts.tv_nsec) else @intCast(ts.nsec);
         return @as(i64, @intCast(sec_val * 1000 + nsec_val / 1_000_000));
     }
     // Fallback for non-Linux: return 0 (tests inject explicit timestamps)
