@@ -1,10 +1,39 @@
 # Zig 0.16 Threading and heartbeat lessons
 
-This document captures verified lessons from the detached HTTP heartbeat implementation in `tovarisch/src/http/heartbeat.zig` and its integration in `tovarisch/src/http/server.zig`.
+This document captures verified lessons from the heartbeat implementation in `tovarisch/src/http/heartbeat.zig` and its integration in `tovarisch/src/http/server.zig`.
 
-## CRITICAL: pthread_mutex_t initialization
+## Current design: Local state, no shared context
 
-**DO NOT use `std.mem.zeroes()` to initialize `pthread_mutex_t`.**
+The heartbeat thread owns its state locally:
+
+```zig
+pub fn heartbeatThread() void {
+    var uptime_seconds: u64 = 0;
+
+    while (true) {
+        // sleep...
+        uptime_seconds += HEARTBEAT_INTERVAL_SECS;
+        emitHeartbeatToFd(uptime_seconds);
+    }
+}
+
+// Spawn with no arguments
+std.Thread.spawn(
+    .{ .stack_size = 65536 },
+    heartbeat.heartbeatThread,
+    .{},
+) catch |err| { /* non-fatal */ };
+```
+
+**No mutex, no shared context, no `@constCast`.** For a decorative daemon-lifetime heartbeat, this is the correct engineering choice.
+
+---
+
+## Historical lesson: pthread_mutex_t initialization
+
+The following section is preserved as a historical Zig/POSIX lesson. It describes a trap that was encountered before the simplified design was adopted.
+
+### DO NOT use `std.mem.zeroes()` to initialize `pthread_mutex_t`
 
 This is a **fatal error** that causes `unreachable` panics in Zig 0.16 std/Thread.zig. On Linux, a zeroed `pthread_mutex_t` is invalid and causes undefined behavior when the thread tries to use it.
 
@@ -33,7 +62,7 @@ pub fn initHeartbeatContext() HeartbeatContext {
 - No runtime initialization required
 - Portable across Linux and macOS
 
-**Alternative runtime approach:** You can also use `pthread_mutex_init()` for dynamic initialization, but static initialization with `PTHREAD_MUTEX_INITIALIZER` is simpler and preferred for daemon-lifetime contexts.
+---
 
 ## Daemon thread startup must be non-fatal
 
@@ -45,10 +74,6 @@ const heartbeat_t = try std.Thread.spawn(...);
 heartbeat_t.detach();
 
 // CORRECT - heartbeat failures are non-fatal
-heartbeat.initHeartbeatContext() catch |err| {
-    // Log error, continue serving HTTP
-    return;
-};
 std.Thread.spawn(...) catch |err| {
     // Log error, continue serving HTTP
     return;
@@ -62,12 +87,11 @@ std.Thread.spawn(...) catch |err| {
 **Use `std.Thread.spawn(...)` for the heartbeat worker.**
 
 ```zig
-const heartbeat_t = try std.Thread.spawn(
+const thread = try std.Thread.spawn(
     .{ .stack_size = 65536 },
     heartbeat.heartbeatThread,
-    .{&heartbeat_ctx},
+    .{},  // No context argument - thread owns local state
 );
-heartbeat_t.detach();
 ```
 
 **Detach only when the daemon lifetime is intentionally process-bound.** The thread survives until the process exits. There is no graceful shutdown path currently.
@@ -90,21 +114,23 @@ _ = c.nanosleep(&ts, null);
 
 ## Context lifetime
 
-The heartbeat context is currently stack-owned inside `serveForever()`:
+**The heartbeat thread owns its state locally.** There is no shared context between the main thread and the heartbeat thread.
 
 ```zig
-var heartbeat_ctx = heartbeat.initHeartbeatContext();
-const heartbeat_t = try std.Thread.spawn(
-    .{ .stack_size = 65536 },
-    heartbeat.heartbeatThread,
-    .{&heartbeat_ctx},
-);
-heartbeat_t.detach();
+pub fn heartbeatThread() void {
+    var uptime_seconds: u64 = 0;  // Local state
+    // ...
+}
 ```
 
-**This is an accepted daemon-lifetime shortcut, not a reusable ownership pattern.** `serveForever()` is an infinite daemon loop. Normal lifecycle does not return. The heartbeat thread outlives the stack frame by design.
+This eliminates:
+- Stack-owned cross-thread state coupling
+- `@constCast` from const context
+- Mutex complexity for a decorative feature
 
-**Future hazard:** If graceful shutdown appears, heartbeat state must become owned lifecycle state and the thread must be stopped and joined (or otherwise made safe). A `done` flag exists in `HeartbeatContext` for this purpose, but there is currently no code path that sets it.
+**Background decorative threads must not share mutable stack-owned state unless there is a real shutdown lifecycle.** The simplified design is correct for v0.
+
+**Future hazard:** If graceful shutdown appears, the thread still needs to be stopped (join or signal). With local state, there's no shared context to corrupt. The shutdown mechanism would be signal-based thread cancellation, not mutex-protected shared state.
 
 ## Logging interleaving
 
@@ -139,18 +165,17 @@ There is currently no heartbeat-specific smoke or grep test in the scripts direc
 const std = @import("std");
 const c = std.c;
 
-// Thread spawn with explicit stack size
-const thread = try std.Thread.spawn(
+// Thread spawn with explicit stack size (no context argument)
+// NOTE: We do NOT call detach() on the thread.
+// detach() in Zig 0.16 can trigger unreachable in certain thread states on Linux.
+// The thread runs until process exit (daemon lifetime), which is correct behavior.
+_ = std.Thread.spawn(
     .{ .stack_size = 65536 },  // 64KB stack for heartbeat worker
     heartbeat.heartbeatThread,
-    .{&heartbeat_ctx},
-);
-thread.detach();
-
-// Mutex for shared state
-_ = c.pthread_mutex_lock(&ctx.mutex);
-// ... protected access ...
-_ = c.pthread_mutex_unlock(&ctx.mutex);
+    .{},  // Empty tuple - thread owns local state
+) catch |err| {
+    // Log error, continue serving HTTP
+};
 
 // Blocking sleep
 var ts: c.timespec = .{ .sec = 30, .nsec = 0 };

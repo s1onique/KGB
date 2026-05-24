@@ -186,11 +186,11 @@ Each risk entry contains:
 
 ## R-009: Heartbeat Thread Lifecycle (Unjoined Daemon Thread)
 
-**Description**: Heartbeat thread is spawned but intentionally not joined or detached. The context lives on `serveForever()` stack and remains valid because `serveForever()` does not return under normal operation. The thread mutates context via `@constCast`.
+**Description**: Heartbeat thread is spawned but intentionally not joined or detached. The thread owns its state locally (uptime_seconds counter) with no shared mutable context, no mutex, and no `@constCast`.
 
 **Owner**: maintainer
 
-**Reason**: For daemon-lifetime threads, an unjoined thread is acceptable as long as the process lifetime matches the thread lifetime. Proper join requires shutdown signal handling which is out of scope for v0. `detach()` was removed to avoid potential Zig 0.16 thread state edge cases.
+**Reason**: For daemon-lifetime threads, an unjoined thread is acceptable as long as the process lifetime matches the thread lifetime. Proper join requires shutdown signal handling which is out of scope for v0. `detach()` was removed to avoid potential Zig 0.16 thread state edge cases. The simplified design (local state only) eliminates stack-owned cross-thread coupling that caused crashes.
 
 **Expiry/Review Trigger**:
 - When graceful shutdown is designed
@@ -201,11 +201,10 @@ Each risk entry contains:
 **Mitigation**:
 - Heartbeat is decorative (non-fatal if it fails)
 - Heartbeat thread spawn failures are logged and daemon continues
-- `done` flag exists in `HeartbeatContext` for future graceful shutdown signaling
-- Context is stack-owned on `serveForever()` stack (safe for daemon-lifetime, not for returning functions)
+- Thread owns its state locally (uptime_seconds counter)
+- No shared context, no mutex, no `@constCast`
 - Thread runs until process exit (correct for daemon lifetime)
-- **Fixed in ACT**: `PTHREAD_MUTEX_INITIALIZER` now used instead of `std.mem.zeroes()`
-- `@constCast` is used to get mutable pointer from thread spawn's const context
+- Background decorative threads must not share mutable stack-owned state unless there is a real shutdown lifecycle
 
 ---
 

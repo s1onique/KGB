@@ -298,23 +298,16 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
     // handleMetrics() casts this back to *metrics_state.MetricsState.
     const state_ptr: *anyopaque = &state.metrics;
 
-    // Initialize heartbeat context with static PTHREAD_MUTEX_INITIALIZER.
-    // Heartbeat startup failures are non-fatal - daemon continues serving.
-    // A decorative heartbeat must never crash the leaf daemon.
+    // Spawn heartbeat thread with no shared context.
+    // The heartbeat thread owns its state locally (uptime_seconds counter).
+    // No mutex, no shared context, no @constCast - cleaner engineering
+    // for a decorative daemon-lifetime thread.
     //
-    // NOTE: heartbeat_ctx is stack-owned and lives on serveForever()'s stack.
-    // This is acceptable because serveForever() is an infinite daemon loop
-    // that never returns under normal operation. If graceful shutdown ever
-    // appears, this must become owned lifecycle state or be explicitly
-    // joined/shutdown to avoid use-after-free.
-    const heartbeat_ctx = heartbeat.initHeartbeatContext();
-
-    // Spawn heartbeat thread. Thread spawn failures are non-fatal -
-    // daemon continues serving HTTP without heartbeat.
+    // Heartbeat startup failures are non-fatal - daemon continues serving.
     _ = std.Thread.spawn(
         .{ .stack_size = 65536 },
         heartbeat.heartbeatThread,
-        .{&heartbeat_ctx},
+        .{},
     ) catch |err| {
         // Log error as structured JSON - heartbeat is optional, daemon continues
         log_buf.reset();
@@ -323,8 +316,6 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
             .{ .name = "reason", .value = logging.FieldValue{ .string = "heartbeat_degraded_continue_serving" } },
         });
         try writeLogRecord(out_writer, log_buf.slice());
-        // heartbeat_ctx is stack-owned and will be abandoned on function exit.
-        // This is acceptable for daemon-lifetime - function never returns.
     };
     // NOTE: We do NOT call detach() on the thread.
     // detach() in Zig 0.16 can trigger unreachable in certain thread states on Linux.

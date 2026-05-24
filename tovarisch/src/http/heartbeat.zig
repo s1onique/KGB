@@ -3,6 +3,11 @@
 /// Implements a daemon-lifetime thread that emits heartbeat logs every 30 seconds
 /// independently of HTTP request traffic. Uses std.c.nanosleep for blocking
 /// sleep (Zig 0.16 std.Thread does not expose a sleep function).
+///
+/// Design note: The heartbeat thread owns its state locally. No mutex, no shared
+/// context, no @constCast. For a decorative heartbeat, this is the correct
+/// engineering choice - the thread runs until process exit with no coupling
+/// to the main thread's lifecycle.
 
 const std = @import("std");
 const c = std.c;
@@ -10,34 +15,6 @@ const status = @import("../status.zig");
 
 /// Heartbeat thread configuration.
 pub const HEARTBEAT_INTERVAL_SECS: u64 = 30;
-
-/// Heartbeat thread context shared between main thread and heartbeat thread.
-/// Uses std.c.pthread_mutex for cross-platform thread synchronization.
-pub const HeartbeatContext = struct {
-    const Self = @This();
-
-    /// Mutex for protecting shared state (pthread_mutex_t).
-    /// Uses PTHREAD_MUTEX_INITIALIZER for static initialization.
-    /// This is the portable POSIX way - no runtime init needed.
-    mutex: c.pthread_mutex_t,
-    /// Current uptime in seconds (updated by heartbeat thread).
-    uptime_seconds: u64,
-    /// Flag to signal thread shutdown.
-    done: bool,
-};
-
-/// Initialize heartbeat context for the daemon-lifetime heartbeat thread.
-/// Uses PTHREAD_MUTEX_INITIALIZER for static, compile-time initialization.
-/// No runtime initialization required - the mutex is valid after struct creation.
-pub fn initHeartbeatContext() HeartbeatContext {
-    return HeartbeatContext{
-        // PTHREAD_MUTEX_INITIALIZER is a compile-time constant with default attributes.
-        // This is the portable POSIX approach - no pthread_mutex_init() runtime call needed.
-        .mutex = c.PTHREAD_MUTEX_INITIALIZER,
-        .uptime_seconds = 0,
-        .done = false,
-    };
-}
 
 /// Heartbeat-specific fixed buffer writer.
 /// Uses 4096 bytes to ensure heartbeat logs never overflow.
@@ -89,10 +66,21 @@ fn writeDecimalToHeartbeat(writer: *HeartbeatWriter, value: u64) void {
 }
 
 /// Heartbeat thread entry point.
+///
 /// Loops every HEARTBEAT_INTERVAL_SECS and emits heartbeat logs.
 /// Uses std.c.nanosleep for cross-platform blocking sleep (Zig 0.16 doesn't have std.Thread.sleep).
-/// Note: parameter is *const because Zig thread spawn passes const pointer.
-pub fn heartbeatThread(ctx: *const HeartbeatContext) void {
+///
+/// This function owns all its state locally:
+/// - uptime_seconds is a local u64 counter
+/// - No mutex needed (thread doesn't share mutable state)
+/// - No @constCast needed (no const context from spawn)
+///
+/// Design rationale: For a decorative heartbeat with daemon-lifetime, shared
+/// mutable state adds complexity without benefit. The thread runs until process
+/// exit; local state is sufficient.
+pub fn heartbeatThread() void {
+    var uptime_seconds: u64 = 0;
+
     while (true) {
         // Sleep for HEARTBEAT_INTERVAL_SECS using libc nanosleep.
         // Zig 0.16 std.Thread does not expose a sleep function.
@@ -104,24 +92,11 @@ pub fn heartbeatThread(ctx: *const HeartbeatContext) void {
         };
         _ = c.nanosleep(&ts, null);
 
-        // @constCast needed: Zig passes *const, but pthread_mutex_lock needs *T
-        // and we need to modify uptime_seconds
-        var mutable_ctx = @constCast(ctx);
-
-        _ = c.pthread_mutex_lock(&mutable_ctx.mutex);
-
-        if (mutable_ctx.done) {
-            _ = c.pthread_mutex_unlock(&mutable_ctx.mutex);
-            return;
-        }
-
-        mutable_ctx.uptime_seconds += HEARTBEAT_INTERVAL_SECS;
-        const uptime = mutable_ctx.uptime_seconds;
-
-        _ = c.pthread_mutex_unlock(&mutable_ctx.mutex);
+        // Increment uptime (local state, no mutex needed)
+        uptime_seconds += HEARTBEAT_INTERVAL_SECS;
 
         // Emit heartbeat log to stdout fd (fd=1).
-        emitHeartbeatToFd(uptime);
+        emitHeartbeatToFd(uptime_seconds);
     }
 }
 
@@ -148,16 +123,12 @@ fn emitHeartbeatToFd(uptime_seconds: u64) void {
     // Write heartbeat record manually to avoid any potential panic paths
     // Note: ts field omitted - journald provides real receipt timestamp
     log_buf.writeAll("{\"level\":\"info\",\"event\":\"heartbeat\",\"service\":\"tovarisch\",");
-
     log_buf.writeAll("\"uptime_seconds\":");
     writeDecimalToHeartbeat(&log_buf, uptime_seconds);
-
     log_buf.writeAll(",\"status\":\"");
     log_buf.writeAll(@tagName(current_status.status));
-
     log_buf.writeAll("\",\"checks_count\":");
     writeDecimalToHeartbeat(&log_buf, current_status.checks.len);
-
     log_buf.writeAll(",\"tunnels_count\":0,\"rx_bytes\":0,\"tx_bytes\":0}\n");
 
     // Write to stdout fd. Ignore partial writes to not disrupt thread.
