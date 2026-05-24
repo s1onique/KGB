@@ -335,3 +335,37 @@ test "emit record ends with newline for NDJSON" {
     const output = w.slice();
     try std.testing.expect(output[output.len - 1] == '\n');
 }
+
+test "all logging events can be emitted" {
+    // Regression test: every Event variant must be emit-able without panic.
+    // This catches missing enum cases in switch statements that use unreachable.
+    inline for ([_]Event{
+        .http_server_listening,
+        .http_accept_loop_started,
+        .http_accept_loop_error,
+        .tunnel_stats,
+        .app_startup,
+        .app_shutdown,
+        .server_error,
+        .uvb76_signal_ready,
+        .heartbeat_init_failed,
+        .heartbeat_thread_start_failed,
+    }) |event| {
+        var w = BufferedWriter.init();
+        try emit(event, &w, &.{});
+        try std.testing.expect(w.len > 0);
+    }
+}
+
+test "heartbeat_thread_start_failed has error level" {
+    var w = BufferedWriter.init();
+    try emit(.heartbeat_thread_start_failed, &w, &.{
+        .{ .name = "error", .value = FieldValue{ .string = "ResourceUnavailable" } },
+        .{ .name = "reason", .value = FieldValue{ .string = "heartbeat_degraded_continue_serving" } },
+    });
+
+    const output = w.slice();
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"level\":\"error\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"event\":\"heartbeat_thread_start_failed\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"reason\":\"heartbeat_degraded_continue_serving\""));
+}
