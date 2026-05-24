@@ -26,6 +26,8 @@ const _net_interface_filter_tests = @import("net/interface_filter_tests.zig");
 const _net_linux_addr = @import("net/linux_addr.zig");
 const _net_linux_addr_tests = @import("net/linux_addr_tests.zig");
 const _net_linux_addr_parse = @import("net/linux_addr_parse.zig");
+const _net_wg_show_parser = @import("net/wg_show_parser.zig");
+const _net_wg_show_parser_tests = @import("net/wg_show_parser_tests.zig");
 const _net_private_interface_stats = @import("net/private_interface_stats.zig");
 const _net_private_interface_stats_tests = @import("net/private_interface_stats_tests.zig");
 const _metrics = @import("metrics.zig");
@@ -104,6 +106,14 @@ test {
 
 test {
     std.testing.refAllDecls(@import("net/linux_addr_parse.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("net/wg_show_parser.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("net/wg_show_parser_tests.zig"));
 }
 
 test {
