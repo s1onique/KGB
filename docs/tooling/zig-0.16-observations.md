@@ -1,4 +1,22 @@
-# Zig 0.16 Observations
+# Zig 0.16 Observations---
+
+## 2026-05-24 — Zig 0.16 std.time API limitations for heartbeat implementation
+
+- **Context:** Attempted to implement periodic heartbeat logging with real-time timestamps in `tovarisch`.
+- **Symptom:** `std.time.Timestamp` is not available in Zig 0.16.x; `std.time.nanoTimestamp()` does not exist; `std.io.FixedBufferStream` is not available.
+- **Failed assumptions:**
+  - `std.time.Timestamp` exists as a type (it does not in Zig 0.16.x)
+  - `std.time.now()` is available for timestamp generation
+  - `std.io.FixedBufferStream` exists as a helper for test writers
+- **Working fix:**
+  - Used a static placeholder timestamp (`"2026-05-24T00:00:00Z"`) for the heartbeat log `ts` field
+  - Implemented custom `TestWriter` struct for unit tests instead of `std.io.FixedBufferStream`
+  - Used counter-based approximation for 30-second interval instead of `std.time.sleep` (which is also unavailable)
+- **Affected files:**
+  - `tovarisch/src/runtime/heartbeat_log.zig` — timestamp uses placeholder
+  - `tovarisch/src/http/server.zig` — heartbeat emission uses accept-loop counter
+- **Recommendation:** Document these as known limitations in zig-0.16-field-manual.md.
+- **Promote to field manual?** Yes — these are common patterns that agents will attempt.
 
 Recording field notes from Zig 0.16 experiments. Confidence varies; do not promote to field manual until verified with a minimal reproducer.
 

@@ -74,6 +74,14 @@ Every log record contains:
 | `server_error` | error | `error` | Server-level startup/runtime error surfaced by CLI |
 | `uvb76_signal_ready` | info | `signal`, `message` | Operator-facing signal that the HTTP service is ready |
 
+### Heartbeat Events
+
+| Event | Level | Fields | Description |
+|-------|-------|--------|-------------|
+| `heartbeat` | info | `ts`, `uptime_seconds`, `status`, `checks_count`, `tunnels_count`, `rx_bytes`, `tx_bytes` | Periodic heartbeat log; flat JSON record (not using `fields` wrapper) |
+
+Note: The heartbeat event uses a flat JSON format at the top level (not wrapped in `fields`). This is intentional for operational simplicity. Tunnel counters (`tunnels_count`, `rx_bytes`, `tx_bytes`) are placeholders until the tunnel subsystem exists.
+
 ## Field Value Types
 
 Fields support these value types:
@@ -127,6 +135,14 @@ String values must be JSON-escaped:
 ```json
 {"level":"error","event":"http_accept_loop_error","service":"tovarisch","version":"0.1.1","fields":{"error":"ConnectionRefused"}}
 ```
+
+### Heartbeat Log
+
+```json
+{"ts":"2026-05-24T00:00:00Z","level":"info","event":"heartbeat","service":"tovarisch","uptime_seconds":30,"status":"warn","checks_count":5,"tunnels_count":0,"rx_bytes":0,"tx_bytes":0}
+```
+
+Note: Heartbeat uses flat JSON format (not wrapped in `fields`). Timestamp is a placeholder until proper time API is available. Tunnel counters are zero until tunnel subsystem exists.
 
 ## Emoji Policy
 
