@@ -3,8 +3,7 @@ const c = std.c;
 const routes = @import("routes.zig");
 const logging = @import("../logging.zig");
 const metrics_state = @import("../metrics_state.zig");
-const heartbeat_log = @import("../runtime/heartbeat_log.zig");
-const status = @import("../status.zig");
+const heartbeat = @import("heartbeat.zig");
 
 // ============================================================================
 // Server State
@@ -278,30 +277,6 @@ pub fn serve(config: Config, out_writer: anytype) !void {
     try emitStartupLogs(config, out_writer);
 }
 
-/// Emit a heartbeat log record using the heartbeat_log module.
-/// This is a helper that bridges the logging module interface with heartbeat_log.
-fn emitHeartbeatLog(out_writer: anytype, uptime_seconds: u64) !void {
-    // Get current status from the same derivation as /status
-    const current_status = status.getStatus();
-
-    // Use heartbeat_log to format the record into a buffer
-    var log_buf = logging.BufferedWriter.init();
-    const stats = heartbeat_log.HeartbeatStats{
-        .uptime_seconds = uptime_seconds,
-        .status = current_status.status,
-        .checks_count = current_status.checks.len,
-        .tunnels_count = 0, // Placeholder until tunnel subsystem exists
-        .rx_bytes = 0, // Placeholder until tunnel subsystem exists
-        .tx_bytes = 0, // Placeholder until tunnel subsystem exists
-    };
-
-    // Write heartbeat JSON to our buffered writer
-    try heartbeat_log.writeHeartbeatLogToWriter(&log_buf, stats);
-
-    // Write the buffered content to output
-    try writeLogRecord(out_writer, log_buf.slice());
-}
-
 /// Daemon-style serve loop for production CLI use with persistent state.
 pub fn serveForever(config: Config, out_writer: anytype) !void {
     var server = Server.init(config);
@@ -323,12 +298,32 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
     // handleMetrics() casts this back to *metrics_state.MetricsState.
     const state_ptr: *anyopaque = &state.metrics;
 
-    // Heartbeat tracking: emit a heartbeat every ~30 seconds
-    // We count iterations of the accept loop. On typical systems,
-    // 3000 yields should approximate 30 seconds, but this is
-    // environment-dependent and is an acknowledged limitation.
-    var heartbeat_counter: usize = 0;
-    var uptime_seconds: u64 = 0;
+    // Initialize heartbeat context for the detached heartbeat thread.
+    // The heartbeat thread emits logs independently of HTTP request traffic.
+    //
+    // NOTE: heartbeat_ctx is stack-owned and lives on serveForever()'s stack.
+    // This is acceptable because serveForever() is an infinite daemon loop
+    // that never returns under normal operation. If graceful shutdown ever
+    // appears, this must become owned lifecycle state or be explicitly
+    // joined/shutdown to avoid use-after-free.
+    //
+    // Log interleaving risk: heartbeat thread writes directly to fd 1 via
+    // c.write() while main server path uses its writer helper. A single
+    // small write() is fine for NDJSON in practice, but it is not the same
+    // serialization path. This is acceptable for this ACT. Log record
+    // interleaving is low risk for small records and should be revisited
+    // if log records grow or multiple background emitters are added.
+    var heartbeat_ctx = heartbeat.initHeartbeatContext();
+
+    // Spawn detached heartbeat thread.
+    // The thread loops every heartbeat.HEARTBEAT_INTERVAL_SECS and emits heartbeat logs.
+    // It uses std.c.nanosleep for blocking sleep (Zig 0.16 std.Thread has no sleep).
+    const heartbeat_t = try std.Thread.spawn(
+        .{ .stack_size = 65536 },
+        heartbeat.heartbeatThread,
+        .{&heartbeat_ctx},
+    );
+    heartbeat_t.detach();
 
     // Blocking accept loop - stays alive until interrupted.
     while (true) {
@@ -340,20 +335,6 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
             });
             try writeLogRecord(out_writer, log_buf.slice());
         };
-
-        // Track time for heartbeat
-        heartbeat_counter += 1;
-
-        // Emit heartbeat every ~3000 accept loop iterations
-        // This is a rough approximation of 30 seconds.
-        // Each iteration yields, so this depends on scheduling quantum.
-        if (heartbeat_counter >= 3000) {
-            heartbeat_counter = 0;
-            uptime_seconds += 30;
-
-            // Emit heartbeat log (ignore errors to not disrupt accept loop)
-            emitHeartbeatLog(out_writer, uptime_seconds) catch {};
-        }
     }
 }
 
