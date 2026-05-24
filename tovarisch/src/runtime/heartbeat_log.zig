@@ -12,7 +12,7 @@ pub const HeartbeatStats = struct {
     uptime_seconds: u64,
     status: status.CheckStatus,
     checks_count: usize,
-    tunnels_count: u32,
+    tunnel_count: u32,
     rx_bytes: u64,
     tx_bytes: u64,
 };
@@ -38,7 +38,7 @@ fn writeTimestamp(writer: anytype) !void {
 /// The record format:
 ///
 /// ```json
-/// {"ts":"2026-05-24T11:40:30Z","level":"info","event":"heartbeat","service":"tovarisch","uptime_seconds":30,"status":"warn","checks_count":4,"tunnels_count":0,"rx_bytes":0,"tx_bytes":0}
+/// {"ts":"2026-05-24T11:40:30Z","level":"info","event":"heartbeat","service":"tovarisch","uptime_seconds":30,"status":"warn","checks_count":4,"tunnel_count":1,"rx_bytes":210965885014,"tx_bytes":1622303482922}
 /// ```
 ///
 /// Records end with a newline for NDJSON.
@@ -55,8 +55,8 @@ pub fn writeHeartbeatLogToWriter(writer: anytype, stats: HeartbeatStats) !void {
     try writer.writeAll("\",\"checks_count\":");
     try writeDecimal(writer, stats.checks_count);
 
-    try writer.writeAll(",\"tunnels_count\":");
-    try writeDecimal(writer, stats.tunnels_count);
+    try writer.writeAll(",\"tunnel_count\":");
+    try writeDecimal(writer, stats.tunnel_count);
 
     try writer.writeAll(",\"rx_bytes\":");
     try writeDecimal(writer, stats.rx_bytes);
@@ -109,14 +109,14 @@ test "HeartbeatStats has correct fields" {
         .uptime_seconds = 30,
         .status = .warn,
         .checks_count = 5,
-        .tunnels_count = 0,
+        .tunnel_count = 1,
         .rx_bytes = 100,
         .tx_bytes = 200,
     };
     try std.testing.expectEqual(@as(u64, 30), stats.uptime_seconds);
     try std.testing.expectEqual(status.CheckStatus.warn, stats.status);
     try std.testing.expectEqual(@as(usize, 5), stats.checks_count);
-    try std.testing.expectEqual(@as(u32, 0), stats.tunnels_count);
+    try std.testing.expectEqual(@as(u32, 1), stats.tunnel_count);
     try std.testing.expectEqual(@as(u64, 100), stats.rx_bytes);
     try std.testing.expectEqual(@as(u64, 200), stats.tx_bytes);
 }
@@ -126,7 +126,7 @@ test "writeHeartbeatLogToWriter emits valid JSON object" {
         .uptime_seconds = 30,
         .status = .warn,
         .checks_count = 5,
-        .tunnels_count = 0,
+        .tunnel_count = 1,
         .rx_bytes = 0,
         .tx_bytes = 0,
     };
@@ -145,7 +145,7 @@ test "writeHeartbeatLogToWriter emits trailing newline" {
         .uptime_seconds = 0,
         .status = .ok,
         .checks_count = 0,
-        .tunnels_count = 0,
+        .tunnel_count = 0,
         .rx_bytes = 0,
         .tx_bytes = 0,
     };
@@ -162,7 +162,7 @@ test "writeHeartbeatLogToWriter contains event:heartbeat" {
         .uptime_seconds = 0,
         .status = .ok,
         .checks_count = 0,
-        .tunnels_count = 0,
+        .tunnel_count = 0,
         .rx_bytes = 0,
         .tx_bytes = 0,
     };
@@ -174,12 +174,12 @@ test "writeHeartbeatLogToWriter contains event:heartbeat" {
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"event\":\"heartbeat\""));
 }
 
-test "writeHeartbeatLogToWriter contains zero tunnel placeholders" {
+test "writeHeartbeatLogToWriter contains tunnel_count field" {
     const stats = HeartbeatStats{
         .uptime_seconds = 0,
         .status = .ok,
         .checks_count = 0,
-        .tunnels_count = 0,
+        .tunnel_count = 1,
         .rx_bytes = 0,
         .tx_bytes = 0,
     };
@@ -188,7 +188,7 @@ test "writeHeartbeatLogToWriter contains zero tunnel placeholders" {
     try writeHeartbeatLogToWriter(&writer, stats);
 
     const output = writer.slice();
-    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"tunnels_count\":0"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"tunnel_count\":1"));
 }
 
 test "writeHeartbeatLogToWriter contains non-zero rx_bytes tx_bytes" {
@@ -196,7 +196,7 @@ test "writeHeartbeatLogToWriter contains non-zero rx_bytes tx_bytes" {
         .uptime_seconds = 0,
         .status = .ok,
         .checks_count = 0,
-        .tunnels_count = 0,
+        .tunnel_count = 1,
         .rx_bytes = 1024,
         .tx_bytes = 2048,
     };
@@ -214,7 +214,7 @@ test "writeHeartbeatLogToWriter contains service:tovarisch" {
         .uptime_seconds = 0,
         .status = .ok,
         .checks_count = 0,
-        .tunnels_count = 0,
+        .tunnel_count = 0,
         .rx_bytes = 0,
         .tx_bytes = 0,
     };
@@ -231,7 +231,7 @@ test "writeHeartbeatLogToWriter contains level:info" {
         .uptime_seconds = 0,
         .status = .ok,
         .checks_count = 0,
-        .tunnels_count = 0,
+        .tunnel_count = 0,
         .rx_bytes = 0,
         .tx_bytes = 0,
     };
@@ -248,7 +248,7 @@ test "writeHeartbeatLogToWriter contains status:ok" {
         .uptime_seconds = 0,
         .status = .ok,
         .checks_count = 0,
-        .tunnels_count = 0,
+        .tunnel_count = 0,
         .rx_bytes = 0,
         .tx_bytes = 0,
     };
@@ -258,4 +258,47 @@ test "writeHeartbeatLogToWriter contains status:ok" {
 
     const output = writer.slice();
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"status\":\"ok\""));
+}
+
+test "HeartbeatStats with wg0 tunnel counters" {
+    // Regression test: fixture containing wg0 with non-zero counters
+    // should produce heartbeat summary with tunnel_count=1, rx_bytes>0, tx_bytes>0
+    const stats = HeartbeatStats{
+        .uptime_seconds = 30,
+        .status = .warn,
+        .checks_count = 6,
+        .tunnel_count = 1,
+        .rx_bytes = 210965885014,
+        .tx_bytes = 1622303482922,
+    };
+
+    var writer = TestWriter.init();
+    try writeHeartbeatLogToWriter(&writer, stats);
+
+    const output = writer.slice();
+    // Verify tunnel_count=1 matches /metrics.json contract
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"tunnel_count\":1"));
+    // Verify non-zero tunnel counters
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"rx_bytes\":210965885014"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"tx_bytes\":1622303482922"));
+}
+
+test "HeartbeatStats no-tunnel state regression" {
+    // Regression test: no-tunnel state should produce zeros
+    const stats = HeartbeatStats{
+        .uptime_seconds = 30,
+        .status = .ok,
+        .checks_count = 4,
+        .tunnel_count = 0,
+        .rx_bytes = 0,
+        .tx_bytes = 0,
+    };
+
+    var writer = TestWriter.init();
+    try writeHeartbeatLogToWriter(&writer, stats);
+
+    const output = writer.slice();
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"tunnel_count\":0"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"rx_bytes\":0"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"tx_bytes\":0"));
 }

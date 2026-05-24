@@ -78,9 +78,9 @@ Every log record contains:
 
 | Event | Level | Fields | Description |
 |-------|-------|--------|-------------|
-| `heartbeat` | info | `ts`, `uptime_seconds`, `status`, `checks_count`, `tunnels_count`, `rx_bytes`, `tx_bytes` | Periodic heartbeat log; flat JSON record (not using `fields` wrapper) |
+| `heartbeat` | info | `ts`, `uptime_seconds`, `status`, `checks_count`, `tunnel_count`, `rx_bytes`, `tx_bytes` | Periodic heartbeat log; flat JSON record (not using `fields` wrapper) |
 
-Note: The heartbeat event uses a flat JSON format at the top level (not wrapped in `fields`). This is intentional for operational simplicity. Tunnel counters (`tunnels_count`, `rx_bytes`, `tx_bytes`) are placeholders until the tunnel subsystem exists.
+Note: The heartbeat event uses a flat JSON format at the top level (not wrapped in `fields`). This is intentional for operational simplicity. Heartbeat tunnel metrics are derived from the same interface enumeration used by `/metrics.json`, ensuring consistency between heartbeat logs and metrics output.
 
 ## Field Value Types
 
@@ -139,10 +139,10 @@ String values must be JSON-escaped:
 ### Heartbeat Log
 
 ```json
-{"ts":"2026-05-24T00:00:00Z","level":"info","event":"heartbeat","service":"tovarisch","uptime_seconds":30,"status":"warn","checks_count":5,"tunnels_count":0,"rx_bytes":0,"tx_bytes":0}
+{"ts":"2026-05-24T00:00:00Z","level":"info","event":"heartbeat","service":"tovarisch","uptime_seconds":30,"status":"warn","checks_count":5,"tunnel_count":1,"rx_bytes":210965885014,"tx_bytes":1622303482922}
 ```
 
-Note: Heartbeat uses flat JSON format (not wrapped in `fields`). Timestamp is a placeholder until proper time API is available. Tunnel counters are zero until tunnel subsystem exists.
+Note: Heartbeat uses flat JSON format (not wrapped in `fields`). Timestamp is a placeholder until proper time API is available. Tunnel metrics (`tunnel_count`, `rx_bytes`, `tx_bytes`) are derived from live interface enumeration, matching the `/metrics.json` contract. Field name uses singular `tunnel_count` to match metrics API.
 
 ## Emoji Policy
 
