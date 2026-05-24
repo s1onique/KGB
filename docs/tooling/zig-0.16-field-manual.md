@@ -387,3 +387,7 @@ In this Zig 0.16 environment, `std.c.dirent` exposes the directory-entry name as
 
 > **See also:** `zig-0.16-observations.md` — this section documents a known Zig 0.16 `@memcpy arguments alias` panic in chained `bufPrint()` calls. Full details and solution pattern are documented there.
 
+## Threading and heartbeat lessons
+
+For threading patterns, detached heartbeat implementation, blocking sleep, and context lifetime ownership, see [`zig-0.16-threading-heartbeat.md`](./zig-0.16-threading-heartbeat.md).
+
