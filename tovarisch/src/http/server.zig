@@ -298,43 +298,27 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
     // handleMetrics() casts this back to *metrics_state.MetricsState.
     const state_ptr: *anyopaque = &state.metrics;
 
-    // NOTE: Heartbeat thread is DISABLED for v0.
-    // See: docs/security/accepted-risks.md (R-009)
-    // Diagnostic command available: `tovarisch thread-smoke`
-
-    // TEMPORARY DIAGNOSTIC: Heartbeat thread spawn with zero logging.
-    // Set TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE=1 to enable.
-    // This is a diagnostic probe to isolate the serve-context spawn crash.
-    // - Writes raw stderr markers to trace execution flow
-    // - Avoids logging.emit entirely to test whether failure logging is the crash source
-    // - Uses std.c.write directly to bypass BufferedWriter/logging path
-    if (c.getenv("TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE") != null) {
-        const before_msg = "DIAG: before heartbeat spawn\n";
-        _ = c.write(2, before_msg.ptr, before_msg.len);
-        // Use default thread stack (no explicit .stack_size).
-        // The 64 KiB explicit stack caused crashes on Linux/glibc release target.
-        // See: docs/security/accepted-risks.md (R-009)
-        const spawn_result = std.Thread.spawn(
-            .{},
-            heartbeat.heartbeatThread,
-            .{},
-        );
-        const after_msg = "DIAG: after heartbeat spawn\n";
-        _ = c.write(2, after_msg.ptr, after_msg.len);
-
-        if (spawn_result) |thread| {
-            const success_msg = "DIAG: heartbeat spawn succeeded, detaching\n";
-            _ = c.write(2, success_msg.ptr, success_msg.len);
-            thread.detach();
-        } else |spawn_err| {
-            // Do NOT call logging.emit here - that was the suspected panic path.
-            // Write raw stderr only with no formatting.
-            const err_name = @errorName(spawn_err);
-            const fail_msg = "DIAG: heartbeat spawn failed, continuing without heartbeat\n";
-            _ = c.write(2, fail_msg.ptr, fail_msg.len);
-            _ = c.write(2, err_name.ptr, err_name.len);
-            _ = c.write(2, "\n", 1);
-        }
+    // Heartbeat thread: spawn with default stack, detach for daemon-lifetime.
+    //
+    // Root cause identified (R-009): explicit .stack_size = 65536 was too small
+    // for Zig 0.16 Linux/glibc release target. Default stack works reliably.
+    //
+    // Design: no mutex, no shared context, no @constCast. Heartbeat owns its
+    // local state. Spawn failure is non-fatal; structured-log the error.
+    if (std.Thread.spawn(.{}, heartbeat.heartbeatThread, .{})) |thread| {
+        // Detach thread for daemon-lifetime operation.
+        // The thread runs until process exit; detach() allows it to continue
+        // independently without blocking the main thread on join.
+        thread.detach();
+    } else |spawn_err| {
+        // Build structured log record for spawn failure.
+        log_buf.reset();
+        logging.emit(.heartbeat_thread_start_failed, &log_buf, &.{
+            .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(spawn_err) } },
+            .{ .name = "detail", .value = logging.FieldValue{ .string = "heartbeat spawn failed, continuing without heartbeat" } },
+        }) catch {};
+        writeLogRecord(out_writer, log_buf.slice()) catch {};
+        // Continue serving - heartbeat is decorative, not critical path
     }
 
     // Blocking accept loop - stays alive until interrupted.

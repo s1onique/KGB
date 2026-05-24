@@ -2,9 +2,12 @@
 
 This document captures verified lessons from the heartbeat implementation in `tovarisch/src/http/heartbeat.zig` and its integration in `tovarisch/src/http/server.zig`.
 
-## ⚠️ CURRENT STATUS: Heartbeat Disabled
+## ✅ CURRENT STATUS: Heartbeat Enabled (Default Stack)
 
-**Threaded heartbeat is DISABLED for v0** due to `std.Thread.spawn` causing "reached unreachable code" panics on production Linux/glibc targets.
+**Threaded heartbeat is ENABLED** with default stack after root cause was identified:
+- Explicit `.stack_size = 65536` (64 KiB) caused crashes on Linux/glibc release target
+- Default stack (`.{}`) works reliably in both serve-context and standalone tests
+- Root cause confirmed via `tovarisch thread-smoke` variant 3
 
 See: [R-009 in docs/security/accepted-risks.md](../security/accepted-risks.md)
 

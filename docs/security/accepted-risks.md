@@ -184,54 +184,41 @@ Each risk entry contains:
 
 ---
 
-## R-009: Heartbeat Threading Isolated — Serve Context vs. Standalone Behavior Divergence
+## R-009: Heartbeat Threading — Root Cause Identified, Heartbeat Re-Enabled
 
-**Description**: `std.Thread.spawn` is stable in a standalone CLI smoke test (`tovarisch thread-smoke`), but the `tovarisch serve` startup path was crashing when a heartbeat thread was spawned with an explicit 64 KiB stack. Current leading hypothesis: the explicit `.stack_size = 65536` is too small for the serve-context heartbeat thread on the Linux/glibc release target.
+**Description**: `std.Thread.spawn` with explicit `.stack_size = 65536` caused "reached unreachable code" panics in the `tovarisch serve` context on Linux/glibc release targets.
+
+**Root Cause Confirmed (2026-05-24)**:
+- Explicit 64 KiB stack (`.{ .stack_size = 65536 }`) is too small for Zig 0.16 Linux/glibc thread startup/runtime/safety paths
+- Crash occurred inside `std.Thread.spawn(...)` before it returned
+- Default stack (`.{}`) works reliably in both serve-context and standalone tests
+- Confirmed via `tovarisch thread-smoke` variant 3 on Linux target
 
 **Owner**: maintainer
 
-**Reason**: New evidence (2026-05-24) shows that `std.Thread.spawn` itself is NOT globally broken on the Linux/glibc target. Both lifecycle patterns pass in the standalone smoke test:
-- variant 1 (spawn+join, default stack): passes
-- variant 2 (spawn+detach, default stack): passes
-- variant 3 (spawn+detach, 64 KiB stack): **may fail on Linux/glibc release target**
+**Resolution Applied (ACT: Re-enable heartbeat with default thread stack)**:
+- Heartbeat thread is now ENABLED by default in `serveForever()`
+- Spawn uses default stack: `std.Thread.spawn(.{}, heartbeat.heartbeatThread, .{})`
+- Thread is detached for daemon-lifetime operation
+- Spawn failure is non-fatal; structured-logged to stdout
+- No mutex, no shared context, no `@constCast`
+- `TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE` environment gate removed
 
-**Current leading hypothesis**: The explicit 64 KiB stack (`.{ .stack_size = 65536 }`) is too small for Zig 0.16 Linux/glibc thread startup/runtime/safety paths. The crash occurred inside `std.Thread.spawn(...)` before it returned, with panic: `reached unreachable code` (Zig's safe-build behavior for stack overflow in safety checks).
-
-**Resolution Applied**: Changed heartbeat spawn from `.stack_size = 65536` to default stack (`.{}`). The heartbeat is decorative; it does not need clever stack tuning. The diagnostic patch uses default stack now.
+**Accepted Risk (Narrowed)**:
+- Heartbeat is a decorative daemon-lifetime thread
+- Detached thread runs until process exit; no graceful shutdown
+- Spawn failure degrades gracefully (logs error, continues serving)
+- HTTP /status and /metrics.json remain primary liveness surfaces
 
 **Expiry/Review Trigger**:
-- When `tovarisch thread-smoke` passes on the exact release target (DONE: passes with default stack)
-- When serve-context heartbeat spawn with default stack is verified on Linux target
-- When heartbeat threading is re-enabled and verified in production with TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE=1
+- When heartbeat is verified in production with `journalctl -u tovarisch -n 250`
+- When heartbeat record appears in logs at uptime_seconds=30, 60, etc.
 
 **Mitigation**:
-- Heartbeat thread is DISABLED for v0 by default
-- `tovarisch serve` now uses default thread stack for heartbeat spawn
-- Diagnostic command available: `tovarisch thread-smoke`
-  - Run manually outside systemd on target system
-  - Tests spawn+join, spawn+detach (default stack), and spawn+detach (64 KiB stack)
-- Temporary gated diagnostic: Set `TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE=1` to enable heartbeat spawn with raw stderr markers
-  - Uses default thread stack now; Linux serve-context probe must confirm the crash is fixed
-  - Writes raw stderr markers to trace execution flow
+- Heartbeat thread uses default stack (no explicit `.stack_size`)
+- Spawn failure is non-fatal, structured-logged
+- `tovarisch thread-smoke` variant 3 retained as regression diagnostic for the 64 KiB stack issue
 - HTTP /status and /metrics.json remain liveness surfaces
-- Heartbeat may be re-enabled with default stack in a hardening ACT
-
-**Diagnostic Protocol**:
-```bash
-# Step 1: Verify thread-smoke passes (standalone spawn is stable)
-sudo -u tovarisch /usr/bin/tovarisch thread-smoke
-
-# Step 2: Deploy with diagnostic enabled (production testing)
-# Edit systemd unit or run manually:
-TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE=1 tovarisch serve
-
-# Expected markers (with default stack fix):
-# - "DIAG: before heartbeat spawn"
-# - "DIAG: after heartbeat spawn"
-# - "DIAG: heartbeat spawn succeeded, detaching"
-#
-# If variant 3 (64 KiB stack) fails in thread-smoke, confirms R-009 root cause.
-```
 
 ---
 
