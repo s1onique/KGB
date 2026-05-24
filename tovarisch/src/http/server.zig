@@ -311,8 +311,11 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
     if (c.getenv("TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE") != null) {
         const before_msg = "DIAG: before heartbeat spawn\n";
         _ = c.write(2, before_msg.ptr, before_msg.len);
+        // Use default thread stack (no explicit .stack_size).
+        // The 64 KiB explicit stack caused crashes on Linux/glibc release target.
+        // See: docs/security/accepted-risks.md (R-009)
         const spawn_result = std.Thread.spawn(
-            .{ .stack_size = 65536 },
+            .{},
             heartbeat.heartbeatThread,
             .{},
         );

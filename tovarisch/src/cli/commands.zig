@@ -123,7 +123,7 @@ fn threadSmokeCommand(stdout: anytype, stderr: anytype) ExitCode {
     }
 
     // Variant 2: spawn + detach (daemon-lifetime pattern)
-    stdout.writeAll("thread-smoke: variant 2 (spawn+detach)... ") catch return .usage;
+    stdout.writeAll("thread-smoke: variant 2 (spawn+detach, default stack)... ") catch return .usage;
 
     const detach_result = std.Thread.spawn(.{}, noopSleepThread, .{});
     if (detach_result) |thread| {
@@ -132,6 +132,24 @@ fn threadSmokeCommand(stdout: anytype, stderr: anytype) ExitCode {
     } else |err| {
         stdout.writeAll("FAILED\n") catch {};
         stderr.print("thread-smoke: spawn+detach failed: {s}\n", .{@errorName(err)}) catch {};
+        return .usage;
+    }
+
+    // Variant 3: spawn + detach with explicit 64 KiB stack (regression test for R-009)
+    // This mirrors the config that crashed on Linux/glibc release target.
+    stdout.writeAll("thread-smoke: variant 3 (spawn+detach, 64KiB stack)... ") catch return .usage;
+
+    const small_stack_result = std.Thread.spawn(
+        .{ .stack_size = 65536 },
+        noopSleepThread,
+        .{},
+    );
+    if (small_stack_result) |thread| {
+        thread.detach();
+        stdout.writeAll("ok\n") catch return .usage;
+    } else |err| {
+        stdout.writeAll("FAILED\n") catch {};
+        stderr.print("thread-smoke: variant 3 (64KiB stack) failed: {s}\n", .{@errorName(err)}) catch {};
         return .usage;
     }
 
