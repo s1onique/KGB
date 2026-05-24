@@ -42,17 +42,19 @@ pub const InterfaceAddress = struct {
 
 /// Tunnel interface name prefixes that indicate tunnel-like interfaces.
 /// These are name-based heuristics for Linux network interfaces:
-/// - wg*  : WireGuard interfaces (digits only, e.g., wg0, wg1, wg42)
-/// - tun* : TUN (network tunnel) interfaces (OpenVPN, etc.)
-/// - tap* : TAP (ethernet tunnel) interfaces
-/// - sit* : SIT (Simple Internet Transition) tunnel
+/// - wg*   : WireGuard interfaces (digits only, e.g., wg0, wg1, wg42)
+/// - tun*  : TUN (network tunnel) interfaces (OpenVPN, etc.)
+/// - tap*  : TAP (ethernet tunnel) interfaces
+/// - vpns* : OpenConnect / ocserv tunnel interfaces (e.g., vpns0, vpns1)
+/// - sit*  : SIT (Simple Internet Transition) tunnel
 /// - ip6tnl*: IPv6 tunnel interfaces
-/// - gre* : GRE tunnel interfaces
+/// - gre*  : GRE tunnel interfaces
 /// - ipip* : IP-in-IP tunnel interfaces
 pub const tunnel_prefixes = [_][]const u8{
     "wg",
     "tun",
     "tap",
+    "vpns",
     "sit",
     "ip6tnl",
     "gre",

@@ -66,11 +66,21 @@ test "isTunnelInterface: IP-in-IP tunnel interfaces" {
     try testing.expect(interface_filter.isTunnelInterface("ipip1"));
 }
 
+test "isTunnelInterface: OpenConnect / ocserv vpn interfaces" {
+    // OpenConnect (ocserv) uses vpns* naming for tunnel interfaces
+    try testing.expect(interface_filter.isTunnelInterface("vpns0"));
+    try testing.expect(interface_filter.isTunnelInterface("vpns1"));
+    try testing.expect(interface_filter.isTunnelInterface("vpns2"));
+    try testing.expect(interface_filter.isTunnelInterface("vpns12"));
+    try testing.expect(interface_filter.isTunnelInterface("vpns99"));
+}
+
 test "isTunnelInterface: non-tunnel interfaces excluded" {
     // Regular ethernet interfaces
     try testing.expect(!interface_filter.isTunnelInterface("eth0"));
     try testing.expect(!interface_filter.isTunnelInterface("eth1"));
     try testing.expect(!interface_filter.isTunnelInterface("ens0"));
+    try testing.expect(!interface_filter.isTunnelInterface("ens3"));
     try testing.expect(!interface_filter.isTunnelInterface("enp0s0"));
 
     // WiFi interfaces
@@ -87,6 +97,16 @@ test "isTunnelInterface: non-tunnel interfaces excluded" {
     // VLAN
     try testing.expect(!interface_filter.isTunnelInterface("vlan0"));
     try testing.expect(!interface_filter.isTunnelInterface("eth0.100"));
+
+    // Podman container interfaces (NOT tunnels despite vpn-like naming)
+    try testing.expect(!interface_filter.isTunnelInterface("podman0"));
+    try testing.expect(!interface_filter.isTunnelInterface("podman1"));
+    try testing.expect(!interface_filter.isTunnelInterface("podman-br0"));
+
+    // veth (virtual ethernet) for containers/VMs (NOT tunnels)
+    try testing.expect(!interface_filter.isTunnelInterface("veth0"));
+    try testing.expect(!interface_filter.isTunnelInterface("veth1"));
+    try testing.expect(!interface_filter.isTunnelInterface("veth2a3b4c"));
 }
 
 test "isTunnelInterface: edge cases" {
@@ -112,4 +132,5 @@ test "isTunnelInterface: all prefixes in array start expected patterns" {
     try testing.expect(std.mem.containsAtLeast([]const u8, prefixes, 1, "wg"));
     try testing.expect(std.mem.containsAtLeast([]const u8, prefixes, 1, "tun"));
     try testing.expect(std.mem.containsAtLeast([]const u8, prefixes, 1, "tap"));
+    try testing.expect(std.mem.containsAtLeast([]const u8, prefixes, 1, "vpns"));
 }
