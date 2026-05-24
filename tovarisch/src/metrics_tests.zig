@@ -111,7 +111,7 @@ test "renderMetricsPayloadFromSnapshots: zero snapshots emits rate null note" {
     var w = TestWriter.init();
     const snapshots: [0]InterfaceStatsSnapshot = .{};
     try renderMetricsPayloadFromSnapshots(testing.allocator, &w, &snapshots);
-    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "rate is optional"));
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "rate is null until a previous sample exists"));
 }
 
 // ============================================================================
@@ -365,7 +365,7 @@ test "renderMetricsFallbackPayload: emits metrics_version 0.2" {
 test "renderMetricsFallbackPayload: emits rate null note" {
     var w = TestWriter.init();
     try renderMetricsFallbackPayload(&w);
-    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "rate is optional"));
+    try testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "rate is null until a previous sample exists"));
 }
 
 // ============================================================================

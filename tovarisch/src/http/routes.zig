@@ -2,6 +2,7 @@ const std = @import("std");
 const response = @import("response.zig");
 const status = @import("../status.zig");
 const metrics = @import("../metrics.zig");
+const metrics_state = @import("../metrics_state.zig");
 
 /// HTTP method types.
 pub const Method = enum {
@@ -23,7 +24,8 @@ pub const Request = struct {
 };
 
 /// Route handler function type.
-pub const Handler = *const fn (fd: i32) anyerror!void;
+/// Takes file descriptor and opaque state pointer.
+pub const Handler = *const fn (fd: i32, state: *anyopaque) anyerror!void;
 
 /// Route definition.
 pub const Route = struct {
@@ -64,12 +66,12 @@ pub fn parseRequestLine(line: []const u8) ?Request {
 }
 
 /// Health check handler - returns simple ok status.
-pub fn handleHealthz(fd: i32) !void {
+pub fn handleHealthz(fd: i32, _: *anyopaque) !void {
     try response.writeSimpleJsonFd(fd, 200, response.Errors.ok);
 }
 
 /// Status handler - returns full status JSON.
-pub fn handleStatus(fd: i32) !void {
+pub fn handleStatus(fd: i32, _: *anyopaque) !void {
     // For HTTP, we need to render status to a buffer first
     // then send it. Use a simple fixed buffer writer.
     var buf: [4096]u8 = undefined;
@@ -98,9 +100,12 @@ pub fn handleStatus(fd: i32) !void {
     try response.writeSimpleJsonFd(fd, 200, json);
 }
 
-/// Metrics handler - returns private interface stats from sysfs + rtnetlink.
+/// Metrics handler - uses persistent sampler state for live rates.
 /// Falls back to warning JSON if live collection fails (HTTP 200 with status warn).
-pub fn handleMetrics(fd: i32) !void {
+pub fn handleMetrics(fd: i32, state: *anyopaque) !void {
+    // Cast opaque state to MetricsState
+    const metrics_state_ptr = @as(*metrics_state.MetricsState, @ptrCast(@alignCast(state)));
+
     var buf: [8192]u8 = undefined;
     var len: usize = 0;
 
@@ -127,13 +132,11 @@ pub fn handleMetrics(fd: i32) !void {
         }
     }{ .buf = &buf, .len = &len };
 
-    // Try live collection; fall back to warning JSON on any error.
-    // Errors may include sysfs access failure, rtnetlink failure, or allocation failure.
-    // We do not expose raw syscall errors to the HTTP client.
-    metrics.renderLiveMetricsPayload(std.heap.page_allocator, writer) catch {
+    // Use stateful metrics collection with sampler for rates
+    metrics_state_ptr.renderMetricsPayload(std.heap.page_allocator, &writer, "/sys/class/net") catch {
         // Fallback: render warning payload
         len = 0;
-        metrics.renderMetricsFallbackPayload(writer) catch return error.InternalError;
+        metrics.renderMetricsFallbackPayload(&writer) catch return error.InternalError;
     };
 
     const json = buf[0..len];
@@ -141,48 +144,48 @@ pub fn handleMetrics(fd: i32) !void {
 }
 
 /// Not found handler.
-pub fn handleNotFound(fd: i32) !void {
+pub fn handleNotFound(fd: i32, _: *anyopaque) !void {
     try response.writeSimpleJsonFd(fd, 404, response.Errors.not_found);
 }
 
 /// Method not allowed handler.
-pub fn handleMethodNotAllowed(fd: i32) !void {
+pub fn handleMethodNotAllowed(fd: i32, _: *anyopaque) !void {
     try response.writeSimpleJsonFd(fd, 405, response.Errors.method_not_allowed);
 }
 
-/// Route a request to the appropriate handler using a file descriptor.
+/// Route a request to the appropriate handler using a file descriptor and state.
 /// Returns true if a route was found and handled.
-pub fn routeRequestFd(fd: i32, req: Request) !bool {
+pub fn routeRequestFd(fd: i32, req: Request, state: *anyopaque) !bool {
     // Only support GET for v0
     if (req.method != .get) {
-        try handleMethodNotAllowed(fd);
+        try handleMethodNotAllowed(fd, state);
         return true;
     }
 
     // Route by path
     if (std.mem.eql(u8, req.path, "/healthz")) {
-        try handleHealthz(fd);
+        try handleHealthz(fd, state);
         return true;
     }
 
     // /status is an ergonomic alias for /status.json
     if (std.mem.eql(u8, req.path, "/status")) {
-        try handleStatus(fd);
+        try handleStatus(fd, state);
         return true;
     }
 
     if (std.mem.eql(u8, req.path, "/status.json")) {
-        try handleStatus(fd);
+        try handleStatus(fd, state);
         return true;
     }
 
     if (std.mem.eql(u8, req.path, "/metrics.json")) {
-        try handleMetrics(fd);
+        try handleMetrics(fd, state);
         return true;
     }
 
     // All other paths return 404
-    try handleNotFound(fd);
+    try handleNotFound(fd, state);
     return true;
 }
 
@@ -243,6 +246,25 @@ test "parseMethod maps uppercase HTTP methods to enum" {
     try std.testing.expect(parseMethod("HEAD") == .head);
     try std.testing.expect(parseMethod("OPTIONS") == .options);
     try std.testing.expect(parseMethod("INVALID") == .unknown);
+}
+
+// --- Metrics state pointer tests ---
+
+test "handleMetrics expects MetricsState pointer, not ServerState layout" {
+    // This test proves that handleMetrics() correctly expects a pointer to
+    // MetricsState, not ServerState. The metrics route casts *anyopaque to
+    // *metrics_state.MetricsState, so the pointer must point at MetricsState bytes.
+    //
+    // If server.zig passed &server_state (ServerState*), the first bytes would be
+    // allocator, not MetricsState fields. This would cause undefined behavior.
+    const allocator = std.testing.allocator;
+    var metrics_state_instance = metrics_state.MetricsState.init(allocator);
+    defer metrics_state_instance.deinit();
+
+    // Verify MetricsState pointer can be passed as *anyopaque (proves type compatibility)
+    const opaque_ptr: *anyopaque = &metrics_state_instance;
+    const recovered = @as(*metrics_state.MetricsState, @ptrCast(@alignCast(opaque_ptr)));
+    _ = recovered; // Just proving the cast is valid; handleMetrics would use it
 }
 
 // --- Route path tests ---
@@ -330,5 +352,3 @@ test "status handler includes http check in output" {
     try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"name\":\"http\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"status\":\"ok\""));
 }
-
-

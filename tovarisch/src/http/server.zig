@@ -2,6 +2,45 @@ const std = @import("std");
 const c = std.c;
 const routes = @import("routes.zig");
 const logging = @import("../logging.zig");
+const metrics_state = @import("../metrics_state.zig");
+
+// ============================================================================
+// Server State
+// ============================================================================
+
+/// Runtime state owned by the server for the duration of a serve session.
+///
+/// This struct owns the MetricsState that persists across HTTP requests
+/// for rate calculation. It is initialized when the server starts and
+/// deinitialized when the server exits.
+///
+/// Ownership model:
+/// - Server owns ServerState (initialized in serve loop, deinitialized on exit)
+/// - ServerState owns MetricsState (freed in deinit)
+/// - MetricsState owns InterfaceSampler (freed in deinit)
+pub const ServerState = struct {
+    const Self = @This();
+
+    allocator: std.mem.Allocator,
+    metrics: metrics_state.MetricsState,
+
+    /// Initialize server state with empty metrics sampler.
+    pub fn init(allocator: std.mem.Allocator) Self {
+        return .{
+            .allocator = allocator,
+            .metrics = metrics_state.MetricsState.init(allocator),
+        };
+    }
+
+    /// Free all server-owned memory.
+    pub fn deinit(self: *Self) void {
+        self.metrics.deinit();
+    }
+};
+
+// ============================================================================
+// Server Configuration
+// ============================================================================
 
 /// Server configuration.
 pub const Config = struct {
@@ -11,6 +50,10 @@ pub const Config = struct {
     /// Address to bind to.
     address: []const u8 = "127.0.0.1",
 };
+
+// ============================================================================
+// HTTP Server
+// ============================================================================
 
 /// HTTP server that listens and serves requests.
 pub const Server = struct {
@@ -139,8 +182,8 @@ fn parseU8(s: []const u8) u32 {
     return result;
 }
 
-/// Handle a single connection.
-fn handleConnection(conn_fd: i32) void {
+/// Handle a single connection with state.
+fn handleConnection(conn_fd: i32, state: *anyopaque) void {
     defer _ = c.close(conn_fd);
 
     // Read request line
@@ -157,14 +200,14 @@ fn handleConnection(conn_fd: i32) void {
         return;
     };
 
-    // Route and handle the request
-    _ = routes.routeRequestFd(conn_fd, req) catch return;
+    // Route and handle the request with state
+    _ = routes.routeRequestFd(conn_fd, req, state) catch return;
 }
 
 /// Accept one connection and handle it (blocking).
 /// Returns error.AcceptFailed for non-transient failures.
 /// EAGAIN/EWOULDBLOCK are treated as transient and return successfully.
-fn acceptOneBlocking(server: *Server) !void {
+fn acceptOneBlocking(server: *Server, state: *anyopaque) !void {
     var client_addr: c.sockaddr = undefined;
     var client_len: c.socklen_t = @sizeOf(c.sockaddr);
 
@@ -180,7 +223,7 @@ fn acceptOneBlocking(server: *Server) !void {
         return error.AcceptFailed;
     }
 
-    handleConnection(conn_fd);
+    handleConnection(conn_fd, state);
 }
 
 /// Write a log record to the output and flush.
@@ -224,7 +267,7 @@ fn emitStartupLogs(config: Config, out_writer: anytype) !void {
     try writeLogRecord(out_writer, log_buf.slice());
 }
 
-/// Simple serve function for CLI use.
+/// Simple serve function for CLI use (no persistent state).
 pub fn serve(config: Config, out_writer: anytype) !void {
     var server = Server.init(config);
     defer server.deinit();
@@ -233,10 +276,14 @@ pub fn serve(config: Config, out_writer: anytype) !void {
     try emitStartupLogs(config, out_writer);
 }
 
-/// Daemon-style serve loop for production CLI use.
+/// Daemon-style serve loop for production CLI use with persistent state.
 pub fn serveForever(config: Config, out_writer: anytype) !void {
     var server = Server.init(config);
     defer server.deinit();
+
+    // Initialize server state with metrics sampler
+    var state = ServerState.init(std.heap.page_allocator);
+    defer state.deinit();
 
     try server.listen();
     try emitStartupLogs(config, out_writer);
@@ -246,9 +293,13 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
     try logging.emit(.http_accept_loop_started, &log_buf, &.{});
     try writeLogRecord(out_writer, log_buf.slice());
 
+    // Get opaque pointer to MetricsState for passing to route handlers.
+    // handleMetrics() casts this back to *metrics_state.MetricsState.
+    const state_ptr: *anyopaque = &state.metrics;
+
     // Blocking accept loop - stays alive until interrupted.
     while (true) {
-        acceptOneBlocking(&server) catch |err| {
+        acceptOneBlocking(&server, state_ptr) catch |err| {
             // Build log record in buffer, then write to output
             log_buf.reset();
             try logging.emit(.http_accept_loop_error, &log_buf, &.{
@@ -284,4 +335,18 @@ test "parseIpOctets parses 127.0.0.1" {
 test "parseIpAddress returns host-order u32" {
     const addr = parseIpAddress("127.0.0.1");
     try std.testing.expectEqual(@as(u32, 0x7F000001), addr);
+}
+
+test "ServerState.init creates empty sampler" {
+    const allocator = std.testing.allocator;
+    var state = ServerState.init(allocator);
+    defer state.deinit();
+    // State should initialize without error; sampler is empty
+}
+
+test "ServerState.deinit handles empty sampler" {
+    const allocator = std.testing.allocator;
+    var state = ServerState.init(allocator);
+    // Should not panic on deinit with empty sampler
+    state.deinit();
 }

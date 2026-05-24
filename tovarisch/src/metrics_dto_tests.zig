@@ -101,11 +101,11 @@ test "renderSampledInterfacesPayload: zero interfaces emits empty array" {
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"private_interfaces\":[]"));
 }
 
-test "renderSampledInterfacesPayload: emits rate is optional note" {
+test "renderSampledInterfacesPayload: emits rate is null until a previous sample exists note" {
     var w = TestWriter.init();
     const sampled: [0]SampledInterface = .{};
     try renderSampledInterfacesPayload(&w, &sampled);
-    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "rate is optional"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "rate is null until a previous sample exists"));
 }
 
 // ============================================================================

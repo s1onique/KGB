@@ -12,6 +12,38 @@ tovarisch serve
 
 Default port: **8317**
 
+## Runtime State
+
+`tovarisch serve` maintains process-local sampler state for rate calculation:
+
+- **ServerState**: Owned by the server, initialized on startup, deinitialized on exit
+- **MetricsState**: Contains InterfaceSampler that persists previous samples across requests
+- **Sampler state**: Tracks interface counters across requests; enables rate calculation
+
+### First Request Behavior
+
+First `/metrics.json` request in a process returns `rate: null` for all interfaces (no previous sample).
+
+### Subsequent Request Behavior
+
+Later `/metrics.json` request with valid elapsed time and increasing counters returns populated rate object.
+
+### Counter Reset
+
+Counter reset (any counter value less than previous) returns `rate: null` for that interface.
+
+### New/Reappearing Interfaces
+
+New interfaces or reappearing interfaces return `rate: null` (treated as first sample).
+
+### Clock Source
+
+Timestamps are generated using `std.os.linux.clock_gettime(CLOCK_REALTIME)` — wall-clock seconds and nanoseconds converted to milliseconds.
+
+- Sub-second precision available (nanoseconds in the timestamp)
+- Rates become available only when elapsed whole seconds are positive (>= 1000ms)
+- On non-Linux platforms, falls back to returning 0 (rates will be null until tests inject timestamps)
+
 ## Bind Behavior
 
 ### Default: Private Interfaces Only (v0 target)
@@ -98,16 +130,24 @@ Content-Type: application/json
 
 ### `GET /metrics.json`
 
-Private interface traffic metrics payload (IPv4 only, with optional rate field).
+Private interface traffic metrics payload (IPv4 only, with process-local sampler state for live rates).
 
 **Request:** `GET /metrics.json HTTP/1.1`
 
-**Response (success, v0.2 — rate field present but null):**
+**Response (success, v0.2 — first request: rate field null):**
 ```
 HTTP/1.1 200 OK
 Content-Type: application/json
 
-{"service":"tovarisch","version":"0.1.1","metrics_version":"0.2","private_interfaces":[{"name":"eth0","rx_bytes":123,"tx_bytes":456,"rx_packets":7,"tx_packets":8,"rate":null}],"notes":["rate is optional (null until sampler state is wired)","interface counters are cumulative","IPv4 private interfaces only; IPv6 is deferred"]}
+{"service":"tovarisch","version":"0.1.1","metrics_version":"0.2","private_interfaces":[{"name":"eth0","rx_bytes":123,"tx_bytes":456,"rx_packets":7,"tx_packets":8,"rate":null}],"notes":["rate is null until a previous sample exists","interface counters are cumulative","IPv4 private interfaces only; IPv6 is deferred"]}
+```
+
+**Response (success, v0.2 — later request with rate):**
+```
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"service":"tovarisch","version":"0.1.1","metrics_version":"0.2","private_interfaces":[{"name":"eth0","rx_bytes":3123,"tx_bytes":6456,"rx_packets":37,"tx_packets":48,"rate":{"window_seconds":30,"rx_bytes_delta":3000,"tx_bytes_delta":6000,"rx_packets_delta":30,"tx_packets_delta":40,"rx_bytes_per_second":100,"tx_bytes_per_second":200,"rx_packets_per_second":1,"tx_packets_per_second":1}}],"notes":["rate is null until a previous sample exists","interface counters are cumulative","IPv4 private interfaces only; IPv6 is deferred"]}
 ```
 
 **Response (live collection failure):**
@@ -115,7 +155,7 @@ Content-Type: application/json
 HTTP/1.1 200 OK
 Content-Type: application/json
 
-{"service":"tovarisch","version":"0.1.1","metrics_version":"0.2","status":"warn","private_interfaces":[],"error":"metrics_unavailable","detail":"private interface stats unavailable","notes":["rate is optional (null until sampler state is wired)","interface counters are cumulative","IPv4 private interfaces only; IPv6 is deferred"]}
+{"service":"tovarisch","version":"0.1.1","metrics_version":"0.2","status":"warn","private_interfaces":[],"error":"metrics_unavailable","detail":"private interface stats unavailable","notes":["rate is null until a previous sample exists","interface counters are cumulative","IPv4 private interfaces only; IPv6 is deferred"]}
 ```
 
 **Status Codes:**
@@ -132,7 +172,7 @@ Content-Type: application/json
 | `private_interfaces` | array | List of private interface stats (empty on fallback) |
 | `error` | string | `"metrics_unavailable"` only on fallback |
 | `detail` | string | Human-readable detail (fallback only) |
-| `notes` | array | Array of three strings: rate optional note, cumulative note, IPv4-only note |
+| `notes` | array | Array of three strings: rate null note, cumulative note, IPv4-only note |
 
 **Interface Object Fields:**
 | Field | Type | Description |
@@ -142,7 +182,7 @@ Content-Type: application/json
 | `tx_bytes` | integer | Cumulative transmit bytes (not rate) |
 | `rx_packets` | integer | Cumulative receive packets (not rate) |
 | `tx_packets` | integer | Cumulative transmit packets (not rate) |
-| `rate` | null or object | `null` until sampler state is wired (ACT 5); populated object when rate is available |
+| `rate` | null or object | `null` on first sample or after counter reset; populated object when previous sample exists and counters are increasing |
 
 **Rate Object Fields** (when `rate` is not null):
 | Field | Type | Description |
@@ -164,6 +204,7 @@ Content-Type: application/json
 - Counters are collected from Linux `/sys/class/net/<iface>/statistics/*`.
 - Interface addresses are discovered via rtnetlink.
 - Public interfaces, loopback (without private IPv4), and IPv6-only interfaces are excluded.
+- **Sampler state** persists across requests within the same process; enables rate calculation.
 
 **Security:** May reveal network topology. Expose only on private interfaces.
 
@@ -283,12 +324,14 @@ The HTTP endpoints must NOT expose:
 | Version | Date | Changes |
 |---------|------|---------|
 | 0.1.0 | 2026-05-22 | Initial HTTP service contract |
+| 0.2 | 2026-05-24 | Add rate field, sampler state wiring (ACT 5) |
 
 ## Relationship to Other Contracts
 
 - Base status contract: `tovarisch-status-v0.md`
 - Health checks contract: `tovarisch-local-health-v0.md`
-- Metrics payload: defined in `tovarisch-metrics-v0.md` (future)
+- Metrics payload: `interface-rates.md` (for rate calculation)
+- Rate contract: `interface-rates.md`
 
 ## Future Evolution
 

@@ -113,7 +113,7 @@ pub fn renderSampledInterfacesPayload(
     }
 
     // Notes footer
-    try writer.writeAll("],\"notes\":[\"rate is optional (null on first sample)\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\"]}");
+    try writer.writeAll("],\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\"]}");
 }
 
 /// Renders a single SampledInterface as JSON.

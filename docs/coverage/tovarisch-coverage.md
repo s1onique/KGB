@@ -191,6 +191,10 @@ The following table inventories all known platform-specific branches in `tovaris
 | `metrics.zig` | `rate:null` per interface row (ACT 4) | **Pure fixture tests** | 3 tests verify rate field present with null, no populated rate object |
 | `metrics.zig` | `sampledInterfacesFromSnapshots()` — snapshot-to-DTO conversion (ACT 4a/4b) | **Pure fixture tests** | Tested via metrics_conversion_tests.zig; 4 tests covering rate null, order, name lifetime, empty input |
 | `metrics.zig` | `renderMetricsPayloadFromSnapshots()` — delegates to DTO (ACT 4a) | **Pure fixture tests** | Cross-platform, tested via metrics_tests.zig |
+| `metrics_state.zig` | `MetricsState.renderMetricsPayload()` — live collection with sampler state (ACT 5) | **Pure fixture tests** | Tested via metrics_state_tests.zig; 14 tests covering first/second render, rate population, counter reset, new interfaces, reappeared interfaces, metrics_version 0.2 |
+| `metrics_state.zig` | `MetricsState.renderMetricsPayloadFromSnapshots()` — fixture-based rendering (ACT 5) | **Pure fixture tests** | Tested via metrics_state_tests.zig; enables cross-platform testing without live sysfs |
+| `http/routes.zig` | `handleMetrics()` — uses MetricsState for stateful rate calculation (ACT 5) | **Unit tests** | Tests verify JSON contract; state is optional for /healthz, /status |
+| `http/server.zig` | `ServerState` — owns MetricsState, initialized on serve start, deinitialized on exit (ACT 5) | **Unit tests** | Tests cover init/deinit with empty sampler |
 | `http/routes.zig` | `handleMetrics()` — /metrics.json endpoint wired to live collection | **Unit tests** | Tests verify JSON contract without starting server; fallback tested on non-Linux |
 | `net/linux_stats.zig` | `openForWrite()` — Linux `std.c.open` path | **Compile-gated only** | Used only for test fixtures; no production write path needed |
 | `net/linux_stats.zig` | `closeFile()` — Linux `std.c.close` path | **Linux CI smoke test** | Exercise via live sysfs smoke test; closes file descriptors after reading stats |

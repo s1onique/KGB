@@ -26,7 +26,7 @@
 //       }
 //     ],
 //     "notes": [
-//       "rate is optional (null until sampler state is wired)",
+//       "rate is null until a previous sample exists",
 //       "interface counters are cumulative",
 //       "IPv4 private interfaces only; IPv6 is deferred"
 //     ]
@@ -43,7 +43,7 @@
 //     "error": "metrics_unavailable",
 //     "detail": "private interface stats unavailable",
 //     "notes": [
-//       "rate is optional (null until sampler state is wired)",
+//       "rate is null until a previous sample exists",
 //       "interface counters are cumulative",
 //       "IPv4 private interfaces only; IPv6 is deferred"
 //     ]
@@ -158,7 +158,7 @@ pub fn renderMetricsPayloadFromSnapshots(
 /// Returns HTTP 200 with a valid JSON payload indicating the warning state.
 pub fn renderMetricsFallbackPayload(writer: anytype) !void {
     try writer.writeAll(
-        "{\"service\":\"tovarisch\",\"version\":\"0.1.1\",\"metrics_version\":\"0.2\",\"status\":\"warn\",\"private_interfaces\":[],\"error\":\"metrics_unavailable\",\"detail\":\"private interface stats unavailable\",\"notes\":[\"rate is optional (null until sampler state is wired)\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\"]}",
+        "{\"service\":\"tovarisch\",\"version\":\"0.1.1\",\"metrics_version\":\"0.2\",\"status\":\"warn\",\"private_interfaces\":[],\"error\":\"metrics_unavailable\",\"detail\":\"private interface stats unavailable\",\"notes\":[\"rate is null until a previous sample exists\",\"interface counters are cumulative\",\"IPv4 private interfaces only; IPv6 is deferred\"]}",
     );
 }
 

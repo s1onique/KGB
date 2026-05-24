@@ -19,7 +19,7 @@ InterfaceCounterSample (previous) + InterfaceCounterSample (current)
                     rates.calculateRate()
                               |
                               v
-               ?InterfaceRate (null if unavailable)
+                ?InterfaceRate (null if unavailable)
 ```
 
 ### Return null (rate unavailable) when:
@@ -86,15 +86,13 @@ pub const InterfaceRate = struct {
 
 ## Scope and Limitations
 
-### This ACT Does NOT Include:
+### This Module Does NOT Include:
 
-- ❌ `/metrics.json` wiring (future ACT)
-- ❌ HTTP server integration (future ACT)
+- ❌ `/metrics.json` wiring (implemented in `metrics_state.zig`)
+- ❌ HTTP server integration (implemented in `http/routes.zig`)
 - ❌ Counter collection (belongs in `linux_stats.zig`)
-- ❌ Sample storage/state management (future ACT)
-- ❌ IPv6 rate support (deferred)
 
-### This ACT Includes:
+### This Module Includes:
 
 - ✅ Pure rate calculation function
 - ✅ Comprehensive unit tests (12 test cases)
@@ -107,97 +105,130 @@ pub const InterfaceRate = struct {
 **Status**: ✅ **Implemented**
 
 ACT 4 wired the DTO format into the live `/metrics.json` route:
-
 - Live `/metrics.json` now uses the DTO row shape
 - Every interface row includes `"rate":null`
 - `metrics_version` updated to `"0.2"`
-- Notes updated to reflect null rates until sampler state is wired
+
+## ACT 5: Persistent Sampler State Wiring
+
+**Status**: ✅ **Implemented**
+
+ACT 5 wired persistent sampler state across `/metrics.json` requests:
+
+### Components
+
+- **MetricsState** (`metrics_state.zig`): Owns InterfaceSampler, persists across requests
+- **ServerState** (`http/server.zig`): Owns MetricsState, initialized on server start
+- **Route handler** (`http/routes.zig`): Uses state pointer for metrics rendering
+
+### Ownership Model
+
+```
+Server (serveForever)
+  └── ServerState
+        └── MetricsState
+              └── InterfaceSampler
+                    └── previous: StringHashMapUnmanaged(StoredSample)
+```
+
+### Clock Source
+
+Timestamps are generated using `std.os.linux.clock_gettime(CLOCK_REALTIME)` — wall-clock seconds and nanoseconds converted to milliseconds.
+
+- Sub-second precision available (nanoseconds in the timestamp)
+- Rates become available only when elapsed whole seconds are positive (>= 1000ms)
+- On non-Linux platforms, falls back to returning 0 (tests inject explicit timestamps)
+
+Rationale: Wall-clock is sufficient because elapsed time is computed within the sampler (`current.sampled_at_ms - previous.sampled_at_ms`). Monotonic time is not used because it doesn't survive process restarts and doesn't provide useful absolute reference for debugging.
+
+### Behavior by Scenario
+
+| Scenario | Behavior |
+|----------|----------|
+| First request | `rate: null` for all interfaces (no previous sample) |
+| Second request with valid elapsed | `rate: { ... }` for interfaces with previous sample |
+| Counter reset | `rate: null` for that interface only |
+| New interface | `rate: null` (no previous sample) |
+| Reappearing interface | `rate: null` (previous state was cleared) |
+| Sub-second elapsed | `rate: null` (cannot derive meaningful rate) |
+
+### First Request Example
+
+```json
+{
+  "service": "tovarisch",
+  "version": "0.1.1",
+  "metrics_version": "0.2",
+  "private_interfaces": [{
+    "name": "eth0",
+    "rx_bytes": 123,
+    "tx_bytes": 456,
+    "rx_packets": 7,
+    "tx_packets": 8,
+    "rate": null
+  }],
+  "notes": [
+    "rate is null until a previous sample exists",
+    "interface counters are cumulative",
+    "IPv4 private interfaces only; IPv6 is deferred"
+  ]
+}
+```
+
+### Later Request with Rate Example
+
+```json
+{
+  "service": "tovarisch",
+  "version": "0.1.1",
+  "metrics_version": "0.2",
+  "private_interfaces": [{
+    "name": "eth0",
+    "rx_bytes": 3123,
+    "tx_bytes": 6456,
+    "rx_packets": 37,
+    "tx_packets": 48,
+    "rate": {
+      "window_seconds": 30,
+      "rx_bytes_delta": 3000,
+      "tx_bytes_delta": 6000,
+      "rx_packets_delta": 30,
+      "tx_packets_delta": 40,
+      "rx_bytes_per_second": 100,
+      "tx_bytes_per_second": 200,
+      "rx_packets_per_second": 1,
+      "tx_packets_per_second": 1
+    }
+  }],
+  "notes": [
+    "rate is null until a previous sample exists",
+    "interface counters are cumulative",
+    "IPv4 private interfaces only; IPv6 is deferred"
+  ]
+}
+```
 
 ## Future Work
 
 The following work is deferred to future ACTs:
 
-1. ~~**ACT 2**: Add sampler state that matches interfaces by name and produces `rate: null | InterfaceRate` per current counter row~~ ✅ **Implemented in `interface_sampler.zig`**
-2. ~~**ACT 4**: Wire DTO format into live `/metrics.json` with null rates~~ ✅ **Implemented**
-3. **ACT 5**: Wire persistent sampler state across HTTP requests for live rates
-4. **IPv6 support**: Extend to handle IPv6 interface counters
-
-## Sampler State
-
-A sampler layer (`interface_sampler.zig`) provides stateful rate calculation across multiple update cycles:
-
-### Behavior
-
-| Scenario | Behavior |
-|----------|----------|
-| First observation for any interface | `rate = null` (no previous sample) |
-| Second+ observation with valid elapsed/counters | `rate = InterfaceRate` |
-| Newly appearing interface | `rate = null` (treated as first observation) |
-| Reappearing interface after disappearance | `rate = null` (previous state was cleared) |
-| Disappeared interface | Removed from previous state after update |
-| Counter reset for one interface | `rate = null` for that interface only; other interfaces unaffected |
-| Output order | Follows current input order |
-
-### Interface Matching
-
-Interfaces are matched by **exact name** comparison. No prefix matching or fuzzy logic.
-
-### Ownership Model
-
-- Sampler owns duplicated map keys (interface names duplicated on insertion)
-- `update()` returns `[]SampledInterface` owned by caller with separate caller-owned name duplicates
-- Caller passes `[]const rates.InterfaceCounterSample` (does not need to outlive sampler)
-- Call `deinit()` to free all sampler-owned map keys
-
-### Data Structures
-
-#### SampledInterface
-
-```zig
-pub const SampledInterface = struct {
-    sample: rates.InterfaceCounterSample,
-    rate: ?rates.InterfaceRate,
-};
-```
-
-#### InterfaceSampler
-
-```zig
-pub const InterfaceSampler = struct {
-    pub fn init(allocator: std.mem.Allocator) InterfaceSampler
-    pub fn deinit(self: *InterfaceSampler) void
-    pub fn update(
-        self: *InterfaceSampler,
-        current: []const rates.InterfaceCounterSample,
-    ) ![]SampledInterface
-};
-```
-
-### Scope and Limitations
-
-**This ACT (2) Does NOT Include:**
-
-- ❌ `/metrics.json` wiring (future ACT)
-- ❌ HTTP server integration (future ACT)
-- ❌ Sysfs counter collection (belongs in `linux_stats.zig`)
-
-**This ACT Includes:**
-
-- ✅ Sampler state that matches interfaces by name
-- ✅ First/new/reappearing interfaces return null rate
-- ✅ Existing interfaces get rates when valid
-- ✅ Disappeared interfaces are forgotten
-- ✅ Counter reset isolated per interface
-- ✅ Output order follows current input order
-- ✅ Safe name lifetime handling (sampler duplicates names)
+1. ~~**ACT 1**: Pure rate calculation~~ ✅ **Implemented in `rates.zig`**
+2. ~~**ACT 2**: InterfaceSampler state management~~ ✅ **Implemented in `interface_sampler.zig`**
+3. ~~**ACT 4**: Wire DTO format into live `/metrics.json` with null rates~~ ✅ **Implemented**
+4. ~~**ACT 5**: Wire persistent sampler state across HTTP requests for live rates~~ ✅ **Implemented in `metrics_state.zig`**
+5. **IPv6 support**: Extend to handle IPv6 interface counters
 
 ## Module Location
 
-- **Source**: `tovarisch/src/net/rates.zig`
-- **Tests**: Inline in `rates.zig` (12 test cases)
+- **Pure rate calculation**: `tovarisch/src/net/rates.zig`
+- **Sampler state**: `tovarisch/src/net/interface_sampler.zig`
+- **Metrics state**: `tovarisch/src/metrics_state.zig`
+- **HTTP routes**: `tovarisch/src/http/routes.zig`
+- **HTTP server**: `tovarisch/src/http/server.zig`
+- **Tests**: Inline in `rates.zig` (12 test cases), `metrics_state_tests.zig` (14 test cases)
 - **Test wiring**: `tovarisch/src/test_all.zig`
 
 ## References
 
-- [tovarisch-http-v0.md](./tovarisch-http-v0.md) — HTTP contract (rates to be added in future ACT)
+- [tovarisch-http-v0.md](./tovarisch-http-v0.md) — HTTP contract (rates implemented)
 - [ACT 5 Epic](../epics/act-5-sysfs-collector.md) — sysfs collection context
