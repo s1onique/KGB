@@ -12,10 +12,12 @@
 //   4. state_dir - state directory exists
 //   5. http     - HTTP service route available
 //   6. tunnel   - tunnel interface presence
+//   7. wg_peers - WireGuard peer diagnostics
 
 const std = @import("std");
 const telemetry = @import("runtime/telemetry.zig");
 const tunnel_check = @import("tunnel_check.zig");
+const status_checks = @import("status_checks.zig");
 const build_info = @import("build_info.zig");
 
 /// Default state directory path relative to working directory.
@@ -94,10 +96,8 @@ pub fn getStateDirCheckForPath(path: []const u8) Check {
     var path_buf: [4096]u8 = undefined;
     const c_path_result = toCString(path, &path_buf);
     if (c_path_result) |c_path| {
-        // Try to open as directory
         const dir = std.c.opendir(c_path);
         if (dir) |d| {
-            // Path exists and is a directory
             _ = std.c.closedir(d);
             return Check{
                 .name = "state_dir",
@@ -105,28 +105,22 @@ pub fn getStateDirCheckForPath(path: []const u8) Check {
                 .detail = "state directory ready",
             };
         }
-
-        // opendir failed - check the errno to determine the failure type
         const errno = std.c._errno().*;
         const e_noent = @intFromEnum(std.c.E.NOENT);
         const e_notdir = @intFromEnum(std.c.E.NOTDIR);
         if (errno == e_noent or errno == e_notdir) {
-            // Path does not exist (ENOENT) or exists but is not a directory (ENOTDIR)
             return Check{
                 .name = "state_dir",
                 .status = .warn,
                 .detail = "state directory not found",
             };
         }
-
-        // Unexpected error (permission denied, I/O error, etc.)
         return Check{
             .name = "state_dir",
             .status = .unknown,
             .detail = "state directory inaccessible",
         };
     } else {
-        // Path too long
         return Check{
             .name = "state_dir",
             .status = .unknown,
@@ -149,7 +143,7 @@ pub fn toCString(path: []const u8, buf: *[4096]u8) ?[*:0]const u8 {
 }
 
 /// Static buffer for local checks. Ensures stable memory addresses.
-var local_checks_buf: [6]Check = undefined;
+var local_checks_buf: [7]Check = undefined;
 
 pub fn getLocalChecks() []const Check {
     local_checks_buf[0] = process_check;
@@ -158,6 +152,7 @@ pub fn getLocalChecks() []const Check {
     local_checks_buf[3] = getStateDirCheck();
     local_checks_buf[4] = http_check;
     local_checks_buf[5] = tunnel_check.getTunnelCheckDefault();
+    local_checks_buf[6] = status_checks.getWgPeersCheck(std.heap.page_allocator);
     return &local_checks_buf;
 }
 
@@ -189,7 +184,6 @@ fn renderStatus(writer: anytype, s: Status) !void {
     try writer.writeAll("\",\"status\":\"");
     try writer.writeAll(@tagName(s.status));
     try writer.writeAll("\",\"checks\":[");
-
     for (s.checks, 0..) |check, i| {
         if (i > 0) try writer.writeAll(",");
         try writer.writeAll("{\"name\":\"");
@@ -200,7 +194,6 @@ fn renderStatus(writer: anytype, s: Status) !void {
         try writer.writeAll(check.detail);
         try writer.writeAll("\"}");
     }
-
     try writer.writeAll("],\"runtime\":{\"pid\":");
     try writer.print("{d}", .{s.runtime.pid});
     if (s.runtime.rss_kib) |rss| {
@@ -214,10 +207,10 @@ fn renderStatus(writer: anytype, s: Status) !void {
 
 // --- Tests ---
 
-// Version shape test: version must contain base_version (0.1.2) and '+'
 test "version contains base_version prefix" {
     try std.testing.expect(std.mem.startsWith(u8, build_info.version, build_info.base_version));
 }
+
 test "version contains plus sign separator" {
     try std.testing.expect(std.mem.containsAtLeast(u8, build_info.version, 1, "+"));
 }
@@ -259,9 +252,9 @@ test "deriveStatus returns ok for empty checks" {
     try std.testing.expectEqual(CheckStatus.ok, deriveStatus(&checks));
 }
 
-test "getLocalChecks returns six checks" {
+test "getLocalChecks returns seven checks" {
     const checks = getLocalChecks();
-    try std.testing.expectEqual(@as(usize, 6), checks.len);
+    try std.testing.expectEqual(@as(usize, 7), checks.len);
 }
 
 test "getLocalChecks first check is process" {
@@ -272,12 +265,11 @@ test "getLocalChecks first check is process" {
 test "status has correct structure" {
     const s = getStatus();
     try std.testing.expectEqualStrings("tovarisch", s.service);
-    // Version is shape-based: must contain base_version prefix and '+'
     try std.testing.expect(std.mem.startsWith(u8, s.version, build_info.base_version));
     try std.testing.expect(std.mem.containsAtLeast(u8, s.version, 1, "+"));
     try std.testing.expectEqualStrings("local-dev", s.node_id);
     try std.testing.expect(s.status == .ok or s.status == .warn or s.status == .@"error");
-    try std.testing.expectEqual(@as(usize, 6), s.checks.len);
+    try std.testing.expectEqual(@as(usize, 7), s.checks.len);
 }
 
 test "getStateDirCheck returns correct name" {
@@ -288,7 +280,6 @@ test "getStateDirCheck returns correct name" {
 test "status JSON contains all required top-level fields" {
     const s = getStatus();
     try std.testing.expectEqualStrings("tovarisch", s.service);
-    // Version is shape-based: must contain base_version prefix and '+'
     try std.testing.expect(std.mem.startsWith(u8, s.version, build_info.base_version));
     try std.testing.expect(std.mem.containsAtLeast(u8, s.version, 1, "+"));
     try std.testing.expectEqualStrings("local-dev", s.node_id);
@@ -296,16 +287,15 @@ test "status JSON contains all required top-level fields" {
     try std.testing.expect(s.checks.len > 0);
 }
 
-test "status JSON contains all six checks including tunnel" {
+test "status JSON contains all seven check names including wg_peers" {
     const checks = getLocalChecks();
-
     var has_process = false;
     var has_binary = false;
     var has_config = false;
     var has_state_dir = false;
     var has_http = false;
     var has_tunnel = false;
-
+    var has_wg_peers = false;
     for (checks) |check| {
         if (std.mem.eql(u8, check.name, "process")) has_process = true;
         if (std.mem.eql(u8, check.name, "binary")) has_binary = true;
@@ -313,14 +303,15 @@ test "status JSON contains all six checks including tunnel" {
         if (std.mem.eql(u8, check.name, "state_dir")) has_state_dir = true;
         if (std.mem.eql(u8, check.name, "http")) has_http = true;
         if (std.mem.eql(u8, check.name, "tunnel")) has_tunnel = true;
+        if (std.mem.eql(u8, check.name, "wg_peers")) has_wg_peers = true;
     }
-
     try std.testing.expect(has_process);
     try std.testing.expect(has_binary);
     try std.testing.expect(has_config);
     try std.testing.expect(has_state_dir);
     try std.testing.expect(has_http);
     try std.testing.expect(has_tunnel);
+    try std.testing.expect(has_wg_peers);
 }
 
 test "config check has warn status" {
@@ -336,7 +327,6 @@ test "config check has warn status" {
 const TestWriter = struct {
     const Self = @This();
     const BufSize = 4096;
-
     buf: [BufSize]u8 = undefined,
     len: usize = 0,
 
@@ -356,12 +346,6 @@ const TestWriter = struct {
         self.len += bytes.len;
     }
 
-    pub fn writeByte(self: *Self, byte: u8) !void {
-        if (self.len >= BufSize) return error.BufferOverflow;
-        self.buf[self.len] = byte;
-        self.len += 1;
-    }
-
     pub fn slice(self: *const Self) []const u8 {
         return self.buf[0..self.len];
     }
@@ -376,7 +360,6 @@ test "renderPayload output contains service:tovarisch" {
 test "renderPayload output contains version prefix from build_info" {
     var w = TestWriter.init();
     try renderPayload(&w);
-    // Version output contains base_version prefix with '+' separator
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"version\":\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, build_info.base_version));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "+"));
@@ -394,16 +377,16 @@ test "renderPayload output contains checks array" {
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"checks\":["));
 }
 
-test "renderPayload output contains all six check names" {
+test "renderPayload output contains all seven check names" {
     var w = TestWriter.init();
     try renderPayload(&w);
-
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"process\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"binary\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"config\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"state_dir\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"http\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"tunnel\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"wg_peers\""));
 }
 
 test "renderPayload output contains runtime block" {

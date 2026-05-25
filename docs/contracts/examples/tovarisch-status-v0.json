@@ -33,6 +33,11 @@
       "name": "tunnel",
       "status": "warn",
       "detail": "no tunnel interfaces detected"
+    },
+    {
+      "name": "wg_peers",
+      "status": "warn",
+      "detail": "wg command not available"
     }
   ],
   "runtime": {

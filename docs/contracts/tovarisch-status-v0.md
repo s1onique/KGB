@@ -1,5 +1,98 @@
 # `tovarisch status --json` v0 Contract
 
+## WireGuard Peer Diagnostics Check (`wg_peers`)
+
+The status payload includes a `wg_peers` check that observes WireGuard peer health without exposing sensitive configuration.
+
+### What This Check Validates
+
+- **Peer presence**: Reports `ok` when at least one peer is detected via `wg show`
+- **Handshake age**: Reports `ok` when at least one peer has completed a handshake
+- **Tool availability**: Gracefully handles unavailable WireGuard tooling as `warn`
+
+### What This Check Does NOT Validate
+
+- Endpoint reachability or liveness
+- Route validity
+- Tunnel throughput or data liveness
+- Configuration validity or key pairs
+- Actual packet forwarding capability
+
+### Privacy-Aligned Fields
+
+The check reports only aggregate, non-identifying fields:
+
+| Field | Description |
+|-------|-------------|
+| `interface` | Not directly exposed; used internally for decision |
+| `peer_count` | Not directly exposed; inferred from ok/warn |
+| `latest_handshake_age_sec` | Not directly exposed; affects status |
+| `rx_bytes` | Not directly exposed; used for ok/warn logic |
+| `tx_bytes` | Not directly exposed; used for ok/warn logic |
+
+### Excluded Data
+
+The following data is explicitly **NOT** exposed in the status payload:
+
+- Public keys (peer or interface)
+- Private keys
+- Preshared keys
+- Endpoints (IP:port)
+- Allowed IPs (subnet routing)
+
+### Status Values
+
+- `ok`: `wg show` succeeds, at least one peer detected, and handshake has occurred
+- `warn`: WireGuard tooling unavailable, command fails, malformed output, no peers, or no handshake yet
+- `warn`: Output truncated (exceeds bounded buffer)
+
+### Example Output
+
+Peer with handshake detected:
+```json
+{
+  "name": "wg_peers",
+  "status": "ok",
+  "detail": "wireguard peers healthy"
+}
+```
+
+No peers detected:
+```json
+{
+  "name": "wg_peers",
+  "status": "warn",
+  "detail": "no peers detected"
+}
+```
+
+No handshake yet:
+```json
+{
+  "name": "wg_peers",
+  "status": "warn",
+  "detail": "no handshake yet"
+}
+```
+
+WireGuard not available:
+```json
+{
+  "name": "wg_peers",
+  "status": "warn",
+  "detail": "wg command not available"
+}
+```
+
+Malformed output:
+```json
+{
+  "name": "wg_peers",
+  "status": "warn",
+  "detail": "wg output malformed"
+}
+```
+
 ## Tunnel Check (`tunnel`)
 
 The status payload includes a `tunnel` check that detects tunnel-like interfaces by name.
