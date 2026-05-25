@@ -23,3 +23,13 @@ KGB follows the Factory style of development.
 4. Add verification.
 5. Update docs.
 6. Close only when the repo proves the claim.
+
+## Agent Discipline
+
+See `karpathy-agent-guidelines.md` for the canonical agent contract:
+
+- Pre-flight: state assumptions, minimum change, verification commands, out of scope.
+- Simplicity: no abstraction unless required.
+- Surgical diff: only touch files needed for the ACT.
+- Verification loop: define close criteria before claiming done.
+- Review invariant: every changed line must be explainable.
