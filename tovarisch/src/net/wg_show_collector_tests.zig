@@ -91,25 +91,65 @@ test "WgDiagnosticsResult is optional WgInterface" {
 }
 
 // ============================================================================
-// Tests: Error set exhaustiveness
+// Tests: Error mapping via mapCommandOutputForTest
 // ============================================================================
 
-test "MalformedOutput error maps from parser" {
-    // Verify that parser errors can be mapped to collector errors
-    const parser_result = wg_show_parser.parseWgShowOutput("");
-    try testing.expect(parser_result == error.NoInterface);
+test "valid stdout passed to parser" {
+    const fixture = "interface: wg0\n" ++
+        "  public key: (hidden)\n" ++
+        "  private key: (hidden)\n" ++
+        "peer: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=\n" ++
+        "  endpoint: 192.168.1.100:51820\n" ++
+        "  allowed ips: 10.0.0.2/32\n" ++
+        "  latest handshake: 45 seconds ago\n" ++
+        "  transfer: 1234567 bytes received, 987654 bytes sent\n";
 
-    // This test documents the error mapping behavior
-    // The actual mapping happens inside collectWgDiagnostics
+    const result = wg_show_collector.mapCommandOutputForTest(fixture, 0);
+    try testing.expect(result != error.CommandNotFound);
+    try testing.expect(result != error.CommandFailed);
+    try testing.expect(result != error.OutputTruncated);
+    try testing.expect(result != error.MalformedOutput);
+
+    const diag = try result;
+    try testing.expectEqualSlices(u8, "wg0", diag.interface);
+    try testing.expectEqual(@as(u32, 1), diag.peer_count);
+    try testing.expectEqual(@as(u64, 45), diag.latest_handshake_age_sec.?);
+    try testing.expectEqual(@as(u64, 1234567), diag.rx_bytes);
+    try testing.expectEqual(@as(u64, 987654), diag.tx_bytes);
+}
+
+test "missing command maps to CommandNotFound" {
+    // exit_code 127 is the standard "command not found" exit code
+    try testing.expectError(error.CommandNotFound, wg_show_collector.mapCommandOutputForTest("", 127));
+}
+
+test "non-zero exit maps to CommandFailed" {
+    // Any non-zero exit that isn't 127 indicates command failure
+    try testing.expectError(error.CommandFailed, wg_show_collector.mapCommandOutputForTest("some error output", 1));
+    try testing.expectError(error.CommandFailed, wg_show_collector.mapCommandOutputForTest("permission denied", 2));
+    try testing.expectError(error.CommandFailed, wg_show_collector.mapCommandOutputForTest("", 255));
+}
+
+test "malformed stdout maps to MalformedOutput" {
+    // Empty output has no interface
+    try testing.expectError(error.MalformedOutput, wg_show_collector.mapCommandOutputForTest("", 0));
+
+    // Single line without space/colon (no valid interface name)
+    try testing.expectError(error.MalformedOutput, wg_show_collector.mapCommandOutputForTest("invalid-only-no-separator", 0));
+}
+
+test "oversized stdout maps to OutputTruncated" {
+    // Create output larger than MAX_OUTPUT_SIZE
+    const oversized = try testing.allocator.alloc(u8, wg_show_collector.MAX_OUTPUT_SIZE + 1);
+    defer testing.allocator.free(oversized);
+    @memset(oversized, 'x');
+
+    try testing.expectError(error.OutputTruncated, wg_show_collector.mapCommandOutputForTest(oversized, 0));
 }
 
 // ============================================================================
-// Integration-style tests using test-only child process approach
+// Tests: Parser integration tests
 // ============================================================================
-
-// Note: Full fork/exec testing requires integration testing environment.
-// These tests verify the data structures and error handling paths that
-// can be tested without spawning actual child processes.
 
 test "Valid wg show output parses correctly (parser integration)" {
     // This test verifies that the parser integration works correctly.
@@ -264,4 +304,20 @@ test "Multiple peers aggregate correctly" {
     // Aggregate bytes: rx=100+300+500+700+900=2500, tx=200+400+600+800+1000=3000
     try testing.expectEqual(@as(u64, 2500), result.rx_bytes);
     try testing.expectEqual(@as(u64, 3000), result.tx_bytes);
+}
+
+// ============================================================================
+// Tests: BoundedCollectResult via mapCommandOutputForTest
+// ============================================================================
+
+test "BoundedCollectResult with valid output and truncation" {
+    const fixture = "interface: wg0\n" ++
+        "peer: test\n" ++
+        "  latest handshake: 100 seconds ago\n" ++
+        "  transfer: 5000 bytes received, 6000 bytes sent\n";
+
+    // Test that valid output parses correctly
+    const result = wg_show_collector.mapCommandOutputForTest(fixture, 0);
+    try testing.expect(result != error.MalformedOutput);
+    try testing.expect(result != error.OutputTruncated);
 }

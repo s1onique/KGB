@@ -393,3 +393,8 @@ const after_bracket = slice[tunnel_start + marker.len..];  // Add marker.len to 
 Recording field notes from Zig 0.16 experiments. Confidence varies; do not promote to field manual until verified with a minimal reproducer.
 
 Old entries have been promoted to `zig-0.16-field-manual.md`. This file tracks experimental observations.
+
+
+---
+
+
