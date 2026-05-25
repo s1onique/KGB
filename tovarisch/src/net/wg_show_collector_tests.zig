@@ -12,6 +12,107 @@ const wg_show_parser = @import("wg_show_parser.zig");
 const testing = std.testing;
 
 // ============================================================================
+// Tests: WgDiagnosticsOwned — ownership model
+// ============================================================================
+
+test "WgDiagnosticsOwned struct can be constructed with literal slices" {
+    // Test that the struct layout works with inline construction
+    const owned = wg_show_collector.WgDiagnosticsOwned{
+        .diagnostics = .{
+            .interface = "wg0",
+            .peer_count = 1,
+            .latest_handshake_age_sec = 120,
+            .rx_bytes = 1000,
+            .tx_bytes = 2000,
+        },
+        .stdout_buf = try testing.allocator.alloc(u8, 32),
+    };
+    defer {
+        // Manual cleanup for test - verify deinit would work
+        testing.allocator.free(owned.stdout_buf);
+    }
+
+    try testing.expectEqualSlices(u8, "wg0", owned.diagnostics.interface);
+    try testing.expectEqual(@as(u32, 1), owned.diagnostics.peer_count);
+    try testing.expectEqual(@as(u64, 120), owned.diagnostics.latest_handshake_age_sec.?);
+    try testing.expectEqual(@as(u64, 1000), owned.diagnostics.rx_bytes);
+    try testing.expectEqual(@as(u64, 2000), owned.diagnostics.tx_bytes);
+    try testing.expectEqual(@as(usize, 32), owned.stdout_buf.len);
+}
+
+test "WgDiagnosticsOwned.deinit frees stdout_buf" {
+    {
+        var owned = wg_show_collector.WgDiagnosticsOwned{
+            .diagnostics = .{
+                .interface = "wg0",
+                .peer_count = 0,
+                .latest_handshake_age_sec = null,
+                .rx_bytes = 0,
+                .tx_bytes = 0,
+            },
+            .stdout_buf = try testing.allocator.alloc(u8, 256),
+        };
+
+        // Verify buffer was allocated
+        try testing.expectEqual(@as(usize, 256), owned.stdout_buf.len);
+
+        // Deinit should free the buffer
+        owned.deinit(testing.allocator);
+
+        // After deinit, fields are cleared
+        try testing.expectEqual(@as(usize, 0), owned.stdout_buf.len);
+    }
+    // If we reach here without panic, deinit worked correctly
+}
+
+test "WgDiagnosticsOwned.deinit is idempotent" {
+    var owned = wg_show_collector.WgDiagnosticsOwned{
+        .diagnostics = .{
+            .interface = "wg0",
+            .peer_count = 0,
+            .latest_handshake_age_sec = null,
+            .rx_bytes = 0,
+            .tx_bytes = 0,
+        },
+        .stdout_buf = try testing.allocator.alloc(u8, 64),
+    };
+
+    // Call deinit multiple times - should not crash
+    owned.deinit(testing.allocator);
+    owned.deinit(testing.allocator); // Second call should be safe
+    owned.deinit(testing.allocator); // Third call too
+}
+
+test "WgDiagnosticsOwned interface slice points into stdout_buf (ownership proof)" {
+    // This test demonstrates that interface is a slice of stdout_buf
+    const interface_name = "wg0";
+
+    var owned = wg_show_collector.WgDiagnosticsOwned{
+        .diagnostics = .{
+            .interface = undefined,
+            .peer_count = 1,
+            .latest_handshake_age_sec = null,
+            .rx_bytes = 0,
+            .tx_bytes = 0,
+        },
+        .stdout_buf = try testing.allocator.alloc(u8, 128),
+    };
+    defer owned.deinit(testing.allocator);
+
+    // Simulate what the parser would do: point interface into stdout_buf
+    @memcpy(owned.stdout_buf[0..interface_name.len], interface_name);
+    owned.diagnostics.interface = owned.stdout_buf[0..interface_name.len];
+
+    // Verify the slice is correct
+    try testing.expectEqualSlices(u8, "wg0", owned.diagnostics.interface);
+
+    // Verify it's actually pointing into stdout_buf (not a copy)
+    // We do this by modifying stdout_buf and checking interface sees the change
+    owned.stdout_buf[0] = 'W'; // Change 'w' to 'W' (capital)
+    try testing.expectEqualSlices(u8, "Wg0", owned.diagnostics.interface);
+}
+
+// ============================================================================
 // Tests: Constants and Types
 // ============================================================================
 
@@ -30,43 +131,6 @@ test "CollectError error set is complete" {
     try testing.expect(wg_show_collector.CollectError.ExecFailed == error.ExecFailed);
     try testing.expect(wg_show_collector.CollectError.OutputTruncated == error.OutputTruncated);
     try testing.expect(wg_show_collector.CollectError.MalformedOutput == error.MalformedOutput);
-}
-
-test "BoundedCollectResult struct is well-formed" {
-    // Test that the result struct can be constructed
-    const result = wg_show_collector.BoundedCollectResult{
-        .diagnostics = .{
-            .interface = "wg0",
-            .peer_count = 1,
-            .latest_handshake_age_sec = 120,
-            .rx_bytes = 1000,
-            .tx_bytes = 2000,
-        },
-        .was_truncated = false,
-    };
-
-    try testing.expectEqualSlices(u8, "wg0", result.diagnostics.interface);
-    try testing.expectEqual(@as(u32, 1), result.diagnostics.peer_count);
-    try testing.expectEqual(@as(u64, 120), result.diagnostics.latest_handshake_age_sec.?);
-    try testing.expectEqual(@as(u64, 1000), result.diagnostics.rx_bytes);
-    try testing.expectEqual(@as(u64, 2000), result.diagnostics.tx_bytes);
-    try testing.expectEqual(false, result.was_truncated);
-}
-
-test "BoundedCollectResult with truncation flag" {
-    const result = wg_show_collector.BoundedCollectResult{
-        .diagnostics = .{
-            .interface = "wg0",
-            .peer_count = 0,
-            .latest_handshake_age_sec = null,
-            .rx_bytes = 0,
-            .tx_bytes = 0,
-        },
-        .was_truncated = true,
-    };
-
-    try testing.expectEqual(true, result.was_truncated);
-    try testing.expect(result.diagnostics.latest_handshake_age_sec == null);
 }
 
 // ============================================================================
@@ -153,7 +217,7 @@ test "oversized stdout maps to OutputTruncated" {
 
 test "Valid wg show output parses correctly (parser integration)" {
     // This test verifies that the parser integration works correctly.
-    // The actual collectWgDiagnostics() function would be tested in
+    // The actual collectWgDiagnosticsOwned() function would be tested in
     // an integration test that has access to a real `wg` binary.
     const fixture = "interface: wg0\n" ++
         "  public key: (hidden)\n" ++
@@ -304,20 +368,4 @@ test "Multiple peers aggregate correctly" {
     // Aggregate bytes: rx=100+300+500+700+900=2500, tx=200+400+600+800+1000=3000
     try testing.expectEqual(@as(u64, 2500), result.rx_bytes);
     try testing.expectEqual(@as(u64, 3000), result.tx_bytes);
-}
-
-// ============================================================================
-// Tests: BoundedCollectResult via mapCommandOutputForTest
-// ============================================================================
-
-test "BoundedCollectResult with valid output and truncation" {
-    const fixture = "interface: wg0\n" ++
-        "peer: test\n" ++
-        "  latest handshake: 100 seconds ago\n" ++
-        "  transfer: 5000 bytes received, 6000 bytes sent\n";
-
-    // Test that valid output parses correctly
-    const result = wg_show_collector.mapCommandOutputForTest(fixture, 0);
-    try testing.expect(result != error.MalformedOutput);
-    try testing.expect(result != error.OutputTruncated);
 }

@@ -14,13 +14,28 @@
 // This module is intentionally separate from the parser to isolate process execution
 // from data parsing. The parser remains testable without spawning processes.
 //
-// Ownership notes for future /status integration:
-// - runWgShowCapture() returns allocated output via allocator.dupe()
-// - The WgInterface.interface field is a slice pointing into this allocated buffer
-// - For one-shot calls this is acceptable (small, bounded, short-lived)
-// - For repeated status calls, consider returning an owned result struct that
-//   includes both parsed data and owned output storage, or copy the interface
-//   name into caller-owned static storage to avoid lifetime issues.
+// Ownership Model:
+//
+// This module provides owned result types for safe memory management:
+//
+// **WgDiagnosticsOwned** (recommended for production):
+// - Returns an owned struct that bundles parsed diagnostics with the allocated stdout buffer
+// - The `.deinit(allocator)` method releases all memory
+// - Safe for repeated `/status` calls without lifetime issues or memory leaks
+//
+// **mapCommandOutputForTest** (for deterministic unit tests):
+// - Test helper that directly maps command output to parsed result
+// - No process spawning required
+//
+// Error handling ensures no memory leaks:
+// - `collectWgDiagnosticsOwned()` uses `errdefer` to free stdout buffer on all error paths
+// - On success, ownership transfers to the returned WgDiagnosticsOwned
+// - Call `deinit()` when done to release memory
+//
+// Usage pattern for owned result:
+//   var result = try collectWgDiagnosticsOwned(allocator);
+//   defer result.deinit(allocator);
+//   // Use result.diagnostics - safe until deinit
 
 const std = @import("std");
 const wg_show_parser = @import("wg_show_parser.zig");
@@ -222,78 +237,113 @@ fn mapAndParse(output: []const u8, exit_code: c_int, output_truncated: bool) Col
 }
 
 // ============================================================================
-// Collector
+// Collector — use WgDiagnosticsOwned for production
+// ============================================================================
+//
+// Prefer collectWgDiagnosticsOwned() for all production use. The non-owned
+// collectWgDiagnostics() API is removed because it returns WgInterface slices
+// pointing into a hidden allocation that callers cannot free.
+//
+// collectWgDiagnosticsBounded() was removed for the same reason — use
+// collectWgDiagnosticsOwned() instead.
+//
+// Use mapCommandOutputForTest() for deterministic unit tests.
+
+// ============================================================================
+// Owned Collector Result (safe for repeated /status calls)
 // ============================================================================
 
-/// Collects WireGuard diagnostics by invoking `wg show` and parsing stdout.
+/// Owned WireGuard diagnostics result for safe repeated status calls.
 ///
-/// This function:
-/// - Invokes `wg show` with fixed argv (no shell)
-/// - Captures stdout into a bounded buffer
-/// - Passes captured output to the parser
-/// - Returns parsed diagnostics or null on any error
+/// This struct bundles:
+/// - `diagnostics`: parsed WireGuard interface data
+/// - `stdout_buf`: the allocated stdout buffer that `diagnostics.interface` references
+///
+/// The `.interface` field is a slice into `stdout_buf`, which is owned by this struct.
+/// Call `.deinit(allocator)` to release all memory when done.
+///
+/// **Usage pattern:**
+/// ```zig
+/// var result = try collectWgDiagnosticsOwned(allocator);
+/// defer result.deinit(allocator);
+/// // Use result.diagnostics safely until deinit
+/// ```
+///
+/// **Ownership guarantees:**
+/// - All memory is owned by this struct and released via deinit()
+/// - No slice aliases exist after deinit
+/// - Safe for repeated /status calls without lifetime issues
+pub const WgDiagnosticsOwned = struct {
+    /// The parsed interface diagnostics. The `.interface` field is a slice
+    /// into `stdout_buf`.
+    diagnostics: wg_show_parser.WgInterface,
+    /// The allocated stdout buffer. The `diagnostics.interface` field is a
+    /// slice into this buffer. Freed by `deinit()`.
+    stdout_buf: []u8,
+
+    /// Releases all memory owned by this result.
+    ///
+    /// After calling this method, do not use the diagnostics or any of its
+    /// string slices (including `diagnostics.interface`).
+    ///
+    /// Safe to call multiple times (idempotent after first call).
+    pub fn deinit(self: *WgDiagnosticsOwned, allocator: std.mem.Allocator) void {
+        allocator.free(self.stdout_buf);
+        self.stdout_buf = &[_]u8{};
+        self.diagnostics.interface = &[_]u8{};
+    }
+};
+
+/// Collects WireGuard diagnostics and returns an owned result.
+///
+/// This function is safe for repeated `/status` calls because:
+/// - The result struct owns the stdout buffer that `diagnostics.interface` references
+/// - The `.deinit(allocator)` method releases all memory
+/// - No dangling pointers from freed output buffers
+///
+/// **Usage:**
+/// ```zig
+/// var result = try collectWgDiagnosticsOwned(allocator);
+/// defer result.deinit(allocator);
+/// // result.diagnostics.interface is valid until deinit
+/// ```
 ///
 /// Errors:
 /// - `CommandNotFound` if `wg` is not available
 /// - `CommandFailed` if `wg` exits non-zero
 /// - `OutputTruncated` if stdout exceeds MAX_OUTPUT_SIZE
 /// - `MalformedOutput` if parser fails
+/// - `OutOfMemory` if memory allocation fails
 ///
-/// Note: For one-shot calls, the returned WgInterface.interface slice
-/// points into an allocated buffer. This is acceptable for v0.
-/// Before repeated /status calls, consider returning an owned result
-/// struct or copying interface name into static storage.
-pub fn collectWgDiagnostics(allocator: std.mem.Allocator) CollectError!wg_show_parser.WgInterface {
-    const result = try runWgShowCapture(allocator);
-    return mapAndParse(result.output, result.exit_code, result.output_truncated);
-}
+/// **Ownership model:**
+/// - `errdefer` handles cleanup on all error paths
+/// - On success, ownership transfers to the returned WgDiagnosticsOwned
+/// - Call `deinit()` when done to release memory
+pub fn collectWgDiagnosticsOwned(allocator: std.mem.Allocator) CollectError!WgDiagnosticsOwned {
+    const cmd_result = try runWgShowCapture(allocator);
+    errdefer allocator.free(cmd_result.output);
 
-// ============================================================================
-// Bounded Collector with Explicit Truncation
-// ============================================================================
+    // Check for command not found (ENOENT - exit 127 from child)
+    if (cmd_result.exit_code == 127) return error.CommandNotFound;
 
-/// Result struct that includes truncation information.
-pub const BoundedCollectResult = struct {
-    /// The parsed interface diagnostics.
-    diagnostics: wg_show_parser.WgInterface,
-    /// True if the output was truncated before parsing.
-    was_truncated: bool,
-};
+    // Check for non-zero exit (but not 127 which means command not found)
+    if (cmd_result.exit_code != 0) return error.CommandFailed;
 
-/// Collects WireGuard diagnostics with explicit truncation handling.
-///
-/// For v0, this function behaves the same as `collectWgDiagnostics`:
-/// it rejects oversized output and returns `OutputTruncated` if the
-/// output exceeds MAX_OUTPUT_SIZE.
-///
-/// The `was_truncated` field in the result indicates whether the
-/// truncation was detected, even though parsing fails in that case.
-/// This variant exists for future use cases that may need to parse
-/// partial data while tracking truncation state.
-pub fn collectWgDiagnosticsBounded(allocator: std.mem.Allocator) error{
-    CommandNotFound,
-    CommandFailed,
-    PipeFailed,
-    ForkFailed,
-    ExecFailed,
-    OutputTruncated,
-    MalformedOutput,
-    OutOfMemory,
-}!BoundedCollectResult {
-    const result = try runWgShowCapture(allocator);
+    // Check for truncated output - reject oversized output for v0
+    if (cmd_result.output_truncated) return error.OutputTruncated;
 
-    // Detect truncation state
-    const was_truncated = result.output_truncated;
+    // Parse the output, mapping parser errors to MalformedOutput
+    const parsed = wg_show_parser.parseWgShowOutput(cmd_result.output) catch |e| {
+        switch (e) {
+            error.NoInterface, error.InvalidNumber, error.MalformedOutput => return error.MalformedOutput,
+        }
+    };
 
-    // For v0: reject oversized output consistently
-    if (was_truncated) {
-        return error.OutputTruncated;
-    }
-
-    const parsed = try mapAndParse(result.output, result.exit_code, false);
-    return BoundedCollectResult{
+    // Success path: transfer ownership of stdout_buf to WgDiagnosticsOwned
+    // errdefer will NOT run on this return path
+    return WgDiagnosticsOwned{
         .diagnostics = parsed,
-        .was_truncated = was_truncated,
+        .stdout_buf = cmd_result.output,
     };
 }
 
@@ -304,7 +354,7 @@ pub fn collectWgDiagnosticsBounded(allocator: std.mem.Allocator) error{
 /// Test helper: directly maps command output to parsed result.
 /// This allows deterministic unit tests without spawning processes.
 ///
-/// For production use, prefer `collectWgDiagnostics`.
+/// For production use, prefer `collectWgDiagnosticsOwned()`.
 ///
 /// Note: This tests the error mapping logic only. Real fork/exec behavior
 /// requires integration testing with a real `wg` binary or a test fixture.
