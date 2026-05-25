@@ -128,7 +128,7 @@ Test 3/3: interface_sampler_with_real... OK
 These guidelines are enforced by:
 
 - `.clinerules/30-karpathy.md` — compact checklist for Cline/MiniMax agents
-- Reviewer prompts (when implemented)
+- `docs/doctrine/reviewer-prompts.md` — reviewer close report checklist and rejection triggers
 - Quality gate checks (when implemented)
 
 See also: `docs/doctrine/factory.md`
