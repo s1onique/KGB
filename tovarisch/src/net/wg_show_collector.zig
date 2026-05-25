@@ -109,14 +109,45 @@ fn isExecutable(path: [*:0]const u8) bool {
     return std.c.access(path, std.c.X_OK) == 0;
 }
 
+/// Environment variable name for forcing a specific wg command path.
+/// Used for contract verification to force deterministic unavailable-tooling path.
+pub const WG_COMMAND_PATH_ENV = "TOVARISCH_WG_COMMAND_PATH";
+
 /// Find the first available wg command path.
+///
+/// Checks TOVARISCH_WG_COMMAND_PATH env var first if set.
+/// Falls back to WG_PATHS list if env var is not set or empty.
+///
+/// Note: Env var takes precedence over auto-detection for:
+/// - Forcing command-not-found path during contract verification
+/// - Testing without wg installed
+/// - Explicit path override for unusual system layouts
 fn findWgCommand() ?[*:0]const u8 {
+    // Check environment variable first (takes precedence)
+    if (getenv(WG_COMMAND_PATH_ENV)) |env_path| {
+        // Get length of C string before the null terminator.
+        const len = std.mem.len(env_path);
+        if (len > 0 and isExecutable(env_path)) {
+            return env_path;
+        }
+        // Env var set but path not executable or empty - return null
+        // This allows forcing CommandNotFound via /nonexistent
+        return null;
+    }
+
+    // Fall back to auto-detection
     for (WG_PATHS) |path| {
         if (isExecutable(path)) {
             return path;
         }
     }
     return null;
+}
+
+/// Get environment variable value as a null-terminated C string.
+/// Returns null if the environment variable is not set.
+fn getenv(name: [*:0]const u8) ?[*:0]const u8 {
+    return std.c.getenv(name);
 }
 
 /// Internal function to run wg show and capture output into a bounded buffer.

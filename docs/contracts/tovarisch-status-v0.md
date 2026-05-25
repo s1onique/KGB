@@ -84,7 +84,28 @@ WireGuard not available:
 }
 ```
 
-Malformed output:
+### Contract Verification Mode
+
+The status contract verification script (`scripts/verify_tovarisch_status_contract.sh`)
+uses an environment variable to force deterministic behavior:
+
+```bash
+TOVARISCH_WG_COMMAND_PATH=/nonexistent
+```
+
+When set, this forces the wg_peers check to return `"wg command not available"`
+regardless of whether the host has `wg` installed. This ensures the fixture
+can be verified deterministically on any system.
+
+**Normal runtime** continues to use the real WireGuard collector when this
+environment variable is not set.
+
+**Example fixture** (`docs/contracts/examples/tovarisch-status-v0.json`) pins the
+unavailable-tooling fallback (`"wg command not available"`) for deterministic
+verification. Real WireGuard deployments may show `"wireguard peers healthy"`,
+`"no peers detected"`, or `"no handshake yet"` depending on actual peer state.
+
+### Malformed output:
 ```json
 {
   "name": "wg_peers",

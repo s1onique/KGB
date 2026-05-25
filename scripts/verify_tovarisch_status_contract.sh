@@ -98,6 +98,11 @@ if command -v jq >/dev/null 2>&1; then
     if command -v zig >/dev/null 2>&1; then
         echo "[status-contract] Zig available — comparing CLI output with fixture"
 
+        # Use contract mode: force deterministic unavailable-tooling path.
+        # This ensures wg_peers check returns "wg command not available"
+        # regardless of whether host has wg installed.
+        export TOVARISCH_WG_COMMAND_PATH=/nonexistent
+
         # Get CLI output and fixture
         cli_output=$(cd tovarisch && zig build run -- status --json 2>/dev/null)
         
