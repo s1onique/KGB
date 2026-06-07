@@ -129,6 +129,7 @@ These guidelines are enforced by:
 
 - `.clinerules/30-karpathy.md` — compact checklist for Cline/MiniMax agents
 - `docs/doctrine/reviewer-prompts.md` — reviewer close report checklist and rejection triggers
+- `docs/doctrine/agent-failure-taxonomy.md` — failure classification for episode review
 - Quality gate checks (when implemented)
 
 See also: `docs/doctrine/factory.md`

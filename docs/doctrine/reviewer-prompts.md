@@ -90,4 +90,5 @@ See also:
 - `karpathy-agent-guidelines.md` — canonical agent contract
 - `.clinerules/30-karpathy.md` — compact agent checklist
 - `docs/doctrine/factory.md` — Factory workflow rules
+- `docs/doctrine/agent-failure-taxonomy.md` — failure classification for episode review
 
