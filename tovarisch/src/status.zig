@@ -20,7 +20,7 @@ const telemetry = @import("runtime/telemetry.zig");
 const tunnel_check = @import("tunnel_check.zig");
 const status_checks = @import("status_checks.zig");
 const build_info = @import("build_info.zig");
-const bfd = @import("bfd/session.zig");
+const bfd_status = @import("bfd/status.zig");
 
 /// Default state directory path relative to working directory.
 pub const DEFAULT_STATE_DIR = ".tovarisch/state";
@@ -147,14 +147,21 @@ pub fn toCString(path: []const u8, buf: *[4096]u8) ?[*:0]const u8 {
 /// Static buffer for local checks. Ensures stable memory addresses.
 var local_checks_buf: [8]Check = undefined;
 
-/// Returns the default BFD check.
-/// In this implementation, BFD sessions are managed externally,
-/// so we report "not configured" until integrated with the daemon.
+/// Returns the BFD check using the runtime status module.
+/// Falls back to "not configured" if no runtime is set.
 pub fn getBfdCheck() Check {
+    const bfd_check = bfd_status.getStatusCheck();
+    // Map BFD status to local CheckStatus
+    const mapped_status: CheckStatus = switch (bfd_check.status) {
+        .ok => .ok,
+        .warn => .warn,
+        .@"error" => .@"error",
+        .unknown => .unknown,
+    };
     return Check{
-        .name = "bfd",
-        .status = .warn,
-        .detail = "bfd not configured",
+        .name = bfd_check.name,
+        .status = mapped_status,
+        .detail = bfd_check.detail,
     };
 }
 
@@ -341,6 +348,9 @@ test "config check has warn status" {
 }
 
 test "bfd check has warn status" {
+    // Clear any runtime set by previous tests
+    bfd_status.clearRuntime();
+
     const checks = getLocalChecks();
     for (checks) |check| {
         if (std.mem.eql(u8, check.name, "bfd")) {
