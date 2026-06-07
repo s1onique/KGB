@@ -2,6 +2,65 @@
 
 ---
 
+## 2026-06-07 — Socket address structures and byte swap APIs for UDP transport
+
+- **Context:** Implementing real Linux UDP transport for BFD multihop in `tovarisch/src/bfd/transport.zig`.
+- **Symptom:** Multiple API discovery issues for socket address handling and network byte order.
+
+**std.c.sockaddr_in, std.c.in_addr do NOT exist:**
+- `std.c` namespace in Zig 0.16 does not expose the standard socket address structs.
+- Working fix: Define your own `extern struct` for `sockaddr_in`, `in_addr`, and `timeval` locally.
+- Example:
+```zig
+pub const sockaddr_in = extern struct {
+    sin_family: c_ushort,
+    sin_port: c_ushort,
+    sin_addr: in_addr,
+    sin_zero: [8]u8,
+};
+
+pub const in_addr = extern struct {
+    s_addr: c_uint,
+};
+```
+
+**std.c.htons does NOT exist:**
+- The standard network byte order conversion functions are not available in `std.c`.
+- Working fix: Use `@byteSwap(u16_value)` builtin for host-to-network byte order conversion.
+- Example: `addr.sin_port = @byteSwap(port);`
+- Note: `@byteSwap` takes 1 argument (the value), not 2 like older Zig API proposals.
+
+**Socket constants like AF_INET, SOCK_DGRAM, IPPROTO_UDP must be defined locally:**
+- These POSIX constants are not reliably available in `std.c` namespace.
+- Working fix: Define them as local constants.
+- Example:
+```zig
+pub const AF_INET: c_int = 2;
+pub const SOCK_DGRAM: c_int = 2;
+pub const IPPROTO_UDP: c_int = 17;
+```
+
+**std.mem.bigEndianToNative, std.mem.byteSwap do NOT exist:**
+- The memory byte order conversion functions are not available in `std.mem`.
+- Always use `@byteSwap()` builtin for byte swapping operations.
+
+**Socket send/receive pattern for UDP:**
+```zig
+// Create socket
+const sockfd = std.c.socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+defer _ = std.c.close(sockfd);
+
+// Send
+const send_addr: *const std.c.sockaddr = @ptrCast(&addr);
+const result = std.c.sendto(sockfd, @ptrCast(bytes.ptr), bytes.len, 0, send_addr, addr_len);
+```
+
+**Files affected:**
+- `tovarisch/src/bfd/transport.zig` — RealTransport implementation
+- `tovarisch/src/bfd/transport_tests.zig` — socket-level tests
+
+---
+
 ## 2026-05-24 — Zig 0.16 threading and sleep APIs (heartbeat thread implementation)
 
 - **Context:** Implementing a detached heartbeat thread for `tovarisch` that emits logs every 30 seconds independently of HTTP request traffic.
@@ -329,72 +388,8 @@ if (c.getenv("TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE") != null) {
 
 ---
 
----
-
-## 2026-05-24 — Zig 0.16 test declarations and doc comments
-
-**symptom:** `error: documentation comments cannot be attached to tests` when using `///` before test declarations.
-
-**wrong assumption:** `/// doc comments` could be used before `test` blocks.
-
-**working fix:** Use `//` regular comments before `test`:
-```zig
-// Contract test: tunnel_count field exists in output.
-test "tunnel contract: tunnel_count field exists" {
-    ...
-}
-```
-
-**files affected:**
-- `tovarisch/src/metrics_tunnel_contract_tests.zig`
-
-**promote to field manual?** Yes — test documentation patterns are common.
-
----
-
-## 2026-05-24 — Zig 0.16 integer overflow on unsigned subtraction
-
-**symptom:** `panic: integer overflow` when decrementing unsigned `usize` counters (e.g., brace-depth) without guards.
-
-**wrong assumption:** Unchecked `brace_depth -= 1` would work for unsigned integers.
-
-**working fix:** Guard before subtracting:
-```zig
-if (brace_depth > 0) brace_depth -= 1;
-```
-
-**files affected:**
-- `tovarisch/src/metrics_tunnel_contract_tests.zig`
-
-**promote to field manual?** Yes — unsigned arithmetic guard patterns are common.
-
----
-
-## 2026-05-24 — Zig 0.16 std.mem.indexOf returns optional usize, not index
-
-**symptom:** Integer arithmetic errors when treating `std.mem.indexOf` result as direct offset without unwrapping.
-
-**wrong assumption:** `std.mem.indexOf` returns the index directly; could use position + 20 directly.
-
-**working fix:** Use `marker.len` pattern with `orelse`:
-```zig
-const marker = "\"tunnel_interfaces\":[";
-const tunnel_start = std.mem.indexOf(u8, slice, marker) orelse return error.MissingField;
-const after_bracket = slice[tunnel_start + marker.len..];  // Add marker.len to position
-```
-
-**files affected:**
-- `tovarisch/src/metrics_tunnel_contract_tests.zig`
-
-**promote to field manual?** Yes — string search offset patterns are common.
-
----
-
 Recording field notes from Zig 0.16 experiments. Confidence varies; do not promote to field manual until verified with a minimal reproducer.
 
 Old entries have been promoted to `zig-0.16-field-manual.md`. This file tracks experimental observations.
-
-
----
 
 

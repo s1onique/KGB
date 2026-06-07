@@ -58,6 +58,7 @@ const _bfd_packet_tests = @import("bfd/packet_tests.zig");
 const _bfd_session_tests = @import("bfd/session_tests.zig");
 const _bfd_smoke_test = @import("bfd/smoke_test.zig");
 const _bfd_transport = @import("bfd/transport.zig");
+const _bfd_transport_tests = @import("bfd/transport_tests.zig");
 const _bfd_runtime = @import("bfd/runtime.zig");
 const _bfd_runtime_tests = @import("bfd/runtime_tests.zig");
 const _bfd_status = @import("bfd/status.zig");
@@ -255,6 +256,10 @@ test {
 
 test {
     std.testing.refAllDecls(@import("bfd/transport.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bfd/transport_tests.zig"));
 }
 
 test {

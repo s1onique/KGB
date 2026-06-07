@@ -20,6 +20,8 @@ pub const TransportError = error{
     SendFailed,
     /// Port validation failed
     InvalidPort,
+    /// Address parsing failed
+    AddressParseFailed,
 };
 
 /// Transport interface for sending BFD packets.
@@ -32,14 +34,50 @@ pub const Transport = struct {
     ctx: *anyopaque,
 };
 
+// ============================================================================
+// Socket Address Structures (Linux-specific, matching kernel wire format)
+// ============================================================================
+
+/// Address family constants
+pub const AF_INET: c_int = 2;
+
+/// Socket protocol constants
+pub const SOCK_DGRAM: c_int = 2;
+pub const IPPROTO_UDP: c_int = 17;
+
+/// socklen_t type
+pub const socklen_t = std.c.socklen_t;
+
+/// sockaddr_in - IPv4 socket address structure (Linux wire format)
+pub const sockaddr_in = extern struct {
+    sin_family: c_ushort,
+    sin_port: c_ushort,
+    sin_addr: in_addr,
+    sin_zero: [8]u8,
+};
+
+/// in_addr - IPv4 address (4 bytes in network byte order)
+pub const in_addr = extern struct {
+    s_addr: c_uint,
+};
+
+/// timeval for socket timeout
+pub const timeval = extern struct {
+    tv_sec: c_long,
+    tv_usec: c_long,
+};
+
+/// Socket option constants
+pub const SOL_SOCKET: c_int = 1;
+pub const SO_RCVTIMEO: c_int = 20;
+
 /// Real Linux UDP transport for production use.
-/// NOTE: This is a stub that returns SendFailed until a dedicated Linux socket ACT
-/// implements proper address resolution and byte order handling.
+/// Sends BFD multihop packets via UDP socket to destination port 4784.
 pub const RealTransport = struct {
     const Self = @This();
 
     /// Send a BFD packet over UDP.
-    /// Currently returns SendFailed as a placeholder until proper socket implementation.
+    /// Creates an ephemeral UDP socket, sends to peer_addr:port, and closes.
     pub fn sendPacket(peer_addr: []const u8, port: u16, bytes: []const u8) TransportError!void {
         if (port != MULTIHOP_PORT) {
             return TransportError.InvalidPort;
@@ -47,10 +85,41 @@ pub const RealTransport = struct {
         if (bytes.len != packet.CONTROL_PACKET_LEN) {
             return TransportError.SendFailed;
         }
-        // TODO: Implement proper UDP send with correct sockaddr handling
-        // Requires dedicated Linux socket ACT for address resolution and byte order
-        _ = peer_addr;
-        return TransportError.SendFailed;
+
+        // Build sockaddr_in for the destination
+        var addr: sockaddr_in = undefined;
+        addr.sin_family = @as(c_ushort, @intCast(AF_INET));
+        // Port in network byte order (big-endian) via @byteSwap builtin
+        addr.sin_port = @byteSwap(port);
+        @memset(addr.sin_zero[0..], 0);
+
+        // Parse IPv4 address string into sin_addr
+        try parseIPv4Address(peer_addr, &addr.sin_addr);
+
+        // Create UDP socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        const sockfd = std.c.socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (sockfd < 0) {
+            return TransportError.SendFailed;
+        }
+        defer _ = std.c.close(sockfd);
+
+        // Send packet to peer
+        const send_addr: *const std.c.sockaddr = @ptrCast(&addr);
+        const addr_len: socklen_t = @sizeOf(sockaddr_in);
+        const result = std.c.sendto(
+            sockfd,
+            @ptrCast(bytes.ptr),
+            bytes.len,
+            0, // flags
+            send_addr,
+            addr_len,
+        );
+
+        if (result < 0) {
+            return TransportError.SendFailed;
+        }
+
+        return;
     }
 
     /// Create a Transport interface from real UDP implementation.
@@ -66,6 +135,59 @@ pub const RealTransport = struct {
         };
     }
 };
+
+/// Parse an IPv4 dotted-decimal address string into a in_addr.
+/// Returns AddressParseFailed if the string is malformed.
+pub fn parseIPv4Address(addr_str: []const u8, out: *in_addr) TransportError!void {
+    // Parse "a.b.c.d" format
+    var parts: [4]u8 = undefined;
+    var part_idx: usize = 0;
+    var pos: usize = 0;
+
+    while (part_idx < 4 and pos < addr_str.len) {
+        // Parse numeric part - first char must be a digit
+        if (addr_str[pos] < '0' or addr_str[pos] > '9') {
+            return TransportError.AddressParseFailed;
+        }
+
+        var value: u32 = 0;
+        var has_digit = false;
+        while (pos < addr_str.len and addr_str[pos] >= '0' and addr_str[pos] <= '9') {
+            value = value * 10 + @as(u32, @intCast(addr_str[pos] - '0'));
+            pos += 1;
+            has_digit = true;
+            if (value > 255) return TransportError.AddressParseFailed;
+        }
+
+        // Expect a dot after each part except the last
+        if (part_idx < 3) {
+            if (pos >= addr_str.len or addr_str[pos] != '.') {
+                return TransportError.AddressParseFailed;
+            }
+            pos += 1; // Skip the dot
+        } else {
+            // Last part - no dot allowed after
+            if (pos < addr_str.len and addr_str[pos] == '.') {
+                return TransportError.AddressParseFailed;
+            }
+        }
+
+        if (!has_digit) {
+            return TransportError.AddressParseFailed;
+        }
+
+        parts[part_idx] = @as(u8, @intCast(value));
+        part_idx += 1;
+    }
+
+    // We expect exactly 4 parts
+    if (part_idx != 4) {
+        return TransportError.AddressParseFailed;
+    }
+
+    // Store in network byte order (big-endian) in s_addr
+    out.s_addr = std.mem.readInt(u32, &parts, .big);
+}
 
 /// Fake transport for testing.
 /// Captures sent packets so tests can assert on them.
@@ -258,8 +380,4 @@ test "FakeTransport rejects unknown peers when configured" {
     try std.testing.expectEqual(@as(usize, 1), fake.captured_count);
 
     try std.testing.expectError(TransportError.UnknownPeer, fake.sendPacket("192.168.1.1", MULTIHOP_PORT, &test_bytes));
-}
-
-test "MULTIHOP_PORT constant is 4784" {
-    try std.testing.expectEqual(@as(u16, 4784), MULTIHOP_PORT);
 }
