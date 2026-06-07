@@ -84,6 +84,43 @@ VERDICT: [approve/request-changes]
 - Agent close reports should self-check against this list before submission
 - Reviewers should use the template above or equivalent checks
 
+## Project Fitness Review — Context Model
+
+When performing a **project fitness review**, reviewers should check for a project context model before starting.
+
+### Context Model Location
+
+The canonical template is `templates/project-context-model.md`. Projects may also supply a filled version in the review bundle.
+
+### Pre-Review Check
+
+```
+Before starting the review:
+1. Check whether templates/project-context-model.md exists OR
+   whether a filled project-context-model.md is provided in the review bundle.
+2. If present, use it to constrain findings, scoring, and recommendations.
+3. If absent, proceed with existing generic review flow — do NOT fabricate a context model.
+```
+
+### Constraining Findings
+
+When the context model is present:
+
+- **Trusted inputs** are safe by default; findings against them require explicit justification of attacker control.
+- **Untrusted inputs** must have provenance evidence before treating as safe.
+- **Out-of-scope concerns** consume no finding budget; skip them without comment.
+- **Evidence requirements** from the context model override generic reviewer preferences when stricter.
+- **Known false-positive classes** are suppressive — do not raise unless stronger-than-usual evidence exists.
+- **Bug bar** defines what severity justifies a finding; use it to filter advisory-only noise.
+
+### Contradicting the Model
+
+Findings that contradict the context model must explicitly justify why the model is wrong or incomplete. Generic "this is a security issue" framing without this justification is not sufficient.
+
+### Absence Preserves Existing Behavior
+
+When no context model is present, the review proceeds with standard generic review criteria. No context model should be invented or assumed.
+
 ## Factory Integration
 
 See also:
@@ -91,4 +128,5 @@ See also:
 - `.clinerules/30-karpathy.md` — compact agent checklist
 - `docs/doctrine/factory.md` — Factory workflow rules
 - `docs/doctrine/agent-failure-taxonomy.md` — failure classification for episode review
+- `templates/project-context-model.md` — optional project-specific review context template
 
