@@ -142,5 +142,21 @@ if ! grep -q 'systemctl daemon-reload' "${POSTRM}"; then
 fi
 echo "[verify-deb-systemd] OK: postrm contains 'systemctl daemon-reload'"
 
+echo "[verify-deb-systemd] Checking sample config as conffile..."
+
+# Check config file exists in data archive
+if ! dpkg-deb -c "${DEB_PATH}" | grep -q '/etc/kgb/tovarisch\.conf$'; then
+    echo "[verify-deb-systemd] FAIL: /etc/kgb/tovarisch.conf not found in package"
+    exit 1
+fi
+echo "[verify-deb-systemd] OK: /etc/kgb/tovarisch.conf found in package"
+
+# Check conffile metadata
+if ! dpkg-deb -I "${DEB_PATH}" conffiles | grep -q '^/etc/kgb/tovarisch\.conf$'; then
+    echo "[verify-deb-systemd] FAIL: /etc/kgb/tovarisch.conf not in conffiles metadata"
+    exit 1
+fi
+echo "[verify-deb-systemd] OK: /etc/kgb/tovarisch.conf marked as conffile"
+
 echo "[verify-deb-systemd] === All checks passed ==="
 exit 0

@@ -15,6 +15,7 @@ rm -rf "${PKG_ROOT}" "${DEB_PATH}"
 mkdir -p \
   "${PKG_ROOT}/usr/bin" \
   "${PKG_ROOT}/lib/systemd/system" \
+  "${PKG_ROOT}/etc/kgb" \
   "${PKG_ROOT}/DEBIAN"
 
 # Change to tovarisch/ directory so zig build finds build.zig
@@ -33,6 +34,12 @@ for script in postinst prerm postrm; do
     fi
     install -m 0755 "${SCRIPT_DEBIAN_DIR}/${script}" "${PKG_ROOT}/DEBIAN/${script}"
 done
+
+# Install sample config as Debian conffile
+install -m 0644 "${SCRIPT_DEBIAN_DIR}/${APP_NAME}.conf" "${PKG_ROOT}/etc/kgb/${APP_NAME}.conf"
+
+# Mark conffile in DEBIAN/conffiles
+echo "/etc/kgb/tovarisch.conf" > "${PKG_ROOT}/DEBIAN/conffiles"
 
 cat > "${PKG_ROOT}/DEBIAN/control" <<EOF
 Package: ${APP_NAME}

@@ -10,9 +10,37 @@ The `tovarisch` Debian package includes a systemd unit file for service manageme
 |------|-------------|
 | `usr/bin/tovarisch` | Main binary |
 | `lib/systemd/system/tovarisch.service` | systemd unit file |
+| `etc/kgb/tovarisch.conf` | Sample configuration (Debian conffile) |
+| `DEBIAN/conffiles` | Lists conffiles for dpkg preservation |
 | `DEBIAN/postinst` | Post-installation script (creates user, directories, daemon-reload) |
 | `DEBIAN/prerm` | Pre-removal script (stops service) |
 | `DEBIAN/postrm` | Post-removal script (daemon-reload) |
+
+## Sample Configuration
+
+The package installs a sample configuration file at `/etc/kgb/tovarisch.conf` as a **Debian conffile**. This means:
+
+- dpkg will prompt the operator if the packaged version differs from the local file during upgrades
+- Local edits are preserved across package upgrades
+- The sample includes commented-out options for server listening and BFD configuration
+
+### Configuration Format
+
+```ini
+[server]
+# listen = "127.0.0.1:8317"
+
+# [bfd]
+# enabled = true
+# local_addr = "192.0.2.10"
+# peer_addr = "192.0.2.1"
+# interval_ms = 800
+# multiplier = 3
+```
+
+**BFD is disabled by default.** The BFD section is fully commented out and must be explicitly enabled to activate.
+
+Operators can edit `/etc/kgb/tovarisch.conf` to customize their deployment. The file will not be overwritten by package upgrades without operator confirmation.
 
 ## Service Configuration
 
