@@ -6,7 +6,8 @@ Canonical doctrine documents for KGB project hygiene and architecture.
 
 | Document | Purpose |
 |----------|---------|
-| [factory.md](./factory.md) | Factory workflow, ACTs, epics, verification |
+| [factory.md](./factory.md) | Factory workflow, ACTs, epics |
+| [verification-ladder.md](./verification-ladder.md) | T0–T4 verification tiers, non-substitution rule |
 | [kgb.md](./kgb.md) | KGB architecture, UVB-76 vs tovarisch split |
 | [privacy.md](./privacy.md) | Privacy principles, allowed/forbidden data |
 | [tiny-leafs.md](./tiny-leafs.md) | Leaf node constraints |
