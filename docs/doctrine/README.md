@@ -13,6 +13,7 @@ Canonical doctrine documents for KGB project hygiene and architecture.
 | [metrics.md](./metrics.md) | Observable metrics philosophy |
 | [llm-friendliness.md](./llm-friendliness.md) | Code readability for agents |
 | [platform-portability.md](./platform-portability.md) | Portable code default, platform isolation rules |
+| [runtime-harness-adaptation.md](./runtime-harness-adaptation.md) | Four-layer harness: contract, skill, action, trajectory |
 
 ## Day-0 Practices
 
