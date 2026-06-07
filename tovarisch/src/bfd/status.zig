@@ -1,7 +1,8 @@
 // status.zig — BFD status reporting for tovarisch
 //
-// Provides BFD status check that integrates with the main status system.
-// Reports per-peer state and overall BFD health.
+// Provides BFD status snapshot derivation for integration with the main status system.
+// The BFD status module is stateless: it transforms an optional runtime pointer
+// into a contract-valid snapshot. Daemon owns the runtime, not the status module.
 
 const std = @import("std");
 const packet = @import("packet.zig");
@@ -31,34 +32,40 @@ pub const CheckStatus = enum {
     unknown,
 };
 
-/// Module-level runtime instance for status reporting.
-/// This is the runtime that status checks query.
-var module_runtime: ?*BfdRuntime = null;
+/// BFD status snapshot containing the current state derived from runtime.
+/// This is the canonical representation for status reporting.
+pub const StatusSnapshot = struct {
+    /// Number of configured peers
+    peer_count: usize,
+    /// Number of peers in Up state
+    up_count: usize,
+    /// Whether runtime has any peers configured
+    has_peers: bool,
+};
 
-/// Initialize the BFD runtime for status reporting.
-/// Must be called before getStatusCheck() returns runtime-aware status.
-pub fn setRuntime(rt: *BfdRuntime) void {
-    module_runtime = rt;
-}
-
-/// Clear the BFD runtime for status reporting.
-/// Use this to reset state between tests.
-pub fn clearRuntime() void {
-    module_runtime = null;
-}
-
-/// Get the current BFD status check.
-/// Uses module_runtime if available, otherwise returns "not configured".
-pub fn getStatusCheck() StatusCheck {
-    const rt = module_runtime orelse {
+/// Derive a status snapshot from an optional BFD runtime.
+/// Returns empty/no-runtime fallback snapshot when runtime is null.
+/// This is the key invariant: no-runtime/no-peers remains a valid status, not an error.
+pub fn snapshotFromRuntime(rt: ?*const BfdRuntime) StatusSnapshot {
+    if (rt == null or !rt.?.hasPeers()) {
         return .{
-            .name = "bfd",
-            .status = .warn,
-            .detail = "bfd not configured",
+            .peer_count = 0,
+            .up_count = 0,
+            .has_peers = false,
         };
-    };
+    }
 
-    if (!rt.hasPeers()) {
+    return .{
+        .peer_count = rt.?.peerCount(),
+        .up_count = rt.?.upCount(),
+        .has_peers = rt.?.hasPeers(),
+    };
+}
+
+/// Build a StatusCheck from a StatusSnapshot.
+/// This function is pure and stateless - it only transforms input.
+pub fn buildStatusCheck(snapshot: StatusSnapshot) StatusCheck {
+    if (!snapshot.has_peers or snapshot.peer_count == 0) {
         return .{
             .name = "bfd",
             .status = .warn,
@@ -66,10 +73,7 @@ pub fn getStatusCheck() StatusCheck {
         };
     }
 
-    const total = rt.peerCount();
-    const up = rt.upCount();
-
-    if (up == total) {
+    if (snapshot.up_count == snapshot.peer_count) {
         return .{
             .name = "bfd",
             .status = .ok,
@@ -78,12 +82,14 @@ pub fn getStatusCheck() StatusCheck {
     }
 
     // Some peers up, some not
-    const detail = std.fmt.allocPrint(std.heap.page_allocator, "{d}/{d} bfd sessions up", .{up, total}) 
-        catch return .{
-            .name = "bfd",
-            .status = .warn,
-            .detail = "bfd partially up",
-        };
+    const detail = std.fmt.allocPrint(std.heap.page_allocator, "{d}/{d} bfd sessions up", .{
+        snapshot.up_count,
+        snapshot.peer_count,
+    }) catch return .{
+        .name = "bfd",
+        .status = .warn,
+        .detail = "bfd partially up",
+    };
 
     return .{
         .name = "bfd",
@@ -113,28 +119,29 @@ pub fn addTestPeer(rt: *BfdRuntime, local_addr: []const u8, peer_addr: []const u
     try rt.addPeer(cfg);
 }
 
-test "getStatusCheck returns warn when no runtime" {
-    module_runtime = null;
-    const check = getStatusCheck();
-    try std.testing.expectEqualStrings("bfd", check.name);
-    try std.testing.expectEqualStrings("bfd not configured", check.detail);
+// --- Tests ---
+
+test "snapshotFromRuntime returns empty when runtime is null" {
+    const snapshot = snapshotFromRuntime(null);
+    try std.testing.expectEqual(@as(usize, 0), snapshot.peer_count);
+    try std.testing.expectEqual(@as(usize, 0), snapshot.up_count);
+    try std.testing.expect(!snapshot.has_peers);
 }
 
-test "getStatusCheck returns warn when no peers" {
+test "snapshotFromRuntime returns empty when runtime has no peers" {
     var rt = createTestRuntime();
-    setRuntime(&rt);
-    
-    const check = getStatusCheck();
-    try std.testing.expectEqualStrings("bfd not configured", check.detail);
+    const snapshot = snapshotFromRuntime(&rt);
+    try std.testing.expectEqual(@as(usize, 0), snapshot.peer_count);
+    try std.testing.expectEqual(@as(usize, 0), snapshot.up_count);
+    try std.testing.expect(!snapshot.has_peers);
 }
 
-test "getStatusCheck returns ok when all peers up" {
+test "snapshotFromRuntime returns correct counts with peers" {
     var rt = createTestRuntime();
     try addTestPeer(&rt, "10.0.0.1", "10.0.0.2");
     rt.startAll();
-    setRuntime(&rt);
 
-    // Bring to Up state
+    // Bring peer to Up state
     const sess = rt.getSession("10.0.0.2").?;
     const local_discr = sess.local_discr;
 
@@ -160,45 +167,45 @@ test "getStatusCheck returns ok when all peers up" {
     _ = packet.encode(up_pkt, &up_buf);
     try rt.receivePacket("10.0.0.2", &up_buf);
 
-    const check = getStatusCheck();
+    const snapshot = snapshotFromRuntime(&rt);
+    try std.testing.expectEqual(@as(usize, 1), snapshot.peer_count);
+    try std.testing.expectEqual(@as(usize, 1), snapshot.up_count);
+    try std.testing.expect(snapshot.has_peers);
+}
+
+test "buildStatusCheck returns warn for no peers" {
+    const snapshot: StatusSnapshot = .{
+        .peer_count = 0,
+        .up_count = 0,
+        .has_peers = false,
+    };
+    const check = buildStatusCheck(snapshot);
+    try std.testing.expectEqualStrings("bfd", check.name);
+    try std.testing.expect(check.status == .warn);
+    try std.testing.expectEqualStrings("bfd not configured", check.detail);
+}
+
+test "buildStatusCheck returns ok when all peers up" {
+    const snapshot: StatusSnapshot = .{
+        .peer_count = 2,
+        .up_count = 2,
+        .has_peers = true,
+    };
+    const check = buildStatusCheck(snapshot);
+    try std.testing.expectEqualStrings("bfd", check.name);
+    try std.testing.expect(check.status == .ok);
     try std.testing.expectEqualStrings("bfd sessions up", check.detail);
 }
 
-test "getStatusCheck returns warn when some peers down" {
-    var rt = createTestRuntime();
-    try addTestPeer(&rt, "10.0.0.1", "10.0.0.2");
-    try addTestPeer(&rt, "10.0.0.1", "10.0.0.3");
-    rt.startAll();
-    setRuntime(&rt);
-
-    // Bring first peer to Up
-    const sess1 = rt.getSession("10.0.0.2").?;
-    const local_discr = sess1.local_discr;
-
-    var init_buf: [24]u8 = undefined;
-    const init_pkt = session.ControlPacket{
-        .state = .init,
-        .my_discr = 0xBEEF,
-        .your_discr = local_discr,
-        .detect_mult = 3,
-        .required_min_rx_interval = 800_000,
+test "buildStatusCheck returns warn when some peers down" {
+    const snapshot: StatusSnapshot = .{
+        .peer_count = 2,
+        .up_count = 1,
+        .has_peers = true,
     };
-    _ = packet.encode(init_pkt, &init_buf);
-    try rt.receivePacket("10.0.0.2", &init_buf);
-
-    var up_buf: [24]u8 = undefined;
-    const up_pkt = session.ControlPacket{
-        .state = .up,
-        .my_discr = 0xBEEF,
-        .your_discr = local_discr,
-        .detect_mult = 3,
-        .required_min_rx_interval = 800_000,
-    };
-    _ = packet.encode(up_pkt, &up_buf);
-    try rt.receivePacket("10.0.0.2", &up_buf);
-
-    // Second peer stays Down
-    const check = getStatusCheck();
+    const check = buildStatusCheck(snapshot);
+    try std.testing.expectEqualStrings("bfd", check.name);
+    try std.testing.expect(check.status == .warn);
     try std.testing.expect(std.mem.indexOf(u8, check.detail, "1/2 bfd sessions up") != null);
 }
 
