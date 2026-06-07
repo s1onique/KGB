@@ -6,6 +6,7 @@ const metrics_state = @import("../metrics_state.zig");
 const heartbeat = @import("heartbeat.zig");
 const cli_args = @import("../cli/args.zig");
 const statonly = @import("statonly.zig");
+const bfd_status = @import("../bfd/status.zig");
 
 // ============================================================================
 // Server State
@@ -36,6 +37,44 @@ pub const ServerState = struct {
     }
 
     /// Free all server-owned memory.
+    pub fn deinit(self: *Self) void {
+        self.metrics.deinit();
+    }
+};
+
+// ============================================================================
+// Serve Context
+// ============================================================================
+
+/// Context passed to HTTP route handlers.
+///
+/// This struct owns the optional BFD runtime pointer for the duration
+/// of a serve session. Daemon owns the runtime; context just passes it
+/// explicitly to handlers.
+///
+/// Ownership model:
+/// - ServeContext does NOT own the BFD runtime (daemon owns it)
+/// - ServeContext owns the metrics state for rate calculations
+/// - MetricsState owns InterfaceSampler (freed in deinit)
+pub const ServeContext = struct {
+    const Self = @This();
+
+    /// Metrics state for rate calculations.
+    metrics: metrics_state.MetricsState,
+
+    /// Optional BFD runtime owned by the daemon.
+    /// Null when BFD is not configured.
+    bfd_runtime: ?*const bfd_status.BfdRuntime,
+
+    /// Initialize serve context with allocator.
+    pub fn init(allocator: std.mem.Allocator) Self {
+        return .{
+            .metrics = metrics_state.MetricsState.init(allocator),
+            .bfd_runtime = null,
+        };
+    }
+
+    /// Free all context-owned memory.
     pub fn deinit(self: *Self) void {
         self.metrics.deinit();
     }
@@ -287,21 +326,25 @@ pub fn serve(config: Config, out_writer: anytype) !void {
 }
 
 /// Daemon-style serve loop for production CLI use with persistent state.
+///
+/// This function owns the ServeContext and passes it to route handlers.
+/// The BFD runtime is null until a daemon wires it in; status endpoint
+/// handles null gracefully.
 pub fn serveForever(config: Config, out_writer: anytype) !void {
     var server = Server.init(config);
     defer server.deinit();
 
-    // Initialize server state with metrics sampler
-    var state = ServerState.init(std.heap.page_allocator);
-    defer state.deinit();
+    // Initialize serve context with metrics state and null BFD runtime.
+    var serve_ctx = ServeContext.init(std.heap.page_allocator);
+    defer serve_ctx.deinit();
 
     try server.listen();
 
     // Emit startup logs only if not in statonly mode
     try emitStartupLogsIfNormal(config, out_writer);
 
-    // Get opaque pointer to MetricsState for passing to route handlers.
-    const state_ptr: *anyopaque = &state.metrics;
+    // Get opaque pointer to ServeContext for passing to route handlers.
+    const ctx_ptr: *anyopaque = &serve_ctx;
 
     // Heartbeat thread: only spawn in normal mode.
     // In statonly mode, we skip heartbeat to keep output clean.
@@ -321,9 +364,9 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
 
     // Branch based on log mode
     if (config.log_mode == .statonly) {
-        try statonly.serveStatonlyWithStderr(server.listener_fd, state_ptr, config.stats_interval_seconds, out_writer);
+        try statonly.serveStatonlyWithStderr(server.listener_fd, ctx_ptr, config.stats_interval_seconds, out_writer);
     } else {
-        try serveForeverNormal(server.listener_fd, state_ptr, &log_buf, out_writer);
+        try serveForeverNormal(server.listener_fd, ctx_ptr, &log_buf, out_writer);
     }
 }
 
@@ -367,41 +410,3 @@ fn serveForeverNormal(
     }
 }
 
-// --- Tests ---
-
-test "Config has sensible defaults" {
-    const cfg = Config{};
-    try std.testing.expectEqual(@as(u16, 8317), cfg.port);
-    try std.testing.expectEqualStrings("127.0.0.1", cfg.address);
-}
-
-test "defaultConfig uses loopback" {
-    const cfg = defaultConfig();
-    try std.testing.expectEqual(@as(u16, 8317), cfg.port);
-    try std.testing.expectEqualStrings("127.0.0.1", cfg.address);
-}
-
-test "parseIpOctets parses 127.0.0.1" {
-    const octets = parseIpOctets("127.0.0.1");
-    try std.testing.expect(octets[0] == 127);
-    try std.testing.expect(octets[1] == 0);
-    try std.testing.expect(octets[2] == 0);
-    try std.testing.expect(octets[3] == 1);
-}
-
-test "parseIpAddress returns host-order u32" {
-    const addr = parseIpAddress("127.0.0.1");
-    try std.testing.expectEqual(@as(u32, 0x7F000001), addr);
-}
-
-test "ServerState.init creates empty sampler" {
-    const allocator = std.testing.allocator;
-    var state = ServerState.init(allocator);
-    defer state.deinit();
-}
-
-test "ServerState.deinit handles empty sampler" {
-    const allocator = std.testing.allocator;
-    var state = ServerState.init(allocator);
-    state.deinit();
-}

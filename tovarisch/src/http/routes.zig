@@ -3,6 +3,7 @@ const response = @import("response.zig");
 const status = @import("../status.zig");
 const metrics = @import("../metrics.zig");
 const metrics_state = @import("../metrics_state.zig");
+const server = @import("server.zig");
 
 /// HTTP method types.
 pub const Method = enum {
@@ -70,8 +71,11 @@ pub fn handleHealthz(fd: i32, _: *anyopaque) !void {
     try response.writeSimpleJsonFd(fd, 200, response.Errors.ok);
 }
 
-/// Status handler - returns full status JSON.
-pub fn handleStatus(fd: i32, _: *anyopaque) !void {
+/// Status handler - returns full status JSON with optional BFD runtime.
+pub fn handleStatus(fd: i32, state: *anyopaque) !void {
+    // Cast opaque state to ServeContext to get BFD runtime.
+    const ctx = @as(*server.ServeContext, @ptrCast(@alignCast(state)));
+
     // For HTTP, we need to render status to a buffer first
     // then send it. Use a simple fixed buffer writer.
     var buf: [4096]u8 = undefined;
@@ -94,7 +98,8 @@ pub fn handleStatus(fd: i32, _: *anyopaque) !void {
         }
     }{ .buf = &buf, .len = &len };
 
-    try status.renderPayload(writer);
+    // Pass BFD runtime from context (may be null if not configured).
+    try status.renderPayloadWithBfd(writer, ctx.bfd_runtime);
     const json = buf[0..len];
 
     try response.writeSimpleJsonFd(fd, 200, json);
@@ -103,8 +108,8 @@ pub fn handleStatus(fd: i32, _: *anyopaque) !void {
 /// Metrics handler - uses persistent sampler state for live rates.
 /// Falls back to warning JSON if live collection fails (HTTP 200 with status warn).
 pub fn handleMetrics(fd: i32, state: *anyopaque) !void {
-    // Cast opaque state to MetricsState
-    const metrics_state_ptr = @as(*metrics_state.MetricsState, @ptrCast(@alignCast(state)));
+    // Cast opaque state to ServeContext to access metrics state.
+    const ctx = @as(*server.ServeContext, @ptrCast(@alignCast(state)));
 
     var buf: [8192]u8 = undefined;
     var len: usize = 0;
@@ -133,7 +138,7 @@ pub fn handleMetrics(fd: i32, state: *anyopaque) !void {
     }{ .buf = &buf, .len = &len };
 
     // Use stateful metrics collection with sampler for rates
-    metrics_state_ptr.renderMetricsPayload(std.heap.page_allocator, &writer, "/sys/class/net") catch {
+    ctx.metrics.renderMetricsPayload(std.heap.page_allocator, &writer, "/sys/class/net") catch {
         // Fallback: render warning payload
         len = 0;
         metrics.renderMetricsFallbackPayload(&writer) catch return error.InternalError;
@@ -250,21 +255,18 @@ test "parseMethod maps uppercase HTTP methods to enum" {
 
 // --- Metrics state pointer tests ---
 
-test "handleMetrics expects MetricsState pointer, not ServerState layout" {
-    // This test proves that handleMetrics() correctly expects a pointer to
-    // MetricsState, not ServerState. The metrics route casts *anyopaque to
-    // *metrics_state.MetricsState, so the pointer must point at MetricsState bytes.
-    //
-    // If server.zig passed &server_state (ServerState*), the first bytes would be
-    // allocator, not MetricsState fields. This would cause undefined behavior.
+test "handleMetrics uses ServeContext.metrics for stateful collection" {
+    // This test proves that handleMetrics() casts *anyopaque to *ServeContext
+    // and accesses ctx.metrics. This is the consistent pattern for all handlers.
     const allocator = std.testing.allocator;
-    var metrics_state_instance = metrics_state.MetricsState.init(allocator);
-    defer metrics_state_instance.deinit();
+    var serve_ctx = server.ServeContext.init(allocator);
+    defer serve_ctx.deinit();
 
-    // Verify MetricsState pointer can be passed as *anyopaque (proves type compatibility)
-    const opaque_ptr: *anyopaque = &metrics_state_instance;
-    const recovered = @as(*metrics_state.MetricsState, @ptrCast(@alignCast(opaque_ptr)));
-    _ = recovered; // Just proving the cast is valid; handleMetrics would use it
+    // Verify ServeContext pointer can be passed as *anyopaque and recovered
+    const opaque_ptr: *anyopaque = &serve_ctx;
+    const recovered = @as(*server.ServeContext, @ptrCast(@alignCast(opaque_ptr)));
+    // Access metrics through context (same pattern as handleMetrics)
+    _ = &recovered.metrics;
 }
 
 // --- Route path tests ---
@@ -351,4 +353,82 @@ test "status handler includes http check in output" {
     // HTTP check should be present with ok status
     try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"name\":\"http\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"status\":\"ok\""));
+}
+
+// --- BFD runtime wiring tests ---
+
+test "serve status endpoint reflects configured BFD runtime" {
+    // This test proves that status rendering with a configured BFD runtime
+    // produces different output than with null runtime.
+    const bfd_status_module = @import("../bfd/status.zig");
+
+    // Create a test BFD runtime with a peer
+    var runtime = bfd_status_module.createTestRuntime();
+    try bfd_status_module.addTestPeer(&runtime, "10.0.0.1", "10.0.0.2");
+
+    // Create serve context with the runtime
+    var serve_ctx = server.ServeContext.init(std.testing.allocator);
+    defer serve_ctx.deinit();
+    serve_ctx.bfd_runtime = &runtime;
+
+    // Render status with the BFD runtime
+    var buf: [4096]u8 = undefined;
+    var len: usize = 0;
+
+    const writer = struct {
+        buf: *[4096]u8,
+        len: *usize,
+
+        pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) !void {
+            if (self.len.* >= 4096) return error.BufferOverflow;
+            const written = std.fmt.bufPrint(self.buf[self.len.*..], fmt, args) catch return error.BufferOverflow;
+            self.len.* += written.len;
+        }
+
+        pub fn writeAll(self: @This(), bytes: []const u8) !void {
+            if (self.len.* + bytes.len > 4096) return error.BufferOverflow;
+            @memcpy(self.buf[self.len.*..][0..bytes.len], bytes);
+            self.len.* += bytes.len;
+        }
+    }{ .buf = &buf, .len = &len };
+
+    // Pass BFD runtime through context
+    try status.renderPayloadWithBfd(writer, serve_ctx.bfd_runtime);
+    const json = buf[0..len];
+
+    // With configured BFD runtime, the bfd check should reflect peer info
+    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"name\":\"bfd\""));
+    // The detail should show peer count, not "bfd not configured"
+    try std.testing.expect(!std.mem.containsAtLeast(u8, json, 1, "bfd not configured"));
+}
+
+test "serve status endpoint with null BFD shows not configured" {
+    // Verify that null BFD runtime produces "bfd not configured" status.
+    var buf: [4096]u8 = undefined;
+    var len: usize = 0;
+
+    const writer = struct {
+        buf: *[4096]u8,
+        len: *usize,
+
+        pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) !void {
+            if (self.len.* >= 4096) return error.BufferOverflow;
+            const written = std.fmt.bufPrint(self.buf[self.len.*..], fmt, args) catch return error.BufferOverflow;
+            self.len.* += written.len;
+        }
+
+        pub fn writeAll(self: @This(), bytes: []const u8) !void {
+            if (self.len.* + bytes.len > 4096) return error.BufferOverflow;
+            @memcpy(self.buf[self.len.*..][0..bytes.len], bytes);
+            self.len.* += bytes.len;
+        }
+    }{ .buf = &buf, .len = &len };
+
+    // Pass null BFD runtime
+    try status.renderPayloadWithBfd(writer, null);
+    const json = buf[0..len];
+
+    // Null runtime should show "bfd not configured"
+    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"name\":\"bfd\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "bfd not configured"));
 }
