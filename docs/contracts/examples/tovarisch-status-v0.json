@@ -38,6 +38,11 @@
       "name": "wg_peers",
       "status": "warn",
       "detail": "wg command not available"
+    },
+    {
+      "name": "bfd",
+      "status": "warn",
+      "detail": "bfd not configured"
     }
   ],
   "runtime": {

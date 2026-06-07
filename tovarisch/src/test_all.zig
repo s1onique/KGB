@@ -49,6 +49,15 @@ const _http_server = @import("http/server.zig");
 const _runtime_telemetry = @import("runtime/telemetry.zig");
 const _runtime_heartbeat_log = @import("runtime/heartbeat_log.zig");
 
+// BFD multihop module tests
+const _bfd_packet = @import("bfd/packet.zig");
+const _bfd_config = @import("bfd/config.zig");
+const _bfd_clock = @import("bfd/clock.zig");
+const _bfd_session = @import("bfd/session.zig");
+const _bfd_packet_tests = @import("bfd/packet_tests.zig");
+const _bfd_session_tests = @import("bfd/session_tests.zig");
+const _bfd_smoke_test = @import("bfd/smoke_test.zig");
+
 // Force test discovery for all imported modules
 // This ensures the test binary actually runs the tests from these modules
 test {
@@ -209,4 +218,33 @@ test {
 
 test {
     std.testing.refAllDecls(@import("logging.zig"));
+}
+
+// BFD module tests
+test {
+    std.testing.refAllDecls(@import("bfd/packet.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bfd/config.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bfd/clock.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bfd/session.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bfd/packet_tests.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bfd/session_tests.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bfd/smoke_test.zig"));
 }

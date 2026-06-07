@@ -13,12 +13,14 @@
 //   5. http     - HTTP service route available
 //   6. tunnel   - tunnel interface presence
 //   7. wg_peers - WireGuard peer diagnostics
+//   8. bfd      - BFD multihop session status
 
 const std = @import("std");
 const telemetry = @import("runtime/telemetry.zig");
 const tunnel_check = @import("tunnel_check.zig");
 const status_checks = @import("status_checks.zig");
 const build_info = @import("build_info.zig");
+const bfd = @import("bfd/session.zig");
 
 /// Default state directory path relative to working directory.
 pub const DEFAULT_STATE_DIR = ".tovarisch/state";
@@ -143,7 +145,18 @@ pub fn toCString(path: []const u8, buf: *[4096]u8) ?[*:0]const u8 {
 }
 
 /// Static buffer for local checks. Ensures stable memory addresses.
-var local_checks_buf: [7]Check = undefined;
+var local_checks_buf: [8]Check = undefined;
+
+/// Returns the default BFD check.
+/// In this implementation, BFD sessions are managed externally,
+/// so we report "not configured" until integrated with the daemon.
+pub fn getBfdCheck() Check {
+    return Check{
+        .name = "bfd",
+        .status = .warn,
+        .detail = "bfd not configured",
+    };
+}
 
 pub fn getLocalChecks() []const Check {
     local_checks_buf[0] = process_check;
@@ -153,6 +166,7 @@ pub fn getLocalChecks() []const Check {
     local_checks_buf[4] = http_check;
     local_checks_buf[5] = tunnel_check.getTunnelCheckDefault();
     local_checks_buf[6] = status_checks.getWgPeersCheck(std.heap.page_allocator);
+    local_checks_buf[7] = getBfdCheck();
     return &local_checks_buf;
 }
 
@@ -252,9 +266,9 @@ test "deriveStatus returns ok for empty checks" {
     try std.testing.expectEqual(CheckStatus.ok, deriveStatus(&checks));
 }
 
-test "getLocalChecks returns seven checks" {
+test "getLocalChecks returns eight checks" {
     const checks = getLocalChecks();
-    try std.testing.expectEqual(@as(usize, 7), checks.len);
+    try std.testing.expectEqual(@as(usize, 8), checks.len);
 }
 
 test "getLocalChecks first check is process" {
@@ -269,7 +283,7 @@ test "status has correct structure" {
     try std.testing.expect(std.mem.containsAtLeast(u8, s.version, 1, "+"));
     try std.testing.expectEqualStrings("local-dev", s.node_id);
     try std.testing.expect(s.status == .ok or s.status == .warn or s.status == .@"error");
-    try std.testing.expectEqual(@as(usize, 7), s.checks.len);
+    try std.testing.expectEqual(@as(usize, 8), s.checks.len);
 }
 
 test "getStateDirCheck returns correct name" {
@@ -287,7 +301,7 @@ test "status JSON contains all required top-level fields" {
     try std.testing.expect(s.checks.len > 0);
 }
 
-test "status JSON contains all seven check names including wg_peers" {
+test "status JSON contains all eight check names including bfd" {
     const checks = getLocalChecks();
     var has_process = false;
     var has_binary = false;
@@ -296,6 +310,7 @@ test "status JSON contains all seven check names including wg_peers" {
     var has_http = false;
     var has_tunnel = false;
     var has_wg_peers = false;
+    var has_bfd = false;
     for (checks) |check| {
         if (std.mem.eql(u8, check.name, "process")) has_process = true;
         if (std.mem.eql(u8, check.name, "binary")) has_binary = true;
@@ -304,6 +319,7 @@ test "status JSON contains all seven check names including wg_peers" {
         if (std.mem.eql(u8, check.name, "http")) has_http = true;
         if (std.mem.eql(u8, check.name, "tunnel")) has_tunnel = true;
         if (std.mem.eql(u8, check.name, "wg_peers")) has_wg_peers = true;
+        if (std.mem.eql(u8, check.name, "bfd")) has_bfd = true;
     }
     try std.testing.expect(has_process);
     try std.testing.expect(has_binary);
@@ -312,6 +328,7 @@ test "status JSON contains all seven check names including wg_peers" {
     try std.testing.expect(has_http);
     try std.testing.expect(has_tunnel);
     try std.testing.expect(has_wg_peers);
+    try std.testing.expect(has_bfd);
 }
 
 test "config check has warn status" {
@@ -319,6 +336,16 @@ test "config check has warn status" {
     for (checks) |check| {
         if (std.mem.eql(u8, check.name, "config")) {
             try std.testing.expectEqual(CheckStatus.warn, check.status);
+        }
+    }
+}
+
+test "bfd check has warn status" {
+    const checks = getLocalChecks();
+    for (checks) |check| {
+        if (std.mem.eql(u8, check.name, "bfd")) {
+            try std.testing.expectEqual(CheckStatus.warn, check.status);
+            try std.testing.expectEqualStrings("bfd not configured", check.detail);
         }
     }
 }
@@ -377,7 +404,7 @@ test "renderPayload output contains checks array" {
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"checks\":["));
 }
 
-test "renderPayload output contains all seven check names" {
+test "renderPayload output contains all eight check names" {
     var w = TestWriter.init();
     try renderPayload(&w);
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"process\""));
@@ -387,6 +414,7 @@ test "renderPayload output contains all seven check names" {
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"http\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"tunnel\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"wg_peers\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"name\":\"bfd\""));
 }
 
 test "renderPayload output contains runtime block" {
