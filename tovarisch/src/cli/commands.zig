@@ -83,6 +83,27 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
                 else => null,
             };
 
+            // Startup assertion: verify bundle is properly initialized before serve
+            // This catches initialization bugs where heap allocation leaves fields undefined.
+            if (bfd_bundle) |bundle| {
+                if (bundle.loop_state == null) {
+                    stderr.writeAll("FATAL: BFD bundle initialized but loop_state is null\n") catch {};
+                    return .serve_error;
+                }
+                if (bundle.thread == null) {
+                    stderr.writeAll("FATAL: BFD bundle initialized but thread is null\n") catch {};
+                    return .serve_error;
+                }
+                if (!bundle.bfd_active) {
+                    stderr.writeAll("FATAL: BFD bundle initialized but bfd_active is false\n") catch {};
+                    return .serve_error;
+                }
+                if (bundle.stop_signal.load()) {
+                    stderr.writeAll("FATAL: BFD bundle initialized but stop_signal is already set\n") catch {};
+                    return .serve_error;
+                }
+            }
+
             // Extract optional runtime pointer for HTTP server
             const bfd_rt: ?*const bfd_status.BfdRuntime = if (bfd_bundle) |bundle|
                 &bundle.runtime

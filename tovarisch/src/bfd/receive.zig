@@ -243,6 +243,15 @@ pub fn bfdReceiveLoop(state: *BfdReceiveLoopState) void {
     // Set socket to non-blocking so we can check the stop flag
     state.socket.setNonBlocking();
 
+    // Verify stop_signal is false at startup - this catches initialization bugs
+    // where raw heap allocation left the flag undefined.
+    // If this assertion fails, it means BfdServeBundle was not properly initialized.
+    if (state.stop.load()) {
+        std.debug.print("[BFD] ERROR: receive loop started with stop_signal already set - bundle initialization bug\n", .{});
+        state.socket.close();
+        return;
+    }
+
     while (!state.stop.load()) {
         // Receive one packet
         const result = state.socket.receiveOne() catch {

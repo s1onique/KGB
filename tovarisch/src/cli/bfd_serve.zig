@@ -89,7 +89,7 @@ pub fn loadConfigAndBfd(
     };
 
     // Initialize with real UDP transport and real system clock
-    bundle.runtime = bfd_status.BfdRuntime.init(
+    var runtime = bfd_status.BfdRuntime.init(
         bfd_transport.RealTransport.interface(),
         bfd_clock.RealClock,
     );
@@ -105,7 +105,7 @@ pub fn loadConfigAndBfd(
     };
 
     // Add peer to runtime
-    bundle.runtime.addPeer(session_cfg) catch |e| {
+    runtime.addPeer(session_cfg) catch |e| {
         stderr.print("error: failed to add BFD peer: {s}\n", .{@errorName(e)}) catch {};
         raw.deinit(std.heap.page_allocator);
         std.heap.page_allocator.destroy(bundle);
@@ -113,7 +113,7 @@ pub fn loadConfigAndBfd(
     };
 
     // Start all sessions
-    bundle.runtime.startAll();
+    runtime.startAll();
 
     // Bind UDP socket for BFD receive
     var socket = bfd_receive.BfdReceiveSocket.bind(bfd_receive.MULTIHOP_PORT) catch |err| {
@@ -125,12 +125,20 @@ pub fn loadConfigAndBfd(
         return .failed;
     };
 
-    bundle.peer_addr = bfd_cfg.peer_addr;
-    bundle.local_addr = bfd_cfg.local_addr;
-
     // Transfer raw config ownership to bundle
-    bundle.raw = raw;
-    bundle.bfd_active = true;
+    // Use full struct literal to ensure all fields are deterministically initialized.
+    // This fixes the bug where raw heap allocation left stop_signal.flag undefined,
+    // causing the receive loop to exit immediately and close the socket.
+    bundle.* = BfdServeBundle{
+        .raw = raw,
+        .runtime = runtime,
+        .stop_signal = .{},
+        .peer_addr = bfd_cfg.peer_addr,
+        .local_addr = bfd_cfg.local_addr,
+        .loop_state = null,
+        .thread = null,
+        .bfd_active = true,
+    };
 
     // Allocate loop state on heap
     var loop_state = std.heap.page_allocator.create(bfd_receive.BfdReceiveLoopState) catch {
