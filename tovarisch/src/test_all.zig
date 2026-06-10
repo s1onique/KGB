@@ -302,3 +302,24 @@ test {
 test {
     std.testing.refAllDecls(@import("bfd_serve_config_tests.zig"));
 }
+
+// BGP protocol module tests (ACT 1: pure encoding/parsing only)
+test {
+    std.testing.refAllDecls(@import("bgp/types.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/message.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/message_tests.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/validation.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/prefix_file.zig"));
+}
