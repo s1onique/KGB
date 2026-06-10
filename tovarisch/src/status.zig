@@ -158,9 +158,15 @@ pub fn toCString(path: []const u8, buf: *[4096]u8) ?[*:0]const u8 {
 
 var local_checks_buf: [8]Check = undefined;
 
+/// Module-level buffer for BFD status detail when peers are partially up.
+/// This avoids per-request heap allocation for the "X/Y bfd sessions up" case.
+/// Max format: "9999/9999 bfd sessions up" = 24 chars, well within 64 byte buffer.
+var bfd_detail_buf: [64]u8 = undefined;
+
 pub fn getBfdCheck(rt: ?*const bfd_status.BfdRuntime) Check {
     const snapshot = bfd_status.snapshotFromRuntime(rt);
-    const raw_check = bfd_status.buildStatusCheck(snapshot);
+    // Use buffer-based variant to avoid any heap allocation
+    const raw_check = bfd_status.buildStatusCheckInto(snapshot, &bfd_detail_buf);
     const mapped_status: CheckStatus = switch (raw_check.status) {
         .ok => .ok,
         .warn => .warn,

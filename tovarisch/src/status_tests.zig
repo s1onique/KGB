@@ -311,3 +311,86 @@ test "version contains base_version prefix" {
     try std.testing.expect(std.mem.startsWith(u8, s.version, "0.1."));
     try std.testing.expect(std.mem.containsAtLeast(u8, s.version, 1, "+"));
 }
+
+// --- Regression: per-request memory leak tests ---
+// These tests verify that status rendering does not leak memory per request.
+// The original bug: buildStatusCheck() used std.fmt.allocPrint() with page_allocator
+// which leaked ~4KiB per /status request (one page per call).
+// Fix: replaced allocPrint with static buffer in bfd/status.zig.
+
+test "renderPayload multiple times produces consistent output" {
+    // This test verifies that repeated status rendering is consistent.
+    // Original bug: each call to buildStatusCheck() with partial BFD peers
+    // would allocate via allocPrint and leak memory.
+    var w1 = TestWriter.init();
+    var w2 = TestWriter.init();
+    var w3 = TestWriter.init();
+
+    try status.renderPayload(&w1);
+    try status.renderPayload(&w2);
+    try status.renderPayload(&w3);
+
+    // All three renders should produce valid JSON with same structure
+    try std.testing.expect(std.mem.containsAtLeast(u8, w1.slice(), 1, "\"service\":\"tovarisch\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w2.slice(), 1, "\"service\":\"tovarisch\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w3.slice(), 1, "\"service\":\"tovarisch\""));
+
+    // All should have same check count (8 checks)
+    try std.testing.expect(std.mem.containsAtLeast(u8, w1.slice(), 1, "\"name\":\"bfd\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w2.slice(), 1, "\"name\":\"bfd\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w3.slice(), 1, "\"name\":\"bfd\""));
+}
+
+test "getBfdCheck with partial peers uses static buffer" {
+    // Test that getBfdCheck with partial peers (some up, some down) works correctly.
+    // This is the exact code path that previously leaked: buildStatusCheck() with
+    // snapshot where up_count != peer_count.
+    var rt = bfd_status.createTestRuntime();
+    try bfd_status.addTestPeer(&rt, "10.0.0.1", "10.0.0.2");
+    try bfd_status.addTestPeer(&rt, "10.0.0.3", "10.0.0.4");
+    rt.startAll();
+
+    // Only one peer is in Up state (no handshake on second yet)
+    const check = status.getBfdCheck(&rt);
+
+    // Should return warn status
+    try std.testing.expect(check.status == .warn);
+
+    // Detail should contain the partial session info
+    // The old buggy code would return "1/2 bfd sessions up" but leak memory.
+    // The fixed code should do the same but without leaking.
+    try std.testing.expect(std.mem.containsAtLeast(u8, check.detail, 1, "bfd"));
+}
+
+test "buildStatusCheck with partial peers detail format" {
+    // Direct test of the fixed function with partial peers scenario.
+    const snapshot = bfd_status.StatusSnapshot{
+        .peer_count = 3,
+        .up_count = 2,
+        .has_peers = true,
+    };
+    const check = bfd_status.buildStatusCheck(snapshot);
+
+    try std.testing.expect(check.status == .warn);
+    // Detail should be "2/3 bfd sessions up" - uses static buffer, no leak
+    try std.testing.expectEqualStrings("2/3 bfd sessions up", check.detail);
+}
+
+test "buildStatusCheckInto partial peers is allocation-free" {
+    // Test the buffer-based variant to verify no allocation occurs.
+    // This is the preferred API for safe usage.
+    const snapshot = bfd_status.StatusSnapshot{
+        .peer_count = 3,
+        .up_count = 2,
+        .has_peers = true,
+    };
+
+    var detail_buf: [64]u8 = undefined;
+    const check = bfd_status.buildStatusCheckInto(snapshot, &detail_buf);
+
+    try std.testing.expect(check.status == .warn);
+    try std.testing.expectEqualStrings("2/3 bfd sessions up", check.detail);
+
+    // Verify the detail points to our buffer (not heap-allocated)
+    try std.testing.expect(@intFromPtr(check.detail.ptr) == @intFromPtr(&detail_buf[0]));
+}

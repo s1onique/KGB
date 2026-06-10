@@ -62,9 +62,20 @@ pub fn snapshotFromRuntime(rt: ?*const BfdRuntime) StatusSnapshot {
     };
 }
 
-/// Build a StatusCheck from a StatusSnapshot.
-/// This function is pure and stateless - it only transforms input.
-pub fn buildStatusCheck(snapshot: StatusSnapshot) StatusCheck {
+/// Maximum buffer size for BFD detail formatting.
+/// Format: "9999/9999 bfd sessions up" = 24 chars max.
+const BFD_DETAIL_BUF_SIZE: usize = 64;
+
+/// Build a StatusCheck from a StatusSnapshot using caller-provided buffer.
+/// This is the allocation-free variant - callers pass a buffer for dynamic details.
+/// 
+/// The returned StatusCheck.detail points to either:
+/// - A static string for non-partial cases
+/// - The caller's buffer for partial BFD cases
+pub fn buildStatusCheckInto(
+    snapshot: StatusSnapshot,
+    detail_buf: *[BFD_DETAIL_BUF_SIZE]u8,
+) StatusCheck {
     if (!snapshot.has_peers or snapshot.peer_count == 0) {
         return .{
             .name = "bfd",
@@ -81,14 +92,18 @@ pub fn buildStatusCheck(snapshot: StatusSnapshot) StatusCheck {
         };
     }
 
-    // Some peers up, some not
-    const detail = std.fmt.allocPrint(std.heap.page_allocator, "{d}/{d} bfd sessions up", .{
-        snapshot.up_count,
-        snapshot.peer_count,
-    }) catch return .{
-        .name = "bfd",
-        .status = .warn,
-        .detail = "bfd partially up",
+    // Some peers up, some not - format into caller's buffer (no allocation)
+    const detail = std.fmt.bufPrint(
+        detail_buf,
+        "{d}/{d} bfd sessions up",
+        .{ snapshot.up_count, snapshot.peer_count },
+    ) catch {
+        // Buffer too small (should never happen with 64 bytes)
+        return .{
+            .name = "bfd",
+            .status = .warn,
+            .detail = "bfd partially up",
+        };
     };
 
     return .{
@@ -96,6 +111,17 @@ pub fn buildStatusCheck(snapshot: StatusSnapshot) StatusCheck {
         .status = .warn,
         .detail = detail,
     };
+}
+
+/// Build a StatusCheck from a StatusSnapshot.
+/// 
+/// WARNING: This function uses a module-level static buffer for the partial-BFD case.
+/// It is NOT reentrant and NOT thread-safe. Use buildStatusCheckInto() for safe usage.
+/// Kept for backward compatibility with existing direct callers.
+var static_detail_buf: [BFD_DETAIL_BUF_SIZE]u8 = undefined;
+
+pub fn buildStatusCheck(snapshot: StatusSnapshot) StatusCheck {
+    return buildStatusCheckInto(snapshot, &static_detail_buf);
 }
 
 /// Create a fresh runtime for testing.
