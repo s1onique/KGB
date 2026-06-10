@@ -16,6 +16,7 @@ jobs:
   cross-platform-verify:
     name: Cross-platform compile gate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Cross-platform compile gate is compile-only verification for Linux target.
     # This catches platform-specific API drift in @import("builtin").os.tag branches
     # that would pass macOS local gate but fail on Linux CI.
@@ -39,6 +40,7 @@ jobs:
   build-deb:
     name: Build Ubuntu 24.04 amd64 deb
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -89,6 +91,7 @@ jobs:
           dpkg-deb --version
 
       - name: Run Linux CI gates excluding accepted kcov risk
+        timeout-minutes: 10
         run: |
           make hygiene-gate
           make tovarisch-build

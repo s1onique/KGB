@@ -18,6 +18,7 @@ jobs:
   build:
     name: Build ${{ matrix.asset_name }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     strategy:
       fail-fast: false
@@ -47,6 +48,7 @@ jobs:
         run: make tovarisch-build
 
       - name: Run tovarisch tests
+        timeout-minutes: 5
         run: make tovarisch-test
 
       - name: Verify tovarisch status contract
