@@ -101,8 +101,7 @@ fn statusCommand(status_args: []const []const u8, stdout: anytype, stderr: anyty
 /// Handle the `tovarisch wg generate` command.
 /// Delegates to wg_cmd module.
 fn wgCommand(wg_args_list: []const []const u8, stdout: anytype, stderr: anytype) ExitCode {
-    _ = stdout; // stdout not used; wg_cmd uses stderr for output
-    const exit_code = wg_cmd.wgCommand(wg_args_list, stderr, std.heap.page_allocator);
+    const exit_code = wg_cmd.wgCommand(wg_args_list, stdout, stderr, std.heap.page_allocator);
     return if (exit_code == 0) .ok else .usage;
 }
 

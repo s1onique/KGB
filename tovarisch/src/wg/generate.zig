@@ -84,28 +84,47 @@ pub fn readPrivateKey(key_path: []const u8, allocator: std.mem.Allocator) Genera
     return owned_key;
 }
 
-/// Create the output directory with mode 0700 (owner read/write/execute only).
+/// Create the output directory recursively with mode 0700 (owner read/write/execute only).
+/// Creates all parent directories as needed.
 fn createOutputDir(output_dir: []const u8) GenerateError!void {
-    var path_buf: [4096]u8 = undefined;
-    const c_path = toCString(output_dir, &path_buf) catch return GenerateError.PathTooLong;
+    // Iterate through the path and create each directory component
+    // No trailing slashes - we slice to end of each component
+    var i: usize = 0;
+    while (i < output_dir.len) {
+        // Find next path separator
+        const remaining = output_dir[i..];
+        const sep = std.mem.indexOfScalar(u8, remaining, '/');
 
-    // Try to create directory with 0700 permissions
-    const result = std.c.mkdir(c_path, 0o700);
-    if (result < 0) {
-        const errno = std.c._errno().*;
-        const e_exist = @intFromEnum(std.c.E.EXIST);
-        const e_noent = @intFromEnum(std.c.E.NOENT);
+        // Calculate end of this component (no trailing slash)
+        const end = if (sep) |s| i + s else output_dir.len;
 
-        if (errno == e_exist) {
-            // Directory already exists - that's fine
-            return;
+        // Skip empty components and the root "/" itself
+        if (end > i + 1) {
+            const component = output_dir[0..end];
+
+            // Convert to null-terminated C string
+            var path_buf: [4096]u8 = undefined;
+            const c_path = toCString(component, &path_buf) catch return GenerateError.PathTooLong;
+
+            // Try to create directory with 0700 permissions
+            const result = std.c.mkdir(c_path, 0o700);
+            if (result < 0) {
+                const errno = std.c._errno().*;
+                const e_exist = @intFromEnum(std.c.E.EXIST);
+
+                if (errno != e_exist) {
+                    return GenerateError.OutputDirCreateFailed;
+                }
+                // EEXIST is fine - directory already exists
+            }
         }
-        if (errno == e_noent) {
-            // Parent directory doesn't exist - try to create parent dirs
-            return GenerateError.OutputDirCreateFailed;
+
+        // Advance past this component
+        if (sep) |_| {
+            i = end + 1;
+        } else {
+            break;
         }
-        // Other error
-        return GenerateError.OutputDirCreateFailed;
     }
 }
 
@@ -220,4 +239,22 @@ test "readPrivateKey rejects invalid key length" {
 
     const result = readPrivateKey(tmp_path, std.heap.page_allocator);
     try std.testing.expectError(GenerateError.InvalidPrivateKey, result);
+}
+
+test "createOutputDir creates nested directories" {
+    // Create a unique nested path under /tmp
+    const unique_dir = "/tmp/tovarisch-wg-test-nested-unique";
+
+    // Create a deeply nested path that doesn't exist
+    const nested_path = unique_dir ++ "/a/b/c/d";
+
+    // This should succeed without error using recursive directory creation.
+    try createOutputDir(nested_path);
+
+    // Clean up - remove the nested directory
+    _ = std.c.rmdir(nested_path);
+    _ = std.c.rmdir(unique_dir ++ "/a/b/c");
+    _ = std.c.rmdir(unique_dir ++ "/a/b");
+    _ = std.c.rmdir(unique_dir ++ "/a");
+    _ = std.c.rmdir(unique_dir);
 }

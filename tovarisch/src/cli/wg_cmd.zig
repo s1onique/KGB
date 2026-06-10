@@ -8,15 +8,17 @@ const config = @import("../config.zig");
 const wg_generate = @import("../wg/generate.zig");
 
 /// Execute the wg subcommand.
-pub fn wgCommand(args: []const []const u8, stderr: anytype, allocator: std.mem.Allocator) u8 {
+/// @param stdout - used for help and success messages
+/// @param stderr - used for error messages
+pub fn wgCommand(args: []const []const u8, stdout: anytype, stderr: anytype, allocator: std.mem.Allocator) u8 {
     const result = wg_args.parseWgArgs(args, stderr);
 
     switch (result) {
         .help => {
-            stderr.writeAll("usage: tovarisch wg generate --config <path>\n") catch return 1;
-            stderr.writeAll("\nGenerates WireGuard server config from [wg] section in tovarisch.conf.\n") catch return 1;
-            stderr.writeAll("The generated config file is written with strict permissions (0600).\n") catch return 1;
-            stderr.writeAll("Private keys are read from the path specified in private_key_file.\n") catch return 1;
+            stdout.writeAll("usage: tovarisch wg generate --config <path>\n") catch return 1;
+            stdout.writeAll("\nGenerates WireGuard server config from [wg] section in tovarisch.conf.\n") catch return 1;
+            stdout.writeAll("The generated config file is written with strict permissions (0600).\n") catch return 1;
+            stdout.writeAll("Private keys are read from the path specified in private_key_file.\n") catch return 1;
             return 0;
         },
         .usage => {
@@ -50,11 +52,11 @@ pub fn wgCommand(args: []const []const u8, stderr: anytype, allocator: std.mem.A
             };
             defer gen_result.deinit(allocator);
 
-            // Success output
-            stderr.print("Generated WireGuard config at: {s}\n", .{gen_result.output_path}) catch {};
-            stderr.print("Interface: {s}\n", .{gen_result.interface}) catch {};
-            stderr.print("Address: {s}\n", .{gen_result.address}) catch {};
-            stderr.print("ListenPort: {d}\n", .{gen_result.listen_port}) catch {};
+            // Success output goes to stdout
+            stdout.print("Generated WireGuard config at: {s}\n", .{gen_result.output_path}) catch {};
+            stdout.print("Interface: {s}\n", .{gen_result.interface}) catch {};
+            stdout.print("Address: {s}\n", .{gen_result.address}) catch {};
+            stdout.print("ListenPort: {d}\n", .{gen_result.listen_port}) catch {};
             return 0;
         },
     }
@@ -72,31 +74,37 @@ const VoidWriter = struct {
 };
 
 test "wgCommand returns 0 for --help" {
-    const result = wgCommand(&.{"--help"}, VoidWriter{}, std.heap.page_allocator);
+    const w = VoidWriter{};
+    const result = wgCommand(&.{"--help"}, w, w, std.heap.page_allocator);
     try std.testing.expectEqual(@as(u8, 0), result);
 }
 
 test "wgCommand returns 0 for -h" {
-    const result = wgCommand(&.{"-h"}, VoidWriter{}, std.heap.page_allocator);
+    const w = VoidWriter{};
+    const result = wgCommand(&.{"-h"}, w, w, std.heap.page_allocator);
     try std.testing.expectEqual(@as(u8, 0), result);
 }
 
 test "wgCommand returns 1 for no args" {
-    const result = wgCommand(&.{}, VoidWriter{}, std.heap.page_allocator);
+    const w = VoidWriter{};
+    const result = wgCommand(&.{}, w, w, std.heap.page_allocator);
     try std.testing.expectEqual(@as(u8, 1), result);
 }
 
 test "wgCommand returns 1 for unknown subcommand" {
-    const result = wgCommand(&.{"unknown"}, VoidWriter{}, std.heap.page_allocator);
+    const w = VoidWriter{};
+    const result = wgCommand(&.{"unknown"}, w, w, std.heap.page_allocator);
     try std.testing.expectEqual(@as(u8, 1), result);
 }
 
 test "wgCommand returns 1 when --config is missing" {
-    const result = wgCommand(&.{"generate"}, VoidWriter{}, std.heap.page_allocator);
+    const w = VoidWriter{};
+    const result = wgCommand(&.{"generate"}, w, w, std.heap.page_allocator);
     try std.testing.expectEqual(@as(u8, 1), result);
 }
 
 test "wgCommand returns 1 for non-existent config file" {
-    const result = wgCommand(&.{ "generate", "--config", "/nonexistent/path.conf" }, VoidWriter{}, std.heap.page_allocator);
+    const w = VoidWriter{};
+    const result = wgCommand(&.{ "generate", "--config", "/nonexistent/path.conf" }, w, w, std.heap.page_allocator);
     try std.testing.expectEqual(@as(u8, 1), result);
 }
