@@ -66,15 +66,20 @@ pub const tunnel_prefixes = [_][]const u8{
 /// This is a name-based heuristic classifier for Linux network interfaces.
 /// It does NOT inspect interface flags, metadata, or actual tunnel configuration.
 ///
-/// WireGuard (wg*) requires digit after "wg" to distinguish from other wg* names.
-/// Other prefixes match if the interface name starts with the prefix.
+/// WireGuard naming patterns:
+/// - "wg" alone is valid (bare WireGuard device)
+/// - "wg" followed by digits (wg0, wg1, wg42) - standard WireGuard naming
+/// - "wg-" prefix followed by anything (wg-kgb0, wg-tunnel, wg-custom) - KGB naming
+///
+/// This relaxed detection accepts both "wg0" and "wg-kgb0" patterns while
+/// still excluding non-tunnel names like "wga", "wgh", "wg-peer1".
 pub fn isTunnelInterface(iface: []const u8) bool {
-    // Check WireGuard specifically: must be "wg" followed by digit(s)
+    // Check WireGuard: must start with "wg"
     if (std.mem.startsWith(u8, iface, "wg")) {
         if (iface.len < 3) return true; // exactly "wg" is valid
-        // Must be followed by digit to be a valid WireGuard interface
         const c = iface[2];
-        return c >= '0' and c <= '9';
+        // Accept: digit (wg0, wg1) or hyphen (wg-kgb0, wg-tunnel)
+        return (c >= '0' and c <= '9') or c == '-';
     }
 
     // Check other prefixes

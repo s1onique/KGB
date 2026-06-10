@@ -27,11 +27,20 @@ test "isTunnelInterface: WireGuard interfaces" {
     // Edge case: "wg" alone is valid
     try testing.expect(interface_filter.isTunnelInterface("wg"));
 
-    // WireGuard must be followed by digit - these are NOT tunnel interfaces
+    // WireGuard with hyphen prefix (KGB naming: wg-<name>)
+    // This is the critical regression test for wg-kgb0 bug
+    try testing.expect(interface_filter.isTunnelInterface("wg-kgb0"));
+    try testing.expect(interface_filter.isTunnelInterface("wg-kgb1"));
+    try testing.expect(interface_filter.isTunnelInterface("wg-tunnel"));
+    try testing.expect(interface_filter.isTunnelInterface("wg-custom"));
+    try testing.expect(interface_filter.isTunnelInterface("wg-vpn0"));
+
+    // WireGuard must be followed by digit or hyphen - these are NOT tunnel interfaces
     try testing.expect(!interface_filter.isTunnelInterface("wga"));
     try testing.expect(!interface_filter.isTunnelInterface("wgh"));
-    try testing.expect(!interface_filter.isTunnelInterface("wg-peer1"));
     try testing.expect(!interface_filter.isTunnelInterface("wgx"));
+    // Note: wg-peer1 starts with "wg-" so it IS a tunnel (matches wg-* pattern)
+    try testing.expect(interface_filter.isTunnelInterface("wg-peer1"));
 }
 
 test "isTunnelInterface: TUN interfaces" {
@@ -107,6 +116,14 @@ test "isTunnelInterface: non-tunnel interfaces excluded" {
     try testing.expect(!interface_filter.isTunnelInterface("veth0"));
     try testing.expect(!interface_filter.isTunnelInterface("veth1"));
     try testing.expect(!interface_filter.isTunnelInterface("veth2a3b4c"));
+
+    // Docker bridge interfaces (NOT tunnels)
+    try testing.expect(!interface_filter.isTunnelInterface("docker0"));
+    try testing.expect(!interface_filter.isTunnelInterface("docker1"));
+
+    // amn0 is NOT a tunnel unless explicitly configured as one
+    try testing.expect(!interface_filter.isTunnelInterface("amn0"));
+    try testing.expect(!interface_filter.isTunnelInterface("amn1"));
 }
 
 test "isTunnelInterface: edge cases" {
