@@ -64,14 +64,7 @@ pub fn readPrivateKey(key_path: []const u8, allocator: std.mem.Allocator) Genera
     }
     defer _ = std.c.close(fd);
 
-    // Get file size
-    var stat_buf: std.c.Stat = undefined;
-    const stat_result = std.c.fstat(fd, &stat_buf);
-    if (stat_result < 0) {
-        return GenerateError.PrivateKeyNotFound;
-    }
-
-    // Read the key (WireGuard private keys are 44 base64 chars + newline)
+    // Read the key (WireGuard private keys are 44 base64 chars + newline).
     var key_buf: [64]u8 = undefined;
     const bytes_read = std.c.read(fd, &key_buf, key_buf.len);
     if (bytes_read < 0) {

@@ -4,7 +4,6 @@
 
 const std = @import("std");
 const config = @import("../config.zig");
-const wg_generate = @import("../wg/generate.zig");
 
 /// Errors that can occur during wg argument parsing.
 pub const WgArgError = error{
