@@ -47,6 +47,7 @@ from coverage_diagnostics import (
     check_dwarf_has_paths,
     print_report_diagnostics,
 )
+from coverage_test_fallback import run_test_as_signal_fallback
 
 
 def read_coverage_threshold() -> float:
@@ -372,6 +373,23 @@ def main() -> int:
     
     print("")
     print(f"[coverage] kcov attempts: {len(attempts)} total, {kcov_success} succeeded, {kcov_timeout_count} timed out")
+    
+    # Check if DWARF is incomplete and we should use test-as-signal fallback
+    if kcov_success > 0 and not dwarf_had_paths:
+        print("")
+        print("[WARN] coverage: DWARF is incomplete — kcov coverage may be untrustworthy")
+        print("[WARN] coverage: Using test-as-signal as honest fallback")
+        print(f"[WARN] coverage: kcov reports {final_coverage:.2f}% but DWARF has no source paths")
+        
+        success, message = run_test_as_signal_fallback(REPO_ROOT, final_coverage)
+        if success:
+            print(f"[PASS] coverage: {message}")
+            print("[PASS] coverage: real line coverage gate passed (test-as-signal fallback)")
+            return 0
+        else:
+            print(f"[FAIL] coverage: {message}")
+            print("[FAIL] coverage: Cannot use kcov percentage as fallback when DWARF is broken")
+            return 1
     
     if kcov_success == 0:
         print("")

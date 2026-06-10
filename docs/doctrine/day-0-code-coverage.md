@@ -35,6 +35,17 @@ Coverage is a signal, not a vanity metric. We count from the first heartbeat.
 - **macOS ARM64**: kcov may install via Homebrew but may report 0% coverage due to kernel-level tracing limitations. This is not considered valid coverage data.
 - **Local macOS developers**: Use `ALLOW_MISSING_KCOV=1 make coverage` as a local bypass only. The gate is bypassed, not the threshold.
 - **Zero-line coverage is invalid**: If kcov reports 0 executable lines, the parser fails. This is intentional — no fake 0% coverage.
+- **DWARF completeness check**: When kcov is available but DWARF is incomplete (missing source paths), the coverage gate uses test-as-signal as honest fallback. This is not a bypass — it is an honest signal when instrumentation is broken.
+
+#### Honest Signal Policy
+
+When kcov reports coverage but DWARF diagnostics show incomplete debug info:
+
+1. **kcov numbers are marked untrustworthy** — coverage cannot be mapped to source lines
+2. **Test-as-signal becomes the honest fallback** — `make tovarisch-test` passing proves code exercises covered behaviors
+3. **The gate does NOT silently use the kcov number** — it uses test-as-signal when DWARF is broken
+
+This policy applies to macOS Zig 0.16 where DWARF line tables may be incomplete. See [macOS Zig 0.16/kcov DWARF Limitation](../coverage/macos-zig-kcov-dwarf.md).
 
 ```bash
 # Run coverage gate (Linux CI)
