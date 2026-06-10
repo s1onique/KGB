@@ -115,8 +115,13 @@ fn writeConfigFile(output_path: []const u8, content: []const u8) GenerateError!v
     const c_path = toCString(output_path, &path_buf) catch return GenerateError.PathTooLong;
 
     // Open file for writing, create if not exists, truncate if exists
-    const open_flags: std.c.O = @bitCast(@as(u32, 1) | @as(u32, 0x0200) | @as(u32, 0x0400));
-    const fd = std.c.open(c_path, open_flags, @as(u32, 0o600));
+    // Use portable std.c.O struct instead of platform-specific magic constants
+    const open_flags = std.c.O{
+        .ACCMODE = std.posix.ACCMODE.WRONLY,
+        .CREAT = true,
+        .TRUNC = true,
+    };
+    const fd = std.c.open(c_path, open_flags, @as(c_uint, 0o600));
     if (fd < 0) {
         return GenerateError.OutputFileWriteFailed;
     }
@@ -191,22 +196,27 @@ test "readPrivateKey rejects non-existent file" {
 }
 
 test "readPrivateKey rejects invalid key length" {
-    // Create a temp file with invalid key content using C API
+    // Create a temp file with invalid key content using portable C API
     const tmp_path = "/tmp/wg-test-key-invalid";
-    defer _ = std.c.unlink(tmp_path.ptr);
 
     var path_buf: [256]u8 = undefined;
     @memcpy(path_buf[0..tmp_path.len], tmp_path);
     path_buf[tmp_path.len] = 0;
     const c_path: [*:0]const u8 = @ptrCast(&path_buf);
+    defer _ = std.c.unlink(c_path);
 
-    // Create and write to the file
-    const fd = std.c.open(c_path, @bitCast(@as(u32, 0x0201)), @as(u32, 0o600)); // O_WRONLY | O_CREAT
-    if (fd >= 0) {
-        defer _ = std.c.close(fd);
-        const content = "short";
-        _ = std.c.write(fd, content.ptr, content.len);
-    }
+    // Use portable std.c.O struct instead of platform-specific magic constants
+    const open_flags = std.c.O{
+        .ACCMODE = std.posix.ACCMODE.WRONLY,
+        .CREAT = true,
+        .TRUNC = true,
+    };
+    const fd = std.c.open(c_path, open_flags, @as(c_uint, 0o600));
+    try std.testing.expect(fd >= 0); // Fail loud if file creation fails
+    defer _ = std.c.close(fd);
+
+    const content = "short";
+    _ = std.c.write(fd, content.ptr, content.len);
 
     const result = readPrivateKey(tmp_path, std.heap.page_allocator);
     try std.testing.expectError(GenerateError.InvalidPrivateKey, result);
