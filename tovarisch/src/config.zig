@@ -25,6 +25,8 @@ pub const ConfigError = error{
     InvalidCidr,
     /// Port number out of valid range (1..65535)
     InvalidPort,
+    /// WireGuard key is invalid (not 44 base64 characters)
+    InvalidKey,
 };
 
 /// Raw section store for INI parsing.
@@ -45,6 +47,10 @@ pub const WgConfig = struct {
     output_dir: []const u8 = "/var/lib/kgb/wireguard",
     /// Path to the server private key file.
     private_key_file: []const u8 = "",
+    /// Path to the server public key file (for client config generation).
+    public_key_file: []const u8 = "",
+    /// Allowed IPs for clients in generated client configs (e.g., "10.149.149.0/24").
+    client_allowed_ips: []const u8 = "10.149.149.0/24",
 };
 
 /// Parse a boolean value from a string.
@@ -211,6 +217,18 @@ pub fn parseWgConfig(raw: *const RawConfig) ConfigError!WgConfig {
         cfg.private_key_file = value;
     } else {
         return ConfigError.MissingKey;
+    }
+
+    // Parse optional public_key_file (needed for client config generation)
+    if (getString(wg_section, "public_key_file")) |value| {
+        try requireNonEmpty(value);
+        cfg.public_key_file = value;
+    }
+
+    // Parse optional client_allowed_ips (defaults to 10.149.149.0/24)
+    if (getString(wg_section, "client_allowed_ips")) |value| {
+        try requireNonEmpty(value);
+        cfg.client_allowed_ips = value;
     }
 
     return cfg;

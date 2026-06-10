@@ -5,6 +5,7 @@
 const std = @import("std");
 const wg_args = @import("wg_args.zig");
 const config = @import("../config.zig");
+const wg_config = @import("../wg/config.zig");
 const wg_generate = @import("../wg/generate.zig");
 
 /// Execute the wg subcommand.
@@ -16,9 +17,11 @@ pub fn wgCommand(args: []const []const u8, stdout: anytype, stderr: anytype, all
     switch (result) {
         .help => {
             stdout.writeAll("usage: tovarisch wg generate --config <path>\n") catch return 1;
-            stdout.writeAll("\nGenerates WireGuard server config from [wg] section in tovarisch.conf.\n") catch return 1;
-            stdout.writeAll("The generated config file is written with strict permissions (0600).\n") catch return 1;
-            stdout.writeAll("Private keys are read from the path specified in private_key_file.\n") catch return 1;
+            stdout.writeAll("\nGenerates WireGuard server and client configs from [wg] and [wg.peer.*] sections.\n") catch return 1;
+            stdout.writeAll("Server config is written to {output_dir}/{interface}.conf\n") catch return 1;
+            stdout.writeAll("Client configs are written to paths specified in each [wg.peer.*] section.\n") catch return 1;
+            stdout.writeAll("Generated config files are written with strict permissions (0600).\n") catch return 1;
+            stdout.writeAll("Private keys are never logged or printed to output.\n") catch return 1;
             return 0;
         },
         .usage => {
@@ -45,18 +48,53 @@ pub fn wgCommand(args: []const []const u8, stdout: anytype, stderr: anytype, all
                 return 1;
             }
 
-            // Generate the config
-            const gen_result = wg_generate.generateConfig(wg_cfg, allocator) catch |e| {
-                stderr.print("error: failed to generate config: {s}\n", .{@errorName(e)}) catch {};
+            // Parse all peer configs
+            const peers = wg_config.parseAllPeerConfigs(&raw, allocator) catch |e| {
+                stderr.print("error: failed to parse peer configs: {s}\n", .{@errorName(e)}) catch {};
                 return 1;
             };
-            defer gen_result.deinit(allocator);
+            defer allocator.free(peers);
 
-            // Success output goes to stdout
-            stdout.print("Generated WireGuard config at: {s}\n", .{gen_result.output_path}) catch {};
-            stdout.print("Interface: {s}\n", .{gen_result.interface}) catch {};
-            stdout.print("Address: {s}\n", .{gen_result.address}) catch {};
-            stdout.print("ListenPort: {d}\n", .{gen_result.listen_port}) catch {};
+            // Generate server config
+            const server_result = wg_generate.generateServerConfig(wg_cfg, peers, allocator) catch |e| {
+                stderr.print("error: failed to generate server config: {s}\n", .{@errorName(e)}) catch {};
+                return 1;
+            };
+            defer server_result.deinit(allocator);
+
+            // Output server config result
+            stdout.print("Server config generated: {s}\n", .{server_result.output_path}) catch {};
+            stdout.print("  Interface: {s}\n", .{server_result.interface}) catch {};
+            stdout.print("  Address: {s}\n", .{server_result.address}) catch {};
+            stdout.print("  ListenPort: {d}\n", .{server_result.listen_port}) catch {};
+            stdout.print("  Peers: {d}\n", .{server_result.peer_count}) catch {};
+
+            // Generate client configs for enabled peers
+            // Client generation is fatal - any failure exits non-zero
+            var client_count: usize = 0;
+            for (peers) |*p| {
+                if (!p.enabled) continue;
+
+                // Skip if no client_output_file specified
+                if (p.client_output_file.len == 0) continue;
+
+                const client_result = wg_generate.generateClientConfig(wg_cfg, p, allocator) catch |e| {
+                    stderr.print("error: failed to generate client config for {s}: {s}\n", .{ p.name, @errorName(e) }) catch {};
+                    return 1; // Fatal error - exit non-zero
+                };
+                defer client_result.deinit(allocator);
+
+                stdout.print("Client config generated: {s}\n", .{client_result.output_path}) catch {};
+                stdout.print("  Peer: {s}\n", .{client_result.peer_name}) catch {};
+                client_count += 1;
+            }
+
+            if (client_count == 0 and server_result.peer_count == 0) {
+                stdout.writeAll("\nNo enabled peers found. Add [wg.peer.<name>] sections with enabled = true.\n") catch {};
+            } else if (client_count == 0) {
+                stdout.writeAll("\nNo client configs generated. Ensure enabled peers have client_output_file set.\n") catch {};
+            }
+
             return 0;
         },
     }

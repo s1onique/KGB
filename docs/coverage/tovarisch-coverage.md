@@ -104,6 +104,7 @@ All public `tovarisch` commands must appear in this ledger:
 | `status --json` | Yes | ✅ Unit test + structural validation |
 | `serve` | Yes | ✅ CLI parse unit tests; daemon loop = manual smoke test |
 | `serve` heartbeat emission | Yes | ✅ Formatter tests in `heartbeat_log.zig`; runtime emission = manual smoke test |
+| `wg generate` | Yes | ✅ Unit tests in `wg_cmd.zig`, `peer.zig`, `peer_tests.zig`; config parsing tests |
 
 ## Updating This Ledger
 

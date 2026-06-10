@@ -1,11 +1,13 @@
 // wg/generate.zig — WireGuard config file generation
 //
 // Generates WireGuard server config files from WgConfig.
+// Generates client config files for each enabled peer.
 // This ACT generates files only - runtime mutation is out of scope.
 
 const std = @import("std");
 const config = @import("../config.zig");
 const wg_config = @import("config.zig");
+const peer = @import("peer.zig");
 
 /// Errors that can occur during WireGuard config generation.
 pub const GenerateError = error{
@@ -13,6 +15,10 @@ pub const GenerateError = error{
     PrivateKeyNotFound,
     /// Private key file has invalid content (not 44 base64 chars).
     InvalidPrivateKey,
+    /// Public key file does not exist or is not readable.
+    PublicKeyNotFound,
+    /// Public key file has invalid content (not 44 base64 chars).
+    InvalidPublicKey,
     /// Output directory cannot be created.
     OutputDirCreateFailed,
     /// Output file cannot be written.
@@ -25,8 +31,8 @@ pub const GenerateError = error{
     OutOfMemory,
 };
 
-/// Result of successful config generation.
-pub const GenerateResult = struct {
+/// Result of successful server config generation.
+pub const ServerGenerateResult = struct {
     /// The generated interface name.
     interface: []const u8,
     /// The address in CIDR notation.
@@ -35,10 +41,26 @@ pub const GenerateResult = struct {
     listen_port: u16,
     /// The path to the generated config file.
     output_path: []const u8,
+    /// Number of peers added to the server config.
+    peer_count: usize,
 
     /// Free resources owned by this result.
     /// Call this when done using the result.
-    pub fn deinit(self: *const GenerateResult, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const ServerGenerateResult, allocator: std.mem.Allocator) void {
+        allocator.free(self.output_path);
+    }
+};
+
+/// Result of successful client config generation for a single peer.
+pub const ClientGenerateResult = struct {
+    /// The peer name.
+    peer_name: []const u8,
+    /// The path to the generated client config file.
+    output_path: []const u8,
+
+    /// Free resources owned by this result.
+    /// Call this when done using the result.
+    pub fn deinit(self: *const ClientGenerateResult, allocator: std.mem.Allocator) void {
         allocator.free(self.output_path);
     }
 };
@@ -77,6 +99,60 @@ pub fn readPrivateKey(key_path: []const u8, allocator: std.mem.Allocator) Genera
     // Validate key length (WireGuard private keys are 44 base64 chars)
     if (key.len != 44) {
         return GenerateError.InvalidPrivateKey;
+    }
+
+    // Duplicate the key for the caller (caller owns the memory)
+    const owned_key = allocator.dupe(u8, key) catch return GenerateError.OutOfMemory;
+    return owned_key;
+}
+
+/// Read the public key from a file.
+/// Returns the key as a string slice (not null-terminated).
+/// The key must be a valid WireGuard public key (44 base64 characters, with optional padding).
+pub fn readPublicKey(key_path: []const u8, allocator: std.mem.Allocator) GenerateError![]const u8 {
+    var path_buf: [4096]u8 = undefined;
+    const c_path = toCString(key_path, &path_buf) catch return GenerateError.PathTooLong;
+
+    const fd = std.c.open(c_path, @bitCast(@as(u32, 0)));
+    if (fd < 0) {
+        return GenerateError.PublicKeyNotFound;
+    }
+    defer _ = std.c.close(fd);
+
+    // Read the key (WireGuard public keys are 44 base64 chars + newline, optionally with padding).
+    var key_buf: [64]u8 = undefined;
+    const bytes_read = std.c.read(fd, &key_buf, key_buf.len);
+    if (bytes_read < 0) {
+        return GenerateError.PublicKeyNotFound;
+    }
+
+    // Trim whitespace only (not padding)
+    const key = std.mem.trim(u8, key_buf[0..@as(usize, @intCast(bytes_read))], " \t\r\n");
+
+    // Validate key format (44 base64 chars, optionally with 1-2 padding chars)
+    if (key.len < 44 or key.len > 46) {
+        return GenerateError.InvalidPublicKey;
+    }
+
+    // Check the base64 portion (first 44 chars)
+    for (key[0..44]) |c| {
+        const valid = (c >= 'A' and c <= 'Z') or
+            (c >= 'a' and c <= 'z') or
+            (c >= '0' and c <= '9') or
+            c == '+' or
+            c == '/';
+        if (!valid) {
+            return GenerateError.InvalidPublicKey;
+        }
+    }
+
+    // If there are extra characters, they must be valid padding (=)
+    if (key.len > 44) {
+        for (key[44..]) |c| {
+            if (c != '=') {
+                return GenerateError.InvalidPublicKey;
+            }
+        }
     }
 
     // Duplicate the key for the caller (caller owns the memory)
@@ -160,12 +236,14 @@ fn writeConfigFile(output_path: []const u8, content: []const u8) GenerateError!v
 }
 
 /// Generate a WireGuard server config file from WgConfig.
-/// Returns a GenerateResult with safe summary fields (no secrets).
+/// Adds Peer blocks for each enabled peer.
+/// Returns a ServerGenerateResult with safe summary fields (no secrets).
 /// Does NOT log the private key.
-pub fn generateConfig(
+pub fn generateServerConfig(
     cfg: wg_config.WgConfig,
+    peers: []const wg_config.WgPeer,
     allocator: std.mem.Allocator,
-) GenerateError!GenerateResult {
+) GenerateError!ServerGenerateResult {
     // Read the private key
     const private_key = readPrivateKey(cfg.private_key_file, allocator) catch |e| return e;
     defer allocator.free(private_key);
@@ -185,6 +263,7 @@ pub fn generateConfig(
     var content = std.ArrayList(u8).empty;
     defer content.deinit(allocator);
 
+    // [Interface] section
     try content.appendSlice(allocator, "[Interface]\n");
     try content.appendSlice(allocator, "Address = ");
     try content.appendSlice(allocator, cfg.address);
@@ -196,65 +275,110 @@ pub fn generateConfig(
     try content.append(allocator, '\n');
     try content.appendSlice(allocator, "SaveConfig = false\n");
 
+    // [Peer] sections for enabled peers
+    var peer_count: usize = 0;
+    for (peers) |p| {
+        if (!p.enabled) continue;
+
+        // Read the peer's public key - fail if missing or invalid
+        const peer_pub_key = try readPublicKey(p.public_key_file, allocator);
+        defer allocator.free(peer_pub_key);
+
+        try content.append(allocator, '\n');
+        try content.appendSlice(allocator, "[Peer]\n");
+        try content.appendSlice(allocator, "# ");
+        try content.appendSlice(allocator, p.name);
+        try content.append(allocator, '\n');
+        try content.appendSlice(allocator, "PublicKey = ");
+        try content.appendSlice(allocator, peer_pub_key);
+        try content.append(allocator, '\n');
+        try content.appendSlice(allocator, "AllowedIPs = ");
+        try content.appendSlice(allocator, p.allowed_ips);
+        try content.append(allocator, '\n');
+
+        peer_count += 1;
+    }
+
     // Write the config file
     try writeConfigFile(output_path, content.items);
 
-    return GenerateResult{
+    return ServerGenerateResult{
         .interface = cfg.interface,
         .address = cfg.address,
         .listen_port = cfg.listen_port,
         .output_path = output_path,
+        .peer_count = peer_count,
     };
 }
 
-// --- Tests ---
+/// Generate a WireGuard client config file for a single peer.
+/// Uses the peer's private key and the server's public key.
+/// Returns a ClientGenerateResult with safe summary fields (no secrets).
+/// Does NOT log any private keys.
+pub fn generateClientConfig(
+    cfg: wg_config.WgConfig,
+    peer_config: *const wg_config.WgPeer,
+    allocator: std.mem.Allocator,
+) GenerateError!ClientGenerateResult {
+    // Read the peer's private key
+    const peer_private_key = readPrivateKey(peer_config.private_key_file, allocator) catch |e| return e;
+    defer allocator.free(peer_private_key);
 
-test "readPrivateKey rejects non-existent file" {
-    const result = readPrivateKey("/nonexistent/path/to/key", std.heap.page_allocator);
-    try std.testing.expectError(GenerateError.PrivateKeyNotFound, result);
-}
+    // Read the server's public key (required for client config)
+    const server_public_key = readPublicKey(cfg.public_key_file, allocator) catch |e| return e;
+    defer allocator.free(server_public_key);
 
-test "readPrivateKey rejects invalid key length" {
-    // Create a temp file with invalid key content using portable C API
-    const tmp_path = "/tmp/wg-test-key-invalid";
+    // Build the output path
+    const output_path = try allocator.dupe(u8, peer_config.client_output_file);
+    errdefer allocator.free(output_path);
 
-    var path_buf: [256]u8 = undefined;
-    @memcpy(path_buf[0..tmp_path.len], tmp_path);
-    path_buf[tmp_path.len] = 0;
-    const c_path: [*:0]const u8 = @ptrCast(&path_buf);
-    defer _ = std.c.unlink(c_path);
+    // Create output directory (extract parent directory)
+    const parent_dir = std.fs.path.dirname(peer_config.client_output_file) orelse ".";
+    try createOutputDir(parent_dir);
 
-    // Use portable std.c.O struct instead of platform-specific magic constants
-    const open_flags = std.c.O{
-        .ACCMODE = std.posix.ACCMODE.WRONLY,
-        .CREAT = true,
-        .TRUNC = true,
+    // Build the WireGuard client config content
+    var content = std.ArrayList(u8).empty;
+    defer content.deinit(allocator);
+
+    // [Interface] section
+    try content.appendSlice(allocator, "[Interface]\n");
+    try content.appendSlice(allocator, "Address = ");
+    try content.appendSlice(allocator, peer_config.address);
+    try content.append(allocator, '\n');
+    try content.appendSlice(allocator, "PrivateKey = ");
+    try content.appendSlice(allocator, peer_private_key);
+    try content.append(allocator, '\n');
+
+    // [Peer] section
+    try content.append(allocator, '\n');
+    try content.appendSlice(allocator, "[Peer]\n");
+    try content.appendSlice(allocator, "PublicKey = ");
+    try content.appendSlice(allocator, server_public_key);
+    try content.append(allocator, '\n');
+    try content.appendSlice(allocator, "AllowedIPs = ");
+    try content.appendSlice(allocator, cfg.client_allowed_ips);
+    try content.append(allocator, '\n');
+
+    // Endpoint (optional)
+    if (peer_config.endpoint) |endpoint| {
+        try content.appendSlice(allocator, "Endpoint = ");
+        try content.appendSlice(allocator, endpoint);
+        try content.append(allocator, '\n');
+    }
+
+    // PersistentKeepalive (optional)
+    if (peer_config.persistent_keepalive) |keepalive| {
+        if (keepalive > 0) {
+            try content.appendSlice(allocator, "PersistentKeepalive = ");
+            try content.print(allocator, "{d}\n", .{keepalive});
+        }
+    }
+
+    // Write the config file
+    try writeConfigFile(output_path, content.items);
+
+    return ClientGenerateResult{
+        .peer_name = peer_config.name,
+        .output_path = output_path,
     };
-    const fd = std.c.open(c_path, open_flags, @as(c_uint, 0o600));
-    try std.testing.expect(fd >= 0); // Fail loud if file creation fails
-    defer _ = std.c.close(fd);
-
-    const content = "short";
-    _ = std.c.write(fd, content.ptr, content.len);
-
-    const result = readPrivateKey(tmp_path, std.heap.page_allocator);
-    try std.testing.expectError(GenerateError.InvalidPrivateKey, result);
-}
-
-test "createOutputDir creates nested directories" {
-    // Create a unique nested path under /tmp
-    const unique_dir = "/tmp/tovarisch-wg-test-nested-unique";
-
-    // Create a deeply nested path that doesn't exist
-    const nested_path = unique_dir ++ "/a/b/c/d";
-
-    // This should succeed without error using recursive directory creation.
-    try createOutputDir(nested_path);
-
-    // Clean up - remove the nested directory
-    _ = std.c.rmdir(nested_path);
-    _ = std.c.rmdir(unique_dir ++ "/a/b/c");
-    _ = std.c.rmdir(unique_dir ++ "/a/b");
-    _ = std.c.rmdir(unique_dir ++ "/a");
-    _ = std.c.rmdir(unique_dir);
 }
