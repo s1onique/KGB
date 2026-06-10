@@ -6,7 +6,7 @@ pub const usage_text =
     \\usage:
     \\  tovarisch --version
     \\  tovarisch check
-    \\  tovarisch serve [--listen ADDR:PORT] [--listen-private] [--listen-all-public-dangerous] [--statonly] [--stats-interval SECONDS]
+    \\  tovarisch serve [--config <path>] [--listen ADDR:PORT] [--listen-private] [--listen-all-public-dangerous] [--statonly] [--stats-interval SECONDS]
     \\  tovarisch status --json
     \\  tovarisch thread-smoke
     \\  tovarisch wg generate --config <path>
@@ -32,6 +32,10 @@ test "usage text contains tovarisch check" {
 
 test "usage text contains tovarisch serve" {
     try std.testing.expect(std.mem.indexOf(u8, usage_text, "tovarisch serve") != null);
+}
+
+test "usage text contains serve --config" {
+    try std.testing.expect(std.mem.indexOf(u8, usage_text, "serve [--config <path>]") != null);
 }
 
 test "usage text contains --listen-all-public-dangerous" {

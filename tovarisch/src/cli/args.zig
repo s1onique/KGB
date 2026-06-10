@@ -58,45 +58,58 @@ fn classifyServeBindHost(host: []const u8) BindValidation {
 
 /// Result of parsing serve command arguments.
 pub const ServeParseResult = union(enum) {
-    ok: http.Config,
+    ok: ServeConfig,
     usage,
+};
+
+/// Configuration returned after parsing serve command arguments.
+/// Includes HTTP config and optional path to toml config file.
+pub const ServeConfig = struct {
+    /// HTTP server configuration.
+    http_config: http.Config,
+    /// Optional path to TOML config file for BFD runtime.
+    config_path: ?[]const u8 = null,
 };
 
 /// Parse serve command arguments without starting the daemon.
 /// Returns the parsed config or usage error.
 pub fn parseServeArgs(args: []const []const u8, stderr: anytype) ServeParseResult {
-    var config = http.defaultConfig();
+    var http_config = http.defaultConfig();
     var dangerous_flag_present = false;
     var explicit_listen_address = false;
     var log_mode: LogMode = .normal;
     var stats_interval_seconds: u16 = 30;
+    var config_path: ?[]const u8 = null;
 
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
 
-        if (std.mem.eql(u8, arg, "--listen") and i + 1 < args.len) {
+        if (std.mem.eql(u8, arg, "--config") and i + 1 < args.len) {
+            config_path = args[i + 1];
+            i += 1;
+        } else if (std.mem.eql(u8, arg, "--listen") and i + 1 < args.len) {
             const addr = args[i + 1];
             if (std.mem.indexOfScalar(u8, addr, ':')) |colon_idx| {
                 const host = addr[0..colon_idx];
                 const port_str = addr[colon_idx + 1 ..];
-                config.port = std.fmt.parseInt(u16, port_str, 10) catch {
+                http_config.port = std.fmt.parseInt(u16, port_str, 10) catch {
                     stderr.writeAll("invalid port in --listen address\n") catch {};
                     return .usage;
                 };
-                config.address = host;
+                http_config.address = host;
             } else {
-                config.address = addr;
+                http_config.address = addr;
             }
             explicit_listen_address = true;
             i += 1;
         } else if (std.mem.eql(u8, arg, "--listen-private")) {
-            config.address = "127.0.0.1";
+            http_config.address = "127.0.0.1";
             explicit_listen_address = true;
         } else if (std.mem.eql(u8, arg, "--listen-all-public-dangerous")) {
             // Only set 0.0.0.0 if no explicit --listen address was given
             if (!explicit_listen_address) {
-                config.address = "0.0.0.0";
+                http_config.address = "0.0.0.0";
             }
             dangerous_flag_present = true;
         } else if (std.mem.eql(u8, arg, "--listen-all")) {
@@ -122,12 +135,12 @@ pub fn parseServeArgs(args: []const []const u8, stderr: anytype) ServeParseResul
     }
 
     // Store log_mode and stats_interval in config for runtime use
-    config.log_mode = log_mode;
-    config.stats_interval_seconds = stats_interval_seconds;
+    http_config.log_mode = log_mode;
+    http_config.stats_interval_seconds = stats_interval_seconds;
 
     // Validate bind address if an explicit host was set via --listen
     // (not if it was set by --listen-private or --listen-all-public-dangerous)
-    const bind_class = classifyServeBindHost(config.address);
+    const bind_class = classifyServeBindHost(http_config.address);
     switch (bind_class) {
         .safe, .non_ipv4 => {
             // Safe or hostname - allow through
@@ -148,7 +161,10 @@ pub fn parseServeArgs(args: []const []const u8, stderr: anytype) ServeParseResul
         },
     }
 
-    return .{ .ok = config };
+    return .{ .ok = .{
+        .http_config = http_config,
+        .config_path = config_path,
+    } };
 }
 
 // --- Tests for serve argument parsing ---
@@ -215,30 +231,38 @@ test "parseServeArgs defaults to loopback port 8317" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{}, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expectEqualStrings("127.0.0.1", parsed.ok.address);
-    try std.testing.expectEqual(@as(u16, 8317), parsed.ok.port);
+    try std.testing.expectEqualStrings("127.0.0.1", parsed.ok.http_config.address);
+    try std.testing.expectEqual(@as(u16, 8317), parsed.ok.http_config.port);
+    try std.testing.expect(parsed.ok.config_path == null);
+}
+
+test "parseServeArgs with --config sets config_path" {
+    const w = VoidWriter{};
+    const parsed = parseServeArgs(&.{ "--config", "/etc/kgb/tovarisch.conf" }, w);
+    try std.testing.expect(parsed == .ok);
+    try std.testing.expectEqualStrings("/etc/kgb/tovarisch.conf", parsed.ok.config_path.?);
 }
 
 test "parseServeArgs with --listen sets address and port" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{ "--listen", "127.0.0.1:9999" }, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expectEqualStrings("127.0.0.1", parsed.ok.address);
-    try std.testing.expectEqual(@as(u16, 9999), parsed.ok.port);
+    try std.testing.expectEqualStrings("127.0.0.1", parsed.ok.http_config.address);
+    try std.testing.expectEqual(@as(u16, 9999), parsed.ok.http_config.port);
 }
 
 test "parseServeArgs with --listen-private sets loopback" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{"--listen-private"}, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expectEqualStrings("127.0.0.1", parsed.ok.address);
+    try std.testing.expectEqualStrings("127.0.0.1", parsed.ok.http_config.address);
 }
 
 test "parseServeArgs with --listen-all-public-dangerous sets 0.0.0.0" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{"--listen-all-public-dangerous"}, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expectEqualStrings("0.0.0.0", parsed.ok.address);
+    try std.testing.expectEqualStrings("0.0.0.0", parsed.ok.http_config.address);
 }
 
 test "parseServeArgs with deprecated --listen-all returns usage" {
@@ -257,35 +281,35 @@ test "parseServeArgs accepts RFC1918 private 10.x.x.x" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{ "--listen", "10.0.0.1:8317" }, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expectEqualStrings("10.0.0.1", parsed.ok.address);
+    try std.testing.expectEqualStrings("10.0.0.1", parsed.ok.http_config.address);
 }
 
 test "parseServeArgs accepts RFC1918 private 172.16.x.x" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{ "--listen", "172.16.0.1:8317" }, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expectEqualStrings("172.16.0.1", parsed.ok.address);
+    try std.testing.expectEqualStrings("172.16.0.1", parsed.ok.http_config.address);
 }
 
 test "parseServeArgs accepts RFC1918 private 192.168.x.x" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{ "--listen", "192.168.1.1:8317" }, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expectEqualStrings("192.168.1.1", parsed.ok.address);
+    try std.testing.expectEqualStrings("192.168.1.1", parsed.ok.http_config.address);
 }
 
 test "parseServeArgs accepts carrier NAT 100.64.x.x" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{ "--listen", "100.64.0.1:8317" }, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expectEqualStrings("100.64.0.1", parsed.ok.address);
+    try std.testing.expectEqualStrings("100.64.0.1", parsed.ok.http_config.address);
 }
 
 test "parseServeArgs accepts link-local 169.254.x.x" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{ "--listen", "169.254.0.1:8317" }, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expectEqualStrings("169.254.0.1", parsed.ok.address);
+    try std.testing.expectEqualStrings("169.254.0.1", parsed.ok.http_config.address);
 }
 
 test "parseServeArgs rejects public IPv4 without dangerous flag" {
@@ -298,7 +322,7 @@ test "parseServeArgs accepts public IPv4 with dangerous flag" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{ "--listen", "8.8.8.8:8317", "--listen-all-public-dangerous" }, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expectEqualStrings("8.8.8.8", parsed.ok.address);
+    try std.testing.expectEqualStrings("8.8.8.8", parsed.ok.http_config.address);
 }
 
 test "parseServeArgs rejects 0.0.0.0 without dangerous flag" {
@@ -310,14 +334,14 @@ test "parseServeArgs accepts 0.0.0.0 with dangerous flag" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{ "--listen", "0.0.0.0:8317", "--listen-all-public-dangerous" }, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expectEqualStrings("0.0.0.0", parsed.ok.address);
+    try std.testing.expectEqualStrings("0.0.0.0", parsed.ok.http_config.address);
 }
 
 test "parseServeArgs accepts 1.1.1.1 with dangerous flag" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{ "--listen", "1.1.1.1:8317", "--listen-all-public-dangerous" }, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expectEqualStrings("1.1.1.1", parsed.ok.address);
+    try std.testing.expectEqualStrings("1.1.1.1", parsed.ok.http_config.address);
 }
 
 test "parseServeArgs with other public IP rejected without dangerous flag" {
@@ -360,30 +384,30 @@ test "parseServeArgs with --statonly sets statonly mode" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{"--statonly"}, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expect(parsed.ok.log_mode == .statonly);
+    try std.testing.expect(parsed.ok.http_config.log_mode == .statonly);
 }
 
 test "parseServeArgs --statonly with --listen" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{ "--statonly", "--listen", "127.0.0.1:8317" }, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expect(parsed.ok.log_mode == .statonly);
-    try std.testing.expectEqualStrings("127.0.0.1", parsed.ok.address);
+    try std.testing.expect(parsed.ok.http_config.log_mode == .statonly);
+    try std.testing.expectEqualStrings("127.0.0.1", parsed.ok.http_config.address);
 }
 
 test "parseServeArgs --statonly with --stats-interval" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{ "--statonly", "--stats-interval", "10" }, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expect(parsed.ok.log_mode == .statonly);
-    try std.testing.expectEqual(@as(u16, 10), parsed.ok.stats_interval_seconds);
+    try std.testing.expect(parsed.ok.http_config.log_mode == .statonly);
+    try std.testing.expectEqual(@as(u16, 10), parsed.ok.http_config.stats_interval_seconds);
 }
 
 test "parseServeArgs --statonly --stats-interval combined" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{ "--statonly", "--stats-interval", "30" }, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expectEqual(@as(u16, 30), parsed.ok.stats_interval_seconds);
+    try std.testing.expectEqual(@as(u16, 30), parsed.ok.http_config.stats_interval_seconds);
 }
 
 test "parseServeArgs invalid --stats-interval returns usage" {
@@ -395,14 +419,14 @@ test "parseServeArgs defaults log_mode to normal" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{}, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expect(parsed.ok.log_mode == .normal);
+    try std.testing.expect(parsed.ok.http_config.log_mode == .normal);
 }
 
 test "parseServeArgs defaults stats_interval to 30" {
     const w = VoidWriter{};
     const parsed = parseServeArgs(&.{}, w);
     try std.testing.expect(parsed == .ok);
-    try std.testing.expectEqual(@as(u16, 30), parsed.ok.stats_interval_seconds);
+    try std.testing.expectEqual(@as(u16, 30), parsed.ok.http_config.stats_interval_seconds);
 }
 
 test "parseServeArgs rejects --stats-interval 0" {

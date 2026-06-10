@@ -71,6 +71,12 @@ pub const timeval = extern struct {
 pub const SOL_SOCKET: c_int = 1;
 pub const SO_RCVTIMEO: c_int = 20;
 
+/// Sentinel value used when no context is needed (RealTransport).
+var real_transport_sentinel: RealTransportSentinel = .{};
+
+/// Sentinel struct used when no context is needed (RealTransport).
+pub const RealTransportSentinel = struct {};
+
 /// Real Linux UDP transport for production use.
 /// Sends BFD multihop packets via UDP socket to destination port 4784.
 pub const RealTransport = struct {
@@ -124,6 +130,7 @@ pub const RealTransport = struct {
 
     /// Create a Transport interface from real UDP implementation.
     pub fn interface() Transport {
+        // Use a stable non-null pointer for the sentinel
         return Transport{
             .sendPacket = struct {
                 fn send(ctx: *anyopaque, peer_addr: []const u8, port: u16, bytes: []const u8) TransportError!void {
@@ -131,7 +138,7 @@ pub const RealTransport = struct {
                     return Self.sendPacket(peer_addr, port, bytes);
                 }
             }.send,
-            .ctx = @ptrFromInt(0), // null context for RealTransport
+            .ctx = @ptrCast(&real_transport_sentinel),
         };
     }
 };

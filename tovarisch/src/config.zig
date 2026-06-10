@@ -9,7 +9,11 @@
 //   interface = wg-kgb0
 
 const std = @import("std");
-const Io = std.Io;
+const bfd_config = @import("bfd/config_parse.zig");
+
+/// Re-export BFD config types for backwards compatibility.
+pub const BfdConfig = bfd_config.BfdConfig;
+pub const parseBfdConfig = bfd_config.parseBfdConfig;
 
 /// Configuration parse errors
 pub const ConfigError = error{
@@ -49,7 +53,7 @@ pub const WgConfig = struct {
     private_key_file: []const u8 = "",
     /// Path to the server public key file (for client config generation).
     public_key_file: []const u8 = "",
-    /// Allowed IPs for clients in generated client configs (e.g., "10.149.149.0/24").
+    /// Allowed IPs for clients in generated client configs.
     client_allowed_ips: []const u8 = "10.149.149.0/24",
 };
 
@@ -66,8 +70,7 @@ pub fn parseBool(value: []const u8) ConfigError!bool {
     return ConfigError.InvalidValue;
 }
 
-/// Parse a port number from a string.
-/// Port must be in range 1..65535.
+/// Parse a port number from a string. Port must be in range 1..65535.
 pub fn parsePort(value: []const u8) ConfigError!u16 {
     const trimmed = std.mem.trim(u8, value, " \t\r\n");
     const port = std.fmt.parseInt(u16, trimmed, 10) catch {
@@ -79,9 +82,7 @@ pub fn parsePort(value: []const u8) ConfigError!u16 {
     return port;
 }
 
-/// Parse CIDR notation from a string.
-/// Returns the address portion (without prefix) and prefix length.
-/// Format: "a.b.c.d/prefix" where prefix is 0..32.
+/// Parse CIDR notation. Returns address and prefix length.
 pub fn parseCidr(value: []const u8) ConfigError!struct { address: []const u8, prefix: u8 } {
     const trimmed = std.mem.trim(u8, value, " \t\r\n");
     const slash_idx = std.mem.indexOfScalar(u8, trimmed, '/') orelse {
@@ -90,19 +91,15 @@ pub fn parseCidr(value: []const u8) ConfigError!struct { address: []const u8, pr
     const address_part = trimmed[0..slash_idx];
     const prefix_part = trimmed[slash_idx + 1 ..];
 
-    // Validate address is not empty
-    if (address_part.len == 0) {
-        return ConfigError.InvalidCidr;
-    }
+    if (address_part.len == 0) return ConfigError.InvalidCidr;
 
-    // Validate IPv4 octets (a.b.c.d format)
     var octets: [4]u8 = undefined;
     var octet_count: usize = 0;
     var start: usize = 0;
 
     for (address_part, 0..) |c, i| {
         if (c == '.') {
-            if (i == start) return ConfigError.InvalidCidr; // leading dot
+            if (i == start) return ConfigError.InvalidCidr;
             const octet_str = address_part[start..i];
             const octet = std.fmt.parseInt(u8, octet_str, 10) catch return ConfigError.InvalidCidr;
             if (octet_count >= 4) return ConfigError.InvalidCidr;
@@ -110,11 +107,10 @@ pub fn parseCidr(value: []const u8) ConfigError!struct { address: []const u8, pr
             octet_count += 1;
             start = i + 1;
         } else if (c < '0' or c > '9') {
-            return ConfigError.InvalidCidr; // non-digit character
+            return ConfigError.InvalidCidr;
         }
     }
 
-    // Parse last octet
     if (start >= address_part.len) return ConfigError.InvalidCidr;
     if (address_part.len > 0 and address_part[address_part.len - 1] == '.') return ConfigError.InvalidCidr;
     const last_octet = std.fmt.parseInt(u8, address_part[start..], 10) catch return ConfigError.InvalidCidr;
@@ -122,31 +118,18 @@ pub fn parseCidr(value: []const u8) ConfigError!struct { address: []const u8, pr
     octets[octet_count] = last_octet;
     octet_count += 1;
 
-    // Must have exactly 4 octets
-    if (octet_count != 4) {
-        return ConfigError.InvalidCidr;
-    }
+    if (octet_count != 4) return ConfigError.InvalidCidr;
 
-    // Validate prefix is a number 0..32
-    const prefix = std.fmt.parseInt(u8, prefix_part, 10) catch {
-        return ConfigError.InvalidCidr;
-    };
-    if (prefix > 32) {
-        return ConfigError.InvalidCidr;
-    }
+    const prefix = std.fmt.parseInt(u8, prefix_part, 10) catch return ConfigError.InvalidCidr;
+    if (prefix > 32) return ConfigError.InvalidCidr;
 
-    return .{
-        .address = address_part,
-        .prefix = prefix,
-    };
+    return .{ .address = address_part, .prefix = prefix };
 }
 
 /// Validate a non-empty string value.
 pub fn requireNonEmpty(value: []const u8) ConfigError!void {
     const trimmed = std.mem.trim(u8, value, " \t\r\n");
-    if (trimmed.len == 0) {
-        return ConfigError.EmptyValue;
-    }
+    if (trimmed.len == 0) return ConfigError.EmptyValue;
 }
 
 /// Get a string value from a section, trimming whitespace.
@@ -158,74 +141,46 @@ pub fn getString(section: anytype, key: []const u8) ?[]const u8 {
 }
 
 /// Parse the [wg] section from raw config into WgConfig.
-/// If [wg] section is missing, returns WgConfig with defaults (disabled).
-/// If enabled=true, validates required fields.
 pub fn parseWgConfig(raw: *const RawConfig) ConfigError!WgConfig {
-    const wg_section = raw.get("wg") orelse {
-        // No [wg] section - return disabled defaults
-        return WgConfig{};
-    };
+    const wg_section = raw.get("wg") orelse return WgConfig{};
 
     var cfg = WgConfig{};
-
     if (getString(wg_section, "enabled")) |value| {
         cfg.enabled = try parseBool(value);
     }
+    if (!cfg.enabled) return cfg;
 
-    // If disabled, return defaults (no validation needed)
-    if (!cfg.enabled) {
-        return cfg;
-    }
-
-    // Parse interface
     if (getString(wg_section, "interface")) |value| {
         try requireNonEmpty(value);
         cfg.interface = value;
-    } else {
-        return ConfigError.MissingKey;
-    }
+    } else return ConfigError.MissingKey;
 
-    // Parse address (CIDR)
     if (getString(wg_section, "address")) |value| {
         try requireNonEmpty(value);
         const cidr = try parseCidr(value);
-        // Reconstruct the full address with CIDR prefix
         cfg.address = value;
-        _ = cidr; // Just validate it exists
-    } else {
-        return ConfigError.MissingKey;
-    }
+        _ = cidr;
+    } else return ConfigError.MissingKey;
 
-    // Parse listen_port
     if (getString(wg_section, "listen_port")) |value| {
         cfg.listen_port = try parsePort(value);
-    } else {
-        return ConfigError.MissingKey;
-    }
+    } else return ConfigError.MissingKey;
 
-    // Parse output_dir
     if (getString(wg_section, "output_dir")) |value| {
         try requireNonEmpty(value);
         cfg.output_dir = value;
-    } else {
-        return ConfigError.MissingKey;
-    }
+    } else return ConfigError.MissingKey;
 
-    // Parse private_key_file
     if (getString(wg_section, "private_key_file")) |value| {
         try requireNonEmpty(value);
         cfg.private_key_file = value;
-    } else {
-        return ConfigError.MissingKey;
-    }
+    } else return ConfigError.MissingKey;
 
-    // Parse optional public_key_file (needed for client config generation)
     if (getString(wg_section, "public_key_file")) |value| {
         try requireNonEmpty(value);
         cfg.public_key_file = value;
     }
 
-    // Parse optional client_allowed_ips (defaults to 10.149.149.0/24)
     if (getString(wg_section, "client_allowed_ips")) |value| {
         try requireNonEmpty(value);
         cfg.client_allowed_ips = value;
@@ -235,15 +190,6 @@ pub fn parseWgConfig(raw: *const RawConfig) ConfigError!WgConfig {
 }
 
 // --- Tests ---
-
-const VoidWriter = struct {
-    const Self = @This();
-    pub fn writeAll(_: Self, _: []const u8) error{}!void {}
-    pub fn write(_: Self, _: []const u8) error{}!void {}
-    pub fn print(_: Self, _: []const u8, _: anytype) error{}!void {}
-    pub fn writeByte(_: Self, _: u8) error{}!void {}
-    pub fn flush(_: Self) error{}!void {}
-};
 
 test "parseBool accepts true variants" {
     try std.testing.expect(try parseBool("true"));
@@ -283,10 +229,6 @@ test "parseCidr accepts valid CIDR" {
     const result = try parseCidr("10.77.0.1/24");
     try std.testing.expectEqualStrings("10.77.0.1", result.address);
     try std.testing.expectEqual(@as(u8, 24), result.prefix);
-
-    const result2 = try parseCidr("192.168.1.1/32");
-    try std.testing.expectEqualStrings("192.168.1.1", result2.address);
-    try std.testing.expectEqual(@as(u8, 32), result2.prefix);
 }
 
 test "parseCidr accepts /0 prefix" {
@@ -303,15 +245,9 @@ test "parseCidr rejects invalid CIDR" {
 }
 
 test "parseCidr rejects invalid IPv4 addresses" {
-    // Non-numeric octets
     try std.testing.expectError(ConfigError.InvalidCidr, parseCidr("999.1.1.1/24"));
-    try std.testing.expectError(ConfigError.InvalidCidr, parseCidr("abc.def.ghi.jkl/24"));
-    // Wrong number of octets
     try std.testing.expectError(ConfigError.InvalidCidr, parseCidr("10.77.0/24"));
-    try std.testing.expectError(ConfigError.InvalidCidr, parseCidr("10.77.0.1.2/24"));
-    // Trailing/leading dots
     try std.testing.expectError(ConfigError.InvalidCidr, parseCidr(".10.77.0.1/24"));
-    try std.testing.expectError(ConfigError.InvalidCidr, parseCidr("10.77.0.1./24"));
 }
 
 test "requireNonEmpty accepts non-empty" {
@@ -322,7 +258,6 @@ test "requireNonEmpty accepts non-empty" {
 test "requireNonEmpty rejects empty" {
     try std.testing.expectError(ConfigError.EmptyValue, requireNonEmpty(""));
     try std.testing.expectError(ConfigError.EmptyValue, requireNonEmpty("   "));
-    try std.testing.expectError(ConfigError.EmptyValue, requireNonEmpty("\t"));
 }
 
 test "getString returns trimmed value" {

@@ -92,7 +92,8 @@ fn parseGenerateArgs(args: []const []const u8, stderr: anytype) WgParseResult {
     };
 }
 
-/// Read and parse a tovarisch config file.
+/// Read and parse a tovarisch config file from any path.
+/// This function is reusable for any config loading use case.
 pub fn readConfig(path: []const u8, allocator: std.mem.Allocator) WgArgError!config.RawConfig {
     var raw = config.RawConfig{};
     errdefer raw.deinit(allocator);

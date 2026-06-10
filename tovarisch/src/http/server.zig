@@ -74,6 +74,14 @@ pub const ServeContext = struct {
         };
     }
 
+    /// Initialize serve context with allocator and pre-configured BFD runtime.
+    pub fn initWithBfd(allocator: std.mem.Allocator, bfd_runtime: *const bfd_status.BfdRuntime) Self {
+        return .{
+            .metrics = metrics_state.MetricsState.init(allocator),
+            .bfd_runtime = bfd_runtime,
+        };
+    }
+
     /// Free all context-owned memory.
     pub fn deinit(self: *Self) void {
         self.metrics.deinit();
@@ -328,14 +336,27 @@ pub fn serve(config: Config, out_writer: anytype) !void {
 /// Daemon-style serve loop for production CLI use with persistent state.
 ///
 /// This function owns the ServeContext and passes it to route handlers.
-/// The BFD runtime is null until a daemon wires it in; status endpoint
+/// The BFD runtime is null unless provided via config; status endpoint
 /// handles null gracefully.
 pub fn serveForever(config: Config, out_writer: anytype) !void {
+    try serveForeverWithBfd(config, null, out_writer);
+}
+
+/// Daemon-style serve loop with optional BFD runtime for status integration.
+///
+/// When bfd_runtime is provided, it will be wired into the status endpoint
+/// so that /status reports BFD session state.
+pub fn serveForeverWithBfd(config: Config, bfd_runtime: ?*const bfd_status.BfdRuntime, out_writer: anytype) !void {
     var server = Server.init(config);
     defer server.deinit();
 
-    // Initialize serve context with metrics state and null BFD runtime.
-    var serve_ctx = ServeContext.init(std.heap.page_allocator);
+    // Initialize serve context with metrics state and optional BFD runtime.
+    var serve_ctx: ServeContext = undefined;
+    if (bfd_runtime) |rt| {
+        serve_ctx = ServeContext.initWithBfd(std.heap.page_allocator, rt);
+    } else {
+        serve_ctx = ServeContext.init(std.heap.page_allocator);
+    }
     defer serve_ctx.deinit();
 
     try server.listen();
