@@ -2,11 +2,12 @@
 
 ## Overview
 
-This document describes the BGP protocol support for `tovarisch`, implemented in three ACTs:
+This document describes the BGP protocol support for `tovarisch`, implemented in multiple ACTs:
 
 - **ACT 1**: Pure encoding/parsing components — no sockets or runtime.
 - **ACT 2**: Minimal TCP session state machine using FakeTransport — no daemon integration yet.
 - **ACT 3**: Real TCP transport adapter — still no daemon integration yet.
+- **ACT 4**: Wire BGP session into tovarisch serve runtime — **disabled by default, config-only**.
 
 ## ACT 1: Pure Encoding/Parsing
 
@@ -16,11 +17,6 @@ Implemented:
 - BIRD-style `route <IPv4 CIDR> reject;` prefix-list parser
 - Config validation helpers
 
-**Not implemented** (deferred to future ACTs):
-- 32-bit ASN capability support
-- BFD-gated BGP session behavior
-- Graceful withdrawal on shutdown
-
 ## ACT 2: TCP Session State Machine
 
 Implemented:
@@ -29,24 +25,6 @@ Implemented:
 - TCP connection and message exchange
 - Mock peer for integration testing
 - In-memory session status (not exposed via HTTP/status JSON yet)
-
-**Still not implemented** (deferred to future ACTs):
-- Production daemon integration
-- Config-file wiring
-- `/status --json` changes
-- BFD gating
-- Multiple peers
-- IPv6
-- MP-BGP
-- 32-bit ASN capability
-- Route refresh
-- Graceful restart
-- Communities
-- TCP MD5 / TCP-AO
-- Kernel route installation
-- Learned/imported RIB
-- BGP decision process
-- Reconnect/backoff loop
 
 ## ACT 3: Real TCP Transport
 
@@ -58,38 +36,88 @@ Implemented:
 - Clean socket close on all error paths
 - Non-blocking receive (returns empty slice when no data)
 
-**Architecture:**
-```
-tovarisch/src/bgp/
-├── tcp_transport.zig       # TcpTransport implementation (ACT 3)
-├── tcp_transport_tests.zig # Local loopback tests (ACT 3)
-├── transport.zig          # Transport interface (ACT 2)
-├── session.zig            # Session state machine (ACT 2)
-└── ...
-```
-
-**Test Coverage (ACT 3):**
-- [x] TcpTransport IPv4 byte order is correct (memory layout)
-- [x] TcpTransport port byte order is correct (memory layout)
-- [x] TcpTransport connects to local listener
-- [x] TcpTransport sends bytes to listener
-- [x] TcpTransport receives bytes from listener
-- [x] TcpTransport closes cleanly
-- [x] TcpTransport wraps as Transport interface
-- [x] TcpTransport handles peer close
-- [x] TcpTransport returns empty when no data available
-
 **Deferred:**
 - Live invalid-port connect tests deferred until bounded nonblocking connect exists
 - connect_timeout_ms is decorative until bounded nonblocking connect is implemented
 
-**Still not implemented** (deferred to future ACTs):
-- Production daemon integration
-- Config-file wiring
-- `/status --json` changes
+## ACT 4: Runtime Wiring (Current ACT)
+
+**Status:** COMPLETED
+
+Implemented:
+- BGP config parsing from `[bgp]` section in tovarisch.conf
+- Plain IPv4 address parser for local_address, router_id, peer_address
+- Comma-separated advertised_prefixes parsing
+- BGP disabled by default — ZERO sockets created when disabled
+- BGP enabled via explicit `enabled = true` in config
+- Session config building and validation from parsed config
+- Runtime bundle management (similar to BFD pattern)
+- CLI integration alongside BFD
+
+**Key Constraints:**
+1. **Disabled means zero sockets** — If BGP is disabled, no TcpTransport.connect() is ever called
+2. **Config-only in ACT 4** — This ACT builds and validates config but does NOT call TcpTransport.connect()
+3. **No hot-loop on failure** — Config validation errors are caught before connection
+4. **No /status exposure** — BGP state is internal only in this ACT
+
+**Not implemented** (deferred to future ACTs):
+- `/status --json` BGP exposure
+- TcpTransport.connect() call (deferred until bounded nonblocking connect exists)
 - Reconnect/backoff loop
 - BFD gating
+- advertised_prefix_files (prefix list files)
+- 32-bit ASN support
 - Multiple peers
+- Graceful withdrawal on shutdown
+- Kernel route installation
+- Learned/imported RIB
+- Bounded nonblocking connect timeout
+
+**Files Added:**
+```
+tovarisch/src/bgp/
+├── config_parse.zig           # [bgp] section parser + IPv4 address parser
+├── serve_integration.zig      # Runtime wiring (config validation only)
+└── serve_integration_tests.zig # Integration tests
+```
+
+**Config Shape:**
+```ini
+[bgp]
+enabled = false  # Default: disabled
+local_address = "10.0.0.1"      # Plain IPv4 (no CIDR)
+router_id = "10.0.0.1"           # Plain IPv4 (no CIDR)
+local_as = 65001
+peer_address = "10.0.0.2"        # Plain IPv4 (no CIDR)
+peer_port = 179
+peer_as = 65002
+hold_time_seconds = 180
+keepalive_seconds = 60
+connect_timeout_ms = 1000  # Decorative until bounded connect exists
+advertised_prefixes = "10.0.0.0/8,192.168.0.0/16"  # Comma-separated CIDR
+same_as = false
+```
+
+**Runtime State:**
+- `not_configured` — No [bgp] section in config
+- `disabled` — [bgp] exists but enabled=false
+- `configured` — Config built and validated, ready for connection
+- `failed` — Config build or validation failed
+
+**Test Coverage (ACT 4):**
+- [x] Default config has BGP disabled
+- [x] Disabled BGP config does not call connect
+- [x] Serve startup path with BGP disabled works
+- [x] Enabled config validates required fields
+- [x] Enabled config rejects missing peer_address
+- [x] Enabled config rejects missing local_as
+- [x] Enabled config rejects missing advertised_prefixes
+- [x] Plain IPv4 addresses parse correctly (not CIDR)
+- [x] Plain IPv4 rejects CIDR suffix
+- [x] Plain IPv4 rejects IPv6
+- [x] Multiple advertised_prefixes parse correctly
+- [x] No /status --json contract changes
+- [x] No blocking connect call in serve startup
 
 ## Architecture
 
@@ -97,7 +125,6 @@ tovarisch/src/bgp/
 tovarisch/src/bgp/
 ├── types.zig              # BGP types, constants, Ipv4Prefix
 ├── message.zig           # Frame encoding (KEEPALIVE, OPEN, UPDATE)
-├── message_tests.zig     # UPDATE and NLRI encoding tests
 ├── validation.zig       # Config validation helpers
 ├── prefix_file.zig       # BIRD-style prefix-list parser
 ├── frame_decode.zig      # Frame decoding (ACT 2)
@@ -105,64 +132,20 @@ tovarisch/src/bgp/
 ├── transport.zig         # Transport interface (ACT 2)
 ├── session.zig           # TCP session state machine (ACT 2)
 ├── session_tests.zig     # Integration tests (ACT 2)
-├── session_handshake_tests.zig # Handshake flow tests (ACT 2)
 ├── tcp_transport.zig     # Real TCP transport (ACT 3)
-└── tcp_transport_tests.zig # Local loopback tests (ACT 3)
+├── tcp_transport_tests.zig # Local loopback tests (ACT 3)
+├── config_parse.zig      # Config parsing + IPv4 address parser (ACT 4)
+├── serve_integration.zig # Runtime wiring (ACT 4)
+└── serve_integration_tests.zig # Integration tests (ACT 4)
 ```
 
-
-## BGP Message Encoding
-
-### KEEPALIVE (19 bytes)
 ```
-Marker (16 bytes of 0xFF) + Length (2 bytes = 19) + Type (1 byte = 4)
+tovarisch/src/cli/
+├── bfd_serve.zig          # BFD runtime (existing)
+└── bgp_serve.zig          # BGP runtime (ACT 4)
 ```
 
-### OPEN
-```
-Marker (16) + Length (2) + Type (1) + Version (1) + My AS (2) + Hold Time (2) + Router ID (4) + Opt Params Len (1)
-```
-- Version: 4 (BGP-4)
-- My AS: 16-bit ASN (1..65535); 32-bit ASN is rejected in this ACT
-- Hold Time: 0 or >= 3 seconds
-- Optional parameters: none (length = 0)
-
-### UPDATE
-```
-Marker (16) + Length (2) + Type (1) +
-  Withdrawn Routes Length (2) +
-  Path Attributes Length (2) +
-  Path Attributes:
-    - ORIGIN (IGP)
-    - AS_PATH (empty for same-AS, local AS for different-AS)
-    - NEXT_HOP (configured local/source IPv4)
-  + NLRI (prefixes)
-```
-
-## Session State Machine
-
-BGP sessions follow RFC 4271 Section 8.2:
-
-```
-Idle -> Connect -> OpenSent -> OpenConfirm -> Established
-                                              |
-                                              v
-                                           Failed
-```
-
-### States
-
-| State | Description |
-|-------|-------------|
-| idle | Initial state, no connection |
-| connect | TCP connection in progress |
-| open_sent | OPEN sent, waiting for peer's OPEN |
-| open_confirm | OPEN received, waiting for KEEPALIVE |
-| established | Connection active, can exchange UPDATE |
-| failed | Connection failed |
-| stopped | Session stopped cleanly |
-
-### Session Config
+## Session Config
 
 ```zig
 pub const SessionConfig = struct {
@@ -174,120 +157,22 @@ pub const SessionConfig = struct {
     router_id: [4]u8,            // Our router ID
     hold_time_seconds: u16,      // 0 or >= 3
     keepalive_seconds: u16,      // < hold_time when hold_time != 0
-    connect_timeout_ms: u32,
+    connect_timeout_ms: u32,     // Decorative until bounded connect
     prefixes: []const Ipv4Prefix, // Must be non-empty
     same_as: bool,               // true = empty AS_PATH
 };
 ```
 
-### Session Status (In-Memory)
-
-```zig
-pub const SessionStatus = struct {
-    state: SessionState,
-    peer_address: [4]u8,
-    peer_as: u16,
-    local_as: u16,
-    router_id: [4]u8,
-    advertised_prefix_count: usize,
-    messages_sent: u64,
-    messages_received: u64,
-    updates_sent: u64,
-    keepalives_sent: u64,
-    keepalives_received: u64,
-    last_error: ?SessionError,
-    last_notification_code: ?u8,
-    last_notification_subcode: ?u8,
-};
-```
-
-**Note:** Session status is internal only. It is NOT exposed via HTTP `/status --json` in this ACT.
-
-## Mock Peer Testing
-
-ACT 2 includes a `MockPeer` for integration testing:
-
-```zig
-// Create mock peer
-var peer = try session.MockPeer.init(65002, .{ 10, 0, 0, 2 });
-defer peer.close();
-
-// Accept connection
-try peer.accept();
-
-// Read and validate OPEN from tovarisch
-try peer.readAndValidateOpen();
-
-// Send peer OPEN
-try peer.sendOpen();
-
-// Continue handshake...
-```
-
-## Import-Nothing Invariant
-
-**Important:** Incoming UPDATEs from peers are **accepted but never imported**.
-
-The session:
-- Receives and counts UPDATE messages
-- Validates frame structure
-- Does NOT create any route state
-- Does NOT add prefixes to any RIB
-
-This invariant is enforced to maintain the leaf-service doctrine: `tovarisch` observes infrastructure health, not people.
-
-## Testing
-
-All BGP tests are wired into `test_all.zig`:
-- `make tovarisch-test` runs all tests
-- `make tovarisch-build` verifies compilation
-
-### Test Coverage (ACT 2)
-
-**Frame Decode Tests:**
-- [x] Frame rejects bad marker
-- [x] Frame rejects length below 19
-- [x] Frame rejects length above max
-- [x] Frame recognizes KEEPALIVE
-- [x] Frame parses OPEN minimally
-- [x] Frame parses NOTIFICATION code/subcode
-
-**Session Config Validation Tests:**
-- [x] Rejects zero peer_port
-- [x] Rejects empty prefixes
-- [x] Rejects invalid hold_time
-- [x] Rejects keepalive >= hold_time
-- [x] Accepts valid config
-
-**Session State Machine Tests:**
-- [x] Session init creates idle session
-- [x] Session sends OPEN first
-- [x] Session sends KEEPALIVE after peer OPEN
-- [x] Session reaches Established after peer KEEPALIVE
-- [x] Session sends UPDATE after establishment
-- [x] Session stop exits cleanly
-
-**Mock Peer Tests:**
-- [x] Mock peer validates advertised NLRI
-- [x] Mock peer validates NEXT_HOP
-- [x] Mock peer validates ORIGIN and AS_PATH
-
-**Import-Nothing Tests:**
-- [x] Incoming peer UPDATE is ignored/imports nothing
-- [x] Peer NOTIFICATION is recorded safely
-
 ## Future ACTs
 
 | ACT | Description |
 |-----|-------------|
-| ACT 4 | Wire BGP session into tovarisch serve runtime (disabled by default) |
 | ACT 5 | Expose BGP state in /status --json |
-| ACT 6 | Add reconnect/backoff loop |
+| ACT 6 | Add bounded nonblocking connect timeout + actual connection |
 | ACT 7 | Add BFD-gated BGP advertisement |
-| ACT 8 | Add 32-bit ASN capability support |
-| ACT 9 | Add graceful withdrawal on shutdown |
+| ACT 8 | Add reconnect/backoff loop |
+| ACT 9 | Add 32-bit ASN capability support |
 | ACT 10 | Add multiple BGP peers |
-
 
 ## References
 

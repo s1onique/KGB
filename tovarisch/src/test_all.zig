@@ -357,3 +357,20 @@ test {
 test {
     std.testing.refAllDecls(@import("bgp/tcp_transport_tests.zig"));
 }
+
+// BGP runtime integration tests (ACT 4: serve runtime wiring)
+test {
+    std.testing.refAllDecls(@import("bgp/config_parse.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/serve_integration.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/serve_integration_tests.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("cli/bgp_serve.zig"));
+}

@@ -8,6 +8,7 @@ const http = @import("../http/server.zig");
 const logging = @import("../logging.zig");
 const bfd_serve = @import("bfd_serve.zig");
 const bfd_status = @import("../bfd/status.zig");
+const bgp_serve = @import("bgp_serve.zig");
 
 pub const ExitCode = enum(u8) {
     ok = 0,
@@ -69,6 +70,7 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
     switch (parsed) {
         .usage => return .usage,
         .ok => |serve_config| {
+            // Load BFD configuration (unchanged from previous implementation)
             const bfd_result = bfd_serve.loadConfigAndBfd(serve_config.config_path, stderr);
 
             // Only fail on actual errors, not on "no config" or "disabled"
@@ -77,14 +79,13 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
                 else => {},
             }
 
-            // Get bundle pointer for cleanup
+            // Get BFD bundle pointer for cleanup
             const bfd_bundle: ?*bfd_serve.BfdServeBundle = switch (bfd_result) {
                 .configured => |bundle| bundle,
                 else => null,
             };
 
-            // Startup assertion: verify bundle is properly initialized before serve
-            // This catches initialization bugs where heap allocation leaves fields undefined.
+            // Startup assertion: verify BFD bundle is properly initialized before serve
             if (bfd_bundle) |bundle| {
                 if (bundle.loop_state == null) {
                     stderr.writeAll("FATAL: BFD bundle initialized but loop_state is null\n") catch {};
@@ -112,23 +113,32 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
                 }
             }
 
-            // Extract optional runtime pointer for HTTP server
+            // Load BGP configuration (ACT 4: BGP wiring)
+            // CRITICAL: When BGP is disabled, this creates ZERO sockets.
+            const bgp_result = bgp_serve.loadConfigAndBgp(serve_config.config_path, stderr);
+
+            // BGP failures are logged but don't fail serve startup
+            // (BGP is optional and connection may fail without hot-looping)
+            const bgp_bundle: ?*bgp_serve.BgpServeBundle = switch (bgp_result) {
+                .configured => |bundle| bundle,
+                else => null,
+            };
+
+            // Extract optional BFD runtime pointer for HTTP server
             const bfd_rt: ?*const bfd_status.BfdRuntime = if (bfd_bundle) |bundle|
                 &bundle.runtime
             else
                 null;
 
             // Derive config check state from config_path.
-            // - null path: no_config state (warn, no config provided)
-            // - path provided: loaded state (ok, path as detail)
-            // Ownership: path memory is owned by args which outlive serve loop.
             const config_check: status.ConfigCheckState = if (serve_config.config_path) |path|
                 .{ .loaded = .{ .path = path } }
             else
                 .no_config;
 
-            // Clean up bundle on any exit
+            // Clean up bundles on any exit (BFD first, then BGP)
             defer if (bfd_bundle) |bundle| bfd_serve.cleanupBfdBundle(bundle);
+            defer if (bgp_bundle) |bundle| bgp_serve.cleanupBgpBundle(bundle);
 
             http.serveForeverWithContext(serve_config.http_config, .{
                 .bfd_runtime = bfd_rt,
