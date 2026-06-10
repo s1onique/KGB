@@ -71,7 +71,7 @@ check_required() {
     fi
 }
 
-check_required 'ExecStart=/usr/bin/tovarisch serve' 'ExecStart command'
+check_required 'ExecStart=/usr/bin/tovarisch serve --config /etc/kgb/tovarisch.conf' 'ExecStart command with config'
 check_required 'User=tovarisch' 'User=tovarisch'
 check_required 'Group=tovarisch' 'Group=tovarisch'
 check_required 'NoNewPrivileges=true' 'NoNewPrivileges'

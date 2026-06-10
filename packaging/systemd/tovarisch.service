@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/tovarisch serve
+ExecStart=/usr/bin/tovarisch serve --config /etc/kgb/tovarisch.conf
 Restart=on-failure
 RestartSec=5s
 
