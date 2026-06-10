@@ -37,6 +37,35 @@ pub const Check = struct {
     detail: []const u8,
 };
 
+/// Configuration check state for status reporting.
+/// This is the immutable state derived at serve startup from the loaded config.
+/// Ownership: Caller owns the path memory for .loaded case.
+pub const ConfigCheckState = union(enum) {
+    /// No config path was provided to serve command.
+    no_config: void,
+    /// Config was loaded successfully - path is owned by caller for daemon lifetime.
+    loaded: struct {
+        path: []const u8,
+    },
+};
+
+/// Build a config check from the config check state.
+/// This function is pure and stateless - it only transforms input.
+pub fn buildConfigCheck(state: ConfigCheckState) Check {
+    return switch (state) {
+        .no_config => Check{
+            .name = "config",
+            .status = .warn,
+            .detail = "no config provided, using defaults",
+        },
+        .loaded => |loaded| Check{
+            .name = "config",
+            .status = .ok,
+            .detail = loaded.path,
+        },
+    };
+}
+
 pub const Status = struct {
     service: []const u8,
     version: []const u8,
@@ -145,14 +174,25 @@ pub fn getBfdCheck(rt: ?*const bfd_status.BfdRuntime) Check {
     };
 }
 
-pub fn getLocalChecks() []const Check {
-    return getLocalChecksWithBfd(null);
+/// Default config check for standalone CLI (status --json).
+/// Uses the static warn "not configured yet" message since there's no serve context.
+pub fn getDefaultConfigCheck() Check {
+    return config_check;
 }
 
-pub fn getLocalChecksWithBfd(bfd_runtime: ?*const bfd_status.BfdRuntime) []const Check {
+pub fn getLocalChecks() []const Check {
+    return getLocalChecksWithBfd(null, getDefaultConfigCheck());
+}
+
+/// Build local checks with explicit BFD runtime and config check state.
+/// Uses injected config_check instead of static global.
+pub fn getLocalChecksWithBfd(
+    bfd_runtime: ?*const bfd_status.BfdRuntime,
+    config_check_injected: Check,
+) []const Check {
     local_checks_buf[0] = process_check;
     local_checks_buf[1] = binary_check;
-    local_checks_buf[2] = config_check;
+    local_checks_buf[2] = config_check_injected;
     local_checks_buf[3] = getStateDirCheck();
     local_checks_buf[4] = http_check;
     local_checks_buf[5] = tunnel_check.getTunnelCheckDefault();
@@ -161,12 +201,35 @@ pub fn getLocalChecksWithBfd(bfd_runtime: ?*const bfd_status.BfdRuntime) []const
     return &local_checks_buf;
 }
 
+/// Runtime status inputs for injectable status rendering.
+/// This struct allows explicit runtime inputs without module-global state.
+pub const RuntimeStatusInputs = struct {
+    /// Optional BFD runtime owned by the daemon.
+    bfd_runtime: ?*const bfd_status.BfdRuntime = null,
+    /// Config check state - defaults to warn with static message.
+    config_check: ConfigCheckState = .no_config,
+};
+
+/// Build status with explicit runtime inputs.
+pub fn buildStatusWithInputs(inputs: RuntimeStatusInputs) Status {
+    const config_check_built = buildConfigCheck(inputs.config_check);
+    const checks = getLocalChecksWithBfd(inputs.bfd_runtime, config_check_built);
+    return Status{
+        .service = "tovarisch",
+        .version = build_info.version,
+        .node_id = "local-dev",
+        .status = deriveStatus(checks),
+        .checks = checks,
+        .runtime = telemetry.getRuntimeTelemetry(),
+    };
+}
+
 pub fn getStatus() Status {
     return getStatusWithBfd(null);
 }
 
 pub fn getStatusWithBfd(bfd_runtime: ?*const bfd_status.BfdRuntime) Status {
-    const checks = getLocalChecksWithBfd(bfd_runtime);
+    const checks = getLocalChecksWithBfd(bfd_runtime, getDefaultConfigCheck());
     return Status{
         .service = "tovarisch",
         .version = build_info.version,
@@ -183,6 +246,13 @@ pub fn renderPayload(writer: anytype) !void {
 
 pub fn renderPayloadWithBfd(writer: anytype, bfd_runtime: ?*const bfd_status.BfdRuntime) !void {
     const s = getStatusWithBfd(bfd_runtime);
+    try renderStatus(writer, s);
+}
+
+/// Render status payload with explicit runtime inputs (BFD + config check).
+/// This is the primary rendering path for the HTTP /status endpoint.
+pub fn renderPayloadWithContext(writer: anytype, inputs: RuntimeStatusInputs) !void {
+    const s = buildStatusWithInputs(inputs);
     try renderStatus(writer, s);
 }
 

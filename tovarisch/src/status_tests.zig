@@ -213,7 +213,8 @@ test "getLocalChecksWithBfd passes explicit runtime" {
     var rt = bfd_status.createTestRuntime();
     try bfd_status.addTestPeer(&rt, "10.0.0.1", "10.0.0.2");
     rt.startAll();
-    const checks = status.getLocalChecksWithBfd(&rt);
+    const default_check = status.getDefaultConfigCheck();
+    const checks = status.getLocalChecksWithBfd(&rt, default_check);
     var found_bfd = false;
     for (checks) |check| {
         if (std.mem.eql(u8, check.name, "bfd")) {

@@ -71,9 +71,9 @@ pub fn handleHealthz(fd: i32, _: *anyopaque) !void {
     try response.writeSimpleJsonFd(fd, 200, response.Errors.ok);
 }
 
-/// Status handler - returns full status JSON with optional BFD runtime.
+/// Status handler - returns full status JSON with BFD runtime and config check.
 pub fn handleStatus(fd: i32, state: *anyopaque) !void {
-    // Cast opaque state to ServeContext to get BFD runtime.
+    // Cast opaque state to ServeContext to get BFD runtime and config check.
     const ctx = @as(*server.ServeContext, @ptrCast(@alignCast(state)));
 
     // For HTTP, we need to render status to a buffer first
@@ -98,8 +98,11 @@ pub fn handleStatus(fd: i32, state: *anyopaque) !void {
         }
     }{ .buf = &buf, .len = &len };
 
-    // Pass BFD runtime from context (may be null if not configured).
-    try status.renderPayloadWithBfd(writer, ctx.bfd_runtime);
+    // Pass BFD runtime and config check from context.
+    try status.renderPayloadWithContext(writer, .{
+        .bfd_runtime = ctx.bfd_runtime,
+        .config_check = ctx.config_check,
+    });
     const json = buf[0..len];
 
     try response.writeSimpleJsonFd(fd, 200, json);

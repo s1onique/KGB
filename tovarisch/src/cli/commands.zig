@@ -89,10 +89,22 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
             else
                 null;
 
+            // Derive config check state from config_path.
+            // - null path: no_config state (warn, no config provided)
+            // - path provided: loaded state (ok, path as detail)
+            // Ownership: path memory is owned by args which outlive serve loop.
+            const config_check: status.ConfigCheckState = if (serve_config.config_path) |path|
+                .{ .loaded = .{ .path = path } }
+            else
+                .no_config;
+
             // Clean up bundle on any exit
             defer if (bfd_bundle) |bundle| bfd_serve.cleanupBfdBundle(bundle);
 
-            http.serveForeverWithBfd(serve_config.http_config, bfd_rt, stdout) catch |err| {
+            http.serveForeverWithContext(serve_config.http_config, .{
+                .bfd_runtime = bfd_rt,
+                .config_check = config_check,
+            }, stdout) catch |err| {
                 var log_buf = logging.BufferedWriter.init();
                 logging.emit(.server_error, &log_buf, &.{
                     .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(err) } },

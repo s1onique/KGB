@@ -2,91 +2,15 @@ const std = @import("std");
 const c = std.c;
 const routes = @import("routes.zig");
 const logging = @import("../logging.zig");
-const metrics_state = @import("../metrics_state.zig");
 const heartbeat = @import("heartbeat.zig");
 const cli_args = @import("../cli/args.zig");
 const statonly = @import("statonly.zig");
 const bfd_status = @import("../bfd/status.zig");
+const status = @import("../status.zig");
+const serve_context = @import("serve_context.zig");
 
-// ============================================================================
-// Server State
-// ============================================================================
-
-/// Runtime state owned by the server for the duration of a serve session.
-///
-/// This struct owns the MetricsState that persists across HTTP requests
-/// for rate calculation. It is initialized when the server starts and
-/// deinitialized when the server exits.
-///
-/// Ownership model:
-/// - Server owns ServerState (initialized in serve loop, deinitialized on exit)
-/// - ServerState owns MetricsState (freed in deinit)
-/// - MetricsState owns InterfaceSampler (freed in deinit)
-pub const ServerState = struct {
-    const Self = @This();
-
-    allocator: std.mem.Allocator,
-    metrics: metrics_state.MetricsState,
-
-    /// Initialize server state with empty metrics sampler.
-    pub fn init(allocator: std.mem.Allocator) Self {
-        return .{
-            .allocator = allocator,
-            .metrics = metrics_state.MetricsState.init(allocator),
-        };
-    }
-
-    /// Free all server-owned memory.
-    pub fn deinit(self: *Self) void {
-        self.metrics.deinit();
-    }
-};
-
-// ============================================================================
-// Serve Context
-// ============================================================================
-
-/// Context passed to HTTP route handlers.
-///
-/// This struct owns the optional BFD runtime pointer for the duration
-/// of a serve session. Daemon owns the runtime; context just passes it
-/// explicitly to handlers.
-///
-/// Ownership model:
-/// - ServeContext does NOT own the BFD runtime (daemon owns it)
-/// - ServeContext owns the metrics state for rate calculations
-/// - MetricsState owns InterfaceSampler (freed in deinit)
-pub const ServeContext = struct {
-    const Self = @This();
-
-    /// Metrics state for rate calculations.
-    metrics: metrics_state.MetricsState,
-
-    /// Optional BFD runtime owned by the daemon.
-    /// Null when BFD is not configured.
-    bfd_runtime: ?*const bfd_status.BfdRuntime,
-
-    /// Initialize serve context with allocator.
-    pub fn init(allocator: std.mem.Allocator) Self {
-        return .{
-            .metrics = metrics_state.MetricsState.init(allocator),
-            .bfd_runtime = null,
-        };
-    }
-
-    /// Initialize serve context with allocator and pre-configured BFD runtime.
-    pub fn initWithBfd(allocator: std.mem.Allocator, bfd_runtime: *const bfd_status.BfdRuntime) Self {
-        return .{
-            .metrics = metrics_state.MetricsState.init(allocator),
-            .bfd_runtime = bfd_runtime,
-        };
-    }
-
-    /// Free all context-owned memory.
-    pub fn deinit(self: *Self) void {
-        self.metrics.deinit();
-    }
-};
+// Re-export ServeContext for external use
+pub const ServeContext = serve_context.ServeContext;
 
 // ============================================================================
 // Server Configuration
@@ -347,16 +271,30 @@ pub fn serveForever(config: Config, out_writer: anytype) !void {
 /// When bfd_runtime is provided, it will be wired into the status endpoint
 /// so that /status reports BFD session state.
 pub fn serveForeverWithBfd(config: Config, bfd_runtime: ?*const bfd_status.BfdRuntime, out_writer: anytype) !void {
+    try serveForeverWithContext(config, .{
+        .bfd_runtime = bfd_runtime,
+        .config_check = .no_config,
+    }, out_writer);
+}
+
+/// Daemon-style serve loop with full runtime inputs for status integration.
+///
+/// This is the primary serve function that wires BFD runtime and config check
+/// state into the status endpoint so that /status reports real serve-time state.
+pub fn serveForeverWithContext(
+    config: Config,
+    inputs: status.RuntimeStatusInputs,
+    out_writer: anytype,
+) !void {
     var server = Server.init(config);
     defer server.deinit();
 
-    // Initialize serve context with metrics state and optional BFD runtime.
-    var serve_ctx: ServeContext = undefined;
-    if (bfd_runtime) |rt| {
-        serve_ctx = ServeContext.initWithBfd(std.heap.page_allocator, rt);
-    } else {
-        serve_ctx = ServeContext.init(std.heap.page_allocator);
-    }
+    // Initialize serve context with full runtime inputs (BFD + config check).
+    var serve_ctx = ServeContext.initWithContext(
+        std.heap.page_allocator,
+        inputs.bfd_runtime,
+        inputs.config_check,
+    );
     defer serve_ctx.deinit();
 
     try server.listen();
