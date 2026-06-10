@@ -1,7 +1,7 @@
 .PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs
 
 # Coverage threshold: percentage of line coverage required to pass
-COVERAGE_THRESHOLD ?= 83
+COVERAGE_THRESHOLD ?= 87
 export COVERAGE_THRESHOLD
 
 # === Split Gates ===
