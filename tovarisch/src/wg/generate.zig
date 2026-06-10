@@ -3,6 +3,9 @@
 // Generates WireGuard server config files from WgConfig.
 // Generates client config files for each enabled peer.
 // This ACT generates files only - runtime mutation is out of scope.
+//
+// Key validation is delegated to peer.validateKey() to ensure
+// consistent handling of padded keys (wg pubkey output).
 
 const std = @import("std");
 const config = @import("../config.zig");
@@ -109,6 +112,7 @@ pub fn readPrivateKey(key_path: []const u8, allocator: std.mem.Allocator) Genera
 /// Read the public key from a file.
 /// Returns the key as a string slice (not null-terminated).
 /// The key must be a valid WireGuard public key (44 base64 characters, with optional padding).
+/// Uses peer.validateKey() for consistent validation with wg pubkey output.
 pub fn readPublicKey(key_path: []const u8, allocator: std.mem.Allocator) GenerateError![]const u8 {
     var path_buf: [4096]u8 = undefined;
     const c_path = toCString(key_path, &path_buf) catch return GenerateError.PathTooLong;
@@ -129,31 +133,13 @@ pub fn readPublicKey(key_path: []const u8, allocator: std.mem.Allocator) Generat
     // Trim whitespace only (not padding)
     const key = std.mem.trim(u8, key_buf[0..@as(usize, @intCast(bytes_read))], " \t\r\n");
 
-    // Validate key format (44 base64 chars, optionally with 1-2 padding chars)
-    if (key.len < 44 or key.len > 46) {
-        return GenerateError.InvalidPublicKey;
-    }
-
-    // Check the base64 portion (first 44 chars)
-    for (key[0..44]) |c| {
-        const valid = (c >= 'A' and c <= 'Z') or
-            (c >= 'a' and c <= 'z') or
-            (c >= '0' and c <= '9') or
-            c == '+' or
-            c == '/';
-        if (!valid) {
-            return GenerateError.InvalidPublicKey;
+    // Validate using shared validator (handles padded keys from wg pubkey)
+    peer.validateKey(key) catch |e| {
+        switch (e) {
+            peer.PeerConfigError.InvalidKey => return GenerateError.InvalidPublicKey,
+            else => return GenerateError.InvalidPublicKey,
         }
-    }
-
-    // If there are extra characters, they must be valid padding (=)
-    if (key.len > 44) {
-        for (key[44..]) |c| {
-            if (c != '=') {
-                return GenerateError.InvalidPublicKey;
-            }
-        }
-    }
+    };
 
     // Duplicate the key for the caller (caller owns the memory)
     const owned_key = allocator.dupe(u8, key) catch return GenerateError.OutOfMemory;

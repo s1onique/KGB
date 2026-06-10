@@ -45,38 +45,30 @@ pub const WgPeer = struct {
 };
 
 /// Validate a WireGuard key (44 base64 characters).
-/// Accepts both padded (e.g., "YWFh...AAA=") and unpadded (e.g., "YWFh...AAA") formats.
-/// The trailing '=' padding character is allowed but not required.
+/// Accepts keys where the final character may be '=' (padded output from wg pubkey).
+/// Total length must be exactly 44 characters.
 pub fn validateKey(key: []const u8) PeerConfigError!void {
-    // Strip whitespace only (not padding)
     const trimmed = std.mem.trim(u8, key, " \t\r\n");
-    
-    // WireGuard keys are 44 base64 characters, optionally followed by 1-2 '=' padding chars
-    if (trimmed.len < 44 or trimmed.len > 46) {
+
+    // WireGuard keys are exactly 44 characters total (including optional final '=')
+    if (trimmed.len != 44) {
         return PeerConfigError.InvalidKey;
     }
-    
-    // Check the base64 portion (first 44 chars)
-    const base64_len = if (trimmed.len > 44) 44 else trimmed.len;
-    for (trimmed[0..base64_len]) |c| {
-        const valid = (c >= 'A' and c <= 'Z') or
+
+    for (trimmed, 0..) |c, i| {
+        const valid_base64 =
+            (c >= 'A' and c <= 'Z') or
             (c >= 'a' and c <= 'z') or
             (c >= '0' and c <= '9') or
             c == '+' or
             c == '/';
-        if (!valid) {
-            return PeerConfigError.InvalidKey;
-        }
-    }
-    
-    // If there are extra characters, they must be valid padding (=)
-    if (trimmed.len > 44) {
-        const padding = trimmed[44..];
-        for (padding) |c| {
-            if (c != '=') {
-                return PeerConfigError.InvalidKey;
-            }
-        }
+
+        if (valid_base64) continue;
+
+        // Allow '=' only as the final character
+        if (c == '=' and i == trimmed.len - 1) continue;
+
+        return PeerConfigError.InvalidKey;
     }
 }
 
@@ -221,9 +213,8 @@ test "validateKey rejects invalid characters" {
 }
 
 test "validateKey accepts padded key" {
-    // 44 base64 chars + 1 padding char (normal wg pubkey output)
-    const padded_key = valid_key_44 ++ "=";
-    try validateKey(padded_key);
+    // 44-character key: 43 base64 chars + final '=' (normal wg pubkey output)
+    try validateKey("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
 }
 
 test "validateKey accepts unpadded key" {

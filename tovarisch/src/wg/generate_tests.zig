@@ -140,8 +140,8 @@ test "readPublicKey accepts padded key" {
     try std.testing.expect(fd >= 0);
     defer _ = std.c.close(fd);
 
-    // 44 base64 chars + 1 padding
-    const content = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    // 44-character key: 43 base64 chars + final '=' (normal wg pubkey output)
+    const content = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
     _ = std.c.write(fd, content.ptr, content.len);
 
     const result = try generate.readPublicKey(tmp_path, std.heap.page_allocator);
@@ -272,4 +272,33 @@ test "ClientGenerateResult deinit frees memory" {
         .output_path = try std.heap.page_allocator.dupe(u8, "/tmp/phone.conf"),
     };
     result.deinit(std.heap.page_allocator);
+}
+
+test "readPublicKey accepts padded key ending with =" {
+    // Regression test: wg pubkey outputs 44-char keys with final '='
+    // e.g., "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n" (43 A's + '=' = 44 chars)
+    const tmp_path = "/tmp/tovarisch-wg-test-padded-pubkey";
+
+    var path_buf: [256]u8 = undefined;
+    @memcpy(path_buf[0..tmp_path.len], tmp_path);
+    path_buf[tmp_path.len] = 0;
+    const c_path: [*:0]const u8 = @ptrCast(&path_buf);
+    defer _ = std.c.unlink(c_path);
+
+    const open_flags = std.c.O{
+        .ACCMODE = std.posix.ACCMODE.WRONLY,
+        .CREAT = true,
+        .TRUNC = true,
+    };
+    const fd = std.c.open(c_path, open_flags, @as(c_uint, 0o600));
+    try std.testing.expect(fd >= 0);
+    defer _ = std.c.close(fd);
+
+    // 44-character key: 43 base64 chars + final '=' (normal wg pubkey output)
+    const padded_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    _ = std.c.write(fd, padded_key.ptr, padded_key.len);
+
+    const result = try generate.readPublicKey(tmp_path, std.heap.page_allocator);
+    defer std.heap.page_allocator.free(result);
+    try std.testing.expectEqualStrings(padded_key, result);
 }

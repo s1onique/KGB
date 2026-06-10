@@ -218,6 +218,16 @@ test "validateKey accepts 44-char base64 without padding" {
     try peer.validateKey(valid_key_44);
 }
 
+test "validateKey accepts 44-char key with final =" {
+    // 44-character key: 43 base64 chars + final '=' (normal wg pubkey output)
+    try peer.validateKey("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+}
+
+test "validateKey rejects 45-char key" {
+    // 45 chars (44 A's + '=') should be rejected
+    try std.testing.expectError(peer.PeerConfigError.InvalidKey, peer.validateKey("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="));
+}
+
 test "validateKey rejects keys with invalid length after trim" {
     // Key with trailing spaces (should be stripped, leaving 44 valid chars)
     const key = valid_key_44 ++ "   ";
