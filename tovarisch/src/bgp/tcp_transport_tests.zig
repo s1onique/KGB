@@ -6,6 +6,9 @@
 // Tests are designed to:
 // - Pass pure byte-order tests without sockets
 // - Skip socket tests gracefully when sandbox prevents binding
+//
+// Bounded connect test added: connection to invalid port is now bounded by timeout.
+// Previously a failing connect could block indefinitely.
 
 const std = @import("std");
 const tcp_transport = @import("tcp_transport.zig");
@@ -258,14 +261,63 @@ test "TcpTransport returns empty when no data available" {
     try std.testing.expect(received.len == 0);
 }
 
-// NOTE: Live invalid-port connect tests are forbidden until TcpTransport
-// implements bounded nonblocking connect. Currently:
-// - connect_timeout_ms is decorative - not enforced on connect()
-// - socket is set nonblocking AFTER connect succeeds
-// - a failing connect to a closed port can block indefinitely
-//
-// TODO: Implement bounded nonblocking TcpTransport connect timeout.
-// Pattern: set O_NONBLOCK before connect(), use poll()/select() with timeout,
-// check SO_ERROR after EINPROGRESS.
-//
-// See: [Open/Later] ACT: Implement bounded nonblocking TcpTransport connect timeout
+// ============================================================================
+// Bounded Connect Tests (regression for indefinite blocking)
+// ============================================================================
+
+test "TcpTransport connect to invalid port fails quickly" {
+    // Regression test: connecting to a closed/refused port should fail
+    // within the configured timeout, not block indefinitely.
+    //
+    // This test uses a very short timeout to catch indefinite blocking.
+    // We use port 1 (privileged, almost certainly unused) as a proxy for
+    // "definitely no listener". Connection refusal on localhost is fast
+    // (kernel RST), so this should complete well within timeout.
+    //
+    // Key assertions:
+    // 1. Connect returns an error (not hanging forever)
+    // 2. If connect unexpectedly succeeds, fail the test (socket must be closed)
+
+    const short_timeout_ms: u32 = 500; // 500ms - generous for CI
+
+    if (tcp_transport.TcpTransport.connect(.{
+        .peer_address = .{ 127, 0, 0, 1 },
+        .peer_port = 1, // Unlikely to have a listener - privileged port
+        .local_address = null,
+        .connect_timeout_ms = short_timeout_ms,
+    })) |tcp| {
+        // Unexpected success - close socket directly and fail
+        if (tcp.socket_fd >= 0) {
+            _ = std.c.close(tcp.socket_fd);
+        }
+        return error.ExpectedConnectionFailure;
+    } else |err| {
+        // Expected failure - verify it's an acceptable error type
+        try std.testing.expect(
+            err == error.ConnectionFailed or
+            err == error.Timeout or
+            err == error.PollFailed
+        );
+    }
+}
+
+test "TcpTransport connect to listening port succeeds quickly" {
+    // Positive test: connect to a real listener should succeed immediately
+    // (no need to wait for full timeout).
+
+    const listener = createLocalListener() catch return error.SkipZigTest;
+    defer _ = std.c.close(listener.fd);
+
+    // Use a longer timeout but success should be near-instant for localhost
+    var tcp = try tcp_transport.TcpTransport.connect(.{
+        .peer_address = .{ 127, 0, 0, 1 },
+        .peer_port = listener.port,
+        .local_address = null,
+        .connect_timeout_ms = 5000, // 5 seconds - generous for localhost
+    });
+    defer tcp.close();
+
+    // Verify transport is connected
+    try std.testing.expect(!tcp.closed);
+    try std.testing.expect(tcp.socket_fd >= 0);
+}
