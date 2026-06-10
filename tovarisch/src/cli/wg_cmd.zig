@@ -57,7 +57,8 @@ pub fn wgCommand(args: []const []const u8, stdout: anytype, stderr: anytype, all
 
             // Generate server config
             const server_result = wg_generate.generateServerConfig(wg_cfg, peers, allocator) catch |e| {
-                stderr.print("error: failed to generate server config: {s}\n", .{@errorName(e)}) catch {};
+                printGenerationError(stderr, "server config", e) catch {};
+                stderr.flush() catch {};
                 return 1;
             };
             defer server_result.deinit(allocator);
@@ -79,7 +80,8 @@ pub fn wgCommand(args: []const []const u8, stdout: anytype, stderr: anytype, all
                 if (p.client_output_file.len == 0) continue;
 
                 const client_result = wg_generate.generateClientConfig(wg_cfg, p, allocator) catch |e| {
-                    stderr.print("error: failed to generate client config for {s}: {s}\n", .{ p.name, @errorName(e) }) catch {};
+                    printGenerationError(stderr, p.name, e) catch {};
+                    stderr.flush() catch {};
                     return 1; // Fatal error - exit non-zero
                 };
                 defer client_result.deinit(allocator);
@@ -98,6 +100,22 @@ pub fn wgCommand(args: []const []const u8, stdout: anytype, stderr: anytype, all
             return 0;
         },
     }
+}
+
+/// Print a human-friendly diagnostic for WireGuard config generation errors.
+/// Maps machine error names to actionable messages.
+fn printGenerationError(stderr: anytype, target: []const u8, err: anyerror) !void {
+    // Map specific errors to friendly messages
+    if (err == wg_generate.GenerateError.InvalidPublicKey) {
+        try stderr.print("error: invalid WireGuard public key for {s}: expected 44-character base64 key\n", .{target});
+        return;
+    }
+    if (err == wg_generate.GenerateError.InvalidPrivateKey) {
+        try stderr.print("error: invalid WireGuard private key for {s}: expected 44-character base64 key\n", .{target});
+        return;
+    }
+    // Default: print the error name for other generation errors
+    try stderr.print("error: failed to generate {s}: {s}\n", .{ target, @errorName(err) });
 }
 
 // --- Tests ---
@@ -141,8 +159,142 @@ test "wgCommand returns 1 when --config is missing" {
     try std.testing.expectEqual(@as(u8, 1), result);
 }
 
+// CaptureWriter: collects bytes written for test assertions.
+const CaptureWriter = struct {
+    const Self = @This();
+    const BufSize = 4096;
+
+    buf: [BufSize]u8 = undefined,
+    len: usize = 0,
+
+    pub fn init() Self {
+        return .{ .buf = undefined, .len = 0 };
+    }
+
+    pub fn print(self: *Self, comptime fmt: []const u8, print_args: anytype) !void {
+        if (self.len >= BufSize) return error.BufferOverflow;
+        const written = std.fmt.bufPrint(self.buf[self.len..], fmt, print_args) catch return error.BufferOverflow;
+        self.len += written.len;
+    }
+
+    pub fn writeAll(self: *Self, bytes: []const u8) !void {
+        if (self.len + bytes.len > BufSize) return error.BufferOverflow;
+        @memcpy(self.buf[self.len..][0..bytes.len], bytes);
+        self.len += bytes.len;
+    }
+
+    pub fn writeByte(self: *Self, byte: u8) !void {
+        if (self.len >= BufSize) return error.BufferOverflow;
+        self.buf[self.len] = byte;
+        self.len += 1;
+    }
+
+    pub fn slice(self: *const Self) []const u8 {
+        return self.buf[0..self.len];
+    }
+
+    pub fn flush(_: *Self) error{}!void {}
+};
+
 test "wgCommand returns 1 for non-existent config file" {
     const w = VoidWriter{};
     const result = wgCommand(&.{ "generate", "--config", "/nonexistent/path.conf" }, w, w, std.heap.page_allocator);
     try std.testing.expectEqual(@as(u8, 1), result);
+}
+
+test "wgCommand prints error to stderr on non-existent config" {
+    var stdout = CaptureWriter.init();
+    var stderr = CaptureWriter.init();
+    const result = wgCommand(&.{ "generate", "--config", "/nonexistent/path.conf" }, &stdout, &stderr, std.heap.page_allocator);
+    try std.testing.expectEqual(@as(u8, 1), result);
+    // Must NOT have empty stderr when returning nonzero
+    try std.testing.expect(stderr.len > 0);
+    try std.testing.expect(std.mem.containsAtLeast(u8, stderr.slice(), 1, "error:"));
+}
+
+test "wgCommand never exits nonzero with empty stderr" {
+    // Regression: ensure all error paths produce non-empty stderr before returning nonzero.
+    // This test uses invalid config path which triggers error during config read.
+    var stdout = CaptureWriter.init();
+    var stderr = CaptureWriter.init();
+    const exit_code = wgCommand(&.{ "generate", "--config", "/nonexistent/path.conf" }, &stdout, &stderr, std.heap.page_allocator);
+
+    // If exit code is nonzero, stderr MUST have content
+    if (exit_code != 0) {
+        try std.testing.expect(stderr.len > 0);
+    }
+}
+
+test "wgCommand with invalid public key file produces stderr diagnostic" {
+    // Use a unique temp directory for this test
+    const tmp_dir = "/tmp/tovarisch-wg-test-invalid-key-unique";
+    const tmp_config = "/tmp/tovarisch-wg-test-invalid-key-unique/config.toml";
+    const tmp_priv_key = "/tmp/tovarisch-wg-test-invalid-key-unique/server.key";
+    const tmp_pub_key = "/tmp/tovarisch-wg-test-invalid-key-unique/peer.pub";
+
+    // Use separate buffers for each path since we need them simultaneously
+    var dir_buf: [256]u8 = undefined;
+    var config_buf: [256]u8 = undefined;
+    var priv_buf: [256]u8 = undefined;
+    var pub_buf: [256]u8 = undefined;
+
+    const c_dir = initCPath(&dir_buf, tmp_dir);
+    const c_config = initCPath(&config_buf, tmp_config);
+    const c_priv = initCPath(&priv_buf, tmp_priv_key);
+    const c_pub = initCPath(&pub_buf, tmp_pub_key);
+
+    // Setup: create directory, files, config
+    _ = std.c.mkdir(c_dir, 0o700);
+
+    const open_flags = std.c.O{ .ACCMODE = std.posix.ACCMODE.WRONLY, .CREAT = true, .TRUNC = true };
+    const valid_priv_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    const invalid_pub_key = "short";
+    const config_content = "[wg]\nenabled = true\ninterface = \"wg0\"\naddress = \"10.0.0.1/24\"\nlisten_port = 51820\nprivate_key_file = \"" ++ tmp_priv_key ++ "\"\npublic_key_file = \"" ++ tmp_pub_key ++ "\"\noutput_dir = \"" ++ tmp_dir ++ "\"\n\n[wg.peer.phone]\nenabled = true\naddress = \"10.0.0.2/32\"\nprivate_key_file = \"" ++ tmp_priv_key ++ "\"\npublic_key_file = \"" ++ tmp_pub_key ++ "\"\nallowed_ips = \"10.0.0.2/32\"\nclient_output_file = \"" ++ tmp_dir ++ "/phone.conf\"\n";
+
+    // Write private key
+    const priv_fd = std.c.open(c_priv, open_flags, @as(c_uint, 0o600));
+    if (priv_fd >= 0) {
+        _ = std.c.write(priv_fd, valid_priv_key.ptr, valid_priv_key.len);
+        _ = std.c.close(priv_fd);
+    }
+
+    // Write invalid public key
+    const pub_fd = std.c.open(c_pub, open_flags, @as(c_uint, 0o600));
+    if (pub_fd >= 0) {
+        _ = std.c.write(pub_fd, invalid_pub_key.ptr, invalid_pub_key.len);
+        _ = std.c.close(pub_fd);
+    }
+
+    // Write config
+    const conf_fd = std.c.open(c_config, open_flags, @as(c_uint, 0o600));
+    if (conf_fd >= 0) {
+        _ = std.c.write(conf_fd, config_content.ptr, config_content.len);
+        _ = std.c.close(conf_fd);
+    }
+
+    // Run wgCommand
+    var stdout = CaptureWriter.init();
+    var stderr = CaptureWriter.init();
+    const exit_code = wgCommand(&.{ "generate", "--config", tmp_config }, &stdout, &stderr, std.heap.page_allocator);
+
+    // Cleanup
+    _ = std.c.unlink(c_config);
+    _ = std.c.unlink(c_priv);
+    _ = std.c.unlink(c_pub);
+    _ = std.c.rmdir(c_dir);
+
+    // Must return error
+    try std.testing.expect(exit_code != 0);
+    // Must produce stderr with error message
+    try std.testing.expect(stderr.len > 0);
+    try std.testing.expect(std.mem.containsAtLeast(u8, stderr.slice(), 1, "error:"));
+    // The error should mention key validation failure with friendly message
+    try std.testing.expect(std.mem.containsAtLeast(u8, stderr.slice(), 1, "invalid WireGuard public key"));
+}
+
+/// Helper to convert a Zig string to a null-terminated C string in a buffer.
+fn initCPath(buf: *[256]u8, path: []const u8) [*:0]const u8 {
+    @memcpy(buf[0..path.len], path);
+    buf[path.len] = 0;
+    return @ptrCast(buf);
 }
