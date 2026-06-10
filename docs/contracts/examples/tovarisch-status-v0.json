@@ -43,6 +43,11 @@
       "name": "bfd",
       "status": "warn",
       "detail": "bfd not configured"
+    },
+    {
+      "name": "bgp",
+      "status": "warn",
+      "detail": "BGP not configured"
     }
   ],
   "runtime": {

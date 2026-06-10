@@ -1,6 +1,7 @@
 // status_tests.zig — Unit tests for status module
 //
 // Tests the status module including BFD integration via explicit runtime wiring.
+// BGP status tests are in status_bgp_tests.zig.
 // These tests are deterministic and do not depend on repository state.
 
 const std = @import("std");
@@ -111,9 +112,9 @@ test "deriveStatus returns ok for empty checks" {
 
 // --- getLocalChecks and getStatus Tests ---
 
-test "getLocalChecks returns eight checks" {
+test "getLocalChecks returns nine checks" {
     const checks = status.getLocalChecks();
-    try std.testing.expectEqual(@as(usize, 8), checks.len);
+    try std.testing.expectEqual(@as(usize, 9), checks.len);
 }
 
 test "getLocalChecks first check is process" {

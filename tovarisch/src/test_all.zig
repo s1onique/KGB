@@ -374,3 +374,13 @@ test {
 test {
     std.testing.refAllDecls(@import("cli/bgp_serve.zig"));
 }
+
+// BGP status module tests (ACT 5: status exposure)
+test {
+    std.testing.refAllDecls(@import("bgp/status.zig"));
+}
+
+// BGP status integration tests
+test {
+    std.testing.refAllDecls(@import("status_bgp_tests.zig"));
+}

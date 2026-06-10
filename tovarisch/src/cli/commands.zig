@@ -9,6 +9,7 @@ const logging = @import("../logging.zig");
 const bfd_serve = @import("bfd_serve.zig");
 const bfd_status = @import("../bfd/status.zig");
 const bgp_serve = @import("bgp_serve.zig");
+const bgp_status = @import("../bgp/status.zig");
 
 pub const ExitCode = enum(u8) {
     ok = 0,
@@ -140,9 +141,15 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
             defer if (bfd_bundle) |bundle| bfd_serve.cleanupBfdBundle(bundle);
             defer if (bgp_bundle) |bundle| bgp_serve.cleanupBgpBundle(bundle);
 
+            const bgp_state = if (bgp_bundle) |bundle|
+                bgp_status.deriveStatusStateFromBundle(bundle)
+            else
+                bgp_status.BgpStatusState.no_config;
+
             http.serveForeverWithContext(serve_config.http_config, .{
                 .bfd_runtime = bfd_rt,
                 .config_check = config_check,
+                .bgp_state = bgp_state,
             }, stdout) catch |err| {
                 var log_buf = logging.BufferedWriter.init();
                 logging.emit(.server_error, &log_buf, &.{

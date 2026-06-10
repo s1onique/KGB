@@ -289,11 +289,12 @@ pub fn serveForeverWithContext(
     var server = Server.init(config);
     defer server.deinit();
 
-    // Initialize serve context with full runtime inputs (BFD + config check).
+    // Initialize serve context with full runtime inputs (BFD + config check + BGP).
     var serve_ctx = ServeContext.initWithContext(
         std.heap.page_allocator,
         inputs.bfd_runtime,
         inputs.config_check,
+        inputs.bgp_state,
     );
     defer serve_ctx.deinit();
 
