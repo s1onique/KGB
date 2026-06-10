@@ -331,7 +331,7 @@ test "BfdReceiveSocket bind validates port" {
     }
 
     // Try to bind to the BFD port
-    const socket = BfdReceiveSocket.bind(MULTIHOP_PORT) catch {
+    var socket = BfdReceiveSocket.bind(MULTIHOP_PORT) catch {
         return error.SkipZigTest;
     };
     defer socket.close();
