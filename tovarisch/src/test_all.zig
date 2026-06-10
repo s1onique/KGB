@@ -323,3 +323,28 @@ test {
 test {
     std.testing.refAllDecls(@import("bgp/prefix_file.zig"));
 }
+
+// BGP session module tests (ACT 2: TCP session state machine)
+test {
+    std.testing.refAllDecls(@import("bgp/frame_decode.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/session_status.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/transport.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/session.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/session_tests.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/session_handshake_tests.zig"));
+}

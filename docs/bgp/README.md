@@ -1,10 +1,13 @@
-# BGP Protocol Module (ACT 1)
+# BGP Protocol Module
 
 ## Overview
 
-This is **ACT 1** of in-process BGP support for `tovarisch`. This ACT adds only pure encoding/parsing components — no sockets, no session state machine, no runtime daemon integration.
+This document describes the BGP protocol support for `tovarisch`, implemented in two ACTs:
 
-## Scope of This ACT
+- **ACT 1**: Pure encoding/parsing components — no sockets or runtime.
+- **ACT 2**: Minimal TCP session state machine — no daemon integration yet.
+
+## ACT 1: Pure Encoding/Parsing
 
 Implemented:
 - BGP message frame encoding (KEEPALIVE, OPEN, UPDATE)
@@ -13,22 +16,50 @@ Implemented:
 - Config validation helpers
 
 **Not implemented** (deferred to future ACTs):
-- TCP sockets or BGP session state machine
 - 32-bit ASN capability support
 - BFD-gated BGP session behavior
 - Graceful withdrawal on shutdown
-- Runtime daemon integration
-- `/status` changes
+
+## ACT 2: TCP Session State Machine
+
+Implemented:
+- BGP frame decoding (OPEN, KEEPALIVE, UPDATE, NOTIFICATION)
+- Session state machine (RFC 4271 Section 8.2)
+- TCP connection and message exchange
+- Mock peer for integration testing
+- In-memory session status (not exposed via HTTP/status JSON yet)
+
+**Still not implemented** (deferred to future ACTs):
+- Production daemon integration
+- Config-file wiring
+- `/status --json` changes
+- BFD gating
+- Multiple peers
+- IPv6
+- MP-BGP
+- 32-bit ASN capability
+- Route refresh
+- Graceful restart
+- Communities
+- TCP MD5 / TCP-AO
+- Kernel route installation
+- Learned/imported RIB
+- BGP decision process
+- Reconnect/backoff loop
 
 ## Architecture
 
 ```
 tovarisch/src/bgp/
-├── types.zig          # BGP types, constants, Ipv4Prefix
+├── types.zig           # BGP types, constants, Ipv4Prefix
 ├── message.zig        # Frame encoding (KEEPALIVE, OPEN, UPDATE)
 ├── message_tests.zig  # UPDATE and NLRI encoding tests
 ├── validation.zig     # Config validation helpers
-└── prefix_file.zig    # BIRD-style prefix-list parser
+├── prefix_file.zig    # BIRD-style prefix-list parser
+├── frame_decode.zig   # Frame decoding (ACT 2)
+├── session_status.zig # Session state/status types (ACT 2)
+├── session.zig        # TCP session state machine + MockPeer (ACT 2)
+└── session_tests.zig  # Integration tests (ACT 2)
 ```
 
 ## BGP Message Encoding
@@ -59,35 +90,102 @@ Marker (16) + Length (2) + Type (1) +
   + NLRI (prefixes)
 ```
 
-## Prefix-list Parser
+## Session State Machine
 
-The parser supports the exact BIRD static route-list format:
+BGP sessions follow RFC 4271 Section 8.2:
 
 ```
-route <IPv4 CIDR> reject;
+Idle -> Connect -> OpenSent -> OpenConfirm -> Established
+                                              |
+                                              v
+                                           Failed
 ```
 
-**Accepted:**
-- `route 23.192.0.0/11 reject;`
-- Blank lines
-- `#` comments
+### States
 
-**Rejected:**
-- IPv6 prefixes (`:/` in CIDR)
-- `via` routes (e.g., `route ... via ...`)
-- Missing semicolons
-- Quoted strings or injection-like input
-- Unknown BIRD directives
+| State | Description |
+|-------|-------------|
+| idle | Initial state, no connection |
+| connect | TCP connection in progress |
+| open_sent | OPEN sent, waiting for peer's OPEN |
+| open_confirm | OPEN received, waiting for KEEPALIVE |
+| established | Connection active, can exchange UPDATE |
+| failed | Connection failed |
+| stopped | Session stopped cleanly |
 
-**Mapping:** `route <cidr> reject;` → advertised BGP NLRI
+### Session Config
 
-## Validation Rules
+```zig
+pub const SessionConfig = struct {
+    peer_address: [4]u8,        // Peer's IPv4
+    peer_port: u16,              // Must be nonzero
+    local_address: ?[4]u8,       // Our IPv4 (null = OS picks)
+    local_as: u16,               // 1..65535
+    peer_as: u16,                // 1..65535
+    router_id: [4]u8,            // Our router ID
+    hold_time_seconds: u16,      // 0 or >= 3
+    keepalive_seconds: u16,      // < hold_time when hold_time != 0
+    connect_timeout_ms: u32,
+    prefixes: []const Ipv4Prefix, // Must be non-empty
+    same_as: bool,               // true = empty AS_PATH
+};
+```
 
-- ASN: 1..65535 (16-bit only in this ACT)
-- Hold time: 0 or >= 3 seconds
-- Keepalive: < hold time (when hold time != 0)
-- Prefix length: 0..32 for IPv4
-- Prefix list: must not be empty for UPDATE
+### Session Status (In-Memory)
+
+```zig
+pub const SessionStatus = struct {
+    state: SessionState,
+    peer_address: [4]u8,
+    peer_as: u16,
+    local_as: u16,
+    router_id: [4]u8,
+    advertised_prefix_count: usize,
+    messages_sent: u64,
+    messages_received: u64,
+    updates_sent: u64,
+    keepalives_sent: u64,
+    keepalives_received: u64,
+    last_error: ?SessionError,
+    last_notification_code: ?u8,
+    last_notification_subcode: ?u8,
+};
+```
+
+**Note:** Session status is internal only. It is NOT exposed via HTTP `/status --json` in this ACT.
+
+## Mock Peer Testing
+
+ACT 2 includes a `MockPeer` for integration testing:
+
+```zig
+// Create mock peer
+var peer = try session.MockPeer.init(65002, .{ 10, 0, 0, 2 });
+defer peer.close();
+
+// Accept connection
+try peer.accept();
+
+// Read and validate OPEN from tovarisch
+try peer.readAndValidateOpen();
+
+// Send peer OPEN
+try peer.sendOpen();
+
+// Continue handshake...
+```
+
+## Import-Nothing Invariant
+
+**Important:** Incoming UPDATEs from peers are **accepted but never imported**.
+
+The session:
+- Receives and counts UPDATE messages
+- Validates frame structure
+- Does NOT create any route state
+- Does NOT add prefixes to any RIB
+
+This invariant is enforced to maintain the leaf-service doctrine: `tovarisch` observes infrastructure health, not people.
 
 ## Testing
 
@@ -95,18 +193,58 @@ All BGP tests are wired into `test_all.zig`:
 - `make tovarisch-test` runs all tests
 - `make tovarisch-build` verifies compilation
 
+### Test Coverage (ACT 2)
+
+**Frame Decode Tests:**
+- [x] Frame rejects bad marker
+- [x] Frame rejects length below 19
+- [x] Frame rejects length above max
+- [x] Frame recognizes KEEPALIVE
+- [x] Frame parses OPEN minimally
+- [x] Frame parses NOTIFICATION code/subcode
+
+**Session Config Validation Tests:**
+- [x] Rejects zero peer_port
+- [x] Rejects empty prefixes
+- [x] Rejects invalid hold_time
+- [x] Rejects keepalive >= hold_time
+- [x] Accepts valid config
+
+**Session State Machine Tests:**
+- [x] Session init creates idle session
+- [x] Session sends OPEN first
+- [x] Session sends KEEPALIVE after peer OPEN
+- [x] Session reaches Established after peer KEEPALIVE
+- [x] Session sends UPDATE after establishment
+- [x] Session stop exits cleanly
+
+**Mock Peer Tests:**
+- [x] Mock peer validates advertised NLRI
+- [x] Mock peer validates NEXT_HOP
+- [x] Mock peer validates ORIGIN and AS_PATH
+
+**Import-Nothing Tests:**
+- [x] Incoming peer UPDATE is ignored/imports nothing
+- [x] Peer NOTIFICATION is recorded safely
+
 ## Future ACTs
 
 | ACT | Description |
 |-----|-------------|
-| ACT 2 | Add BGP TCP session state machine |
-| ACT 3 | Add BGP runtime wiring and /status state |
-| ACT 4 | Add 32-bit ASN capability support |
-| ACT 5 | Add BFD-gated BGP session behavior |
-| ACT 6 | Add graceful withdrawal on shutdown |
+| ACT 3 | Wire BGP session into tovarisch serve runtime |
+| ACT 4 | Expose BGP state in /status --json |
+| ACT 5 | Add reconnect/backoff loop |
+| ACT 6 | Add BFD-gated BGP advertisement |
+| ACT 7 | Add 32-bit ASN capability support |
+| ACT 8 | Add graceful withdrawal on shutdown |
+| ACT 9 | Add multiple BGP peers |
 
 ## References
 
 - RFC 4271 — Border Gateway Protocol 4 (BGP-4)
-  - Sections 4.1 (message format), 4.2 (OPEN), 4.3 (UPDATE)
+  - Sections 4.1 (message format)
+  - Sections 4.2 (OPEN message)
+  - Sections 4.3 (UPDATE message)
   - Sections 5.1 (path attributes: ORIGIN, AS_PATH, NEXT_HOP)
+  - Section 8 (BGP State Machine)
+  - Sections 8.2 (State Machine Description)

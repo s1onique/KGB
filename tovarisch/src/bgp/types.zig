@@ -1,7 +1,7 @@
 // types.zig — BGP protocol types and constants
 //
 // ACT 1: Pure encoding/parsing only, no sockets or runtime behavior.
-// References: RFC 4271 (BGP-4), RFC 1997 (AS_PATH), RFC 2918 (ORIGIN)
+// References: RFC 4271 (BGP-4) — Sections 4.1, 4.2, 4.3, 5.1
 
 const std = @import("std");
 
