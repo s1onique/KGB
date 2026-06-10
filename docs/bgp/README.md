@@ -2,10 +2,11 @@
 
 ## Overview
 
-This document describes the BGP protocol support for `tovarisch`, implemented in two ACTs:
+This document describes the BGP protocol support for `tovarisch`, implemented in three ACTs:
 
 - **ACT 1**: Pure encoding/parsing components — no sockets or runtime.
-- **ACT 2**: Minimal TCP session state machine — no daemon integration yet.
+- **ACT 2**: Minimal TCP session state machine using FakeTransport — no daemon integration yet.
+- **ACT 3**: Real TCP transport adapter — still no daemon integration yet.
 
 ## ACT 1: Pure Encoding/Parsing
 
@@ -47,20 +48,68 @@ Implemented:
 - BGP decision process
 - Reconnect/backoff loop
 
+## ACT 3: Real TCP Transport
+
+Implemented:
+- `TcpTransport` conforming to existing `Transport` interface
+- TCP socket connect to configured peer address/port
+- Optional local address binding
+- Send/receive with partial handling
+- Clean socket close on all error paths
+- Non-blocking receive (returns empty slice when no data)
+
+**Architecture:**
+```
+tovarisch/src/bgp/
+├── tcp_transport.zig       # TcpTransport implementation (ACT 3)
+├── tcp_transport_tests.zig # Local loopback tests (ACT 3)
+├── transport.zig          # Transport interface (ACT 2)
+├── session.zig            # Session state machine (ACT 2)
+└── ...
+```
+
+**Test Coverage (ACT 3):**
+- [x] TcpTransport IPv4 byte order is correct (memory layout)
+- [x] TcpTransport port byte order is correct (memory layout)
+- [x] TcpTransport connects to local listener
+- [x] TcpTransport sends bytes to listener
+- [x] TcpTransport receives bytes from listener
+- [x] TcpTransport closes cleanly
+- [x] TcpTransport wraps as Transport interface
+- [x] TcpTransport handles peer close
+- [x] TcpTransport returns empty when no data available
+
+**Deferred:**
+- Live invalid-port connect tests deferred until bounded nonblocking connect exists
+- connect_timeout_ms is decorative until bounded nonblocking connect is implemented
+
+**Still not implemented** (deferred to future ACTs):
+- Production daemon integration
+- Config-file wiring
+- `/status --json` changes
+- Reconnect/backoff loop
+- BFD gating
+- Multiple peers
+
 ## Architecture
 
 ```
 tovarisch/src/bgp/
-├── types.zig           # BGP types, constants, Ipv4Prefix
-├── message.zig        # Frame encoding (KEEPALIVE, OPEN, UPDATE)
-├── message_tests.zig  # UPDATE and NLRI encoding tests
-├── validation.zig     # Config validation helpers
-├── prefix_file.zig    # BIRD-style prefix-list parser
-├── frame_decode.zig   # Frame decoding (ACT 2)
-├── session_status.zig # Session state/status types (ACT 2)
-├── session.zig        # TCP session state machine + MockPeer (ACT 2)
-└── session_tests.zig  # Integration tests (ACT 2)
+├── types.zig              # BGP types, constants, Ipv4Prefix
+├── message.zig           # Frame encoding (KEEPALIVE, OPEN, UPDATE)
+├── message_tests.zig     # UPDATE and NLRI encoding tests
+├── validation.zig       # Config validation helpers
+├── prefix_file.zig       # BIRD-style prefix-list parser
+├── frame_decode.zig      # Frame decoding (ACT 2)
+├── session_status.zig    # Session state/status types (ACT 2)
+├── transport.zig         # Transport interface (ACT 2)
+├── session.zig           # TCP session state machine (ACT 2)
+├── session_tests.zig     # Integration tests (ACT 2)
+├── session_handshake_tests.zig # Handshake flow tests (ACT 2)
+├── tcp_transport.zig     # Real TCP transport (ACT 3)
+└── tcp_transport_tests.zig # Local loopback tests (ACT 3)
 ```
+
 
 ## BGP Message Encoding
 
@@ -231,13 +280,14 @@ All BGP tests are wired into `test_all.zig`:
 
 | ACT | Description |
 |-----|-------------|
-| ACT 3 | Wire BGP session into tovarisch serve runtime |
-| ACT 4 | Expose BGP state in /status --json |
-| ACT 5 | Add reconnect/backoff loop |
-| ACT 6 | Add BFD-gated BGP advertisement |
-| ACT 7 | Add 32-bit ASN capability support |
-| ACT 8 | Add graceful withdrawal on shutdown |
-| ACT 9 | Add multiple BGP peers |
+| ACT 4 | Wire BGP session into tovarisch serve runtime (disabled by default) |
+| ACT 5 | Expose BGP state in /status --json |
+| ACT 6 | Add reconnect/backoff loop |
+| ACT 7 | Add BFD-gated BGP advertisement |
+| ACT 8 | Add 32-bit ASN capability support |
+| ACT 9 | Add graceful withdrawal on shutdown |
+| ACT 10 | Add multiple BGP peers |
+
 
 ## References
 

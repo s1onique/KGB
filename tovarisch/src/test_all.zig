@@ -348,3 +348,12 @@ test {
 test {
     std.testing.refAllDecls(@import("bgp/session_handshake_tests.zig"));
 }
+
+// BGP TCP transport tests (ACT 3: real TCP transport)
+test {
+    std.testing.refAllDecls(@import("bgp/tcp_transport.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/tcp_transport_tests.zig"));
+}
