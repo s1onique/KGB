@@ -389,3 +389,7 @@ In this Zig 0.16 environment, `std.c.dirent` exposes the directory-entry name as
 
 For threading patterns, detached heartbeat implementation, blocking sleep, and context lifetime ownership, see [`zig-0.16-threading-heartbeat.md`](./zig-0.16-threading-heartbeat.md).
 
+## Request/Status Rendering and Memory Ownership
+
+For page_allocator leak lessons, request/status rendering memory ownership patterns, and production soak test guidance, see [`zig-0.16-field-manual-rss-leak.md`](./zig-0.16-field-manual-rss-leak.md).
+
