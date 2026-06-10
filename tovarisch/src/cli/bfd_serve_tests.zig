@@ -7,6 +7,7 @@ const std = @import("std");
 const testing = std.testing;
 const bfd_serve = @import("bfd_serve.zig");
 const bfd_receive = @import("../bfd/receive.zig");
+const bfd_transmit = @import("../bfd/transmit.zig");
 const bfd_status = @import("../bfd/status.zig");
 const bfd_transport = @import("../bfd/transport.zig");
 const bfd_clock = @import("../bfd/clock.zig");
@@ -48,7 +49,9 @@ test "stop_signal.load() returns false after full struct literal init" {
         .peer_addr = undefined,
         .local_addr = undefined,
         .loop_state = null,
-        .thread = null,
+        .transmit_loop_state = null,
+        .receive_thread = null,
+        .transmit_thread = null,
         .bfd_active = true,
     };
     
@@ -59,7 +62,9 @@ test "stop_signal.load() returns false after full struct literal init" {
     
     // Also verify other fields have expected initial values
     try testing.expect(bundle.loop_state == null);
-    try testing.expect(bundle.thread == null);
+    try testing.expect(bundle.transmit_loop_state == null);
+    try testing.expect(bundle.receive_thread == null);
+    try testing.expect(bundle.transmit_thread == null);
     try testing.expect(bundle.bfd_active == true);
 }
 
@@ -77,10 +82,22 @@ test "loop_state field is nullable" {
     try testing.expect(loop_state_field.type == ?*bfd_receive.BfdReceiveLoopState);
 }
 
-test "thread field is nullable" {
+test "transmit_loop_state field is nullable" {
     const bundle_ty = bfd_serve.BfdServeBundle;
-    const thread_field = @typeInfo(bundle_ty).Struct.fields[6];
-    try testing.expect(thread_field.type == ?std.Thread);
+    const transmit_loop_state_field = @typeInfo(bundle_ty).Struct.fields[6];
+    try testing.expect(transmit_loop_state_field.type == ?*bfd_transmit.BfdTransmitLoopState);
+}
+
+test "receive_thread field is nullable" {
+    const bundle_ty = bfd_serve.BfdServeBundle;
+    const receive_thread_field = @typeInfo(bundle_ty).Struct.fields[7];
+    try testing.expect(receive_thread_field.type == ?std.Thread);
+}
+
+test "transmit_thread field is nullable" {
+    const bundle_ty = bfd_serve.BfdServeBundle;
+    const transmit_thread_field = @typeInfo(bundle_ty).Struct.fields[8];
+    try testing.expect(transmit_thread_field.type == ?std.Thread);
 }
 
 // ============================================================================

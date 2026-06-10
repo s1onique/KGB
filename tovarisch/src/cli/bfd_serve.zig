@@ -12,6 +12,7 @@ const bfd_status = @import("../bfd/status.zig");
 const bfd_transport = @import("../bfd/transport.zig");
 const bfd_clock = @import("../bfd/clock.zig");
 const bfd_receive = @import("../bfd/receive.zig");
+const bfd_transmit = @import("../bfd/transmit.zig");
 
 /// Result of loading BFD configuration.
 pub const BfdLoadResult = union(enum) {
@@ -25,9 +26,9 @@ pub const BfdLoadResult = union(enum) {
     failed,
 };
 
-/// Bundle that owns config memory, BFD runtime, and receive thread.
-/// Thread is joinable to prevent use-after-free during cleanup.
-/// Socket ownership: loop state owns the socket.
+/// Bundle that owns config memory, BFD runtime, and both BFD threads.
+/// Threads are joinable to prevent use-after-free during cleanup.
+/// Socket ownership: receive loop state owns the socket.
 pub const BfdServeBundle = struct {
     const Self = @This();
 
@@ -35,7 +36,7 @@ pub const BfdServeBundle = struct {
     raw: config.RawConfig,
     /// The BFD runtime - uses addresses from raw.
     runtime: bfd_status.BfdRuntime,
-    /// Stop signal for receive loop thread.
+    /// Stop signal shared between receive and transmit loops.
     stop_signal: bfd_receive.StopSignal = .{},
     /// Peer address for discriminator learning.
     peer_addr: []const u8,
@@ -43,8 +44,12 @@ pub const BfdServeBundle = struct {
     local_addr: []const u8,
     /// Receive loop state (heap-allocated, owned by this bundle).
     loop_state: ?*bfd_receive.BfdReceiveLoopState = null,
-    /// Thread handle (null if not started).
-    thread: ?std.Thread = null,
+    /// Transmit loop state (heap-allocated, owned by this bundle).
+    transmit_loop_state: ?*bfd_transmit.BfdTransmitLoopState = null,
+    /// Receive thread handle (null if not started).
+    receive_thread: ?std.Thread = null,
+    /// Transmit thread handle (null if not started).
+    transmit_thread: ?std.Thread = null,
     /// Flag indicating BFD was configured and socket was bound.
     bfd_active: bool = false,
 };
@@ -136,11 +141,13 @@ pub fn loadConfigAndBfd(
         .peer_addr = bfd_cfg.peer_addr,
         .local_addr = bfd_cfg.local_addr,
         .loop_state = null,
-        .thread = null,
+        .transmit_loop_state = null,
+        .receive_thread = null,
+        .transmit_thread = null,
         .bfd_active = true,
     };
 
-    // Allocate loop state on heap
+    // Allocate receive loop state on heap
     var loop_state = std.heap.page_allocator.create(bfd_receive.BfdReceiveLoopState) catch {
         stderr.writeAll("error: out of memory for BFD receive loop\n") catch {};
         socket.close();
@@ -150,7 +157,7 @@ pub fn loadConfigAndBfd(
     };
     bundle.loop_state = loop_state;
 
-    // Initialize loop state (socket ownership transferred)
+    // Initialize receive loop state (socket ownership transferred)
     loop_state.* = bfd_receive.BfdReceiveLoopState{
         .runtime = &bundle.runtime,
         .socket = socket,
@@ -159,8 +166,8 @@ pub fn loadConfigAndBfd(
         .needs_cleanup = true,
     };
 
-    // Spawn thread (NOT detached - we need to join it on cleanup)
-    const thread = std.Thread.spawn(.{}, bfd_receive.bfdReceiveLoop, .{loop_state}) catch |err| {
+    // Spawn receive thread (NOT detached - we need to join it on cleanup)
+    const receive_thread = std.Thread.spawn(.{}, bfd_receive.bfdReceiveLoop, .{loop_state}) catch |err| {
         stderr.print("error: failed to start BFD receive thread: {s}\n", .{@errorName(err)}) catch {};
         // socket is owned by loop_state, close it here on failure
         loop_state.socket.close();
@@ -169,45 +176,108 @@ pub fn loadConfigAndBfd(
         std.heap.page_allocator.destroy(bundle);
         return .failed;
     };
-    bundle.thread = thread;
+    bundle.receive_thread = receive_thread;
+
+    // Allocate transmit loop state on heap
+    const transmit_loop_state = std.heap.page_allocator.create(bfd_transmit.BfdTransmitLoopState) catch |err| {
+        stderr.print("error: out of memory for BFD transmit loop: {s}\n", .{@errorName(err)}) catch {};
+        // Clean up receive thread before destroying bundle - it holds pointers into bundle.runtime
+        cleanupStartedReceiveThread(bundle, loop_state);
+        raw.deinit(std.heap.page_allocator);
+        std.heap.page_allocator.destroy(bundle);
+        return .failed;
+    };
+    bundle.transmit_loop_state = transmit_loop_state;
+
+    // Initialize transmit loop state
+    transmit_loop_state.* = bfd_transmit.BfdTransmitLoopState{
+        .runtime = &bundle.runtime,
+        .stop = &bundle.stop_signal,
+        .tick_interval_ms = bfd_transmit.DEFAULT_TICK_INTERVAL_MS,
+        .needs_cleanup = true,
+    };
+
+    // Spawn transmit thread (NOT detached - we need to join it on cleanup)
+    const transmit_thread = std.Thread.spawn(.{}, bfd_transmit.bfdTransmitLoop, .{transmit_loop_state}) catch |err| {
+        stderr.print("error: failed to start BFD transmit thread: {s}\n", .{@errorName(err)}) catch {};
+        // Clean up receive thread before destroying bundle - it holds pointers into bundle.runtime
+        cleanupStartedReceiveThread(bundle, loop_state);
+        std.heap.page_allocator.destroy(transmit_loop_state);
+        raw.deinit(std.heap.page_allocator);
+        std.heap.page_allocator.destroy(bundle);
+        return .failed;
+    };
+    bundle.transmit_thread = transmit_thread;
 
     return .{ .configured = bundle };
 }
 
+/// Clean up a receive thread that has been started but needs to be aborted.
+/// This is called from error paths after receive_thread has been assigned
+/// but before the bundle is fully initialized.
+///
+/// SAFETY: This function must be called while bundle and loop_state are still valid.
+/// The receive thread holds pointers into bundle.runtime and bundle.stop_signal,
+/// so we must stop it before destroying those structures.
+fn cleanupStartedReceiveThread(bundle: *BfdServeBundle, loop_state: *bfd_receive.BfdReceiveLoopState) void {
+    // Signal receive loop to stop
+    bundle.stop_signal.store();
+    // Close socket to wake recvfrom (non-blocking will return)
+    loop_state.socket.close();
+    // Join thread (blocks until loop exits)
+    bundle.receive_thread.?.join();
+    // Destroy receive loop state
+    std.heap.page_allocator.destroy(loop_state);
+    bundle.loop_state = null;
+}
+
 /// Clean up a BFD bundle when shutting down.
 /// Thread-safe cleanup order:
-/// 1. Signal stop flag
+/// 1. Signal stop flag (both loops check this)
 /// 2. Close socket to wake recvfrom
-/// 3. Join thread
-/// 4. Destroy loop state
-/// 5. Deinit raw config
-/// 6. Destroy bundle
+/// 3. Join receive thread
+/// 4. Join transmit thread
+/// 5. Destroy receive loop state
+/// 6. Destroy transmit loop state
+/// 7. Deinit raw config
+/// 8. Destroy bundle
 pub fn cleanupBfdBundle(bundle: *BfdServeBundle) void {
-    // 1. Signal receive loop to stop
+    // 1. Signal both loops to stop
     bundle.stop_signal.store();
 
-    // 2. If BFD was active, close socket and join thread
+    // 2. If BFD was active, close socket and join threads
     if (bundle.bfd_active) {
         // Close socket to wake recvfrom (non-blocking will return)
         if (bundle.loop_state) |state| {
             state.socket.close();
         }
 
-        // 3. Join thread (blocks until loop exits)
-        if (bundle.thread) |thread| {
+        // 3. Join receive thread (blocks until loop exits)
+        if (bundle.receive_thread) |thread| {
             thread.join();
         }
 
-        // 4. Destroy loop state
+        // 4. Join transmit thread (blocks until loop exits)
+        if (bundle.transmit_thread) |thread| {
+            thread.join();
+        }
+
+        // 5. Destroy receive loop state
         if (bundle.loop_state) |state| {
             std.heap.page_allocator.destroy(state);
             bundle.loop_state = null;
         }
+
+        // 6. Destroy transmit loop state
+        if (bundle.transmit_loop_state) |state| {
+            std.heap.page_allocator.destroy(state);
+            bundle.transmit_loop_state = null;
+        }
     }
 
-    // 5. Deinit raw config
+    // 7. Deinit raw config
     bundle.raw.deinit(std.heap.page_allocator);
 
-    // 6. Destroy bundle
+    // 8. Destroy bundle
     std.heap.page_allocator.destroy(bundle);
 }

@@ -90,8 +90,16 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
                     stderr.writeAll("FATAL: BFD bundle initialized but loop_state is null\n") catch {};
                     return .serve_error;
                 }
-                if (bundle.thread == null) {
-                    stderr.writeAll("FATAL: BFD bundle initialized but thread is null\n") catch {};
+                if (bundle.transmit_loop_state == null) {
+                    stderr.writeAll("FATAL: BFD bundle initialized but transmit_loop_state is null\n") catch {};
+                    return .serve_error;
+                }
+                if (bundle.receive_thread == null) {
+                    stderr.writeAll("FATAL: BFD bundle initialized but receive_thread is null\n") catch {};
+                    return .serve_error;
+                }
+                if (bundle.transmit_thread == null) {
+                    stderr.writeAll("FATAL: BFD bundle initialized but transmit_thread is null\n") catch {};
                     return .serve_error;
                 }
                 if (!bundle.bfd_active) {
