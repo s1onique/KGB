@@ -290,3 +290,15 @@ test {
 test {
     std.testing.refAllDecls(@import("cli/wg_args.zig"));
 }
+
+test {
+    std.testing.refAllDecls(@import("cli/bfd_serve.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("cli_serve_config_tests.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bfd_serve_config_tests.zig"));
+}
