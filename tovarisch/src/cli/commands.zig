@@ -1,6 +1,7 @@
 const std = @import("std");
 const cli_args = @import("args.zig");
 const usage = @import("usage.zig");
+const wg_cmd = @import("wg_cmd.zig");
 const status = @import("../status.zig");
 const build_info = @import("../build_info.zig");
 const http = @import("../http/server.zig");
@@ -48,6 +49,10 @@ pub fn run(argv: []const []const u8, stdout: anytype, stderr: anytype) ExitCode 
         return statusCommand(argv[2..], stdout, stderr);
     }
 
+    if (std.mem.eql(u8, command, "wg")) {
+        return wgCommand(argv[2..], stdout, stderr);
+    }
+
     stderr.print("unknown command: {s}\n\n", .{command}) catch {};
     printUsage(stderr);
     return .usage;
@@ -91,6 +96,14 @@ fn statusCommand(status_args: []const []const u8, stdout: anytype, stderr: anyty
     stdout.writeByte('\n') catch return .usage;
 
     return .ok;
+}
+
+/// Handle the `tovarisch wg generate` command.
+/// Delegates to wg_cmd module.
+fn wgCommand(wg_args_list: []const []const u8, stdout: anytype, stderr: anytype) ExitCode {
+    _ = stdout; // stdout not used; wg_cmd uses stderr for output
+    const exit_code = wg_cmd.wgCommand(wg_args_list, stderr, std.heap.page_allocator);
+    return if (exit_code == 0) .ok else .usage;
 }
 
 /// Diagnostic command to isolate std.Thread.spawn crash on Linux target.
@@ -403,4 +416,31 @@ test "CLI exit codes match expected behavior" {
     try std.testing.expect(run(&.{ "tovarisch", "badcmd" }, w, w) == .usage);
     try std.testing.expect(run(&.{ "tovarisch", "status" }, w, w) == .usage);
     try std.testing.expect(run(&.{ "tovarisch", "serve", "--unknown" }, w, w) == .usage);
+}
+
+test "wg command returns ok with --help" {
+    const w = VoidWriter{};
+    try std.testing.expect(run(&.{ "tovarisch", "wg", "--help" }, w, w) == .ok);
+}
+
+test "wg command returns ok with -h" {
+    const w = VoidWriter{};
+    try std.testing.expect(run(&.{ "tovarisch", "wg", "-h" }, w, w) == .ok);
+}
+
+test "wg generate without args returns usage" {
+    const w = VoidWriter{};
+    try std.testing.expect(run(&.{ "tovarisch", "wg", "generate" }, w, w) == .usage);
+}
+
+test "wg unknown subcommand returns usage" {
+    const w = VoidWriter{};
+    try std.testing.expect(run(&.{ "tovarisch", "wg", "unknown" }, w, w) == .usage);
+}
+
+test "--help output contains tovarisch wg generate" {
+    var cw = CaptureWriter.init();
+    const code = run(&.{ "tovarisch", "--help" }, &cw, &cw);
+    try std.testing.expect(code == .ok);
+    try std.testing.expect(std.mem.containsAtLeast(u8, cw.slice(), 1, "tovarisch wg generate"));
 }

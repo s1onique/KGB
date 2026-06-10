@@ -273,3 +273,20 @@ test {
 test {
     std.testing.refAllDecls(@import("bfd/status.zig"));
 }
+
+// WireGuard config module tests
+test {
+    std.testing.refAllDecls(@import("config.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("wg/config.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("wg/generate.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("cli/wg_args.zig"));
+}

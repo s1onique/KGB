@@ -9,6 +9,7 @@ pub const usage_text =
     \\  tovarisch serve [--listen ADDR:PORT] [--listen-private] [--listen-all-public-dangerous] [--statonly] [--stats-interval SECONDS]
     \\  tovarisch status --json
     \\  tovarisch thread-smoke
+    \\  tovarisch wg generate --config <path>
     \\
 ;
 
@@ -47,4 +48,8 @@ test "usage text contains tovarisch status --json" {
 
 test "usage text contains tovarisch thread-smoke" {
     try std.testing.expect(std.mem.indexOf(u8, usage_text, "tovarisch thread-smoke") != null);
+}
+
+test "usage text contains tovarisch wg generate" {
+    try std.testing.expect(std.mem.indexOf(u8, usage_text, "tovarisch wg generate") != null);
 }
