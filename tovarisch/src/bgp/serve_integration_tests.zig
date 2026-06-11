@@ -36,7 +36,22 @@ test "BgpRuntimeState enum has expected variants" {
 }
 
 test "BgpLoadResult union has expected variants" {
+    // Now has 4 variants: no_config, disabled, configured, failed
     try std.testing.expectEqual(@as(usize, 4), @typeInfo(serve_integration.BgpLoadResult).@"union".fields.len);
+}
+
+test "BgpLoadResult.failed has LoadFailure payload" {
+    const failure = serve_integration.LoadFailure{ .message = "test error" };
+    const result: serve_integration.BgpLoadResult = .{ .failed = failure };
+    try std.testing.expectEqualStrings("test error", result.failed.message);
+}
+
+test "BgpLoadResult.failed preserves error message" {
+    const w = VoidWriter{};
+    // This will fail because /nonexistent doesn't exist
+    const result = serve_integration.loadConfigAndBgp("/nonexistent/config.toml", w, std.heap.page_allocator);
+    try std.testing.expect(result == .failed);
+    try std.testing.expectEqualStrings("failed to read config", result.failed.message);
 }
 
 test "parseBgpConfig returns disabled with present=false when no [bgp] section" {

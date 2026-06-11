@@ -43,7 +43,14 @@ pub const BgpLoadResult = union(enum) {
     /// Note: Session is ready but not yet connected (connect deferred).
     configured: *BgpServeBundle,
     /// Config loading or BGP initialization failed.
-    failed,
+    /// Includes error message for status reporting.
+    failed: LoadFailure,
+};
+
+/// Error details for failed BGP load.
+pub const LoadFailure = struct {
+    /// Sanitized error message for status reporting.
+    message: []const u8,
 };
 
 /// Bundle that owns config memory and BGP runtime state.
@@ -92,14 +99,14 @@ pub fn loadConfigAndBgp(
     // Read config file
     var raw = wg_args.readConfig(path, std.heap.page_allocator) catch |e| {
         stderr.print("error: failed to read config file '{s}': {s}\n", .{ path, @errorName(e) }) catch {};
-        return .failed;
+        return .{ .failed = .{ .message = "failed to read config" } };
     };
 
     // Parse BGP config (includes advertised_prefixes parsing now)
     const bgp_cfg = config_parse.parseBgpConfig(&raw) catch |e| {
         stderr.print("error: failed to parse BGP config: {s}\n", .{@errorName(e)}) catch {};
         raw.deinit(std.heap.page_allocator);
-        return .failed;
+        return .{ .failed = .{ .message = "failed to parse BGP config" } };
     };
 
     // If [bgp] section is not present, return no_config
@@ -124,21 +131,21 @@ pub fn loadConfigAndBgp(
     const local_addr = config_parse.parseIpv4Address(bgp_cfg.local_address) catch |e| {
         stderr.print("error: invalid local_address '{s}': {s}\n", .{ bgp_cfg.local_address, @errorName(e) }) catch {};
         raw.deinit(std.heap.page_allocator);
-        return .failed;
+        return .{ .failed = .{ .message = "invalid local_address" } };
     };
 
     // Parse router_id using plain IPv4 parser
     const router_addr = config_parse.parseIpv4Address(bgp_cfg.router_id) catch |e| {
         stderr.print("error: invalid router_id '{s}': {s}\n", .{ bgp_cfg.router_id, @errorName(e) }) catch {};
         raw.deinit(std.heap.page_allocator);
-        return .failed;
+        return .{ .failed = .{ .message = "invalid router_id" } };
     };
 
     // Parse peer address using plain IPv4 parser
     const peer_addr = config_parse.parseIpv4Address(bgp_cfg.peer_address) catch |e| {
         stderr.print("error: invalid peer_address '{s}': {s}\n", .{ bgp_cfg.peer_address, @errorName(e) }) catch {};
         raw.deinit(std.heap.page_allocator);
-        return .failed;
+        return .{ .failed = .{ .message = "invalid peer_address" } };
     };
 
     // Parse advertised prefixes from raw config string (comma-separated CIDR list)
@@ -150,7 +157,7 @@ pub fn loadConfigAndBgp(
     const prefix_strings = config_parse.parsePrefixList(bgp_cfg.advertised_prefixes_raw, allocator) catch |e| {
         stderr.print("error: failed to parse advertised_prefixes: {s}\n", .{@errorName(e)}) catch {};
         raw.deinit(std.heap.page_allocator);
-        return .failed;
+        return .{ .failed = .{ .message = "failed to parse advertised_prefixes" } };
     };
     // Free prefix_strings on any exit from this block
     defer allocator.free(prefix_strings);
@@ -160,13 +167,13 @@ pub fn loadConfigAndBgp(
             stderr.print("error: invalid advertised_prefix '{s}': {s}\n", .{ cidr, @errorName(e) }) catch {};
             prefixes.deinit(allocator);
             raw.deinit(std.heap.page_allocator);
-            return .failed;
+            return .{ .failed = .{ .message = "invalid advertised_prefix" } };
         };
         prefixes.append(allocator, prefix) catch {
             stderr.writeAll("error: out of memory parsing prefixes\n") catch {};
             prefixes.deinit(allocator);
             raw.deinit(std.heap.page_allocator);
-            return .failed;
+            return .{ .failed = .{ .message = "out of memory parsing prefixes" } };
         };
     }
 
@@ -175,7 +182,7 @@ pub fn loadConfigAndBgp(
         stderr.writeAll("error: no advertised_prefixes configured\n") catch {};
         prefixes.deinit(allocator);
         raw.deinit(std.heap.page_allocator);
-        return .failed;
+        return .{ .failed = .{ .message = "no advertised_prefixes configured" } };
     }
 
     // Build SessionConfig for BGP session
@@ -198,7 +205,7 @@ pub fn loadConfigAndBgp(
         stderr.print("error: invalid BGP session config: {s}\n", .{@errorName(e)}) catch {};
         prefixes.deinit(allocator);
         raw.deinit(std.heap.page_allocator);
-        return .failed;
+        return .{ .failed = .{ .message = "invalid BGP session config" } };
     };
 
     // Create TCP transport with bounded connect timeout
@@ -212,7 +219,7 @@ pub fn loadConfigAndBgp(
         stderr.print("error: failed to connect to BGP peer: {s}\n", .{@errorName(e)}) catch {};
         prefixes.deinit(allocator);
         raw.deinit(std.heap.page_allocator);
-        return .failed;
+        return .{ .failed = .{ .message = "BGP connect failed" } };
     };
 
     // Allocate bundle first so we can store trans in it
@@ -221,7 +228,7 @@ pub fn loadConfigAndBgp(
         tcp.close();
         prefixes.deinit(allocator);
         raw.deinit(std.heap.page_allocator);
-        return .failed;
+        return .{ .failed = .{ .message = "out of memory creating BGP bundle" } };
     };
 
     // Initialize transport wrapper in bundle (owned by bundle, lives as long as sess)
@@ -246,7 +253,7 @@ pub fn loadConfigAndBgp(
         prefixes.deinit(allocator);
         raw.deinit(std.heap.page_allocator);
         std.heap.page_allocator.destroy(bundle);
-        return .failed;
+        return .{ .failed = .{ .message = "failed to create BGP session" } };
     };
     bundle.sess = sess;
     bundle.state = .configured;

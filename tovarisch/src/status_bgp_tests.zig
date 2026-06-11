@@ -260,3 +260,61 @@ test "deriveStatusStateFromBundle returns no_config for null" {
     const state = bgp_status.deriveStatusStateFromBundle(null);
     try std.testing.expect(state == .no_config);
 }
+
+// --- BGP Load Failure Tests ---
+
+test "BgpStatusState.failed renders as error status" {
+    var scratch: [64]u8 = undefined;
+    const check = bgp_status.buildBgpCheckInto(.{ .failed = .{ .message = "BGP load failed" } }, &scratch);
+    try std.testing.expect(check.status == .@"error");
+    try std.testing.expectEqualStrings("BGP load failed", check.detail);
+}
+
+test "BgpStatusState.failed message is preserved verbatim" {
+    var scratch: [64]u8 = undefined;
+    const check = bgp_status.buildBgpCheckInto(.{ .failed = .{ .message = "BGP connect failed" } }, &scratch);
+    try std.testing.expect(check.status == .@"error");
+    try std.testing.expectEqualStrings("BGP connect failed", check.detail);
+}
+
+test "BgpStatusState.failed is distinguishable from no_config" {
+    var scratch: [64]u8 = undefined;
+    
+    const no_config_check = bgp_status.buildBgpCheckInto(.no_config, &scratch);
+    try std.testing.expect(no_config_check.status == .warn);
+    try std.testing.expectEqualStrings("BGP not configured", no_config_check.detail);
+    
+    const failed_check = bgp_status.buildBgpCheckInto(.{ .failed = .{ .message = "BGP load failed" } }, &scratch);
+    try std.testing.expect(failed_check.status == .@"error");
+    try std.testing.expectEqualStrings("BGP load failed", failed_check.detail);
+    
+    // These must be different statuses
+    try std.testing.expect(no_config_check.status != failed_check.status);
+}
+
+test "BgpStatusState.failed is distinguishable from disabled" {
+    var scratch: [64]u8 = undefined;
+    
+    const disabled_check = bgp_status.buildBgpCheckInto(.disabled, &scratch);
+    try std.testing.expect(disabled_check.status == .ok);
+    try std.testing.expectEqualStrings("BGP disabled by config", disabled_check.detail);
+    
+    const failed_check = bgp_status.buildBgpCheckInto(.{ .failed = .{ .message = "invalid local_address" } }, &scratch);
+    try std.testing.expect(failed_check.status == .@"error");
+    try std.testing.expect(failed_check.status != disabled_check.status);
+}
+
+test "top-level status degrades when BGP load fails" {
+    const checks = [_]status.Check{
+        .{ .name = "process", .status = .ok, .detail = "running" },
+        .{ .name = "binary", .status = .ok, .detail = "tovarisch" },
+        .{ .name = "config", .status = .ok, .detail = "/etc/tovarisch.conf" },
+        .{ .name = "state_dir", .status = .ok, .detail = "state directory ready" },
+        .{ .name = "http", .status = .ok, .detail = "http service route available" },
+        .{ .name = "tunnel", .status = .ok, .detail = "wg0" },
+        .{ .name = "wg_peers", .status = .ok, .detail = "wg0" },
+        .{ .name = "bfd", .status = .ok, .detail = "bfd sessions up" },
+        .{ .name = "bgp", .status = .@"error", .detail = "BGP load failed" },
+    };
+    try std.testing.expectEqual(status.CheckStatus.@"error", status.deriveStatus(&checks));
+}

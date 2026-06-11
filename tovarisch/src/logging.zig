@@ -30,6 +30,10 @@ pub const Event = enum(u8) {
     heartbeat_init_failed,
     /// Heartbeat thread spawn failed (non-fatal, daemon continues).
     heartbeat_thread_start_failed,
+    /// BGP load started.
+    bgp_load_started,
+    /// BGP load result (success, disabled, or failure).
+    bgp_load_result,
 };
 
 /// Get the log level string for a given event.
@@ -40,7 +44,9 @@ fn levelFor(event: Event) []const u8 {
         .tunnel_stats,
         .app_startup,
         .app_shutdown,
-        .uvb76_signal_ready => "info",
+        .uvb76_signal_ready,
+        .bgp_load_started,
+        .bgp_load_result => "info",
 
         .http_accept_loop_error,
         .server_error,
@@ -171,6 +177,21 @@ pub fn logTunnelStatsFull(writer: *BufferedWriter, total: u32, up: u32, down: u3
         .{ .name = "tunnels_total", .value = FieldValue{ .integer = total } },
         .{ .name = "tunnels_up", .value = FieldValue{ .integer = up } },
         .{ .name = "tunnels_down", .value = FieldValue{ .integer = down } },
+    });
+}
+
+/// Log BGP load started event.
+pub fn logBgpLoadStarted(writer: *BufferedWriter) !void {
+    try emit(.bgp_load_started, writer, &.{
+        .{ .name = "detail", .value = FieldValue{ .string = "BGP load started" } },
+    });
+}
+
+/// Log BGP load result event.
+pub fn logBgpLoadResult(writer: *BufferedWriter, result_tag: []const u8, detail: []const u8) !void {
+    try emit(.bgp_load_result, writer, &.{
+        .{ .name = "result", .value = FieldValue{ .string = result_tag } },
+        .{ .name = "detail", .value = FieldValue{ .string = detail } },
     });
 }
 

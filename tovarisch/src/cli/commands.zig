@@ -10,6 +10,7 @@ const bfd_serve = @import("bfd_serve.zig");
 const bfd_status = @import("../bfd/status.zig");
 const bgp_serve = @import("bgp_serve.zig");
 const bgp_status = @import("../bgp/status.zig");
+const test_helpers = @import("commands_test_helpers.zig");
 
 pub const ExitCode = enum(u8) {
     ok = 0,
@@ -116,13 +117,44 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
 
             // Load BGP configuration (ACT 4: BGP wiring)
             // CRITICAL: When BGP is disabled, this creates ZERO sockets.
+
+            // Log BGP load start for observability
+            var bgp_log_buf = logging.BufferedWriter.init();
+            logging.logBgpLoadStarted(&bgp_log_buf) catch {};
+            stderr.writeAll(bgp_log_buf.slice()) catch {};
+
             const bgp_result = bgp_serve.loadConfigAndBgp(serve_config.config_path, stderr);
 
-            // BGP failures are logged but don't fail serve startup
-            // (BGP is optional and connection may fail without hot-looping)
+            // Log BGP load result for observability
+            bgp_log_buf.reset();
+            const result_tag: []const u8 = switch (bgp_result) {
+                .configured => "configured",
+                .disabled => "disabled",
+                .no_config => "no_config",
+                .failed => |load_err| load_err.message,
+            };
+            logging.logBgpLoadResult(&bgp_log_buf, result_tag, "") catch {};
+            stderr.writeAll(bgp_log_buf.slice()) catch {};
+
+            // Preserve BgpLoadResult tag for status derivation.
+            // BGP failures must be visible as ".failed", not silently collapsed to ".no_config".
             const bgp_bundle: ?*bgp_serve.BgpServeBundle = switch (bgp_result) {
                 .configured => |bundle| bundle,
                 else => null,
+            };
+
+            // Clean up bundle on any exit
+            defer if (bgp_bundle) |bundle| bgp_serve.cleanupBgpBundle(bundle);
+
+            // Derive BGP status preserving the load result tag.
+            // This prevents ".failed" from collapsing into ".no_config".
+            const bgp_state: bgp_status.BgpStatusState = switch (bgp_result) {
+                .configured => |bundle| bgp_status.deriveStatusStateFromBundle(bundle),
+                .disabled => bgp_status.BgpStatusState.disabled,
+                .no_config => bgp_status.BgpStatusState.no_config,
+                .failed => |load_err| bgp_status.BgpStatusState{
+                    .failed = .{ .message = load_err.message },
+                },
             };
 
             // Extract optional BFD runtime pointer for HTTP server
@@ -137,14 +169,8 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
             else
                 .no_config;
 
-            // Clean up bundles on any exit (BFD first, then BGP)
+            // Clean up BFD bundle on any exit
             defer if (bfd_bundle) |bundle| bfd_serve.cleanupBfdBundle(bundle);
-            defer if (bgp_bundle) |bundle| bgp_serve.cleanupBgpBundle(bundle);
-
-            const bgp_state = if (bgp_bundle) |bundle|
-                bgp_status.deriveStatusStateFromBundle(bundle)
-            else
-                bgp_status.BgpStatusState.no_config;
 
             http.serveForeverWithContext(serve_config.http_config, .{
                 .bfd_runtime = bfd_rt,
@@ -230,51 +256,9 @@ fn noopSleepThread() void {
     _ = std.c.nanosleep(&ts, null);
 }
 
-// --- Test helpers ---
-
-const VoidWriter = struct {
-    const Self = @This();
-    pub fn writeAll(_: Self, _: []const u8) error{}!void {}
-    pub fn write(_: Self, _: []const u8) error{}!void {}
-    pub fn print(_: Self, _: []const u8, _: anytype) error{}!void {}
-    pub fn writeByte(_: Self, _: u8) error{}!void {}
-    pub fn flush(_: Self) error{}!void {}
-};
-
-const CaptureWriter = struct {
-    const Self = @This();
-    const BufSize = 4096;
-    buf: [BufSize]u8 = undefined,
-    len: usize = 0,
-
-    pub fn init() Self {
-        return .{ .buf = undefined, .len = 0 };
-    }
-
-    pub fn print(self: *Self, comptime fmt: []const u8, print_args: anytype) !void {
-        if (self.len >= BufSize) return error.BufferOverflow;
-        const written = std.fmt.bufPrint(self.buf[self.len..], fmt, print_args) catch return error.BufferOverflow;
-        self.len += written.len;
-    }
-
-    pub fn writeAll(self: *Self, bytes: []const u8) !void {
-        if (self.len + bytes.len > BufSize) return error.BufferOverflow;
-        @memcpy(self.buf[self.len..][0..bytes.len], bytes);
-        self.len += bytes.len;
-    }
-
-    pub fn writeByte(self: *Self, byte: u8) !void {
-        if (self.len >= BufSize) return error.BufferOverflow;
-        self.buf[self.len] = byte;
-        self.len += 1;
-    }
-
-    pub fn slice(self: *const Self) []const u8 {
-        return self.buf[0..self.len];
-    }
-
-    pub fn flush(_: *Self) error{}!void {}
-};
+// Re-export test helpers for external use
+const VoidWriter = test_helpers.VoidWriter;
+const CaptureWriter = test_helpers.CaptureWriter;
 
 // --- Tests ---
 
