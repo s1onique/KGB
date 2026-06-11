@@ -16,15 +16,6 @@
 const std = @import("std");
 const tcp_transport = @import("tcp_transport.zig");
 
-// CI BREADCRUMB: Print test start/end for debugging hangs.
-// These are temporary and will be replaced with structured diagnostics.
-fn breadcrumb(comptime name: []const u8) void {
-    std.debug.print("[BREADCRUMB] tcp-test: start {s}\n", .{name});
-}
-fn breadcrumbEnd(comptime name: []const u8) void {
-    std.debug.print("[BREADCRUMB] tcp-test: end {s}\n", .{name});
-}
-
 // ============================================================================
 // Test Helpers
 // ============================================================================
@@ -121,9 +112,6 @@ const ACCEPT_TIMEOUT_MS: i32 = 5000;
 // ============================================================================
 
 test "TcpTransport IPv4 byte order is correct" {
-    breadcrumb("IPv4 byte order");
-    defer breadcrumbEnd("IPv4 byte order");
-
     // Test 127.0.0.1 memory layout
     const addr127 = [_]u8{ 127, 0, 0, 1 };
     const packed127 = tcp_transport.writeIpv4ToSockaddr(addr127);
@@ -148,9 +136,6 @@ test "TcpTransport IPv4 byte order is correct" {
 }
 
 test "TcpTransport port byte order is correct" {
-    breadcrumb("port byte order");
-    defer breadcrumbEnd("port byte order");
-
     // Test port 179 memory layout
     const port179 = tcp_transport.writePortToSockaddr(179);
     const bytes179 = std.mem.asBytes(&port179);
@@ -173,9 +158,6 @@ test "TcpTransport port byte order is correct" {
 // ============================================================================
 
 test "TcpTransport can connect to local listener" {
-    breadcrumb("connect to local listener");
-    defer breadcrumbEnd("connect to local listener");
-
     // Create local listener - skip if bind fails (macOS sandbox)
     const listener = createLocalListener() catch return error.SkipZigTest;
     defer _ = std.c.close(listener.fd);
@@ -195,9 +177,6 @@ test "TcpTransport can connect to local listener" {
 }
 
 test "TcpTransport sends bytes to listener" {
-    breadcrumb("sends bytes to listener");
-    defer breadcrumbEnd("sends bytes to listener");
-
     // Create local listener - skip if bind fails
     const listener = createLocalListener() catch return error.SkipZigTest;
     defer _ = std.c.close(listener.fd);
@@ -256,9 +235,6 @@ test "TcpTransport receives bytes from listener" {
 }
 
 test "TcpTransport closes cleanly" {
-    breadcrumb("closes cleanly");
-    defer breadcrumbEnd("closes cleanly");
-
     // Create local listener - skip if bind fails
     const listener = createLocalListener() catch return error.SkipZigTest;
     defer _ = std.c.close(listener.fd);
@@ -305,9 +281,6 @@ test "TcpTransport handles peer close" {
 }
 
 test "TcpTransport returns empty when no data available" {
-    breadcrumb("returns empty when no data");
-    defer breadcrumbEnd("returns empty when no data");
-
     // Create local listener - skip if bind fails
     const listener = createLocalListener() catch return error.SkipZigTest;
     defer _ = std.c.close(listener.fd);
@@ -337,9 +310,6 @@ test "TcpTransport returns empty when no data available" {
 // ============================================================================
 
 test "TcpTransport connect to invalid port fails quickly" {
-    breadcrumb("connect to invalid port");
-    defer breadcrumbEnd("connect to invalid port");
-
     // Regression test: connecting to a closed/refused port should fail
     // within the configured timeout, not block indefinitely.
     //
@@ -376,9 +346,6 @@ test "TcpTransport connect to invalid port fails quickly" {
 }
 
 test "TcpTransport connect to listening port succeeds quickly" {
-    breadcrumb("connect to listening port");
-    defer breadcrumbEnd("connect to listening port");
-
     // Positive test: connect to a real listener should succeed immediately
     // (no need to wait for full timeout).
 

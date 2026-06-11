@@ -393,3 +393,7 @@ For threading patterns, detached heartbeat implementation, blocking sleep, and c
 
 For page_allocator leak lessons, request/status rendering memory ownership patterns, and production soak test guidance, see [`zig-0.16-field-manual-rss-leak.md`](./zig-0.16-field-manual-rss-leak.md).
 
+## TCP Socket Testing in Zig Tests
+
+For TCP socket testing patterns that prevent CI hangs, see [`zig-0.16-tcp-socket-tests.md`](./zig-0.16-tcp-socket-tests.md). This companion doc covers: no raw blocking `accept()`/`recv()`, bounded `poll()` before socket receive, and compile/run split for CI observability.
+
