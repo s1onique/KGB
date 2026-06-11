@@ -37,6 +37,11 @@ pub const POLLOUT: c_short = 0x004;
 /// on refused, filtered, or blackholed peers.
 pub const default_connect_timeout_ms: u32 = 5000;
 
+/// Default receive timeout in milliseconds.
+/// This bounds receive operations to prevent indefinite blocking
+/// when no data is available.
+pub const default_recv_timeout_ms: u32 = 100;
+
 /// sockaddr_in - IPv4 socket address structure (network byte order)
 pub const sockaddr_in = extern struct {
     sin_family: c_ushort,
@@ -227,7 +232,8 @@ pub const TcpTransport = struct {
     }
 
     /// Receive bytes from the TCP socket.
-    /// Non-blocking: returns empty slice when no data available.
+    /// Bounded: uses poll() to prevent indefinite blocking when no data available.
+    /// Returns empty slice when no data available or on timeout.
     /// Marks closed only on peer close (recv==0) or fatal error.
     pub fn recv(self: *Self) []const u8 {
         if (self.closed or self.socket_fd < 0) return &[_]u8{};
@@ -239,14 +245,23 @@ pub const TcpTransport = struct {
             return data;
         }
 
-        // Try recv
+        // Poll for data with bounded timeout
+        const ready = waitForData(self.socket_fd, default_recv_timeout_ms);
+        switch (ready) {
+            .ready => {},
+            .timeout => return &[_]u8{},
+            .hung_up, .socket_error, .invalid => {
+                self.closed = true;
+                return &[_]u8{};
+            },
+        }
+
+        // Now do the actual recv - should not block since poll indicated readiness
         const received = std.c.recv(self.socket_fd, @ptrCast(&self.recv_buf), self.recv_buf.len, 0);
         if (received < 0) {
-            // Error occurred - for non-blocking, this means try again later
             return &[_]u8{};
         }
         if (received == 0) {
-            // Peer closed connection
             self.closed = true;
             return &[_]u8{};
         }
@@ -330,36 +345,45 @@ fn setNonBlocking(sockfd: std.c.fd_t) !void {
     }
 }
 
-/// POLLHUP flag - peer closed connection (but connect may still have succeeded)
-const POLLHUP: c_short = 0x020;
-
-/// POLLERR flag - error condition on socket
+/// POLLHUP = 0x010 (peer closed), POLLERR = 0x008 (error), POLLIN = 0x001 (read), POLLNVAL = 0x020 (invalid)
+const POLLHUP: c_short = 0x010;
 const POLLERR: c_short = 0x008;
+const POLLIN: c_short = 0x001;
+const POLLNVAL: c_short = 0x020;
 
-/// Wait for socket to be writable (connect completed or failed) with timeout.
-/// Uses poll() with POLLOUT to detect when the nonblocking connect completes.
-/// Returns error.Timeout on poll timeout, error.PollFailed on poll error.
-fn waitConnectWritable(sockfd: std.c.fd_t, timeout_ms: u32) !void {
+/// Result of waiting for socket data.
+const DataReady = enum(u3) {
+    ready,
+    timeout,
+    hung_up,
+    socket_error,
+    invalid,
+};
+
+/// Wait for data with bounded timeout. Returns DataReady to allow proper error handling.
+fn waitForData(sockfd: std.c.fd_t, timeout_ms: u32) DataReady {
     var poll_fd: [1]std.c.pollfd = .{
-        .{ .fd = sockfd, .events = POLLOUT, .revents = 0 },
+        .{ .fd = sockfd, .events = POLLIN, .revents = 0 },
     };
-
-    const poll_result = std.c.poll(&poll_fd, 1, @as(i32, @intCast(timeout_ms)));
-    if (poll_result < 0) {
-        return error.PollFailed;
-    }
-    if (poll_result == 0) {
-        // Timeout - connection did not complete within the timeout period
-        return error.Timeout;
-    }
-    // poll_result > 0 means socket had an event
-    // Check if POLLOUT is set (connect completed or succeeded) OR
-    // POLLERR/POLLHUP indicate completion (even if failed)
+    const r = std.c.poll(&poll_fd, 1, @as(i32, @intCast(timeout_ms)));
+    if (r < 0) return .socket_error;
+    if (r == 0) return .timeout;
     const revents = poll_fd[0].revents;
-    if ((revents & POLLOUT) != 0 or (revents & POLLERR) != 0 or (revents & POLLHUP) != 0) {
-        // Connect completed (success or failure) - caller should check SO_ERROR
-        return;
-    }
+    if ((revents & POLLNVAL) != 0) return .invalid;
+    if ((revents & POLLERR) != 0) return .socket_error;
+    if ((revents & POLLHUP) != 0) return .hung_up;
+    if ((revents & POLLIN) != 0) return .ready;
+    return .timeout;
+}
+
+/// Wait for writable with timeout. POLLOUT detects connect completion.
+fn waitConnectWritable(sockfd: std.c.fd_t, timeout_ms: u32) !void {
+    var poll_fd: [1]std.c.pollfd = .{.{ .fd = sockfd, .events = POLLOUT, .revents = 0 }};
+    const r = std.c.poll(&poll_fd, 1, @as(i32, @intCast(timeout_ms)));
+    if (r < 0) return error.PollFailed;
+    if (r == 0) return error.Timeout;
+    const revents = poll_fd[0].revents;
+    if ((revents & POLLOUT) != 0 or (revents & POLLERR) != 0 or (revents & POLLHUP) != 0) return;
     return error.PollFailed;
 }
 
