@@ -57,8 +57,8 @@ The service is configured to:
 - `PrivateTmp=true` — Isolates /tmp
 - `ProtectSystem=strict` — Read-only /usr, /boot, /etc
 - `ProtectHome=true` — Hide /home directories
-- `CapabilityBoundingSet=` — No capabilities granted
-- `AmbientCapabilities=` — No ambient capabilities
+- `CapabilityBoundingSet=CAP_NET_BIND_SERVICE` — Grants CAP_NET_BIND_SERVICE to bind privileged BGP TCP/179 as non-root
+- `AmbientCapabilities=CAP_NET_BIND_SERVICE` — Allows persistent binding of port 179 for BGP passive listener
 - `LockPersonality=true` — Prevent personality changes
 - `MemoryDenyWriteExecute=true` — Deny memory write+execute
 - `RestrictRealtime=true` — Disable realtime scheduling
@@ -158,6 +158,18 @@ Linux CI owns that contract.
 ### No auto-enable on install
 
 Security/local-first leaf daemon should not automatically start listening, even on localhost. Operators explicitly enable the service after reviewing the configuration.
+
+### Why systemd capabilities not file setcap?
+
+Using systemd's `CapabilityBoundingSet` and `AmbientCapabilities` is preferred over `setcap` on the binary for several reasons:
+
+1. **Package upgrade safety**: File capabilities can be lost during package upgrades if the preinst/postinst scripts fail or are skipped. systemd capabilities are declarative in the unit file and survive upgrades.
+
+2. **Principle of least privilege**: `setcap` grants the capability to anyone who executes the binary. systemd capabilities are scoped to the service process only, and only when the service is started via systemd.
+
+3. **Auditability**: systemd unit files are declarative and version-controlled. File capabilities require separate tooling (`getcap`, `setcap`) and are harder to audit across systems.
+
+4. **Consistency**: All service capabilities are defined in one place (the unit file), making security posture review straightforward.
 
 ### No state deletion on remove
 

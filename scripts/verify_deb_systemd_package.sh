@@ -77,8 +77,8 @@ check_required 'Group=tovarisch' 'Group=tovarisch'
 check_required 'NoNewPrivileges=true' 'NoNewPrivileges'
 check_required 'PrivateTmp=true' 'PrivateTmp'
 check_required 'ProtectSystem=strict' 'ProtectSystem'
-check_required 'CapabilityBoundingSet=' 'CapabilityBoundingSet (empty)'
-check_required 'AmbientCapabilities=' 'AmbientCapabilities (empty)'
+check_required 'CapabilityBoundingSet=CAP_NET_BIND_SERVICE' 'CapabilityBoundingSet=CAP_NET_BIND_SERVICE'
+check_required 'AmbientCapabilities=CAP_NET_BIND_SERVICE' 'AmbientCapabilities=CAP_NET_BIND_SERVICE'
 
 echo "[verify-deb-systemd] Checking control archive (maintainer scripts)..."
 
