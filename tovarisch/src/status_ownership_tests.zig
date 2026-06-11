@@ -139,7 +139,18 @@ test "repeated BFD renders with partial peers don't corrupt previous output" {
 
 test "buildBgpCheckInto uses caller-owned buffer for configured case" {
     const state = bgp_status.BgpStatusState{
-        .configured = .{ .advertised_prefix_count = 3 },
+        .configured = .{
+            .advertised_prefix_count = 3,
+            .fsm_state = "established",
+            .peer_address = .{ 10, 0, 0, 2 },
+            .peer_as = 65002,
+            .local_as = 65001,
+            .last_error = null,
+            .messages_sent = 5,
+            .messages_received = 4,
+            .keepalives_sent = 2,
+            .keepalives_received = 2,
+        },
     };
 
     var caller_buf: [64]u8 = undefined;
@@ -153,10 +164,32 @@ test "buildBgpCheckInto uses caller-owned buffer for configured case" {
 
 test "two BGP scratch buffers are independent (no aliasing)" {
     const state1 = bgp_status.BgpStatusState{
-        .configured = .{ .advertised_prefix_count = 10 },
+        .configured = .{
+            .advertised_prefix_count = 10,
+            .fsm_state = "open_sent",
+            .peer_address = .{ 10, 0, 0, 2 },
+            .peer_as = 65002,
+            .local_as = 65001,
+            .last_error = null,
+            .messages_sent = 1,
+            .messages_received = 0,
+            .keepalives_sent = 0,
+            .keepalives_received = 0,
+        },
     };
     const state2 = bgp_status.BgpStatusState{
-        .configured = .{ .advertised_prefix_count = 1 },
+        .configured = .{
+            .advertised_prefix_count = 1,
+            .fsm_state = "established",
+            .peer_address = .{ 10, 0, 0, 2 },
+            .peer_as = 65002,
+            .local_as = 65001,
+            .last_error = null,
+            .messages_sent = 3,
+            .messages_received = 2,
+            .keepalives_sent = 1,
+            .keepalives_received = 1,
+        },
     };
 
     var buf1: [64]u8 = undefined;
@@ -231,7 +264,20 @@ test "two independent StatusScratch contexts don't alias" {
     const checks2 = status.getLocalChecksWithBgp(
         null,
         status.getDefaultConfigCheck(),
-        .{ .configured = .{ .advertised_prefix_count = 5 } },
+        .{
+            .configured = .{
+                .advertised_prefix_count = 5,
+                .fsm_state = "established",
+                .peer_address = .{ 10, 0, 0, 2 },
+                .peer_as = 65002,
+                .local_as = 65001,
+                .last_error = null,
+                .messages_sent = 10,
+                .messages_received = 8,
+                .keepalives_sent = 5,
+                .keepalives_received = 5,
+            },
+        },
         &scratch2,
     );
 

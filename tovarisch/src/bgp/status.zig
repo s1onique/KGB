@@ -47,6 +47,24 @@ pub const BgpStatusState = union(enum) {
     pub const Configured = struct {
         /// Number of advertised prefixes (may be 0).
         advertised_prefix_count: usize,
+        /// Current BGP FSM state (idle, connect, open_sent, open_confirm, established, failed, stopped).
+        fsm_state: []const u8,
+        /// Peer address as raw bytes (avoids dangling slice from stack buffer).
+        peer_address: [4]u8,
+        /// Peer's ASN.
+        peer_as: u16,
+        /// Our local ASN.
+        local_as: u16,
+        /// Last error message (null if no error).
+        last_error: ?[]const u8,
+        /// Messages sent counter.
+        messages_sent: u64,
+        /// Messages received counter.
+        messages_received: u64,
+        /// Keepalives sent counter.
+        keepalives_sent: u64,
+        /// Keepalives received counter.
+        keepalives_received: u64,
     };
 
     pub const Failure = struct {
@@ -126,6 +144,17 @@ pub fn buildBgpCheckInto(
     }
 }
 
+/// Format IPv4 address as string into buffer.
+fn formatPeerAddress(addr: [4]u8, buf: *[16]u8) []const u8 {
+    const result = std.fmt.bufPrint(buf, "{}.{}.{}.{}", .{
+        addr[0],
+        addr[1],
+        addr[2],
+        addr[3],
+    }) catch unreachable;
+    return result;
+}
+
 /// Derive BgpStatusState from an optional BgpServeBundle pointer.
 /// Returns .no_config when bundle is null (no config path was provided).
 /// Returns .not_configured when bundle state is .not_configured.
@@ -133,7 +162,9 @@ pub fn buildBgpCheckInto(
 /// Returns .configured when bundle state is .configured.
 /// Returns .failed when bundle state is .failed.
 /// Returns .failed when bundle has last_error set.
-pub fn deriveStatusStateFromBundle(bundle: ?*const serve_integration.BgpServeBundle) BgpStatusState {
+/// 
+/// When .configured, populates runtime FSM state and message counters.
+pub fn deriveStatusStateFromBundle(bundle: ?*serve_integration.BgpServeBundle) BgpStatusState {
     if (bundle == null) {
         return .no_config;
     }
@@ -142,10 +173,24 @@ pub fn deriveStatusStateFromBundle(bundle: ?*const serve_integration.BgpServeBun
     switch (b.state) {
         .not_configured => return .not_configured,
         .disabled => return .disabled,
-        .configured => return .{
-            .configured = .{
-                .advertised_prefix_count = b.prefixes.len,
-            },
+        .configured => {
+            // Get session status for runtime data
+            const sess_status = serve_integration.getSessionStatus(b);
+            const fsm_state = @tagName(sess_status.state);
+            return .{
+                .configured = .{
+                    .advertised_prefix_count = b.prefixes.len,
+                    .fsm_state = fsm_state,
+                    .peer_address = sess_status.peer_address,
+                    .peer_as = sess_status.peer_as,
+                    .local_as = sess_status.local_as,
+                    .last_error = if (sess_status.last_error) |e| e.message else null,
+                    .messages_sent = sess_status.messages_sent,
+                    .messages_received = sess_status.messages_received,
+                    .keepalives_sent = sess_status.keepalives_sent,
+                    .keepalives_received = sess_status.keepalives_received,
+                },
+            };
         },
         .failed => {
             const err_msg = if (b.last_error) |e| e else "configuration failed";
@@ -182,7 +227,20 @@ test "buildBgpCheckInto returns ok for disabled" {
 
 test "buildBgpCheckInto returns warn for configured with zero prefixes" {
     var detail_buf: [BGP_DETAIL_BUF_SIZE]u8 = undefined;
-    const check = buildBgpCheckInto(.{ .configured = .{ .advertised_prefix_count = 0 } }, &detail_buf);
+    const check = buildBgpCheckInto(.{
+        .configured = .{
+            .advertised_prefix_count = 0,
+            .fsm_state = "idle",
+            .peer_address = .{ 10, 0, 0, 2 },
+            .peer_as = 65002,
+            .local_as = 65001,
+            .last_error = null,
+            .messages_sent = 0,
+            .messages_received = 0,
+            .keepalives_sent = 0,
+            .keepalives_received = 0,
+        },
+    }, &detail_buf);
     try std.testing.expectEqualStrings("bgp", check.name);
     try std.testing.expect(check.status == .warn);
     try std.testing.expectEqualStrings("BGP configured with no advertised prefixes", check.detail);
@@ -190,7 +248,20 @@ test "buildBgpCheckInto returns warn for configured with zero prefixes" {
 
 test "buildBgpCheckInto returns ok for configured with one prefix" {
     var detail_buf: [BGP_DETAIL_BUF_SIZE]u8 = undefined;
-    const check = buildBgpCheckInto(.{ .configured = .{ .advertised_prefix_count = 1 } }, &detail_buf);
+    const check = buildBgpCheckInto(.{
+        .configured = .{
+            .advertised_prefix_count = 1,
+            .fsm_state = "established",
+            .peer_address = .{ 10, 0, 0, 2 },
+            .peer_as = 65002,
+            .local_as = 65001,
+            .last_error = null,
+            .messages_sent = 3,
+            .messages_received = 2,
+            .keepalives_sent = 1,
+            .keepalives_received = 1,
+        },
+    }, &detail_buf);
     try std.testing.expectEqualStrings("bgp", check.name);
     try std.testing.expect(check.status == .ok);
     try std.testing.expect(std.mem.containsAtLeast(u8, check.detail, 1, "1 advertised prefix"));
@@ -198,7 +269,20 @@ test "buildBgpCheckInto returns ok for configured with one prefix" {
 
 test "buildBgpCheckInto returns ok for configured with multiple prefixes" {
     var detail_buf: [BGP_DETAIL_BUF_SIZE]u8 = undefined;
-    const check = buildBgpCheckInto(.{ .configured = .{ .advertised_prefix_count = 5 } }, &detail_buf);
+    const check = buildBgpCheckInto(.{
+        .configured = .{
+            .advertised_prefix_count = 5,
+            .fsm_state = "open_sent",
+            .peer_address = .{ 10, 0, 0, 2 },
+            .peer_as = 65002,
+            .local_as = 65001,
+            .last_error = null,
+            .messages_sent = 1,
+            .messages_received = 0,
+            .keepalives_sent = 0,
+            .keepalives_received = 0,
+        },
+    }, &detail_buf);
     try std.testing.expectEqualStrings("bgp", check.name);
     try std.testing.expect(check.status == .ok);
     try std.testing.expect(std.mem.containsAtLeast(u8, check.detail, 1, "5 advertised prefixes"));
@@ -222,7 +306,20 @@ test "buildBgpCheckInto returns error for runtime_failed" {
 
 test "buildBgpCheckInto uses caller's buffer" {
     var detail_buf: [BGP_DETAIL_BUF_SIZE]u8 = undefined;
-    const check = buildBgpCheckInto(.{ .configured = .{ .advertised_prefix_count = 3 } }, &detail_buf);
+    const check = buildBgpCheckInto(.{
+        .configured = .{
+            .advertised_prefix_count = 3,
+            .fsm_state = "established",
+            .peer_address = .{ 10, 0, 0, 2 },
+            .peer_as = 65002,
+            .local_as = 65001,
+            .last_error = null,
+            .messages_sent = 5,
+            .messages_received = 4,
+            .keepalives_sent = 2,
+            .keepalives_received = 2,
+        },
+    }, &detail_buf);
     
     try std.testing.expect(check.status == .ok);
     // Verify the detail points to our buffer (not heap-allocated)

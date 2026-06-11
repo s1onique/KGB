@@ -43,7 +43,20 @@ test "getBgpCheck returns ok for disabled state" {
 
 test "getBgpCheck returns ok for configured with prefixes" {
     var scratch: [64]u8 = undefined;
-    const check = status.getBgpCheck(.{ .configured = .{ .advertised_prefix_count = 2 } }, &scratch);
+    const check = status.getBgpCheck(.{
+        .configured = .{
+            .advertised_prefix_count = 2,
+            .fsm_state = "established",
+            .peer_address = .{ 10, 0, 0, 2 },
+            .peer_as = 65002,
+            .local_as = 65001,
+            .last_error = null,
+            .messages_sent = 3,
+            .messages_received = 2,
+            .keepalives_sent = 1,
+            .keepalives_received = 1,
+        },
+    }, &scratch);
     try std.testing.expectEqualStrings("bgp", check.name);
     try std.testing.expect(check.status == .ok);
     try std.testing.expect(std.mem.containsAtLeast(u8, check.detail, 1, "2 advertised prefixes"));
@@ -51,7 +64,20 @@ test "getBgpCheck returns ok for configured with prefixes" {
 
 test "getBgpCheck returns warn for configured with zero prefixes" {
     var scratch: [64]u8 = undefined;
-    const check = status.getBgpCheck(.{ .configured = .{ .advertised_prefix_count = 0 } }, &scratch);
+    const check = status.getBgpCheck(.{
+        .configured = .{
+            .advertised_prefix_count = 0,
+            .fsm_state = "idle",
+            .peer_address = .{ 10, 0, 0, 2 },
+            .peer_as = 65002,
+            .local_as = 65001,
+            .last_error = null,
+            .messages_sent = 0,
+            .messages_received = 0,
+            .keepalives_sent = 0,
+            .keepalives_received = 0,
+        },
+    }, &scratch);
     try std.testing.expectEqualStrings("bgp", check.name);
     try std.testing.expect(check.status == .warn);
     try std.testing.expectEqualStrings("BGP configured with no advertised prefixes", check.detail);
@@ -151,7 +177,20 @@ test "BgpStatusState.disabled maps to ok status" {
 
 test "BgpStatusState.configured with prefixes maps to ok status" {
     var scratch: [64]u8 = undefined;
-    const state = bgp_status.BgpStatusState{ .configured = .{ .advertised_prefix_count = 3 } };
+    const state = bgp_status.BgpStatusState{
+        .configured = .{
+            .advertised_prefix_count = 3,
+            .fsm_state = "established",
+            .peer_address = .{ 10, 0, 0, 2 },
+            .peer_as = 65002,
+            .local_as = 65001,
+            .last_error = null,
+            .messages_sent = 5,
+            .messages_received = 4,
+            .keepalives_sent = 2,
+            .keepalives_received = 2,
+        },
+    };
     const check = bgp_status.buildBgpCheckInto(state, &scratch);
     try std.testing.expect(check.status == .ok);
     try std.testing.expect(std.mem.containsAtLeast(u8, check.detail, 1, "3 advertised prefixes"));
@@ -159,7 +198,20 @@ test "BgpStatusState.configured with prefixes maps to ok status" {
 
 test "BgpStatusState.configured with zero prefixes maps to warn status" {
     var scratch: [64]u8 = undefined;
-    const state = bgp_status.BgpStatusState{ .configured = .{ .advertised_prefix_count = 0 } };
+    const state = bgp_status.BgpStatusState{
+        .configured = .{
+            .advertised_prefix_count = 0,
+            .fsm_state = "idle",
+            .peer_address = .{ 10, 0, 0, 2 },
+            .peer_as = 65002,
+            .local_as = 65001,
+            .last_error = null,
+            .messages_sent = 0,
+            .messages_received = 0,
+            .keepalives_sent = 0,
+            .keepalives_received = 0,
+        },
+    };
     const check = bgp_status.buildBgpCheckInto(state, &scratch);
     try std.testing.expect(check.status == .warn);
     try std.testing.expectEqualStrings("BGP configured with no advertised prefixes", check.detail);
@@ -183,7 +235,20 @@ test "BgpStatusState.runtime_failed maps to error status" {
 
 test "buildBgpCheckInto uses caller's buffer" {
     var detail_buf: [64]u8 = undefined;
-    const state = bgp_status.BgpStatusState{ .configured = .{ .advertised_prefix_count = 5 } };
+    const state = bgp_status.BgpStatusState{
+        .configured = .{
+            .advertised_prefix_count = 5,
+            .fsm_state = "open_sent",
+            .peer_address = .{ 10, 0, 0, 2 },
+            .peer_as = 65002,
+            .local_as = 65001,
+            .last_error = null,
+            .messages_sent = 1,
+            .messages_received = 0,
+            .keepalives_sent = 0,
+            .keepalives_received = 0,
+        },
+    };
     const check = bgp_status.buildBgpCheckInto(state, &detail_buf);
     
     try std.testing.expect(check.status == .ok);

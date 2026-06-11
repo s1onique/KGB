@@ -1,15 +1,14 @@
 // bgp/serve_integration.zig — BGP runtime integration for serve command
 //
-// ACT 4: Wire BGP session into tovarisch serve runtime.
+// ACT 5: Wire BGP session into tovarisch serve runtime.
 // Loads config from file and creates BGP runtime for the daemon.
 // Keeps config memory alive for daemon lifetime to avoid dangling slices.
 //
 // KEY CONSTRAINT: When BGP is disabled, ZERO sockets are created.
 // This module must NOT call TcpTransport.connect() when BGP is disabled.
 //
-// ACT 4 Scope: This module only builds and validates BGP runtime config.
-// Real connection startup is deferred to a later ACT after bounded connect exists.
-// This keeps serve startup safe - no blocking connect calls.
+// This module creates the TCP transport and BGP session at load time,
+// enabling the session state machine to run during serve.
 //
 // References: RFC 4271 (BGP-4)
 
@@ -19,6 +18,8 @@ const config = @import("../config.zig");
 const config_parse = @import("config_parse.zig");
 const session = @import("session.zig");
 const types = @import("types.zig");
+const tcp_transport = @import("tcp_transport.zig");
+const transport = @import("transport.zig");
 
 /// Runtime state for BGP session
 pub const BgpRuntimeState = enum {
@@ -46,8 +47,7 @@ pub const BgpLoadResult = union(enum) {
 };
 
 /// Bundle that owns config memory and BGP runtime state.
-/// This ACT builds and validates config but does NOT call TcpTransport.connect().
-/// Connection is deferred to a future ACT after bounded nonblocking connect exists.
+/// Includes TCP transport and session for the full BGP state machine.
 pub const BgpServeBundle = struct {
     const Self = @This();
 
@@ -55,7 +55,7 @@ pub const BgpServeBundle = struct {
     raw: config.RawConfig,
     /// The parsed BGP config.
     bgp_config: config_parse.BgpConfig,
-    /// BGP session config (built but session not created yet).
+    /// BGP session config (built at load time).
     session_config: session.SessionConfig,
     /// Current runtime state.
     state: BgpRuntimeState = .not_configured,
@@ -63,6 +63,12 @@ pub const BgpServeBundle = struct {
     last_error: ?[]const u8 = null,
     /// Advertised prefixes (parsed from config).
     prefixes: []types.Ipv4Prefix = &.{},
+    /// TCP transport for the BGP session.
+    tcp: tcp_transport.TcpTransport,
+    /// Transport wrapper (owned by bundle, lives as long as sess needs it).
+    trans: transport.Transport,
+    /// BGP session state machine.
+    sess: session.Session,
 };
 
 /// Load config file and validate BGP configuration.
@@ -195,30 +201,64 @@ pub fn loadConfigAndBgp(
         return .failed;
     };
 
-    // Allocate bundle
-    const bundle = std.heap.page_allocator.create(BgpServeBundle) catch {
-        stderr.writeAll("error: out of memory creating BGP bundle\n") catch {};
+    // Create TCP transport with bounded connect timeout
+    const tcp_config = tcp_transport.TcpTransportConfig{
+        .peer_address = peer_addr,
+        .peer_port = bgp_cfg.peer_port,
+        .local_address = local_addr,
+        .connect_timeout_ms = bgp_cfg.connect_timeout_ms,
+    };
+    var tcp = tcp_transport.TcpTransport.connect(tcp_config) catch |e| {
+        stderr.print("error: failed to connect to BGP peer: {s}\n", .{@errorName(e)}) catch {};
         prefixes.deinit(allocator);
         raw.deinit(std.heap.page_allocator);
         return .failed;
     };
 
-    // Initialize bundle - state is "configured" not "running"
-    // because we haven't connected yet (deferred to future ACT)
+    // Allocate bundle first so we can store trans in it
+    const bundle = std.heap.page_allocator.create(BgpServeBundle) catch {
+        stderr.writeAll("error: out of memory creating BGP bundle\n") catch {};
+        tcp.close();
+        prefixes.deinit(allocator);
+        raw.deinit(std.heap.page_allocator);
+        return .failed;
+    };
+
+    // Initialize transport wrapper in bundle (owned by bundle, lives as long as sess)
     bundle.* = BgpServeBundle{
         .raw = raw,
         .bgp_config = bgp_cfg,
         .session_config = session_config,
-        .state = .configured,
+        .state = .not_configured,
         .last_error = null,
         .prefixes = prefixes.items,
+        .tcp = undefined,
+        .trans = undefined,
+        .sess = undefined,
     };
+    bundle.tcp = tcp;
+    bundle.trans = tcp.toTransport();
+
+    // Create BGP session with the bundle-owned transport
+    const sess = session.init(session_config, &bundle.trans) catch |e| {
+        stderr.print("error: failed to create BGP session: {s}\n", .{@errorName(e)}) catch {};
+        tcp.close();
+        prefixes.deinit(allocator);
+        raw.deinit(std.heap.page_allocator);
+        std.heap.page_allocator.destroy(bundle);
+        return .failed;
+    };
+    bundle.sess = sess;
+    bundle.state = .configured;
 
     return .{ .configured = bundle };
 }
 
 /// Clean up a BGP bundle when shutting down.
 pub fn cleanupBgpBundle(bundle: *BgpServeBundle, allocator: std.mem.Allocator) void {
+    // Close TCP transport
+    bundle.tcp.close();
+
     // Free prefixes
     allocator.free(bundle.prefixes);
 
@@ -237,4 +277,34 @@ pub fn getBgpState(bundle: *const BgpServeBundle) BgpRuntimeState {
 /// Get last error message if any.
 pub fn getBgpLastError(bundle: *const BgpServeBundle) ?[]const u8 {
     return bundle.last_error;
+}
+
+/// Run one iteration of the BGP session state machine.
+/// Returns RunResult indicating session state after the iteration.
+pub fn runSessionOnce(bundle: *BgpServeBundle) session.RunResult {
+    const result = session.runOnce(&bundle.sess) catch |e| {
+        bundle.last_error = @errorName(e);
+        bundle.state = .failed;
+        return .failed;
+    };
+
+    // Sync runtime state with session state
+    switch (result) {
+        .established => bundle.state = .configured,
+        .failed => {
+            bundle.state = .failed;
+            if (bundle.sess.status.last_error) |err| {
+                bundle.last_error = err.message;
+            }
+        },
+        .stopped => bundle.state = .configured,
+        .ok => {},
+    }
+
+    return result;
+}
+
+/// Get the BGP session status for /status JSON output.
+pub fn getSessionStatus(bundle: *BgpServeBundle) session.SessionStatus {
+    return session.getStatus(&bundle.sess);
 }
