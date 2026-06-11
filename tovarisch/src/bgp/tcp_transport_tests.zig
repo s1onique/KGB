@@ -9,9 +9,21 @@
 //
 // Bounded connect test added: connection to invalid port is now bounded by timeout.
 // Previously a failing connect could block indefinitely.
+//
+// FIX: Added bounded accept() to prevent test hangs on Linux CI.
+// Blocking accept() could block forever waiting for a connection.
 
 const std = @import("std");
 const tcp_transport = @import("tcp_transport.zig");
+
+// CI BREADCRUMB: Print test start/end for debugging hangs.
+// These are temporary and will be replaced with structured diagnostics.
+fn breadcrumb(comptime name: []const u8) void {
+    std.debug.print("[BREADCRUMB] tcp-test: start {s}\n", .{name});
+}
+fn breadcrumbEnd(comptime name: []const u8) void {
+    std.debug.print("[BREADCRUMB] tcp-test: end {s}\n", .{name});
+}
 
 // ============================================================================
 // Test Helpers
@@ -71,8 +83,11 @@ fn createLocalListener() !struct { fd: std.c.fd_t, port: u16 } {
     return .{ .fd = listen_fd, .port = assigned_port };
 }
 
-/// Accept one connection from a listening socket.
-fn acceptConnection(listen_fd: std.c.fd_t) !std.c.fd_t {
+/// Accept one connection from a listening socket with BOUNDED timeout.
+/// Uses poll() to detect incoming connection before accept(), preventing
+/// indefinite blocking on Linux CI.
+/// Returns error.AcceptTimeout if no connection arrives within timeout_ms.
+fn acceptConnectionBounded(listen_fd: std.c.fd_t, timeout_ms: i32) !std.c.fd_t {
     const sockaddr_in = extern struct {
         sin_family: c_ushort,
         sin_port: c_ushort,
@@ -82,17 +97,33 @@ fn acceptConnection(listen_fd: std.c.fd_t) !std.c.fd_t {
     var client_addr: sockaddr_in = undefined;
     var addr_len: std.c.socklen_t = @sizeOf(sockaddr_in);
 
+    // Poll for incoming connection with timeout
+    var poll_fd: [1]std.c.pollfd = .{
+        .{ .fd = listen_fd, .events = 0x001, .revents = 0 }, // POLLIN
+    };
+
+    const poll_result = std.c.poll(&poll_fd, 1, timeout_ms);
+    if (poll_result < 0) return error.AcceptFailed;
+    if (poll_result == 0) return error.AcceptTimeout;
+
+    // Now accept (should not block since data is ready)
     const client_fd = std.c.accept(listen_fd, @ptrCast(&client_addr), &addr_len);
     if (client_fd < 0) return error.AcceptFailed;
 
     return client_fd;
 }
 
+/// Default timeout for bounded accept in tests (5 seconds)
+const ACCEPT_TIMEOUT_MS: i32 = 5000;
+
 // ============================================================================
 // Byte Order Tests (no sockets required)
 // ============================================================================
 
 test "TcpTransport IPv4 byte order is correct" {
+    breadcrumb("IPv4 byte order");
+    defer breadcrumbEnd("IPv4 byte order");
+
     // Test 127.0.0.1 memory layout
     const addr127 = [_]u8{ 127, 0, 0, 1 };
     const packed127 = tcp_transport.writeIpv4ToSockaddr(addr127);
@@ -117,6 +148,9 @@ test "TcpTransport IPv4 byte order is correct" {
 }
 
 test "TcpTransport port byte order is correct" {
+    breadcrumb("port byte order");
+    defer breadcrumbEnd("port byte order");
+
     // Test port 179 memory layout
     const port179 = tcp_transport.writePortToSockaddr(179);
     const bytes179 = std.mem.asBytes(&port179);
@@ -139,6 +173,9 @@ test "TcpTransport port byte order is correct" {
 // ============================================================================
 
 test "TcpTransport can connect to local listener" {
+    breadcrumb("connect to local listener");
+    defer breadcrumbEnd("connect to local listener");
+
     // Create local listener - skip if bind fails (macOS sandbox)
     const listener = createLocalListener() catch return error.SkipZigTest;
     defer _ = std.c.close(listener.fd);
@@ -158,6 +195,9 @@ test "TcpTransport can connect to local listener" {
 }
 
 test "TcpTransport sends bytes to listener" {
+    breadcrumb("sends bytes to listener");
+    defer breadcrumbEnd("sends bytes to listener");
+
     // Create local listener - skip if bind fails
     const listener = createLocalListener() catch return error.SkipZigTest;
     defer _ = std.c.close(listener.fd);
@@ -171,15 +211,35 @@ test "TcpTransport sends bytes to listener" {
     });
     defer tcp.close();
 
-    // Accept connection from listener
-    const client_fd = try acceptConnection(listener.fd);
+    // Accept connection from listener (BOUNDED to prevent hang)
+    const client_fd = acceptConnectionBounded(listener.fd, ACCEPT_TIMEOUT_MS) catch |err| {
+        // On timeout, we know the accept didn't complete in time
+        return err;
+    };
     defer _ = std.c.close(client_fd);
 
     // Send data through TCP transport
     const test_data = [_]u8{ 0xFF, 0xFF, 0x00, 0x13, 0x04 };
     tcp.send(&test_data);
 
-    // Receive data on server side
+    // Receive data on server side with BOUNDED timeout.
+    // Nonblocking recv returns EAGAIN if no data; bounded poll ensures we don't hang forever.
+    const POLLIN: c_short = 0x001;
+    const POLLERR: c_short = 0x008;
+    const POLLHUP: c_short = 0x010;
+    const POLLNVAL: c_short = 0x020;
+
+    var poll_fd: [1]std.c.pollfd = .{
+        .{ .fd = client_fd, .events = POLLIN, .revents = 0 },
+    };
+    const poll_result = std.c.poll(&poll_fd, 1, 2000); // 2 second timeout
+    try std.testing.expect(poll_result > 0);
+    // Reject spurious wakeups or error conditions; must be actual input readiness.
+    try std.testing.expect((poll_fd[0].revents & POLLNVAL) == 0);
+    try std.testing.expect((poll_fd[0].revents & POLLERR) == 0);
+    try std.testing.expect((poll_fd[0].revents & POLLHUP) == 0);
+    try std.testing.expect((poll_fd[0].revents & POLLIN) != 0);
+
     var recv_buf: [1024]u8 = undefined;
     const received = std.c.recv(client_fd, @ptrCast(&recv_buf), recv_buf.len, 0);
     try std.testing.expect(received > 0);
@@ -196,6 +256,9 @@ test "TcpTransport receives bytes from listener" {
 }
 
 test "TcpTransport closes cleanly" {
+    breadcrumb("closes cleanly");
+    defer breadcrumbEnd("closes cleanly");
+
     // Create local listener - skip if bind fails
     const listener = createLocalListener() catch return error.SkipZigTest;
     defer _ = std.c.close(listener.fd);
@@ -207,9 +270,12 @@ test "TcpTransport closes cleanly" {
         .local_address = null,
         .connect_timeout_ms = 1000,
     });
+    defer tcp.close();
 
-    // Accept connection from listener
-    const client_fd = try acceptConnection(listener.fd);
+    // Accept connection from listener (BOUNDED)
+    const client_fd = acceptConnectionBounded(listener.fd, ACCEPT_TIMEOUT_MS) catch |err| {
+        return err;
+    };
     defer _ = std.c.close(client_fd);
 
     // Close the transport
@@ -239,6 +305,9 @@ test "TcpTransport handles peer close" {
 }
 
 test "TcpTransport returns empty when no data available" {
+    breadcrumb("returns empty when no data");
+    defer breadcrumbEnd("returns empty when no data");
+
     // Create local listener - skip if bind fails
     const listener = createLocalListener() catch return error.SkipZigTest;
     defer _ = std.c.close(listener.fd);
@@ -252,8 +321,10 @@ test "TcpTransport returns empty when no data available" {
     });
     defer tcp.close();
 
-    // Accept connection from listener (but don't send anything)
-    const client_fd = try acceptConnection(listener.fd);
+    // Accept connection from listener (BOUNDED)
+    const client_fd = acceptConnectionBounded(listener.fd, ACCEPT_TIMEOUT_MS) catch |err| {
+        return err;
+    };
     defer _ = std.c.close(client_fd);
 
     // recv should return empty when no data (non-blocking)
@@ -266,6 +337,9 @@ test "TcpTransport returns empty when no data available" {
 // ============================================================================
 
 test "TcpTransport connect to invalid port fails quickly" {
+    breadcrumb("connect to invalid port");
+    defer breadcrumbEnd("connect to invalid port");
+
     // Regression test: connecting to a closed/refused port should fail
     // within the configured timeout, not block indefinitely.
     //
@@ -302,6 +376,9 @@ test "TcpTransport connect to invalid port fails quickly" {
 }
 
 test "TcpTransport connect to listening port succeeds quickly" {
+    breadcrumb("connect to listening port");
+    defer breadcrumbEnd("connect to listening port");
+
     // Positive test: connect to a real listener should succeed immediately
     // (no need to wait for full timeout).
 
