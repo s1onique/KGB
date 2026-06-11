@@ -27,6 +27,7 @@ const status_checks = @import("status_checks.zig");
 const build_info = @import("build_info.zig");
 const bfd_status = @import("bfd/status.zig");
 const bgp_status = @import("bgp/status.zig");
+const bgp_serve = @import("cli/bgp_serve.zig");
 
 pub const DEFAULT_STATE_DIR = ".tovarisch/state";
 
@@ -299,13 +300,17 @@ pub fn getLocalChecksWithBfd(
 
 /// Runtime status inputs for injectable status rendering.
 /// This struct allows explicit runtime inputs without module-global state.
+///
+/// KEY CHANGE: Uses bgp_bundle pointer for LIVE status derivation.
+/// Status rendering derives BGP state at request time, not startup time.
 pub const RuntimeStatusInputs = struct {
     /// Optional BFD runtime owned by the daemon.
     bfd_runtime: ?*const bfd_status.BfdRuntime = null,
     /// Config check state - defaults to warn with static message.
     config_check: ConfigCheckState = .no_config,
-    /// BGP status state - defaults to no_config.
-    bgp_state: bgp_status.BgpStatusState = .no_config,
+    /// Optional BGP bundle pointer for LIVE status derivation.
+    /// When null, /status shows BGP not configured.
+    bgp_bundle: ?*bgp_serve.BgpServeBundle = null,
 };
 
 // ============================================================================
@@ -314,9 +319,14 @@ pub const RuntimeStatusInputs = struct {
 
 /// Build status with explicit runtime inputs and caller-provided scratch.
 /// The scratch buffer must outlive the returned Status for JSON serialization.
+///
+/// DERIVES LIVE BGP STATE: If bgp_bundle is provided, BGP state is derived
+/// at this time (request time) rather than startup time.
 pub fn buildStatusWithInputs(inputs: RuntimeStatusInputs, scratch: *StatusScratch) Status {
     const config_check_built = buildConfigCheck(inputs.config_check);
-    const checks = getLocalChecksWithBgp(inputs.bfd_runtime, config_check_built, inputs.bgp_state, scratch);
+    // Derive LIVE BGP state from bundle pointer
+    const live_bgp_state = bgp_status.deriveStatusStateFromBundle(inputs.bgp_bundle);
+    const checks = getLocalChecksWithBgp(inputs.bfd_runtime, config_check_built, live_bgp_state, scratch);
     return Status{
         .service = "tovarisch",
         .version = build_info.version,

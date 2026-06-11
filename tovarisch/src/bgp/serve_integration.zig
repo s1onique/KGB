@@ -10,6 +10,10 @@
 // This module creates the TCP transport and BGP session at load time,
 // enabling the session state machine to run during serve.
 //
+// ACT runtime: BGP FSM loop runs in a detached thread (see runtime.zig),
+// driving runSessionOnce. The thread logs FSM transitions and sleeps
+// between iterations.
+//
 // References: RFC 4271 (BGP-4)
 
 const std = @import("std");

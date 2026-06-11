@@ -7,13 +7,13 @@
 // KEY CONSTRAINT: When BGP is disabled, ZERO sockets are created.
 // This module must NOT call TcpTransport.connect() when BGP is disabled.
 //
-// ACT 4 Scope: This module only builds and validates BGP runtime config.
-// Real connection startup is deferred to a later ACT after bounded connect exists.
+// ACT runtime: BGP FSM runs in a detached thread (bgp/runtime.zig).
 //
 // References: RFC 4271 (BGP-4)
 
 const std = @import("std");
 const bgp_serve_integration = @import("../bgp/serve_integration.zig");
+const bgp_runtime = @import("../bgp/runtime.zig");
 
 /// Result of loading BGP configuration.
 pub const BgpLoadResult = bgp_serve_integration.BgpLoadResult;
@@ -49,4 +49,11 @@ pub fn getBgpState(bundle: *const BgpServeBundle) BgpRuntimeState {
 /// Get last error message if any.
 pub fn getBgpLastError(bundle: *const BgpServeBundle) ?[]const u8 {
     return bgp_serve_integration.getBgpLastError(bundle);
+}
+
+/// Start the BGP runtime thread for a configured bundle.
+/// Returns true if thread was spawned successfully.
+/// Thread failures are non-fatal.
+pub fn startBgpRuntimeThread(bundle: *BgpServeBundle, stderr: anytype) bool {
+    return bgp_runtime.startBgpRuntimeThread(bundle, stderr);
 }

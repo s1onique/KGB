@@ -2,10 +2,15 @@
 //
 // Context passed to HTTP route handlers containing runtime state derived at serve startup.
 // This is the canonical state container for /status endpoint rendering.
+//
+// KEY CHANGE: ServeContext now stores a LIVE BGP bundle pointer instead of a frozen
+// BgpStatusState snapshot. Status rendering derives state at request time so
+// /status reflects current FSM state and counters.
 
 const std = @import("std");
 const metrics_state = @import("../metrics_state.zig");
 const bfd_status = @import("../bfd/status.zig");
+const bgp_serve = @import("../cli/bgp_serve.zig");
 const bgp_status = @import("../bgp/status.zig");
 const status = @import("../status.zig");
 
@@ -35,9 +40,10 @@ pub const ServeContext = struct {
     /// This is immutable for the daemon lifetime.
     config_check: status.ConfigCheckState,
 
-    /// BGP status state derived at serve startup from loaded config.
-    /// This is immutable for the daemon lifetime.
-    bgp_state: bgp_status.BgpStatusState,
+    /// Optional BGP bundle owned by the daemon.
+    /// Used to derive live BGP status at request time.
+    /// Null when BGP is not configured.
+    bgp_bundle: ?*bgp_serve.BgpServeBundle,
 
     /// Initialize serve context with allocator.
     /// Uses default no_config state since no config path is available.
@@ -46,7 +52,7 @@ pub const ServeContext = struct {
             .metrics = metrics_state.MetricsState.init(allocator),
             .bfd_runtime = null,
             .config_check = .no_config,
-            .bgp_state = .no_config,
+            .bgp_bundle = null,
         };
     }
 
@@ -57,7 +63,7 @@ pub const ServeContext = struct {
             .metrics = metrics_state.MetricsState.init(allocator),
             .bfd_runtime = bfd_runtime,
             .config_check = .no_config,
-            .bgp_state = .no_config,
+            .bgp_bundle = null,
         };
     }
 
@@ -67,14 +73,20 @@ pub const ServeContext = struct {
         allocator: std.mem.Allocator,
         bfd_runtime: ?*const bfd_status.BfdRuntime,
         config_check: status.ConfigCheckState,
-        bgp_state: bgp_status.BgpStatusState,
+        bgp_bundle: ?*bgp_serve.BgpServeBundle,
     ) Self {
         return .{
             .metrics = metrics_state.MetricsState.init(allocator),
             .bfd_runtime = bfd_runtime,
             .config_check = config_check,
-            .bgp_state = bgp_state,
+            .bgp_bundle = bgp_bundle,
         };
+    }
+
+    /// Derive live BGP status state from the bundle pointer.
+    /// Returns .no_config when bundle is null.
+    pub fn deriveLiveBgpState(self: *const Self) bgp_status.BgpStatusState {
+        return bgp_status.deriveStatusStateFromBundle(self.bgp_bundle);
     }
 
     /// Free all context-owned memory.

@@ -71,7 +71,7 @@ pub fn handleHealthz(fd: i32, _: *anyopaque) !void {
     try response.writeSimpleJsonFd(fd, 200, response.Errors.ok);
 }
 
-/// Status handler - returns full status JSON with BFD, config, and BGP state.
+/// Status handler - returns full status JSON with BFD, config, and live BGP state.
 pub fn handleStatus(fd: i32, state: *anyopaque) !void {
     // Cast opaque state to ServeContext to get BFD runtime, config check, and BGP state.
     const ctx = @as(*server.ServeContext, @ptrCast(@alignCast(state)));
@@ -101,11 +101,11 @@ pub fn handleStatus(fd: i32, state: *anyopaque) !void {
         }
     }{ .buf = &buf, .len = &len };
 
-    // Pass BFD runtime, config check, and BGP state from context.
+    // Pass BFD runtime, config check, and LIVE BGP state from context.
     try status.renderPayloadWithContext(writer, .{
         .bfd_runtime = ctx.bfd_runtime,
         .config_check = ctx.config_check,
-        .bgp_state = ctx.bgp_state,
+        .bgp_bundle = ctx.bgp_bundle,
     });
     const json = buf[0..len];
 

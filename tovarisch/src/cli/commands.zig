@@ -146,16 +146,13 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
             // Clean up bundle on any exit
             defer if (bgp_bundle) |bundle| bgp_serve.cleanupBgpBundle(bundle);
 
-            // Derive BGP status preserving the load result tag.
-            // This prevents ".failed" from collapsing into ".no_config".
-            const bgp_state: bgp_status.BgpStatusState = switch (bgp_result) {
-                .configured => |bundle| bgp_status.deriveStatusStateFromBundle(bundle),
-                .disabled => bgp_status.BgpStatusState.disabled,
-                .no_config => bgp_status.BgpStatusState.no_config,
-                .failed => |load_err| bgp_status.BgpStatusState{
-                    .failed = .{ .message = load_err.message },
-                },
-            };
+            // ACT runtime: Start BGP FSM thread if bundle is configured.
+            // The thread drives runSessionOnce independently of HTTP serve.
+            // Thread failures are non-fatal - daemon continues with degraded BGP.
+            // Pass bundle pointer to ServeContext for LIVE status derivation.
+            if (bgp_bundle) |bundle| {
+                _ = bgp_serve.startBgpRuntimeThread(bundle, stderr);
+            }
 
             // Extract optional BFD runtime pointer for HTTP server
             const bfd_rt: ?*const bfd_status.BfdRuntime = if (bfd_bundle) |bundle|
@@ -175,7 +172,7 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
             http.serveForeverWithContext(serve_config.http_config, .{
                 .bfd_runtime = bfd_rt,
                 .config_check = config_check,
-                .bgp_state = bgp_state,
+                .bgp_bundle = bgp_bundle,
             }, stdout) catch |err| {
                 var log_buf = logging.BufferedWriter.init();
                 logging.emit(.server_error, &log_buf, &.{

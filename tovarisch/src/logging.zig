@@ -34,6 +34,20 @@ pub const Event = enum(u8) {
     bgp_load_started,
     /// BGP load result (success, disabled, or failure).
     bgp_load_result,
+    /// BGP TCP connection established.
+    bgp_connected,
+    /// BGP OPEN sent to peer.
+    bgp_open_sent,
+    /// BGP OPEN received from peer.
+    bgp_open_received,
+    /// BGP KEEPALIVE sent to peer.
+    bgp_keepalive_sent,
+    /// BGP session established (full adjacency).
+    bgp_established,
+    /// BGP NOTIFICATION sent or received.
+    bgp_notification,
+    /// BGP session failed or error.
+    bgp_error,
 };
 
 /// Get the log level string for a given event.
@@ -46,8 +60,15 @@ fn levelFor(event: Event) []const u8 {
         .app_shutdown,
         .uvb76_signal_ready,
         .bgp_load_started,
-        .bgp_load_result => "info",
+        .bgp_load_result,
+        .bgp_connected,
+        .bgp_open_sent,
+        .bgp_open_received,
+        .bgp_keepalive_sent,
+        .bgp_established => "info",
 
+        .bgp_notification,
+        .bgp_error,
         .http_accept_loop_error,
         .server_error,
         .heartbeat_init_failed,
