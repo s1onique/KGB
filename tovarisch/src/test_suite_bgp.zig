@@ -35,6 +35,8 @@ const _bgp_serve_integration = @import("bgp/serve_integration.zig");
 const _bgp_serve_integration_tests = @import("bgp/serve_integration_tests.zig");
 const _bgp_serve_lifetime_tests = @import("bgp/serve_lifetime_tests.zig");
 const _bgp_transport_ownership_tests = @import("bgp/transport_ownership_tests.zig");
+const _bgp_prefix_file_loader = @import("bgp/prefix_file_loader.zig");
+const _bgp_prefix_file_integration_tests = @import("bgp/prefix_file_integration_tests.zig");
 
 // BGP status
 const _bgp_status = @import("bgp/status.zig");
@@ -63,4 +65,6 @@ test { std.testing.refAllDecls(@import("bgp/serve_integration.zig")); }
 test { std.testing.refAllDecls(@import("bgp/serve_integration_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/serve_lifetime_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/transport_ownership_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/prefix_file_loader.zig")); }
+test { std.testing.refAllDecls(@import("bgp/prefix_file_integration_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/status.zig")); }

@@ -284,7 +284,7 @@ test {
     std.testing.refAllDecls(@import("bfd/status.zig"));
 }
 
-// WireGuard config module tests
+// WireGuard tests
 test {
     std.testing.refAllDecls(@import("config.zig"));
 }
@@ -418,11 +418,13 @@ test {
     std.testing.refAllDecls(@import("bgp/transport_ownership_tests.zig"));
 }
 
-test {
-    std.testing.refAllDecls(@import("cli/bgp_serve.zig"));
-}
+// BGP prefix file tests (ACT 6)
+test { std.testing.refAllDecls(@import("bgp/prefix_file_loader.zig")); }
+test { std.testing.refAllDecls(@import("bgp/prefix_file_integration_tests.zig")); }
 
-// BGP status module tests (ACT 5: status exposure)
+test { std.testing.refAllDecls(@import("cli/bgp_serve.zig")); }
+
+// BGP status tests (ACT 5)
 test {
     std.testing.refAllDecls(@import("bgp/status.zig"));
 }
@@ -440,7 +442,7 @@ test {
     std.testing.refAllDecls(@import("bgp/lifecycle_tests.zig"));
 }
 
-// BGP status integration tests
+// BGP status tests
 test {
     std.testing.refAllDecls(@import("status_bgp_tests.zig"));
 }

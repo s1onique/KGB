@@ -40,6 +40,9 @@ pub const BgpConfig = struct {
     /// Raw advertised_prefixes string (comma-separated CIDR list).
     /// Parsed into owned Ipv4Prefix slice in serve_integration.zig.
     advertised_prefixes_raw: []const u8 = "",
+    /// Raw advertised_prefix_files string (comma-separated file paths).
+    /// Parsed into owned Ipv4Prefix slice in serve_integration.zig.
+    advertised_prefix_files_raw: []const u8 = "",
     /// If true, AS_PATH is empty (same-AS/iBGP style).
     same_as: bool = false,
 };
@@ -204,7 +207,12 @@ pub fn parseBgpConfig(raw: *const config.RawConfig) config.ConfigError!BgpConfig
         cfg.advertised_prefixes_raw = value;
     }
 
-    // Note: advertised_prefix_files parsing is deferred to future ACT
+    // Parse advertised_prefix_files (comma-separated file paths)
+    // Store raw string - parsing into owned Ipv4Prefix slice happens in serve_integration.zig
+    if (config.getString(bgp_section, "advertised_prefix_files")) |value| {
+        try config.requireNonEmpty(value);
+        cfg.advertised_prefix_files_raw = value;
+    }
 
     // Parse same_as (optional, default false)
     if (config.getString(bgp_section, "same_as")) |value| {

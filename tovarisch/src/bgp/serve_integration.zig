@@ -32,6 +32,8 @@ const tcp_transport = @import("tcp_transport.zig");
 const transport = @import("transport.zig");
 const clock = @import("clock.zig");
 const reconnect = @import("reconnect_lifecycle.zig");
+const prefix_file_loader = @import("prefix_file_loader.zig");
+const prefix_file = @import("prefix_file.zig");
 
 // ============================================================================
 // Runtime State
@@ -145,6 +147,7 @@ pub fn loadConfigAndBgp(
     var prefixes = std.ArrayList(types.Ipv4Prefix).empty;
     errdefer prefixes.deinit(allocator);
 
+    // Parse inline prefixes first
     const prefix_strings = config_parse.parsePrefixList(bgp_cfg.advertised_prefixes_raw, allocator) catch |e| {
         stderr.print("error: failed to parse advertised_prefixes: {s}\n", .{@errorName(e)}) catch {};
         raw.deinit(std.heap.page_allocator);
@@ -165,6 +168,53 @@ pub fn loadConfigAndBgp(
             raw.deinit(std.heap.page_allocator);
             return .{ .failed = .{ .message = "out of memory parsing prefixes" } };
         };
+    }
+
+    // Load and append prefixes from prefix files (if any)
+    if (bgp_cfg.advertised_prefix_files_raw.len > 0) {
+        // Load file-by-file to provide path-specific diagnostics
+        const file_paths = config_parse.parsePrefixList(bgp_cfg.advertised_prefix_files_raw, allocator) catch |e| {
+            stderr.print("error: failed to parse advertised_prefix_files: {s}\n", .{@errorName(e)}) catch {};
+            prefixes.deinit(allocator);
+            raw.deinit(std.heap.page_allocator);
+            return .{ .failed = .{ .message = "failed to parse advertised_prefix_files" } };
+        };
+        defer allocator.free(file_paths);
+
+        for (file_paths) |file_path| {
+            const file_content = prefix_file_loader.loadPrefixFile(file_path, allocator) catch |e| {
+                stderr.print("error: failed to read prefix file '{s}': {s}\n", .{ file_path, @errorName(e) }) catch {};
+                prefixes.deinit(allocator);
+                raw.deinit(std.heap.page_allocator);
+                return .{ .failed = .{ .message = "failed to read prefix file" } };
+            };
+            defer allocator.free(file_content);
+
+            const parse_result = prefix_file.parse(file_content, allocator) catch |e| {
+                stderr.print("error: failed to parse prefix file '{s}': {s}\n", .{ file_path, @errorName(e) }) catch {};
+                prefixes.deinit(allocator);
+                raw.deinit(std.heap.page_allocator);
+                return .{ .failed = .{ .message = "failed to parse prefix file" } };
+            };
+            defer allocator.free(parse_result.prefixes);
+
+            for (parse_result.prefixes) |prefix| {
+                prefixes.append(allocator, prefix) catch {
+                    stderr.writeAll("error: out of memory merging prefix files\n") catch {};
+                    prefixes.deinit(allocator);
+                    raw.deinit(std.heap.page_allocator);
+                    return .{ .failed = .{ .message = "out of memory merging prefix files" } };
+                };
+            }
+        }
+    }
+
+    // Require at least one advertised prefix when BGP is enabled
+    if (prefixes.items.len == 0) {
+        stderr.writeAll("error: no advertised prefixes configured (need inline or prefix files)\n") catch {};
+        prefixes.deinit(allocator);
+        raw.deinit(std.heap.page_allocator);
+        return .{ .failed = .{ .message = "no advertised prefixes" } };
     }
 
     const session_config = session.SessionConfig{

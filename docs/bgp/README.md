@@ -58,7 +58,7 @@ Implemented:
 3. **No hot-loop on failure** — Config validation errors are caught before connection
 4. **No /status exposure** — BGP state is internal only in this ACT
 
-## ACT 5: Reconnect/Backoff Loop (CURRENT ACT)
+## ACT 5: Reconnect/Backoff Loop
 
 **Status:** COMPLETED
 
@@ -98,8 +98,58 @@ Session established → reset backoff to 0
 - `reconnect_wait` — Waiting for backoff deadline after failure
 - `failed` — Terminal config validation failure
 
+## ACT 6: Advertised Prefix Files (CURRENT ACT)
+
+**Status:** COMPLETED
+
+Implemented:
+- `advertised_prefix_files` config key for one or more prefix-list file paths
+- Runtime loading of BIRD-style prefix files using existing `prefix_file.zig` parser
+- Merge behavior: inline `advertised_prefixes` + file-loaded prefixes are concatenated
+- Fail-closed: unreadable or invalid prefix files cause BGP load to fail with diagnostic
+- Disabled BGP does not attempt to read prefix files
+- At least one advertised prefix is required when BGP is enabled
+
+**Config Example:**
+```ini
+[bgp]
+enabled = true
+local_address = "10.0.0.1"
+router_id = "10.0.0.1"
+local_as = 65001
+peer_address = "10.0.0.2"
+peer_as = 65002
+advertised_prefixes = "10.0.0.0/8"
+advertised_prefix_files = "/etc/kgb/bgp-prefixes.conf"
+```
+
+**Prefix File Format (BIRD-style):**
+```
+# /etc/kgb/bgp-prefixes.conf
+route 192.168.0.0/16 reject;
+route 172.16.0.0/12 reject;
+```
+
+**Merge Behavior:**
+- Inline prefixes (comma-separated in config) are loaded first
+- Prefix files are loaded and parsed second
+- All parsed prefixes are concatenated into the advertised prefix list
+- Duplicates are preserved (not deduplicated)
+- Empty prefix file is valid if inline prefixes exist
+- Empty prefix file with no inline prefixes causes failure
+
+**Error Handling:**
+- Unreadable file: `error: failed to read prefix file '/path/to/file.conf': ...`
+- Parse error: `error: failed to parse prefix file '/path/to/file.conf': SyntaxError`
+- No prefixes: `error: no advertised prefixes configured (need inline or prefix files)`
+
+**Ownership Model:**
+- Config parsing is allocation-free (stores raw strings only)
+- Runtime parsing owns temporary path list and prefix array allocations
+- All temporary allocations are freed on success
+- Bundle-owned prefixes are freed exactly once by `cleanupBgpBundle()`
+
 **Not implemented** (deferred to future ACTs):
-- advertised_prefix_files (prefix list files)
 - BFD-gated advertisement
 - 32-bit ASN support
 - Multiple peers
@@ -122,6 +172,7 @@ hold_time_seconds = 180
 keepalive_seconds = 60
 connect_timeout_ms = 5000  # Bounded nonblocking connect
 advertised_prefixes = "10.0.0.0/8,192.168.0.0/16"  # Comma-separated CIDR
+advertised_prefix_files = "/etc/kgb/bgp-prefixes.conf"  # Optional BIRD-style prefix files
 same_as = false
 ```
 
@@ -144,6 +195,7 @@ tovarisch/src/bgp/
 ├── serve_integration.zig # Runtime wiring + reconnect (ACT 4/5)
 ├── serve_integration_tests.zig # Integration tests (ACT 4)
 ├── reconnect_lifecycle.zig # Reconnect/backoff lifecycle (ACT 5)
+├── prefix_file_integration_tests.zig # Prefix file integration tests (ACT 6)
 ├── backoff_tests.zig     # Backoff computation tests (ACT 5)
 ├── lifecycle_tests.zig   # Reconnect lifecycle tests (ACT 5)
 ├── clock.zig             # Testable clock for timers
