@@ -93,7 +93,10 @@ pub fn handleStatus(fd: i32, state: *anyopaque) !void {
 
         pub fn writeAll(self: @This(), bytes: []const u8) !void {
             if (self.len.* + bytes.len > 4096) return error.BufferOverflow;
-            @memcpy(self.buf[self.len.*..][0..bytes.len], bytes);
+            // Use for loop instead of @memcpy to avoid aliasing panic in Zig 0.16
+            for (bytes, 0..) |byte, i| {
+                self.buf[self.len.* + i] = byte;
+            }
             self.len.* += bytes.len;
         }
     }{ .buf = &buf, .len = &len };
@@ -295,27 +298,32 @@ test "parseRequestLine parses /unknown path for 404" {
 test "status handler response contains status payload" {
     // Test that the status payload contains the expected service and checks.
     // This verifies handleStatus() will produce valid status JSON.
-    const s = status.getStatus();
+    var scratch = status.StatusScratch{};
+    const s = status.buildStatus(&scratch);
     try std.testing.expectEqualStrings("tovarisch", s.service);
     try std.testing.expect(s.checks.len > 0);
 
     // Verify the renderPayload output contains expected status fields
-    var buf: [4096]u8 = undefined;
+    // Use 8192 buffer to accommodate all 9 checks including BGP detail
+    var buf: [8192]u8 = undefined;
     var len: usize = 0;
 
     const writer = struct {
-        buf: *[4096]u8,
+        buf: *[8192]u8,
         len: *usize,
 
         pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) !void {
-            if (self.len.* >= 4096) return error.BufferOverflow;
+            if (self.len.* >= 8192) return error.BufferOverflow;
             const written = std.fmt.bufPrint(self.buf[self.len.*..], fmt, args) catch return error.BufferOverflow;
             self.len.* += written.len;
         }
 
         pub fn writeAll(self: @This(), bytes: []const u8) !void {
-            if (self.len.* + bytes.len > 4096) return error.BufferOverflow;
-            @memcpy(self.buf[self.len.*..][0..bytes.len], bytes);
+            if (self.len.* + bytes.len > 8192) return error.BufferOverflow;
+            // Use for loop instead of @memcpy to avoid aliasing panic in Zig 0.16
+            for (bytes, 0..) |byte, i| {
+                self.buf[self.len.* + i] = byte;
+            }
             self.len.* += bytes.len;
         }
     }{ .buf = &buf, .len = &len };
@@ -331,22 +339,25 @@ test "status handler response contains status payload" {
 
 test "status handler includes http check in output" {
     // Explicitly verify that the status JSON includes the http check
-    var buf: [4096]u8 = undefined;
+    var buf: [8192]u8 = undefined;
     var len: usize = 0;
 
     const writer = struct {
-        buf: *[4096]u8,
+        buf: *[8192]u8,
         len: *usize,
 
         pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) !void {
-            if (self.len.* >= 4096) return error.BufferOverflow;
+            if (self.len.* >= 8192) return error.BufferOverflow;
             const written = std.fmt.bufPrint(self.buf[self.len.*..], fmt, args) catch return error.BufferOverflow;
             self.len.* += written.len;
         }
 
         pub fn writeAll(self: @This(), bytes: []const u8) !void {
-            if (self.len.* + bytes.len > 4096) return error.BufferOverflow;
-            @memcpy(self.buf[self.len.*..][0..bytes.len], bytes);
+            if (self.len.* + bytes.len > 8192) return error.BufferOverflow;
+            // Use for loop instead of @memcpy to avoid aliasing panic in Zig 0.16
+            for (bytes, 0..) |byte, i| {
+                self.buf[self.len.* + i] = byte;
+            }
             self.len.* += bytes.len;
         }
     }{ .buf = &buf, .len = &len };

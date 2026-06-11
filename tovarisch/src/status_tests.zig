@@ -112,23 +112,36 @@ test "deriveStatus returns ok for empty checks" {
 
 // --- getLocalChecks and getStatus Tests ---
 
-test "getLocalChecks returns nine checks" {
-    const checks = status.getLocalChecks();
+test "getLocalChecksWithBgp returns nine checks" {
+    var scratch = status.StatusScratch{};
+    const checks = status.getLocalChecksWithBgp(
+        null,
+        status.getDefaultConfigCheck(),
+        .no_config,
+        &scratch,
+    );
     try std.testing.expectEqual(@as(usize, 9), checks.len);
 }
 
-test "getLocalChecks first check is process" {
-    const checks = status.getLocalChecks();
+test "getLocalChecksWithBgp first check is process" {
+    var scratch = status.StatusScratch{};
+    const checks = status.getLocalChecksWithBgp(
+        null,
+        status.getDefaultConfigCheck(),
+        .no_config,
+        &scratch,
+    );
     try std.testing.expectEqualStrings("process", checks[0].name);
 }
 
-test "status has correct structure" {
-    const s = status.getStatus();
+test "buildStatus has correct structure" {
+    var scratch = status.StatusScratch{};
+    const s = status.buildStatus(&scratch);
     try std.testing.expectEqualStrings("tovarisch", s.service);
     try std.testing.expect(std.mem.startsWith(u8, s.version, "0.1."));
     try std.testing.expectEqualStrings("local-dev", s.node_id);
     try std.testing.expect(s.status == .ok or s.status == .warn or s.status == .@"error");
-    try std.testing.expectEqual(@as(usize, 8), s.checks.len);
+    try std.testing.expectEqual(@as(usize, 9), s.checks.len);
 }
 
 test "getStateDirCheck returns correct name" {
@@ -137,14 +150,21 @@ test "getStateDirCheck returns correct name" {
 }
 
 test "status JSON contains all required top-level fields" {
-    const s = status.getStatus();
+    var scratch = status.StatusScratch{};
+    const s = status.buildStatus(&scratch);
     try std.testing.expectEqualStrings("tovarisch", s.service);
     try std.testing.expectEqualStrings("local-dev", s.node_id);
     try std.testing.expect(s.checks.len > 0);
 }
 
-test "status JSON contains all eight check names including bfd" {
-    const checks = status.getLocalChecks();
+test "status JSON contains all nine check names including bfd and bgp" {
+    var scratch = status.StatusScratch{};
+    const checks = status.getLocalChecksWithBgp(
+        null,
+        status.getDefaultConfigCheck(),
+        .no_config,
+        &scratch,
+    );
     var has_process = false;
     var has_binary = false;
     var has_config = false;
@@ -153,6 +173,7 @@ test "status JSON contains all eight check names including bfd" {
     var has_tunnel = false;
     var has_wg_peers = false;
     var has_bfd = false;
+    var has_bgp = false;
     for (checks) |check| {
         if (std.mem.eql(u8, check.name, "process")) has_process = true;
         if (std.mem.eql(u8, check.name, "binary")) has_binary = true;
@@ -162,6 +183,7 @@ test "status JSON contains all eight check names including bfd" {
         if (std.mem.eql(u8, check.name, "tunnel")) has_tunnel = true;
         if (std.mem.eql(u8, check.name, "wg_peers")) has_wg_peers = true;
         if (std.mem.eql(u8, check.name, "bfd")) has_bfd = true;
+        if (std.mem.eql(u8, check.name, "bgp")) has_bgp = true;
     }
     try std.testing.expect(has_process);
     try std.testing.expect(has_binary);
@@ -171,10 +193,17 @@ test "status JSON contains all eight check names including bfd" {
     try std.testing.expect(has_tunnel);
     try std.testing.expect(has_wg_peers);
     try std.testing.expect(has_bfd);
+    try std.testing.expect(has_bgp);
 }
 
 test "config check has warn status" {
-    const checks = status.getLocalChecks();
+    var scratch = status.StatusScratch{};
+    const checks = status.getLocalChecksWithBgp(
+        null,
+        status.getDefaultConfigCheck(),
+        .no_config,
+        &scratch,
+    );
     for (checks) |check| {
         if (std.mem.eql(u8, check.name, "config")) {
             try std.testing.expectEqual(status.CheckStatus.warn, check.status);
@@ -185,7 +214,13 @@ test "config check has warn status" {
 // --- BFD Status Integration Tests ---
 
 test "bfd check has warn status when no runtime" {
-    const checks = status.getLocalChecks();
+    var scratch = status.StatusScratch{};
+    const checks = status.getLocalChecksWithBgp(
+        null,
+        status.getDefaultConfigCheck(),
+        .no_config,
+        &scratch,
+    );
     for (checks) |check| {
         if (std.mem.eql(u8, check.name, "bfd")) {
             try std.testing.expectEqual(status.CheckStatus.warn, check.status);
@@ -195,7 +230,8 @@ test "bfd check has warn status when no runtime" {
 }
 
 test "getBfdCheck returns warn for null runtime" {
-    const check = status.getBfdCheck(null);
+    var bfd_detail_buf: [64]u8 = undefined;
+    const check = status.getBfdCheck(null, &bfd_detail_buf);
     try std.testing.expectEqualStrings("bfd", check.name);
     try std.testing.expect(check.status == .warn);
     try std.testing.expectEqualStrings("bfd not configured", check.detail);
@@ -205,7 +241,8 @@ test "getBfdCheck uses explicit runtime" {
     var rt = bfd_status.createTestRuntime();
     try bfd_status.addTestPeer(&rt, "10.0.0.1", "10.0.0.2");
     rt.startAll();
-    const check = status.getBfdCheck(&rt);
+    var bfd_detail_buf: [64]u8 = undefined;
+    const check = status.getBfdCheck(&rt, &bfd_detail_buf);
     try std.testing.expectEqualStrings("bfd", check.name);
     try std.testing.expect(check.status == .warn); // No handshake yet
 }
@@ -215,7 +252,8 @@ test "getLocalChecksWithBfd passes explicit runtime" {
     try bfd_status.addTestPeer(&rt, "10.0.0.1", "10.0.0.2");
     rt.startAll();
     const default_check = status.getDefaultConfigCheck();
-    const checks = status.getLocalChecksWithBfd(&rt, default_check);
+    var scratch = status.StatusScratch{};
+    const checks = status.getLocalChecksWithBfd(&rt, default_check, &scratch);
     var found_bfd = false;
     for (checks) |check| {
         if (std.mem.eql(u8, check.name, "bfd")) {
@@ -230,7 +268,7 @@ test "getLocalChecksWithBfd passes explicit runtime" {
 
 const TestWriter = struct {
     const Self = @This();
-    const BufSize = 4096;
+    const BufSize = 8192;
     buf: [BufSize]u8 = undefined,
     len: usize = 0,
 
@@ -246,7 +284,10 @@ const TestWriter = struct {
 
     pub fn writeAll(self: *Self, bytes: []const u8) !void {
         if (self.len + bytes.len > BufSize) return error.BufferOverflow;
-        @memcpy(self.buf[self.len..][0..bytes.len], bytes);
+        // Use for loop instead of @memcpy to avoid aliasing panic in Zig 0.16
+        for (bytes, 0..) |byte, i| {
+            self.buf[self.len + i] = byte;
+        }
         self.len += bytes.len;
     }
 
@@ -301,14 +342,16 @@ test "renderPayload output contains runtime block" {
     try std.testing.expect(std.mem.containsAtLeast(u8, w.slice(), 1, "\"rss_kib\":"));
 }
 
-test "getStatus includes runtime telemetry" {
-    const s = status.getStatus();
+test "buildStatus includes runtime telemetry" {
+    var scratch = status.StatusScratch{};
+    const s = status.buildStatus(&scratch);
     try std.testing.expect(s.runtime.pid > 0);
     try std.testing.expect(s.runtime.rss_kib == null or s.runtime.rss_kib.? >= 0);
 }
 
 test "version contains base_version prefix" {
-    const s = status.getStatus();
+    var scratch = status.StatusScratch{};
+    const s = status.buildStatus(&scratch);
     try std.testing.expect(std.mem.startsWith(u8, s.version, "0.1."));
     try std.testing.expect(std.mem.containsAtLeast(u8, s.version, 1, "+"));
 }
@@ -317,7 +360,7 @@ test "version contains base_version prefix" {
 // These tests verify that status rendering does not leak memory per request.
 // The original bug: buildStatusCheck() used std.fmt.allocPrint() with page_allocator
 // which leaked ~4KiB per /status request (one page per call).
-// Fix: replaced allocPrint with static buffer in bfd/status.zig.
+// Fix: replaced allocPrint with caller-owned buffer in bfd/status.zig.
 
 test "renderPayload multiple times produces consistent output" {
     // This test verifies that repeated status rendering is consistent.
@@ -342,7 +385,7 @@ test "renderPayload multiple times produces consistent output" {
     try std.testing.expect(std.mem.containsAtLeast(u8, w3.slice(), 1, "\"name\":\"bfd\""));
 }
 
-test "getBfdCheck with partial peers uses static buffer" {
+test "getBfdCheck with partial peers uses caller buffer" {
     // Test that getBfdCheck with partial peers (some up, some down) works correctly.
     // This is the exact code path that previously leaked: buildStatusCheck() with
     // snapshot where up_count != peer_count.
@@ -351,29 +394,31 @@ test "getBfdCheck with partial peers uses static buffer" {
     try bfd_status.addTestPeer(&rt, "10.0.0.3", "10.0.0.4");
     rt.startAll();
 
-    // Only one peer is in Up state (no handshake on second yet)
-    const check = status.getBfdCheck(&rt);
+    // Provide caller-owned scratch buffer
+    var scratch = status.StatusScratch{};
+    const check = status.getBfdCheck(&rt, &scratch.bfd_detail);
 
     // Should return warn status
     try std.testing.expect(check.status == .warn);
 
     // Detail should contain the partial session info
-    // The old buggy code would return "1/2 bfd sessions up" but leak memory.
-    // The fixed code should do the same but without leaking.
     try std.testing.expect(std.mem.containsAtLeast(u8, check.detail, 1, "bfd"));
 }
 
-test "buildStatusCheck with partial peers detail format" {
-    // Direct test of the fixed function with partial peers scenario.
+test "buildStatusCheckInto with partial peers detail format" {
+    // Direct test of the buffer-based variant with partial peers scenario.
+    // This function requires caller-owned buffer - no static buffers.
     const snapshot = bfd_status.StatusSnapshot{
         .peer_count = 3,
         .up_count = 2,
         .has_peers = true,
     };
-    const check = bfd_status.buildStatusCheck(snapshot);
+
+    var detail_buf: [bfd_status.BFD_DETAIL_BUF_SIZE]u8 = undefined;
+    const check = bfd_status.buildStatusCheckInto(snapshot, &detail_buf);
 
     try std.testing.expect(check.status == .warn);
-    // Detail should be "2/3 bfd sessions up" - uses static buffer, no leak
+    // Detail should be "2/3 bfd sessions up" - uses caller's buffer, no leak
     try std.testing.expectEqualStrings("2/3 bfd sessions up", check.detail);
 }
 
@@ -386,7 +431,7 @@ test "buildStatusCheckInto partial peers is allocation-free" {
         .has_peers = true,
     };
 
-    var detail_buf: [64]u8 = undefined;
+    var detail_buf: [bfd_status.BFD_DETAIL_BUF_SIZE]u8 = undefined;
     const check = bfd_status.buildStatusCheckInto(snapshot, &detail_buf);
 
     try std.testing.expect(check.status == .warn);

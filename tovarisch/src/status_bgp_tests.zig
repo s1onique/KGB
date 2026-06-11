@@ -10,7 +10,13 @@ const bgp_status = @import("bgp/status.zig");
 // --- BGP Status Integration Tests ---
 
 test "bgp check has warn status when no config" {
-    const checks = status.getLocalChecks();
+    var scratch = status.StatusScratch{};
+    const checks = status.getLocalChecksWithBgp(
+        null,
+        status.getDefaultConfigCheck(),
+        .no_config,
+        &scratch,
+    );
     for (checks) |check| {
         if (std.mem.eql(u8, check.name, "bgp")) {
             try std.testing.expectEqual(status.CheckStatus.warn, check.status);

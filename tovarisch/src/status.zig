@@ -5,6 +5,10 @@
 // - getLocalChecks() returns all local health checks
 // - getStatus() builds the full status payload
 //
+// Key constraint: All status-check construction is render-owned/reentrant.
+// No module-level mutable buffers in status rendering paths.
+// All dynamic detail strings are backed by caller-owned scratch or immutable static strings.
+//
 // Check ordering (stable for operator readability):
 //   1. process  - daemon is running
 //   2. binary   - binary name is correct
@@ -87,6 +91,11 @@ pub fn deriveStatus(checks: []const Check) CheckStatus {
     return .ok;
 }
 
+// ============================================================================
+// Static/immutable check definitions
+// These are safe because they point to static strings with no mutable state.
+// ============================================================================
+
 const process_check = Check{
     .name = "process",
     .status = .ok,
@@ -110,6 +119,40 @@ const http_check = Check{
     .status = .ok,
     .detail = "http service route available",
 };
+
+// ============================================================================
+// Buffer size constants
+// ============================================================================
+
+/// Max format: "9999/9999 bfd sessions up" = 24 chars, well within 64 byte buffer.
+const BFD_DETAIL_BUF_SIZE: usize = 64;
+
+/// Max format: "BGP configured; 9999 advertised prefixes" = 42 chars max.
+const BGP_DETAIL_BUF_SIZE: usize = 64;
+
+/// Number of checks in the local checks array.
+const LOCAL_CHECKS_COUNT: usize = 9;
+
+// ============================================================================
+// Scratch buffer for status rendering
+// ============================================================================
+
+/// Scratch buffer for status rendering.
+/// Caller must keep this alive until JSON serialization completes.
+/// This avoids dangling pointers when checks reference dynamically formatted details.
+pub const StatusScratch = struct {
+    /// Buffer for BGP detail formatting (e.g., "BGP configured; N advertised prefixes").
+    bgp_detail: [BGP_DETAIL_BUF_SIZE]u8 = undefined,
+    /// Buffer for BFD detail formatting (e.g., "X/Y bfd sessions up").
+    bfd_detail: [BFD_DETAIL_BUF_SIZE]u8 = undefined,
+    /// Buffer for check array (all 9 checks are stored here).
+    /// This replaces the old module-level local_checks_buf.
+    checks: [LOCAL_CHECKS_COUNT]Check = undefined,
+};
+
+// ============================================================================
+// State directory check
+// ============================================================================
 
 pub fn getStateDirCheckForPath(path: []const u8) Check {
     var path_buf: [4096]u8 = undefined;
@@ -158,22 +201,15 @@ pub fn toCString(path: []const u8, buf: *[4096]u8) ?[*:0]const u8 {
     return @as([*:0]const u8, @ptrCast(buf));
 }
 
-var local_checks_buf: [9]Check = undefined;
+// ============================================================================
+// BFD and BGP check builders
+// ============================================================================
 
-/// Module-level buffer for BFD status detail when peers are partially up.
-/// This avoids per-request heap allocation for the "X/Y bfd sessions up" case.
-/// Max format: "9999/9999 bfd sessions up" = 24 chars, well within 64 byte buffer.
-var bfd_detail_buf: [64]u8 = undefined;
-
-/// BGP detail buffer for status rendering.
-/// Uses caller-provided buffer to avoid module-level mutable state.
-/// Max format: "BGP configured; 9999 advertised prefixes" = 42 chars max.
-const BGP_DETAIL_BUF_SIZE: usize = 64;
-
-pub fn getBfdCheck(rt: ?*const bfd_status.BfdRuntime) Check {
+/// Get BFD check from BFD runtime using caller-provided scratch buffer.
+/// This function is allocation-free - uses caller's buffer for dynamic content.
+pub fn getBfdCheck(rt: ?*const bfd_status.BfdRuntime, bfd_detail_buf: *[BFD_DETAIL_BUF_SIZE]u8) Check {
     const snapshot = bfd_status.snapshotFromRuntime(rt);
-    // Use buffer-based variant to avoid any heap allocation
-    const raw_check = bfd_status.buildStatusCheckInto(snapshot, &bfd_detail_buf);
+    const raw_check = bfd_status.buildStatusCheckInto(snapshot, bfd_detail_buf);
     const mapped_status: CheckStatus = switch (raw_check.status) {
         .ok => .ok,
         .warn => .warn,
@@ -189,8 +225,8 @@ pub fn getBfdCheck(rt: ?*const bfd_status.BfdRuntime) Check {
 
 /// Get BGP check from BGP status state using caller-provided scratch buffer.
 /// This function is allocation-free - uses caller's buffer for dynamic content.
-pub fn getBgpCheck(state: bgp_status.BgpStatusState, scratch: *[64]u8) Check {
-    const bgp_check = bgp_status.buildBgpCheckInto(state, scratch);
+pub fn getBgpCheck(state: bgp_status.BgpStatusState, bgp_detail_buf: *[BGP_DETAIL_BUF_SIZE]u8) Check {
+    const bgp_check = bgp_status.buildBgpCheckInto(state, bgp_detail_buf);
     // Map BGP check status to status.CheckStatus
     const mapped_status: CheckStatus = switch (bgp_check.status) {
         .ok => .ok,
@@ -205,6 +241,10 @@ pub fn getBgpCheck(state: bgp_status.BgpStatusState, scratch: *[64]u8) Check {
     };
 }
 
+// ============================================================================
+// Default check helpers for CLI (no serve context)
+// ============================================================================
+
 /// Default config check for standalone CLI (status --json).
 /// Uses the static warn "not configured yet" message since there's no serve context.
 pub fn getDefaultConfigCheck() Check {
@@ -217,13 +257,12 @@ pub fn getDefaultBgpState() bgp_status.BgpStatusState {
     return .no_config;
 }
 
-pub fn getLocalChecks() []const Check {
-    var scratch = StatusScratch{};
-    return getLocalChecksWithBgp(null, getDefaultConfigCheck(), getDefaultBgpState(), &scratch);
-}
+// ============================================================================
+// Main local checks builders (render-owned, reentrant)
+// ============================================================================
 
-/// Build local checks with explicit BFD runtime, config check state, and BGP state.
-/// Uses caller-provided scratch buffer for BGP detail formatting to avoid dangling pointers.
+/// Build local checks using caller-provided scratch buffer.
+/// This is the primary render path - fully reentrant and render-owned.
 /// The scratch buffer must outlive the returned checks slice.
 pub fn getLocalChecksWithBgp(
     bfd_runtime: ?*const bfd_status.BfdRuntime,
@@ -231,21 +270,21 @@ pub fn getLocalChecksWithBgp(
     bgp_state: bgp_status.BgpStatusState,
     scratch: *StatusScratch,
 ) []const Check {
-    local_checks_buf[0] = process_check;
-    local_checks_buf[1] = binary_check;
-    local_checks_buf[2] = config_check_injected;
-    local_checks_buf[3] = getStateDirCheck();
-    local_checks_buf[4] = http_check;
-    local_checks_buf[5] = tunnel_check.getTunnelCheckDefault();
-    local_checks_buf[6] = status_checks.getWgPeersCheck(std.heap.page_allocator);
-    local_checks_buf[7] = getBfdCheck(bfd_runtime);
-    local_checks_buf[8] = getBgpCheck(bgp_state, &scratch.bgp_detail);
-    return local_checks_buf[0..9];
+    // Build checks into scratch buffer (no module-level mutable state)
+    scratch.checks[0] = process_check;
+    scratch.checks[1] = binary_check;
+    scratch.checks[2] = config_check_injected;
+    scratch.checks[3] = getStateDirCheck();
+    scratch.checks[4] = http_check;
+    scratch.checks[5] = tunnel_check.getTunnelCheckDefault();
+    scratch.checks[6] = status_checks.getWgPeersCheck(std.heap.page_allocator);
+    scratch.checks[7] = getBfdCheck(bfd_runtime, &scratch.bfd_detail);
+    scratch.checks[8] = getBgpCheck(bgp_state, &scratch.bgp_detail);
+    return scratch.checks[0..LOCAL_CHECKS_COUNT];
 }
 
 /// Build local checks with explicit BFD runtime and config check state.
-/// Legacy function for backward compatibility - uses no_config for BGP.
-/// DEPRECATED: Use getLocalChecksWithBgp() instead.
+/// Uses no_config for BGP (legacy backward compatibility).
 pub fn getLocalChecksWithBfd(
     bfd_runtime: ?*const bfd_status.BfdRuntime,
     config_check_injected: Check,
@@ -254,13 +293,9 @@ pub fn getLocalChecksWithBfd(
     return getLocalChecksWithBgp(bfd_runtime, config_check_injected, .no_config, scratch);
 }
 
-/// Scratch buffer for status rendering.
-/// Caller must keep this alive until JSON serialization completes.
-/// This avoids dangling pointers when checks reference dynamically formatted details.
-pub const StatusScratch = struct {
-    /// Buffer for BGP detail formatting (e.g., "BGP configured; N advertised prefixes").
-    bgp_detail: [BGP_DETAIL_BUF_SIZE]u8 = undefined,
-};
+// ============================================================================
+// Runtime status inputs
+// ============================================================================
 
 /// Runtime status inputs for injectable status rendering.
 /// This struct allows explicit runtime inputs without module-global state.
@@ -272,6 +307,10 @@ pub const RuntimeStatusInputs = struct {
     /// BGP status state - defaults to no_config.
     bgp_state: bgp_status.BgpStatusState = .no_config,
 };
+
+// ============================================================================
+// Status building
+// ============================================================================
 
 /// Build status with explicit runtime inputs and caller-provided scratch.
 /// The scratch buffer must outlive the returned Status for JSON serialization.
@@ -288,13 +327,16 @@ pub fn buildStatusWithInputs(inputs: RuntimeStatusInputs, scratch: *StatusScratc
     };
 }
 
-pub fn getStatus() Status {
-    return getStatusWithBfd(null);
+/// Build status with caller-provided scratch buffer.
+/// The scratch buffer must outlive the returned Status for JSON serialization.
+pub fn buildStatus(scratch: *StatusScratch) Status {
+    return buildStatusWithBfd(null, scratch);
 }
 
-pub fn getStatusWithBfd(bfd_runtime: ?*const bfd_status.BfdRuntime) Status {
-    var scratch = StatusScratch{};
-    const checks = getLocalChecksWithBfd(bfd_runtime, getDefaultConfigCheck(), &scratch);
+/// Build status with optional BFD runtime and caller-provided scratch.
+/// The scratch buffer must outlive the returned Status for JSON serialization.
+pub fn buildStatusWithBfd(bfd_runtime: ?*const bfd_status.BfdRuntime, scratch: *StatusScratch) Status {
+    const checks = getLocalChecksWithBfd(bfd_runtime, getDefaultConfigCheck(), scratch);
     return Status{
         .service = "tovarisch",
         .version = build_info.version,
@@ -305,12 +347,17 @@ pub fn getStatusWithBfd(bfd_runtime: ?*const bfd_status.BfdRuntime) Status {
     };
 }
 
+// ============================================================================
+// JSON rendering
+// ============================================================================
+
 pub fn renderPayload(writer: anytype) !void {
     try renderPayloadWithBfd(writer, null);
 }
 
 pub fn renderPayloadWithBfd(writer: anytype, bfd_runtime: ?*const bfd_status.BfdRuntime) !void {
-    const s = getStatusWithBfd(bfd_runtime);
+    var scratch = StatusScratch{};
+    const s = buildStatusWithBfd(bfd_runtime, &scratch);
     try renderStatus(writer, s);
 }
 

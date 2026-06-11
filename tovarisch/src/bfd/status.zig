@@ -64,7 +64,7 @@ pub fn snapshotFromRuntime(rt: ?*const BfdRuntime) StatusSnapshot {
 
 /// Maximum buffer size for BFD detail formatting.
 /// Format: "9999/9999 bfd sessions up" = 24 chars max.
-const BFD_DETAIL_BUF_SIZE: usize = 64;
+pub const BFD_DETAIL_BUF_SIZE: usize = 64;
 
 /// Build a StatusCheck from a StatusSnapshot using caller-provided buffer.
 /// This is the allocation-free variant - callers pass a buffer for dynamic details.
@@ -111,17 +111,6 @@ pub fn buildStatusCheckInto(
         .status = .warn,
         .detail = detail,
     };
-}
-
-/// Build a StatusCheck from a StatusSnapshot.
-/// 
-/// WARNING: This function uses a module-level static buffer for the partial-BFD case.
-/// It is NOT reentrant and NOT thread-safe. Use buildStatusCheckInto() for safe usage.
-/// Kept for backward compatibility with existing direct callers.
-var static_detail_buf: [BFD_DETAIL_BUF_SIZE]u8 = undefined;
-
-pub fn buildStatusCheck(snapshot: StatusSnapshot) StatusCheck {
-    return buildStatusCheckInto(snapshot, &static_detail_buf);
 }
 
 /// Create a fresh runtime for testing.
@@ -199,37 +188,40 @@ test "snapshotFromRuntime returns correct counts with peers" {
     try std.testing.expect(snapshot.has_peers);
 }
 
-test "buildStatusCheck returns warn for no peers" {
+test "buildStatusCheckInto returns warn for no peers" {
     const snapshot: StatusSnapshot = .{
         .peer_count = 0,
         .up_count = 0,
         .has_peers = false,
     };
-    const check = buildStatusCheck(snapshot);
+    var detail_buf: [BFD_DETAIL_BUF_SIZE]u8 = undefined;
+    const check = buildStatusCheckInto(snapshot, &detail_buf);
     try std.testing.expectEqualStrings("bfd", check.name);
     try std.testing.expect(check.status == .warn);
     try std.testing.expectEqualStrings("bfd not configured", check.detail);
 }
 
-test "buildStatusCheck returns ok when all peers up" {
+test "buildStatusCheckInto returns ok when all peers up" {
     const snapshot: StatusSnapshot = .{
         .peer_count = 2,
         .up_count = 2,
         .has_peers = true,
     };
-    const check = buildStatusCheck(snapshot);
+    var detail_buf: [BFD_DETAIL_BUF_SIZE]u8 = undefined;
+    const check = buildStatusCheckInto(snapshot, &detail_buf);
     try std.testing.expectEqualStrings("bfd", check.name);
     try std.testing.expect(check.status == .ok);
     try std.testing.expectEqualStrings("bfd sessions up", check.detail);
 }
 
-test "buildStatusCheck returns warn when some peers down" {
+test "buildStatusCheckInto returns warn when some peers down" {
     const snapshot: StatusSnapshot = .{
         .peer_count = 2,
         .up_count = 1,
         .has_peers = true,
     };
-    const check = buildStatusCheck(snapshot);
+    var detail_buf: [BFD_DETAIL_BUF_SIZE]u8 = undefined;
+    const check = buildStatusCheckInto(snapshot, &detail_buf);
     try std.testing.expectEqualStrings("bfd", check.name);
     try std.testing.expect(check.status == .warn);
     try std.testing.expect(std.mem.indexOf(u8, check.detail, "1/2 bfd sessions up") != null);

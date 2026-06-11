@@ -10,6 +10,7 @@ const _config = @import("config.zig");
 const _logging = @import("logging.zig");
 const _status = @import("status.zig");
 const _status_checks = @import("status_checks.zig");
+const _status_ownership_tests = @import("status_ownership_tests.zig");
 
 // Metrics modules
 const _metrics = @import("metrics.zig");
@@ -50,6 +51,7 @@ test { std.testing.refAllDecls(@import("config.zig")); }
 test { std.testing.refAllDecls(@import("logging.zig")); }
 test { std.testing.refAllDecls(@import("status.zig")); }
 test { std.testing.refAllDecls(@import("status_checks.zig")); }
+test { std.testing.refAllDecls(@import("status_ownership_tests.zig")); }
 test { std.testing.refAllDecls(@import("metrics.zig")); }
 test { std.testing.refAllDecls(@import("metrics_tests.zig")); }
 test { std.testing.refAllDecls(@import("metrics_conversion_tests.zig")); }

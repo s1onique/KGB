@@ -157,7 +157,8 @@ pub fn heartbeatThread() void {
 /// timestamp in the payload would be misleading to operators.
 fn emitHeartbeatToFd(uptime_seconds: u64) void {
     // Get current status from the same derivation as /status
-    const current_status = status.getStatus();
+    var scratch = status.StatusScratch{};
+    const current_status = status.buildStatus(&scratch);
 
     // Collect tunnel summary using the same interface enumeration as /metrics.json
     // This ensures heartbeat logs are consistent with metrics output.
