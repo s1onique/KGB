@@ -23,6 +23,10 @@
 // - cleanup_requested is atomic.Bool for cross-thread signaling
 // - Thread handle is stored in bundle.runtime_thread for join on cleanup
 //
+// Passive connection policy:
+// - Passive inbound connection does NOT preempt an already-established active BGP session.
+// - Established session wins and duplicate inbound socket is closed.
+//
 // References: RFC 4271 (BGP-4)
 
 const std = @import("std");
@@ -30,6 +34,8 @@ const c = std.c;
 const session = @import("session.zig");
 const logging = @import("../logging.zig");
 const serve_integration = @import("serve_integration.zig");
+const passive_listener_integration = @import("passive_listener_integration.zig");
+const tcp_transport = @import("tcp_transport.zig");
 const clock = @import("clock.zig");
 
 /// BGP FSM loop interval in milliseconds.
@@ -120,6 +126,78 @@ pub fn bgpRuntimeThread(bundle: *serve_integration.BgpServeBundle) void {
                 };
                 _ = c.nanosleep(&ts, null);
                 continue;
+            }
+        }
+
+        // Check for pending passive connection ONLY if session is not already established.
+        // Passive inbound connection does NOT preempt an already-established active BGP session.
+        // This ensures established sessions are never displaced by incoming connections.
+        if (passive_listener_integration.hasPendingPassiveConnection(bundle)) {
+            const current_session_state = bundle.sess.status.state;
+
+            // Only process passive connection if we're not in established state
+            if (current_session_state != .established) {
+                const accept_result = passive_listener_integration.acceptPassiveConnection(bundle) catch {
+                    // Failed to accept, continue with normal session
+                    var log_buf = logging.BufferedWriter.init();
+                    logging.emit(.bgp_error, &log_buf, &.{
+                        .{ .name = "detail", .value = logging.FieldValue{ .string = "failed to accept passive connection" } },
+                    }) catch break;
+                    bgpLogToStdout(log_buf.slice());
+                    continue;
+                };
+
+                // Log passive connection accepted
+                {
+                    var log_buf = logging.BufferedWriter.init();
+                    var peer_addr_buf: [32]u8 = undefined;
+                    logging.emit(.bgp_connected, &log_buf, &.{
+                        .{ .name = "detail", .value = logging.FieldValue{ .string = "passive connection accepted" } },
+                        .{ .name = "peer", .value = logging.FieldValue{ .string = formatPeerAddr(accept_result.peer_address, &peer_addr_buf) } },
+                    }) catch break;
+                    bgpLogToStdout(log_buf.slice());
+                }
+
+                // Close current transport and switch to passive
+                bundle.tcp.close();
+                bundle.tcp = tcp_transport.TcpTransport.fromPassiveSocket(
+                    accept_result.socket_fd,
+                    accept_result.peer_address,
+                    accept_result.peer_port,
+                );
+                bundle.trans = bundle.tcp.toTransport();
+                bundle.sess.trans = &bundle.trans;
+
+                // Reset session state for fresh BGP handshake
+                bundle.sess.status.state = .idle;
+                bundle.sess.recv_len = 0;
+                bundle.sess.send_pos = 0;
+                bundle.sess.peer_open = null;
+                bundle.sess.negotiated_hold_time = 0;
+                bundle.sess.keepalive_interval_ms = 0;
+                bundle.sess.hold_timer_deadline = 0;
+                bundle.sess.pending_keepalive = false;
+                bundle.sess.pending_keepalive_ms = 0;
+                bundle.sess.status.last_error = null;
+                bundle.sess.status.last_notification_code = null;
+                bundle.sess.status.last_notification_subcode = null;
+
+                // Update session config peer address
+                bundle.session_config.peer_address = accept_result.peer_address;
+                bundle.session_config.peer_port = accept_result.peer_port;
+
+                // Reset to configured state (not reconnect_wait)
+                bundle.state = .configured;
+                bundle.last_error = null;
+                previous_state = .idle;
+            } else {
+                // Session is established - close the incoming passive socket without switching.
+                // Established active sessions take precedence over incoming connections.
+                if (passive_listener_integration.acceptPassiveConnection(bundle)) |accept_result| {
+                    if (accept_result.socket_fd >= 0) {
+                        _ = std.c.close(accept_result.socket_fd);
+                    }
+                } else |_| {}
             }
         }
 
@@ -243,7 +321,7 @@ fn getConcreteErrorMessage(bundle: *serve_integration.BgpServeBundle) []const u8
 /// Start the BGP runtime thread for a configured bundle.
 /// Returns true if thread was spawned successfully.
 /// Thread failures are non-fatal - caller should log and continue.
-/// 
+///
 /// Thread is stored in bundle.runtime_thread for join on cleanup.
 /// cleanupBgpBundle() will join this thread before destroying bundle.
 pub fn startBgpRuntimeThread(bundle: *serve_integration.BgpServeBundle, stderr: anytype) bool {

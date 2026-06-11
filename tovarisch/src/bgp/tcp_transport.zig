@@ -169,6 +169,19 @@ pub const TcpTransport = struct {
         self.recv_len = 0;
     }
 
+    /// Create a TcpTransport from an already-accepted socket.
+    /// This is used when the passive listener accepts an incoming connection.
+    pub fn fromPassiveSocket(fd: std.c.fd_t, peer_address: [4]u8, peer_port: u16) Self {
+        return Self{
+            .socket_fd = fd,
+            .recv_buf = undefined,
+            .recv_len = 0,
+            .closed = false,
+            .peer_address = peer_address,
+            .peer_port = peer_port,
+        };
+    }
+
     /// Wrap this TCP transport as a Transport interface.
     pub fn toTransport(self: *Self) transport.Transport {
         return transport.Transport{

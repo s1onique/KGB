@@ -184,5 +184,12 @@ test { std.testing.refAllDecls(@import("bgp/lifecycle_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/reconnect_hold_timer_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/reconnect_recovery_tests.zig")); }
 
-// BGP status tests
-test { std.testing.refAllDecls(@import("status_bgp_tests.zig")); }
+// BGP status tests (split into focused files)
+test { std.testing.refAllDecls(@import("status_bgp_integration_tests.zig")); }
+test { std.testing.refAllDecls(@import("status_bgp_state_tests.zig")); }
+test { std.testing.refAllDecls(@import("status_bgp_error_tests.zig")); }
+test { std.testing.refAllDecls(@import("status_bgp_fsm_tests.zig")); }
+
+// Passive listener tests (split into focused files)
+test { std.testing.refAllDecls(@import("bgp/passive_listener_config_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/passive_listener_integration_tests.zig")); }

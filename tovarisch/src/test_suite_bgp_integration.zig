@@ -1,7 +1,7 @@
 // test_suite_bgp_integration.zig — BGP config parsing and serve integration tests
 //
-// Tests: config parsing, serve integration, status reporting, reconnect lifecycle.
-// No runtime sockets — parse-only validation.
+// Tests: config parsing, serve integration, status reporting, reconnect lifecycle,
+// and passive listener tests (real socket behavior).
 
 const std = @import("std");
 
@@ -12,7 +12,13 @@ const _bgp_reconnect_lifecycle = @import("bgp/reconnect_lifecycle.zig");
 const _bgp_backoff_tests = @import("bgp/backoff_tests.zig");
 const _bgp_lifecycle_tests = @import("bgp/lifecycle_tests.zig");
 
+// Passive listener tests (real socket behavior tests)
+const _passive_listener_config_tests = @import("bgp/passive_listener_config_tests.zig");
+const _passive_listener_integration_tests = @import("bgp/passive_listener_integration_tests.zig");
+
 // Force test discovery for BGP integration layer
 test { std.testing.refAllDecls(@import("bgp/reconnect_lifecycle.zig")); }
 test { std.testing.refAllDecls(@import("bgp/backoff_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/lifecycle_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/passive_listener_config_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/passive_listener_integration_tests.zig")); }

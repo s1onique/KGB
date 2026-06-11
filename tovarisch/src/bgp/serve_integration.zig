@@ -30,6 +30,9 @@ const session = @import("session.zig");
 const types = @import("types.zig");
 const tcp_transport = @import("tcp_transport.zig");
 const transport = @import("transport.zig");
+const passive_listener = @import("passive_listener.zig");
+const passive_listener_integration = @import("passive_listener_integration.zig");
+const logging = @import("../logging.zig");
 const clock = @import("clock.zig");
 const reconnect = @import("reconnect_lifecycle.zig");
 const prefix_file_loader = @import("prefix_file_loader.zig");
@@ -80,6 +83,10 @@ pub const BgpServeBundle = struct {
     tcp: tcp_transport.TcpTransport,
     trans: transport.Transport,
     sess: session.Session,
+
+    // Passive listener for accepting incoming BGP connections.
+    // null when no passive listener is configured.
+    passive_listener: ?passive_listener.PassiveListener = null,
 
     // Reconnect state
     backoff_ms: u64 = 0,

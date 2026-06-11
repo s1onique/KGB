@@ -28,6 +28,27 @@ Bidirectional Forwarding Detection (BFD) for multihop path monitoring.
 | `interval_ms` | u32 | `800` | Transmit interval in milliseconds |
 | `multiplier` | u8 | `3` | Detection time multiplier |
 
+### `[bgp]`
+
+Border Gateway Protocol (BGP) session for route exchange. Supports both active outbound connections and passive inbound listening.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | bool | `false` | Enable BGP session |
+| `local_address` | string | (required) | Local IPv4 address for binding and BGP identifier |
+| `router_id` | string | (required) | BGP router ID in dotted notation |
+| `local_as` | u16 | (required) | Local autonomous system number (1..65535) |
+| `peer_address` | string | (required) | Remote BGP peer IPv4 address |
+| `peer_port` | u16 | `179` | Remote BGP port |
+| `peer_as` | u16 | (required) | Remote autonomous system number (1..65535) |
+| `hold_time_seconds` | u16 | `180` | BGP hold time in seconds (0 or >=3) |
+| `keepalive_seconds` | u16 | `60` | Keepalive interval in seconds |
+| `advertised_prefixes` | string | (required) | Comma-separated list of CIDR prefixes to advertise |
+| `advertised_prefix_files` | string | (optional) | Comma-separated list of file paths containing prefixes |
+| `same_as` | bool | `false` | AS_PATH is empty (same-AS/iBGP style) |
+
+**Note:** When `local_address` is configured, a passive TCP/179 listener is created automatically, allowing the daemon to accept incoming BGP peer connections in addition to initiating outbound connections. The capability `CAP_NET_BIND_SERVICE` must be granted via systemd to bind port 179 as non-root.
+
 ### `[wg]`
 
 WireGuard local server configuration and peer settings.

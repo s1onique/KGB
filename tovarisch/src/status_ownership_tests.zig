@@ -150,6 +150,8 @@ test "buildBgpCheckInto uses caller-owned buffer for configured case" {
             .messages_received = 4,
             .keepalives_sent = 2,
             .keepalives_received = 2,
+            .passive_listener_state = .disabled,
+            .passive_listener_error = null,
         },
     };
 
@@ -175,6 +177,8 @@ test "two BGP scratch buffers are independent (no aliasing)" {
             .messages_received = 0,
             .keepalives_sent = 0,
             .keepalives_received = 0,
+            .passive_listener_state = .disabled,
+            .passive_listener_error = null,
         },
     };
     const state2 = bgp_status.BgpStatusState{
@@ -189,6 +193,8 @@ test "two BGP scratch buffers are independent (no aliasing)" {
             .messages_received = 2,
             .keepalives_sent = 1,
             .keepalives_received = 1,
+            .passive_listener_state = .disabled,
+            .passive_listener_error = null,
         },
     };
 
@@ -276,6 +282,8 @@ test "two independent StatusScratch contexts don't alias" {
                 .messages_received = 8,
                 .keepalives_sent = 5,
                 .keepalives_received = 5,
+                .passive_listener_state = .disabled,
+                .passive_listener_error = null,
             },
         },
         &scratch2,
