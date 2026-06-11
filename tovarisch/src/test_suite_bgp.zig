@@ -72,5 +72,7 @@ test { std.testing.refAllDecls(@import("bgp/transport_ownership_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/prefix_file_loader.zig")); }
 test { std.testing.refAllDecls(@import("bgp/prefix_file_integration_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/status.zig")); }
+
+// BGP hold timer expiry recovery tests (this ACT)
 test { std.testing.refAllDecls(@import("bgp/reconnect_hold_timer_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/reconnect_recovery_tests.zig")); }

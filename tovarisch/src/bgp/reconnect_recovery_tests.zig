@@ -63,12 +63,54 @@ fn makeSessionConfig() session.SessionConfig {
     };
 }
 
+/// Creates a minimal BgpServeBundle for testing without real TCP/session init.
+fn createMinimalBundle(allocator: std.mem.Allocator) !*serve_integration.BgpServeBundle {
+    const sess_cfg = makeSessionConfig();
+
+    const bundle = try allocator.create(serve_integration.BgpServeBundle);
+    errdefer allocator.destroy(bundle);
+
+    bundle.* = serve_integration.BgpServeBundle{
+        .raw = undefined,
+        .bgp_config = undefined,
+        .session_config = sess_cfg,
+        .state = .configured,
+        .last_error = null,
+        .prefixes = &.{},
+        .tcp = tcp_transport_createDummy(),
+        .trans = undefined,
+        .sess = undefined,
+    };
+
+    // Set tcp and trans BEFORE initializing session
+    bundle.tcp = tcp_transport_createDummy();
+    bundle.trans = bundle.tcp.toTransport();
+
+    // Initialize session with bundle-owned transport pointer (NOT a local)
+    const sess = try session.init(sess_cfg, &bundle.trans);
+    bundle.sess = sess;
+
+    return bundle;
+}
+
+fn tcp_transport_createDummy() tcp_transport.TcpTransport {
+    return tcp_transport.TcpTransport{
+        .socket_fd = -1,
+        .recv_buf = undefined,
+        .recv_len = 0,
+        .closed = true,
+        .peer_address = .{ 0, 0, 0, 0 },
+        .peer_port = 0,
+    };
+}
+
 // ============================================================================
 // Test 1: Peer unavailable -> retrying status (not terminal error)
 // ============================================================================
 
 test "session failure transitions to reconnect_wait" {
-    const bundle = createMinimalBundle();
+    const bundle = try createMinimalBundle(std.testing.allocator);
+    defer std.testing.allocator.destroy(bundle);
 
     session.MockClock.reset();
     session.MockClock.setTime(1000);
@@ -102,7 +144,8 @@ test "session failure transitions to reconnect_wait" {
 }
 
 test "reconnect_wait state is not terminal" {
-    const bundle = createMinimalBundle();
+    const bundle = try createMinimalBundle(std.testing.allocator);
+    defer std.testing.allocator.destroy(bundle);
 
     // Verify reconnect_wait is distinct from failed
     bundle.state = .reconnect_wait;
@@ -114,7 +157,8 @@ test "reconnect_wait state is not terminal" {
 }
 
 test "failed state is terminal" {
-    const bundle = createMinimalBundle();
+    const bundle = try createMinimalBundle(std.testing.allocator);
+    defer std.testing.allocator.destroy(bundle);
 
     bundle.sess.status.state = .failed;
 
@@ -167,7 +211,8 @@ test "session can return to established after reconnection" {
 // ============================================================================
 
 test "error cleared before new connection attempt" {
-    const bundle = createMinimalBundle();
+    const bundle = try createMinimalBundle(std.testing.allocator);
+    defer std.testing.allocator.destroy(bundle);
 
     // Simulate previous error
     bundle.sess.status.state = .failed;
@@ -244,58 +289,4 @@ test "hold timer expiry followed by closeForReconnect results in idle session" {
     try std.testing.expectEqual(session.SessionState.idle, sess.status.state);
     try std.testing.expectEqual(@as(?session.SessionError, null), sess.status.last_error);
     try std.testing.expect(!session.isTerminal(&sess));
-}
-
-// ============================================================================
-// Test Helpers
-// ============================================================================
-
-/// Creates a minimal BgpServeBundle for testing without real TCP/session init.
-///
-/// IMPORTANT: This function allocates the bundle at a stable heap address to ensure
-/// sess.trans points to bundle.trans (not a stack local that could dangle):
-/// 1. Allocate bundle on heap
-/// 2. Set bundle.tcp and bundle.trans
-/// 3. Initialize session with &bundle.trans (bundle-owned pointer)
-/// 4. Set bundle.sess
-///
-/// The caller is responsible for cleaning up the allocated bundle.
-fn createMinimalBundle() *serve_integration.BgpServeBundle {
-    const sess_cfg = makeSessionConfig();
-
-    // Allocate bundle at stable heap address
-    const bundle = std.heap.page_allocator.create(serve_integration.BgpServeBundle) catch unreachable;
-
-    bundle.* = serve_integration.BgpServeBundle{
-        .raw = undefined,
-        .bgp_config = undefined,
-        .session_config = sess_cfg,
-        .state = .configured,
-        .last_error = null,
-        .prefixes = &.{},
-        .tcp = tcp_transport_createDummy(),
-        .trans = undefined,
-        .sess = undefined,
-    };
-
-    // Set tcp and trans BEFORE initializing session
-    bundle.tcp = tcp_transport_createDummy();
-    bundle.trans = bundle.tcp.toTransport();
-
-    // Initialize session with bundle-owned transport pointer (NOT a local)
-    const sess = session.init(sess_cfg, &bundle.trans) catch unreachable;
-    bundle.sess = sess;
-
-    return bundle;
-}
-
-fn tcp_transport_createDummy() tcp_transport.TcpTransport {
-    return tcp_transport.TcpTransport{
-        .socket_fd = -1,
-        .recv_buf = undefined,
-        .recv_len = 0,
-        .closed = true,
-        .peer_address = .{ 0, 0, 0, 0 },
-        .peer_port = 0,
-    };
 }

@@ -66,17 +66,9 @@ const _bfd_runtime_tests = @import("bfd/runtime_tests.zig");
 const _bfd_status = @import("bfd/status.zig");
 
 // Force test discovery for all imported modules
-// This ensures the test binary actually runs the tests from these modules
-test {
-    std.testing.refAllDecls(@import("bgp/lifecycle_tests.zig"));
-}
-
-// BGP hold timer expiry recovery tests (this ACT)
-test { std.testing.refAllDecls(@import("bgp/reconnect_hold_timer_tests.zig")); }
-test { std.testing.refAllDecls(@import("bgp/reconnect_recovery_tests.zig")); }
-test { std.testing.refAllDecls(@import("status_bgp_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/private_ip.zig")); }
+test { std.testing.refAllDecls(@import("net/rates.zig")); }
 test { std.testing.refAllDecls(@import("net/interface_sampler.zig")); }
-
 test { std.testing.refAllDecls(@import("net/interface_sampler_tests.zig")); }
 test { std.testing.refAllDecls(@import("net/linux_stats.zig")); }
 test { std.testing.refAllDecls(@import("net/linux_stats_tests.zig")); }
@@ -115,6 +107,8 @@ test { std.testing.refAllDecls(@import("http/server.zig")); }
 test { std.testing.refAllDecls(@import("runtime/telemetry.zig")); }
 test { std.testing.refAllDecls(@import("runtime/heartbeat_log.zig")); }
 test { std.testing.refAllDecls(@import("logging.zig")); }
+
+// BFD module tests
 test { std.testing.refAllDecls(@import("bfd/packet.zig")); }
 test { std.testing.refAllDecls(@import("bfd/config.zig")); }
 test { std.testing.refAllDecls(@import("bfd/clock.zig")); }
@@ -128,6 +122,8 @@ test { std.testing.refAllDecls(@import("bfd/transport_tests.zig")); }
 test { std.testing.refAllDecls(@import("bfd/runtime.zig")); }
 test { std.testing.refAllDecls(@import("bfd/runtime_tests.zig")); }
 test { std.testing.refAllDecls(@import("bfd/status.zig")); }
+
+// WireGuard tests
 test { std.testing.refAllDecls(@import("config.zig")); }
 test { std.testing.refAllDecls(@import("wg/config.zig")); }
 test { std.testing.refAllDecls(@import("wg/generate.zig")); }
@@ -135,11 +131,15 @@ test { std.testing.refAllDecls(@import("cli/wg_args.zig")); }
 test { std.testing.refAllDecls(@import("cli/bfd_serve.zig")); }
 test { std.testing.refAllDecls(@import("cli_serve_config_tests.zig")); }
 test { std.testing.refAllDecls(@import("bfd_serve_config_tests.zig")); }
+
+// BGP protocol module tests
 test { std.testing.refAllDecls(@import("bgp/types.zig")); }
 test { std.testing.refAllDecls(@import("bgp/message.zig")); }
 test { std.testing.refAllDecls(@import("bgp/message_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/validation.zig")); }
 test { std.testing.refAllDecls(@import("bgp/prefix_file.zig")); }
+
+// BGP session module tests
 test { std.testing.refAllDecls(@import("bgp/frame_decode.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_status.zig")); }
 test { std.testing.refAllDecls(@import("bgp/transport.zig")); }
@@ -151,19 +151,38 @@ test { std.testing.refAllDecls(@import("bgp/session_handshake_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_keepalive_basic_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_keepalive_notification_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_keepalive_advanced_tests.zig")); }
+
+// BGP TCP transport tests
 test { std.testing.refAllDecls(@import("bgp/tcp_transport.zig")); }
 test { std.testing.refAllDecls(@import("bgp/tcp_transport_helpers.zig")); }
 test { std.testing.refAllDecls(@import("bgp/tcp_transport_tests.zig")); }
+
+// BGP send failure propagation tests
 test { std.testing.refAllDecls(@import("bgp/send_failure_tests.zig")); }
+
+// BGP runtime integration tests
 test { std.testing.refAllDecls(@import("bgp/config_parse.zig")); }
 test { std.testing.refAllDecls(@import("bgp/serve_integration.zig")); }
 test { std.testing.refAllDecls(@import("bgp/serve_integration_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/serve_lifetime_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/transport_ownership_tests.zig")); }
+
+// BGP prefix file tests
 test { std.testing.refAllDecls(@import("bgp/prefix_file_loader.zig")); }
 test { std.testing.refAllDecls(@import("bgp/prefix_file_integration_tests.zig")); }
 test { std.testing.refAllDecls(@import("cli/bgp_serve.zig")); }
+
+// BGP status tests
 test { std.testing.refAllDecls(@import("bgp/status.zig")); }
+
+// BGP reconnect/backoff lifecycle tests
 test { std.testing.refAllDecls(@import("bgp/reconnect_lifecycle.zig")); }
 test { std.testing.refAllDecls(@import("bgp/backoff_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/lifecycle_tests.zig")); }
+
+// BGP hold timer expiry recovery tests (this ACT)
+test { std.testing.refAllDecls(@import("bgp/reconnect_hold_timer_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/reconnect_recovery_tests.zig")); }
+
+// BGP status tests
+test { std.testing.refAllDecls(@import("status_bgp_tests.zig")); }
