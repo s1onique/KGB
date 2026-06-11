@@ -12,6 +12,7 @@ const _bfd_clock = @import("bfd/clock.zig");
 const _bfd_session = @import("bfd/session.zig");
 const _bfd_packet_tests = @import("bfd/packet_tests.zig");
 const _bfd_session_tests = @import("bfd/session_tests.zig");
+const _bfd_session_bird_tests = @import("bfd/session_bird_tests.zig");
 const _bfd_smoke_test = @import("bfd/smoke_test.zig");
 const _bfd_transport = @import("bfd/transport.zig");
 const _bfd_transport_tests = @import("bfd/transport_tests.zig");
@@ -26,6 +27,7 @@ test { std.testing.refAllDecls(@import("bfd/clock.zig")); }
 test { std.testing.refAllDecls(@import("bfd/session.zig")); }
 test { std.testing.refAllDecls(@import("bfd/packet_tests.zig")); }
 test { std.testing.refAllDecls(@import("bfd/session_tests.zig")); }
+test { std.testing.refAllDecls(@import("bfd/session_bird_tests.zig")); }
 test { std.testing.refAllDecls(@import("bfd/smoke_test.zig")); }
 test { std.testing.refAllDecls(@import("bfd/transport.zig")); }
 test { std.testing.refAllDecls(@import("bfd/transport_tests.zig")); }

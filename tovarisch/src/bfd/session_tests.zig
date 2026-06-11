@@ -331,3 +331,34 @@ test "up after Init with Init from peer" {
     _ = session.processEvent(&sess, .{ .packetReceived = init2_pkt });
     try std.testing.expectEqual(session.SessionState.up, sess.state);
 }
+
+test "wrong nonzero YourDiscr is still dropped" {
+    clock.MockClock.reset();
+    const mock_clock = clock.MockClock.interface();
+
+    const cfg = config.BfdConfig{
+        .local_addr = "10.0.0.1",
+        .peer_addr = "10.0.0.2",
+        .local_discr = 100,
+    };
+
+    var sess = session.init(cfg, mock_clock);
+    try std.testing.expectEqual(@as(u32, 100), sess.local_discr);
+
+    // Packet with wrong nonzero YourDiscr should be dropped
+    const wrong_pkt = packet.ControlPacket{
+        .state = .up,
+        .my_discr = 200,
+        .your_discr = 999, // Not 0, not our discriminator
+        .detect_mult = 3,
+    };
+    _ = session.processEvent(&sess, .{ .packetReceived = wrong_pkt });
+
+    // Should be counted as dropped
+    try std.testing.expectEqual(@as(u64, 1), sess.stats.packets_dropped);
+    // State should remain Down (packet was dropped before state transition)
+    try std.testing.expectEqual(session.SessionState.down, sess.state);
+    // Note: remote_discr is learned BEFORE your_discr check, so it IS set.
+    // This is correct - we learn peers from my_discr regardless of addressing.
+    try std.testing.expectEqual(@as(u32, 200), sess.remote_discr);
+}

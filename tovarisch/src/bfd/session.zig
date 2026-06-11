@@ -143,7 +143,11 @@ fn handlePacketReceived(sess: *Session, pkt: ControlPacket) SessionState {
     if (sess.remote_discr == 0 and pkt.my_discr != 0) {
         sess.remote_discr = pkt.my_discr;
     }
-    if (pkt.your_discr != sess.local_discr) {
+    // RFC 5880 Section 6.8.4: Your Discriminator is 0 on initial discovery packets.
+    // BIRD and other implementations send Down packets with YourDiscr=0 when they
+    // don't know our discriminator yet. Accept these from configured peers.
+    // Drop only if YourDiscr is nonzero AND doesn't match our local discriminator.
+    if (pkt.your_discr != 0 and pkt.your_discr != sess.local_discr) {
         sess.stats.packets_dropped += 1;
         return sess.state;
     }
@@ -230,7 +234,13 @@ pub fn isDetectionExpired(sess: *Session) bool {
 /// Check if it's time to transmit.
 pub fn isTransmitDue(sess: *Session) bool {
     if (sess.state == .admin_down) return false;
-    if (sess.state == .down and sess.remote_discr != 0) return false;
+    // In Down state, suppress transmit only if we've sent at least one packet
+    // and are still waiting for the peer's response.
+    // This prevents the BFD startup deadlock where tovarisch doesn't respond
+    // to BIRD's initial packet because it thinks it's "waiting".
+    if (sess.state == .down and sess.stats.packets_sent > 0 and sess.remote_discr == 0) {
+        return false;
+    }
     return sess.clock.getMonoTimeMs() >= sess.next_transmit_time;
 }
 
