@@ -12,6 +12,7 @@ const _bfd_serve_config_tests = @import("bfd_serve_config_tests.zig");
 const _status_bgp_tests = @import("status_bgp_tests.zig");
 
 // WireGuard config modules
+const _wg_config = @import("wg/config.zig");
 const _wg_generate = @import("wg/generate.zig");
 const _cli_wg_args = @import("cli/wg_args.zig");
 const _cli_bfd_serve = @import("cli/bfd_serve.zig");
@@ -25,4 +26,5 @@ test { std.testing.refAllDecls(@import("status_bgp_tests.zig")); }
 test { std.testing.refAllDecls(@import("wg/generate.zig")); }
 test { std.testing.refAllDecls(@import("cli/wg_args.zig")); }
 test { std.testing.refAllDecls(@import("cli/bfd_serve.zig")); }
+test { std.testing.refAllDecls(@import("wg/config.zig")); }
 test { std.testing.refAllDecls(@import("cli/bgp_serve.zig")); }
