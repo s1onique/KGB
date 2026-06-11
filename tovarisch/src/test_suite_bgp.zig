@@ -33,6 +33,7 @@ const _bgp_tcp_transport_tests = @import("bgp/tcp_transport_tests.zig");
 const _bgp_config_parse = @import("bgp/config_parse.zig");
 const _bgp_serve_integration = @import("bgp/serve_integration.zig");
 const _bgp_serve_integration_tests = @import("bgp/serve_integration_tests.zig");
+const _bgp_serve_lifetime_tests = @import("bgp/serve_lifetime_tests.zig");
 const _bgp_transport_ownership_tests = @import("bgp/transport_ownership_tests.zig");
 
 // BGP status
@@ -60,5 +61,6 @@ test { std.testing.refAllDecls(@import("bgp/tcp_transport_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/config_parse.zig")); }
 test { std.testing.refAllDecls(@import("bgp/serve_integration.zig")); }
 test { std.testing.refAllDecls(@import("bgp/serve_integration_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/serve_lifetime_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/transport_ownership_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/status.zig")); }

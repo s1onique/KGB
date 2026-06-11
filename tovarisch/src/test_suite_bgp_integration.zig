@@ -9,4 +9,5 @@ const std = @import("std");
 test { std.testing.refAllDecls(@import("bgp/config_parse.zig")); }
 test { std.testing.refAllDecls(@import("bgp/serve_integration.zig")); }
 test { std.testing.refAllDecls(@import("bgp/serve_integration_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/serve_lifetime_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/status.zig")); }
