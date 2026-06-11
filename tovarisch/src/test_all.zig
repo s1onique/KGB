@@ -360,7 +360,16 @@ test {
 }
 
 test {
+    std.testing.refAllDecls(@import("bgp/tcp_transport_helpers.zig"));
+}
+
+test {
     std.testing.refAllDecls(@import("bgp/tcp_transport_tests.zig"));
+}
+
+// BGP send failure propagation tests
+test {
+    std.testing.refAllDecls(@import("bgp/send_failure_tests.zig"));
 }
 
 // BGP runtime integration tests (ACT 4: serve runtime wiring)

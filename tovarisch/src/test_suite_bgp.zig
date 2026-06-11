@@ -32,6 +32,8 @@ const _bgp_serve_integration_tests = @import("bgp/serve_integration_tests.zig");
 // BGP status
 const _bgp_status = @import("bgp/status.zig");
 
+// (New BGP modules owned by test_suite_bgp_tcp.zig)
+
 // Force test discovery
 test { std.testing.refAllDecls(@import("bgp/types.zig")); }
 test { std.testing.refAllDecls(@import("bgp/message.zig")); }

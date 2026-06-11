@@ -15,6 +15,7 @@
 
 const std = @import("std");
 const tcp_transport = @import("tcp_transport.zig");
+const h = @import("tcp_transport_helpers.zig");
 
 // ============================================================================
 // Test Helpers
@@ -47,8 +48,8 @@ fn createLocalListener() !struct { fd: std.c.fd_t, port: u16 } {
 
     var addr = sockaddr_in{
         .sin_family = @as(c_ushort, @intCast(AF_INET)),
-        .sin_port = tcp_transport.writePortToSockaddr(0), // Port 0 = ephemeral
-        .sin_addr = tcp_transport.writeIpv4ToSockaddr(peer_address).s_addr,
+        .sin_port = h.writePortToSockaddr(0), // Port 0 = ephemeral
+        .sin_addr = h.writeIpv4ToSockaddr(peer_address).s_addr,
         .sin_zero = undefined,
     };
     @memset(addr.sin_zero[0..], 0);
@@ -64,7 +65,7 @@ fn createLocalListener() !struct { fd: std.c.fd_t, port: u16 } {
     if (std.c.getsockname(listen_fd, @ptrCast(&addr), &addr_len) < 0) {
         return error.GetNameFailed;
     }
-    const assigned_port = tcp_transport.readPortFromSockaddr(addr.sin_port);
+    const assigned_port = h.readPortFromSockaddr(addr.sin_port);
 
     // Listen for connections
     if (std.c.listen(listen_fd, 1) < 0) {
@@ -114,7 +115,7 @@ const ACCEPT_TIMEOUT_MS: i32 = 5000;
 test "TcpTransport IPv4 byte order is correct" {
     // Test 127.0.0.1 memory layout
     const addr127 = [_]u8{ 127, 0, 0, 1 };
-    const packed127 = tcp_transport.writeIpv4ToSockaddr(addr127);
+    const packed127 = h.writeIpv4ToSockaddr(addr127);
     const bytes127 = std.mem.asBytes(&packed127.s_addr);
     try std.testing.expectEqual(@as(u8, 127), bytes127[0]);
     try std.testing.expectEqual(@as(u8, 0), bytes127[1]);
@@ -123,7 +124,7 @@ test "TcpTransport IPv4 byte order is correct" {
 
     // Test 192.168.50.185 memory layout
     const addr192 = [_]u8{ 192, 168, 50, 185 };
-    const packed192 = tcp_transport.writeIpv4ToSockaddr(addr192);
+    const packed192 = h.writeIpv4ToSockaddr(addr192);
     const bytes192 = std.mem.asBytes(&packed192.s_addr);
     try std.testing.expectEqual(@as(u8, 192), bytes192[0]);
     try std.testing.expectEqual(@as(u8, 168), bytes192[1]);
@@ -131,26 +132,26 @@ test "TcpTransport IPv4 byte order is correct" {
     try std.testing.expectEqual(@as(u8, 185), bytes192[3]);
 
     // Verify round-trip
-    try std.testing.expectEqual(addr127, tcp_transport.readIpv4FromSockaddr(packed127));
-    try std.testing.expectEqual(addr192, tcp_transport.readIpv4FromSockaddr(packed192));
+    try std.testing.expectEqual(addr127, h.readIpv4FromSockaddr(packed127));
+    try std.testing.expectEqual(addr192, h.readIpv4FromSockaddr(packed192));
 }
 
 test "TcpTransport port byte order is correct" {
     // Test port 179 memory layout
-    const port179 = tcp_transport.writePortToSockaddr(179);
+    const port179 = h.writePortToSockaddr(179);
     const bytes179 = std.mem.asBytes(&port179);
     try std.testing.expectEqual(@as(u8, 0), bytes179[0]);
     try std.testing.expectEqual(@as(u8, 179), bytes179[1]);
 
     // Test port 80 memory layout
-    const port80 = tcp_transport.writePortToSockaddr(80);
+    const port80 = h.writePortToSockaddr(80);
     const bytes80 = std.mem.asBytes(&port80);
     try std.testing.expectEqual(@as(u8, 0), bytes80[0]);
     try std.testing.expectEqual(@as(u8, 80), bytes80[1]);
 
     // Verify round-trip
-    try std.testing.expectEqual(@as(u16, 179), tcp_transport.readPortFromSockaddr(port179));
-    try std.testing.expectEqual(@as(u16, 80), tcp_transport.readPortFromSockaddr(port80));
+    try std.testing.expectEqual(@as(u16, 179), h.readPortFromSockaddr(port179));
+    try std.testing.expectEqual(@as(u16, 80), h.readPortFromSockaddr(port80));
 }
 
 // ============================================================================

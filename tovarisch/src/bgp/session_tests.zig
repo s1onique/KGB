@@ -248,96 +248,9 @@ test "getStatus returns current status" {
     try std.testing.expectEqual(@as(u16, 65002), status.peer_as);
 }
 
-// === Transport Send Error Tests ===
-
-/// A fake transport that always fails on send.
-const FailingFakeTransport = struct {
-    const Self = @This();
-
-    allocator: std.mem.Allocator,
-    closed: bool,
-
-    pub fn init(allocator: std.mem.Allocator) Self {
-        return Self{
-            .allocator = allocator,
-            .closed = false,
-        };
-    }
-
-    /// Always returns error to simulate failed TCP send.
-    pub fn send(self: *Self, data: []const u8) session.TransportError!void {
-        _ = data;
-        _ = self;
-        return session.TransportError.SendFailed;
-    }
-
-    pub fn recv(self: *Self) []const u8 {
-        _ = self;
-        return &[_]u8{};
-    }
-
-    pub fn close(self: *Self) void {
-        self.closed = true;
-    }
-
-    pub fn toTransport(self: *Self) session.Transport {
-        return session.Transport{
-            .sendFn = struct {
-                fn send(ctx: *anyopaque, data: []const u8) session.TransportError!void {
-                    const fake: *Self = @ptrCast(@alignCast(ctx));
-                    return fake.send(data);
-                }
-            }.send,
-            .recvFn = struct {
-                fn recv(ctx: *anyopaque) []const u8 {
-                    const fake: *Self = @ptrCast(@alignCast(ctx));
-                    return fake.recv();
-                }
-            }.recv,
-            .closeFn = struct {
-                fn close(ctx: *anyopaque) void {
-                    const fake: *Self = @ptrCast(@alignCast(ctx));
-                    fake.close();
-                }
-            }.close,
-            .ctx = @ptrCast(self),
-        };
-    }
-};
-
-test "failed OPEN send leaves session in failed state, not open_sent" {
-    const config = session.SessionConfig{
-        .peer_address = .{ 127, 0, 0, 1 },
-        .peer_port = 179,
-        .local_address = null,
-        .local_as = 65001,
-        .peer_as = 65002,
-        .router_id = .{ 10, 0, 0, 1 },
-        .hold_time_seconds = 180,
-        .keepalive_seconds = 60,
-        .connect_timeout_ms = 5000,
-        .prefixes = &.{types.Ipv4Prefix.init("10.0.0.0/8")},
-        .same_as = true,
-    };
-
-    var fake = FailingFakeTransport.init(std.testing.allocator);
-    var sess = try session.init(config, &fake.toTransport());
-
-    // Attempt to run from idle - OPEN send will fail
-    const result = session.runOnce(&sess);
-
-    // Should return error because send failed
-    try std.testing.expectError(session.SessionErrorKind.IoError, result);
-
-    // Session should be in failed state, NOT open_sent
-    try std.testing.expectEqual(session.SessionState.failed, sess.status.state);
-
-    // messages_sent should still be 0 - OPEN was never sent
-    try std.testing.expectEqual(@as(u64, 0), sess.status.messages_sent);
-
-    // last_error should be set
-    try std.testing.expect(sess.status.last_error != null);
-}
+// === Send Failure Tests ===
+// Send failure propagation tests have been moved to send_failure_tests.zig
+// to satisfy LLM-friendliness line limits.
 
 test "successful OPEN send transitions to open_sent with captured frame" {
     const config = session.SessionConfig{

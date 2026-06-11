@@ -7,15 +7,26 @@ const std = @import("std");
 
 /// Transport send errors.
 /// BGP FSM state transitions depend on successful writes.
+/// Concrete variants preserve exact socket failure reason for observability.
 pub const TransportError = error{
     /// Transport is closed
     Closed,
     /// Peer closed connection (zero-length send)
     ConnectionClosed,
-    /// Send system call failed
-    SendFailed,
     /// Memory allocation failed
     OutOfMemory,
+    /// WouldBlock: socket non-blocking and buffer full (EAGAIN/EWOULDBLOCK)
+    WouldBlock,
+    /// ConnectionReset: peer sent RST (ECONNRESET)
+    ConnectionReset,
+    /// BrokenPipe: write on closed pipe/Socket (EPIPE)
+    BrokenPipe,
+    /// NotConnected: socket not connected (ENOTCONN)
+    NotConnected,
+    /// BadFileDescriptor: invalid socket fd (EBADF)
+    BadFileDescriptor,
+    /// SendFailed: unspecified send failure
+    SendFailed,
 };
 
 /// Transport interface for BGP message send/receive.
