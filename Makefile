@@ -49,6 +49,24 @@ tovarisch-build:
 tovarisch-test:
 	cd tovarisch && zig build test
 
+# === BGP Sub-Suite Targets (for CI isolation) ===
+
+tovarisch-test-bgp-protocol:
+	cd tovarisch && zig build test-bgp-protocol --summary all
+
+tovarisch-test-bgp-session:
+	cd tovarisch && zig build test-bgp-session --summary all
+
+tovarisch-test-bgp-tcp:
+	cd tovarisch && zig build test-bgp-tcp --summary all
+
+tovarisch-test-bgp-integration:
+	cd tovarisch && zig build test-bgp-integration --summary all
+
+# Combined BGP sub-suite step (runs all BGP sub-suites)
+tovarisch-test-bgp-split:
+	cd tovarisch && zig build test-bgp-split --summary all
+
 tovarisch-run:
 	cd tovarisch && zig build run -- --version
 

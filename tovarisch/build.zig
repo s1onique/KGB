@@ -200,6 +200,61 @@ pub fn build(b: *std.Build) void {
     const test_bgp_step = b.step("test-bgp", "Run BGP tests (protocol, session, TCP transport)");
     test_bgp_step.dependOn(&b.addRunArtifact(bgp_tests).step);
 
+    // BGP sub-suites for fine-grained CI isolation
+    const bgp_protocol_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/test_suite_bgp_protocol.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    bgp_protocol_tests.root_module.addOptions("build_options", build_options);
+    const test_bgp_protocol_step = b.step("test-bgp-protocol", "Run BGP protocol tests (types, message, validation)");
+    test_bgp_protocol_step.dependOn(&b.addRunArtifact(bgp_protocol_tests).step);
+
+    const bgp_session_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/test_suite_bgp_session.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    bgp_session_tests.root_module.addOptions("build_options", build_options);
+    const test_bgp_session_step = b.step("test-bgp-session", "Run BGP session tests (state machine, handshake)");
+    test_bgp_session_step.dependOn(&b.addRunArtifact(bgp_session_tests).step);
+
+    const bgp_tcp_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/test_suite_bgp_tcp.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    bgp_tcp_tests.root_module.addOptions("build_options", build_options);
+    const test_bgp_tcp_step = b.step("test-bgp-tcp", "Run BGP TCP transport tests (loopback sockets)");
+    test_bgp_tcp_step.dependOn(&b.addRunArtifact(bgp_tcp_tests).step);
+
+    const bgp_integration_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/test_suite_bgp_integration.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    bgp_integration_tests.root_module.addOptions("build_options", build_options);
+    const test_bgp_integration_step = b.step("test-bgp-integration", "Run BGP integration tests (config, serve, status)");
+    test_bgp_integration_step.dependOn(&b.addRunArtifact(bgp_integration_tests).step);
+
+    const test_bgp_split_step = b.step("test-bgp-split", "Run all BGP sub-suite tests");
+    test_bgp_split_step.dependOn(test_bgp_protocol_step);
+    test_bgp_split_step.dependOn(test_bgp_session_step);
+    test_bgp_split_step.dependOn(test_bgp_tcp_step);
+    test_bgp_split_step.dependOn(test_bgp_integration_step);
+
     // HTTP tests: HTTP server, routes, serve context
     const http_tests = b.addTest(.{
         .root_module = b.createModule(.{

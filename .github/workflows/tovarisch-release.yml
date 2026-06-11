@@ -55,9 +55,21 @@ jobs:
         timeout-minutes: 3
         run: cd tovarisch && zig build test-bfd --summary all
 
-      - name: Run tovarisch BGP tests
+      - name: Run tovarisch BGP protocol tests
         timeout-minutes: 3
-        run: cd tovarisch && zig build test-bgp --summary all
+        run: cd tovarisch && zig build test-bgp-protocol --summary all
+
+      - name: Run tovarisch BGP session tests
+        timeout-minutes: 3
+        run: cd tovarisch && zig build test-bgp-session --summary all
+
+      - name: Run tovarisch BGP TCP tests
+        timeout-minutes: 3
+        run: cd tovarisch && zig build test-bgp-tcp --summary all
+
+      - name: Run tovarisch BGP integration tests
+        timeout-minutes: 3
+        run: cd tovarisch && zig build test-bgp-integration --summary all
 
       - name: Run tovarisch HTTP tests
         timeout-minutes: 3
