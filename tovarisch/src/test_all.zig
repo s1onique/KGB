@@ -427,6 +427,19 @@ test {
     std.testing.refAllDecls(@import("bgp/status.zig"));
 }
 
+// BGP reconnect/backoff lifecycle tests (ACT 5: reconnect loop)
+test {
+    std.testing.refAllDecls(@import("bgp/reconnect_lifecycle.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/backoff_tests.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/lifecycle_tests.zig"));
+}
+
 // BGP status integration tests
 test {
     std.testing.refAllDecls(@import("status_bgp_tests.zig"));

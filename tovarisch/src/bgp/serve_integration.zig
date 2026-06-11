@@ -1,18 +1,24 @@
 // bgp/serve_integration.zig — BGP runtime integration for serve command
 //
-// ACT 5: Wire BGP session into tovarisch serve runtime.
 // Loads config from file and creates BGP runtime for the daemon.
 // Keeps config memory alive for daemon lifetime to avoid dangling slices.
 //
 // KEY CONSTRAINT: When BGP is disabled, ZERO sockets are created.
-// This module must NOT call TcpTransport.connect() when BGP is disabled.
 //
 // This module creates the TCP transport and BGP session at load time,
 // enabling the session state machine to run during serve.
+// Reconnect/backoff lifecycle is handled by the runtime thread.
 //
-// ACT runtime: BGP FSM loop runs in a detached thread (see runtime.zig),
-// driving runSessionOnce. The thread logs FSM transitions and sleeps
-// between iterations.
+// Thread Safety Model:
+// - cleanup_requested: atomic u8 with release/acquire ordering
+// - runtime_thread: joined on cleanup (not detached)
+// - Bundle state (state, backoff_ms, last_error): written by runtime thread only
+// - Status reads: best-effort snapshot during HTTP requests
+//
+// NOTE: /status reads bundle state without mutex protection. This is acceptable
+// because: (1) runtime thread is joined on cleanup before bundle destruction,
+// (2) status reads during normal operation may see stale but not corrupt data,
+// (3) heavyweight mutex is deferred to future ACT per tiny-leafs doctrine.
 //
 // References: RFC 4271 (BGP-4)
 
@@ -24,150 +30,126 @@ const session = @import("session.zig");
 const types = @import("types.zig");
 const tcp_transport = @import("tcp_transport.zig");
 const transport = @import("transport.zig");
+const clock = @import("clock.zig");
+const reconnect = @import("reconnect_lifecycle.zig");
 
-/// Runtime state for BGP session
+// ============================================================================
+// Runtime State
+// ============================================================================
+
+/// Runtime state for BGP session including reconnect lifecycle.
 pub const BgpRuntimeState = enum {
-    /// BGP not configured (no [bgp] section in config)
     not_configured,
-    /// BGP configured but disabled
     disabled,
-    /// BGP config built and validated, ready for connection
     configured,
-    /// BGP config build or validation failed
+    reconnect_wait,
     failed,
 };
 
-/// Result of loading BGP configuration.
+// ============================================================================
+// Load Result
+// ============================================================================
+
 pub const BgpLoadResult = union(enum) {
-    /// No config path provided - BGP not requested.
     no_config,
-    /// Config exists but BGP is disabled.
     disabled,
-    /// BGP runtime configured - pointer owned by caller.
-    /// Note: Session is ready but not yet connected (connect deferred).
     configured: *BgpServeBundle,
-    /// Config loading or BGP initialization failed.
-    /// Includes error message for status reporting.
     failed: LoadFailure,
 };
 
-/// Error details for failed BGP load.
 pub const LoadFailure = struct {
-    /// Sanitized error message for status reporting.
     message: []const u8,
 };
 
-/// Bundle that owns config memory and BGP runtime state.
-/// Includes TCP transport and session for the full BGP state machine.
+// ============================================================================
+// Serve Bundle
+// ============================================================================
+
 pub const BgpServeBundle = struct {
     const Self = @This();
 
-    /// Owned config memory - must outlive runtime.
     raw: config.RawConfig,
-    /// The parsed BGP config.
     bgp_config: config_parse.BgpConfig,
-    /// BGP session config (built at load time).
     session_config: session.SessionConfig,
-    /// Current runtime state.
     state: BgpRuntimeState = .not_configured,
-    /// Last error message (owned by bundle, not borrowed from session).
-    /// Format: concrete send errors like "send: EBADF" or "send: ECONNRESET".
     last_error: ?[]const u8 = null,
-    /// Owned buffer for last_error messages to avoid dangling slices.
-    /// Max: "send failed" = 12 chars, fits in 32 byte buffer.
     last_error_buf: [64]u8 = undefined,
-    /// Advertised prefixes (parsed from config).
     prefixes: []types.Ipv4Prefix = &.{},
-    /// TCP transport for the BGP session.
     tcp: tcp_transport.TcpTransport,
-    /// Transport wrapper (owned by bundle, lives as long as sess needs it).
     trans: transport.Transport,
-    /// BGP session state machine.
     sess: session.Session,
+
+    // Reconnect state
+    backoff_ms: u64 = 0,
+    reconnect_deadline: clock.MonoTime = 0,
+    // Thread safety: Atomic u8 for cross-thread signaling.
+    // cleanupBgpBundle stores 1, isCleanupRequested loads with acquire ordering.
+    // This ensures the runtime thread sees the flag before bundle destruction.
+    cleanup_requested: u8 = 0,
+
+    // Runtime thread handle (null if not started or already joined)
+    runtime_thread: ?std.Thread = null,
 };
 
-/// Load config file and validate BGP configuration.
-/// Returns BgpLoadResult to distinguish between "no config", "disabled", and errors.
-/// Caller owns the returned pointer for the configured case.
-///
-/// CRITICAL: When this returns .disabled or .no_config, NO sockets are created.
-/// ACT 4: This function does NOT call TcpTransport.connect().
-/// Connection is deferred to a future ACT after bounded nonblocking connect exists.
+// ============================================================================
+// Config Loading
+// ============================================================================
+
 pub fn loadConfigAndBgp(
     config_path: ?[]const u8,
     stderr: anytype,
     allocator: std.mem.Allocator,
 ) BgpLoadResult {
-    if (config_path == null) {
-        return .no_config;
-    }
+    if (config_path == null) return .no_config;
 
     const path = config_path.?;
-
-    // Read config file
     var raw = wg_args.readConfig(path, std.heap.page_allocator) catch |e| {
         stderr.print("error: failed to read config file '{s}': {s}\n", .{ path, @errorName(e) }) catch {};
         return .{ .failed = .{ .message = "failed to read config" } };
     };
 
-    // Parse BGP config (includes advertised_prefixes parsing now)
     const bgp_cfg = config_parse.parseBgpConfig(&raw) catch |e| {
         stderr.print("error: failed to parse BGP config: {s}\n", .{@errorName(e)}) catch {};
         raw.deinit(std.heap.page_allocator);
         return .{ .failed = .{ .message = "failed to parse BGP config" } };
     };
 
-    // If [bgp] section is not present, return no_config
-    // This is distinguishable from present-but-disabled
     if (!bgp_cfg.present) {
         raw.deinit(std.heap.page_allocator);
         return .no_config;
     }
 
-    // If BGP is not enabled, clean up and return disabled
-    // CRITICAL: Zero sockets are created here
     if (!bgp_cfg.enabled) {
         raw.deinit(std.heap.page_allocator);
         return .disabled;
     }
 
-    // Now BGP is enabled - validate and build config.
-    // We do NOT call TcpTransport.connect() in this ACT.
-    // Connection is deferred to a future ACT.
-
-    // Parse local address using plain IPv4 parser (not CIDR)
     const local_addr = config_parse.parseIpv4Address(bgp_cfg.local_address) catch |e| {
         stderr.print("error: invalid local_address '{s}': {s}\n", .{ bgp_cfg.local_address, @errorName(e) }) catch {};
         raw.deinit(std.heap.page_allocator);
         return .{ .failed = .{ .message = "invalid local_address" } };
     };
 
-    // Parse router_id using plain IPv4 parser
     const router_addr = config_parse.parseIpv4Address(bgp_cfg.router_id) catch |e| {
         stderr.print("error: invalid router_id '{s}': {s}\n", .{ bgp_cfg.router_id, @errorName(e) }) catch {};
         raw.deinit(std.heap.page_allocator);
         return .{ .failed = .{ .message = "invalid router_id" } };
     };
 
-    // Parse peer address using plain IPv4 parser
     const peer_addr = config_parse.parseIpv4Address(bgp_cfg.peer_address) catch |e| {
         stderr.print("error: invalid peer_address '{s}': {s}\n", .{ bgp_cfg.peer_address, @errorName(e) }) catch {};
         raw.deinit(std.heap.page_allocator);
         return .{ .failed = .{ .message = "invalid peer_address" } };
     };
 
-    // Parse advertised prefixes from raw config string (comma-separated CIDR list)
-    // This is the runtime-owned allocation - freed by defer below
     var prefixes = std.ArrayList(types.Ipv4Prefix).empty;
     errdefer prefixes.deinit(allocator);
 
-    // Parse the comma-separated prefix list
     const prefix_strings = config_parse.parsePrefixList(bgp_cfg.advertised_prefixes_raw, allocator) catch |e| {
         stderr.print("error: failed to parse advertised_prefixes: {s}\n", .{@errorName(e)}) catch {};
         raw.deinit(std.heap.page_allocator);
         return .{ .failed = .{ .message = "failed to parse advertised_prefixes" } };
     };
-    // Free prefix_strings on any exit from this block
     defer allocator.free(prefix_strings);
 
     for (prefix_strings) |cidr| {
@@ -185,9 +167,6 @@ pub fn loadConfigAndBgp(
         };
     }
 
-    // Zero prefixes is valid - allows OPEN/KEEPALIVE-only smoke test without route advertisement
-
-    // Build SessionConfig for BGP session
     const session_config = session.SessionConfig{
         .peer_address = peer_addr,
         .peer_port = bgp_cfg.peer_port,
@@ -202,7 +181,6 @@ pub fn loadConfigAndBgp(
         .same_as = bgp_cfg.same_as,
     };
 
-    // Validate session config (ASN ranges, hold time, etc.)
     session.validateConfig(session_config) catch |e| {
         stderr.print("error: invalid BGP session config: {s}\n", .{@errorName(e)}) catch {};
         prefixes.deinit(allocator);
@@ -210,7 +188,6 @@ pub fn loadConfigAndBgp(
         return .{ .failed = .{ .message = "invalid BGP session config" } };
     };
 
-    // Create TCP transport with bounded connect timeout
     const tcp_config = tcp_transport.TcpTransportConfig{
         .peer_address = peer_addr,
         .peer_port = bgp_cfg.peer_port,
@@ -224,7 +201,6 @@ pub fn loadConfigAndBgp(
         return .{ .failed = .{ .message = "BGP connect failed" } };
     };
 
-    // Allocate bundle first so we can store trans in it
     const bundle = std.heap.page_allocator.create(BgpServeBundle) catch {
         stderr.writeAll("error: out of memory creating BGP bundle\n") catch {};
         tcp.close();
@@ -233,7 +209,6 @@ pub fn loadConfigAndBgp(
         return .{ .failed = .{ .message = "out of memory creating BGP bundle" } };
     };
 
-    // Initialize transport wrapper in bundle (owned by bundle, lives as long as sess)
     bundle.* = BgpServeBundle{
         .raw = raw,
         .bgp_config = bgp_cfg,
@@ -248,7 +223,6 @@ pub fn loadConfigAndBgp(
     bundle.tcp = tcp;
     bundle.trans = bundle.tcp.toTransport();
 
-    // Create BGP session with the bundle-owned transport
     const sess = session.init(session_config, &bundle.trans) catch |e| {
         stderr.print("error: failed to create BGP session: {s}\n", .{@errorName(e)}) catch {};
         bundle.tcp.close();
@@ -263,54 +237,61 @@ pub fn loadConfigAndBgp(
     return .{ .configured = bundle };
 }
 
-/// Clean up a BGP bundle when shutting down.
+// ============================================================================
+// Cleanup
+// ============================================================================
+
 pub fn cleanupBgpBundle(bundle: *BgpServeBundle, allocator: std.mem.Allocator) void {
-    // Close TCP transport
+    // Signal stop via atomic store (main thread -> runtime thread)
+    @atomicStore(u8, &bundle.cleanup_requested, 1, .release);
+
+    // Join runtime thread if present (ensures thread has exited before we destroy bundle)
+    if (bundle.runtime_thread) |thread| {
+        thread.join();
+        bundle.runtime_thread = null;
+    }
+
+    // Now safe to clean up resources
     bundle.tcp.close();
-
-    // Free prefixes
     allocator.free(bundle.prefixes);
-
-    // Deinit raw config
     bundle.raw.deinit(std.heap.page_allocator);
-
-    // Destroy bundle
     std.heap.page_allocator.destroy(bundle);
 }
 
-/// Get current BGP runtime state.
+// ============================================================================
+// Status Accessors
+// ============================================================================
+
 pub fn getBgpState(bundle: *const BgpServeBundle) BgpRuntimeState {
     return bundle.state;
 }
 
-/// Get last error message if any.
 pub fn getBgpLastError(bundle: *const BgpServeBundle) ?[]const u8 {
     return bundle.last_error;
 }
 
-/// Run one iteration of the BGP session state machine.
-/// Returns RunResult indicating session state after the iteration.
+pub fn getSessionStatus(bundle: *BgpServeBundle) session.SessionStatus {
+    return session.getStatus(&bundle.sess);
+}
+
+// ============================================================================
+// Session Execution
+// ============================================================================
+
 pub fn runSessionOnce(bundle: *BgpServeBundle) session.RunResult {
     const result = session.runOnce(&bundle.sess) catch |e| {
-        // CRITICAL: Preserve concrete session error over wrapper-level @errorName(e).
-        // session.runOnce() sets sess.status.last_error with concrete send failures
-        // (e.g., "send: EBADF", "send: ECONNRESET"). We copy the message into
-        // bundle-owned storage to avoid dangling slices.
         bundle.last_error = if (bundle.sess.status.last_error) |session_err|
             copyErrorToBundle(bundle, session_err.message)
         else
             copyErrorToBundle(bundle, @errorName(e));
-
         bundle.state = .failed;
         return .failed;
     };
 
-    // Sync runtime state with session state
     switch (result) {
         .established => bundle.state = .configured,
         .failed => {
             bundle.state = .failed;
-            // Copy session's concrete error to bundle-owned buffer
             if (bundle.sess.status.last_error) |err| {
                 bundle.last_error = copyErrorToBundle(bundle, err.message);
             }
@@ -322,14 +303,87 @@ pub fn runSessionOnce(bundle: *BgpServeBundle) session.RunResult {
     return result;
 }
 
-/// Copy an error message into bundle-owned buffer and return a borrowed slice.
-/// This avoids dangling pointers when session error messages are short-lived.
 fn copyErrorToBundle(bundle: *BgpServeBundle, message: []const u8) []const u8 {
     @memcpy(bundle.last_error_buf[0..message.len], message);
     return bundle.last_error_buf[0..message.len];
 }
 
-/// Get the BGP session status for /status JSON output.
-pub fn getSessionStatus(bundle: *BgpServeBundle) session.SessionStatus {
-    return session.getStatus(&bundle.sess);
+// ============================================================================
+// Reconnect/Backoff Lifecycle
+// ============================================================================
+
+pub fn computeNextBackoff(current_ms: u64, max_delay_ms: u64) u64 {
+    return reconnect.computeNextBackoff(current_ms, max_delay_ms);
 }
+
+pub fn scheduleReconnect(
+    bundle: *BgpServeBundle,
+    clock_interface: clock.Clock,
+    max_delay_ms: u64,
+) void {
+    // Compute next backoff delay
+    bundle.backoff_ms = reconnect.computeNextBackoff(bundle.backoff_ms, max_delay_ms);
+
+    // Set deadline
+    const now = clock_interface.getMonoTimeMs();
+    bundle.reconnect_deadline = now + bundle.backoff_ms;
+    bundle.state = .reconnect_wait;
+}
+
+pub fn isReconnectReady(bundle: *BgpServeBundle, clock_interface: clock.Clock) bool {
+    if (bundle.state != .reconnect_wait) {
+        return false;
+    }
+    const now = clock_interface.getMonoTimeMs();
+    return now >= bundle.reconnect_deadline;
+}
+
+pub fn resetBackoff(bundle: *BgpServeBundle) void {
+    reconnect.resetBackoff(&bundle.backoff_ms, &bundle.reconnect_deadline);
+}
+
+pub fn closeForReconnect(bundle: *BgpServeBundle) void {
+    bundle.tcp.close();
+    bundle.sess.status.state = .idle;
+    bundle.sess.recv_len = 0;
+    bundle.sess.send_pos = 0;
+    bundle.sess.peer_open = null;
+    bundle.sess.negotiated_hold_time = 0;
+    bundle.sess.keepalive_interval_ms = 0;
+    bundle.sess.hold_timer_deadline = 0;
+    bundle.sess.pending_keepalive = false;
+    bundle.sess.pending_keepalive_ms = 0;
+}
+
+pub fn reconnectTransport(bundle: *BgpServeBundle) !void {
+    const tcp_config = tcp_transport.TcpTransportConfig{
+        .peer_address = bundle.session_config.peer_address,
+        .peer_port = bundle.session_config.peer_port,
+        .local_address = bundle.session_config.local_address,
+        .connect_timeout_ms = bundle.session_config.connect_timeout_ms,
+    };
+
+    bundle.tcp = try tcp_transport.TcpTransport.connect(tcp_config);
+    bundle.trans = bundle.tcp.toTransport();
+    bundle.sess.trans = &bundle.trans;
+}
+
+pub fn doReconnect(bundle: *BgpServeBundle) !void {
+    closeForReconnect(bundle);
+    try reconnectTransport(bundle);
+    resetBackoff(bundle);
+    bundle.state = .configured;
+    bundle.last_error = null;
+}
+
+pub fn isCleanupRequested(bundle: *BgpServeBundle) bool {
+    return @atomicLoad(u8, &bundle.cleanup_requested, .acquire) != 0;
+}
+
+// ============================================================================
+// Constants Export
+// ============================================================================
+
+pub const DEFAULT_RECONNECT_INITIAL_MS = reconnect.DEFAULT_RECONNECT_INITIAL_MS;
+pub const DEFAULT_RECONNECT_MAX_MS = reconnect.DEFAULT_RECONNECT_MAX_MS;
+pub const DEFAULT_RECONNECT_MULTIPLIER = reconnect.DEFAULT_RECONNECT_MULTIPLIER;

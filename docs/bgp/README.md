@@ -8,6 +8,7 @@ This document describes the BGP protocol support for `tovarisch`, implemented in
 - **ACT 2**: Minimal TCP session state machine using FakeTransport — no daemon integration yet.
 - **ACT 3**: Real TCP transport adapter — still no daemon integration yet.
 - **ACT 4**: Wire BGP session into tovarisch serve runtime — **disabled by default, config-only**.
+- **ACT 5**: Add BGP reconnect/backoff loop — lifecycle resilience without daemon restart.
 
 ## ACT 1: Pure Encoding/Parsing
 
@@ -35,12 +36,9 @@ Implemented:
 - Send/receive with partial handling
 - Clean socket close on all error paths
 - Non-blocking receive (returns empty slice when no data)
+- Bounded nonblocking connect timeout
 
-**Deferred:**
-- Live invalid-port connect tests deferred until bounded nonblocking connect exists
-- connect_timeout_ms is decorative until bounded nonblocking connect is implemented
-
-## ACT 4: Runtime Wiring (Current ACT)
+## ACT 4: Runtime Wiring (COMPLETED)
 
 **Status:** COMPLETED
 
@@ -60,28 +58,57 @@ Implemented:
 3. **No hot-loop on failure** — Config validation errors are caught before connection
 4. **No /status exposure** — BGP state is internal only in this ACT
 
+## ACT 5: Reconnect/Backoff Loop (CURRENT ACT)
+
+**Status:** COMPLETED
+
+Implemented:
+- Exponential backoff for failed connections/sessions
+- Initial retry: 1s, doubling up to 60s max
+- Backoff reset after successful establishment
+- reconnect_wait runtime state
+- Cleanup during reconnect_wait stops reconnect loop
+- Transport closed exactly once on cleanup
+- Status reports reconnect_wait state with backoff delay
+- Session failure schedules reconnect (not thread exit)
+- Peer close schedules reconnect
+- Thread-safe cleanup via atomic cleanup_requested
+- Joined thread (not detached) for safe bundle lifetime
+
+**Thread Ownership Model:**
+- Runtime thread is stored in `bundle.runtime_thread`
+- `cleanupBgpBundle()` signals via atomic store, then joins thread
+- No detached thread can access destroyed bundle
+- `cleanup_requested` is atomic `u8` flag with `@atomicStore/@atomicLoad` for cross-thread signaling
+
+**Reconnect Behavior:**
+```
+Initial connect failed → backoff 1s → retry
+Retry failed → backoff 2s → retry
+Retry failed → backoff 4s → retry
+...
+60s max → retry every 60s (no hot loop)
+Session established → reset backoff to 0
+```
+
+**Runtime States:**
+- `not_configured` — No [bgp] section in config
+- `disabled` — [bgp] exists but enabled=false
+- `configured` — Config built and validated, session running
+- `reconnect_wait` — Waiting for backoff deadline after failure
+- `failed` — Terminal config validation failure
+
 **Not implemented** (deferred to future ACTs):
-- `/status --json` BGP exposure
-- TcpTransport.connect() call (deferred until bounded nonblocking connect exists)
-- Reconnect/backoff loop
-- BFD gating
 - advertised_prefix_files (prefix list files)
+- BFD-gated advertisement
 - 32-bit ASN support
 - Multiple peers
 - Graceful withdrawal on shutdown
 - Kernel route installation
 - Learned/imported RIB
-- Bounded nonblocking connect timeout
 
-**Files Added:**
-```
-tovarisch/src/bgp/
-├── config_parse.zig           # [bgp] section parser + IPv4 address parser
-├── serve_integration.zig      # Runtime wiring (config validation only)
-└── serve_integration_tests.zig # Integration tests
-```
+## Config Shape
 
-**Config Shape:**
 ```ini
 [bgp]
 enabled = false  # Default: disabled
@@ -93,31 +120,10 @@ peer_port = 179
 peer_as = 65002
 hold_time_seconds = 180
 keepalive_seconds = 60
-connect_timeout_ms = 1000  # Decorative until bounded connect exists
+connect_timeout_ms = 5000  # Bounded nonblocking connect
 advertised_prefixes = "10.0.0.0/8,192.168.0.0/16"  # Comma-separated CIDR
 same_as = false
 ```
-
-**Runtime State:**
-- `not_configured` — No [bgp] section in config
-- `disabled` — [bgp] exists but enabled=false
-- `configured` — Config built and validated, ready for connection
-- `failed` — Config build or validation failed
-
-**Test Coverage (ACT 4):**
-- [x] Default config has BGP disabled
-- [x] Disabled BGP config does not call connect
-- [x] Serve startup path with BGP disabled works
-- [x] Enabled config validates required fields
-- [x] Enabled config rejects missing peer_address
-- [x] Enabled config rejects missing local_as
-- [x] Enabled config rejects missing advertised_prefixes
-- [x] Plain IPv4 addresses parse correctly (not CIDR)
-- [x] Plain IPv4 rejects CIDR suffix
-- [x] Plain IPv4 rejects IPv6
-- [x] Multiple advertised_prefixes parse correctly
-- [x] No /status --json contract changes
-- [x] No blocking connect call in serve startup
 
 ## Architecture
 
@@ -135,14 +141,13 @@ tovarisch/src/bgp/
 ├── tcp_transport.zig     # Real TCP transport (ACT 3)
 ├── tcp_transport_tests.zig # Local loopback tests (ACT 3)
 ├── config_parse.zig      # Config parsing + IPv4 address parser (ACT 4)
-├── serve_integration.zig # Runtime wiring (ACT 4)
-└── serve_integration_tests.zig # Integration tests (ACT 4)
-```
-
-```
-tovarisch/src/cli/
-├── bfd_serve.zig          # BFD runtime (existing)
-└── bgp_serve.zig          # BGP runtime (ACT 4)
+├── serve_integration.zig # Runtime wiring + reconnect (ACT 4/5)
+├── serve_integration_tests.zig # Integration tests (ACT 4)
+├── reconnect_lifecycle.zig # Reconnect/backoff lifecycle (ACT 5)
+├── backoff_tests.zig     # Backoff computation tests (ACT 5)
+├── lifecycle_tests.zig   # Reconnect lifecycle tests (ACT 5)
+├── clock.zig             # Testable clock for timers
+└── status.zig            # Status reporting (ACT 5)
 ```
 
 ## Session Config
@@ -157,7 +162,7 @@ pub const SessionConfig = struct {
     router_id: [4]u8,            // Our router ID
     hold_time_seconds: u16,      // 0 or >= 3
     keepalive_seconds: u16,      // < hold_time when hold_time != 0
-    connect_timeout_ms: u32,     // Decorative until bounded connect
+    connect_timeout_ms: u32,     // Bounded nonblocking connect
     prefixes: []const Ipv4Prefix, // Must be non-empty
     same_as: bool,               // true = empty AS_PATH
 };
@@ -167,12 +172,13 @@ pub const SessionConfig = struct {
 
 | ACT | Description |
 |-----|-------------|
-| ACT 5 | Expose BGP state in /status --json |
-| ACT 6 | Add bounded nonblocking connect timeout + actual connection |
+| ACT 6 | Add advertised_prefix_files support |
 | ACT 7 | Add BFD-gated BGP advertisement |
-| ACT 8 | Add reconnect/backoff loop |
-| ACT 9 | Add 32-bit ASN capability support |
-| ACT 10 | Add multiple BGP peers |
+| ACT 8 | Add direct BgpServeBundle error-propagation regression test |
+| ACT 9 | Add BGP route import/export status semantics |
+| ACT 10 | Add graceful withdrawal on shutdown |
+| ACT 11 | Add 32-bit ASN capability support |
+| ACT 12 | Add multiple BGP peers |
 
 ## References
 

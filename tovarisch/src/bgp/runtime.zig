@@ -1,13 +1,27 @@
 // bgp/runtime.zig — BGP FSM runtime worker for tovarisch
 //
-// ACT runtime: BGP FSM loop runs in a detached thread, driving runSessionOnce.
-// The thread logs FSM transitions and sleeps between iterations.
+// ACT runtime: BGP FSM loop runs in a joined thread, driving runSessionOnce.
+// The thread handles reconnect scheduling when connection/session failures occur.
 //
 // Key behaviors:
 // - Logs each FSM transition (open_sent, open_confirm, established, notification, error)
 // - Sleeps between iterations to avoid hot-spinning
+// - Schedules reconnect with exponential backoff on failure
+// - Resets backoff after successful establishment
 // - Thread failures are non-fatal (logs error and exits)
 // - Bundle lifetime is owned by the caller (main thread) - thread does NOT free bundle
+//
+// Reconnect policy:
+// - Initial retry: 1s, exponential up to 60s max
+// - Backoff resets after successful establishment
+// - Cleanup during reconnect_wait stops reconnect loop
+//
+// Thread safety:
+// - bgpRuntimeThread waits for isCleanupRequested() before each iteration
+// - cleanupBgpBundle signals cleanup_requested via atomic, then joins thread
+// - All bundle state mutations happen in the runtime thread only
+// - cleanup_requested is atomic.Bool for cross-thread signaling
+// - Thread handle is stored in bundle.runtime_thread for join on cleanup
 //
 // References: RFC 4271 (BGP-4)
 
@@ -16,10 +30,14 @@ const c = std.c;
 const session = @import("session.zig");
 const logging = @import("../logging.zig");
 const serve_integration = @import("serve_integration.zig");
+const clock = @import("clock.zig");
 
 /// BGP FSM loop interval in milliseconds.
 /// This is the sleep between runSessionOnce calls.
 const BGP_LOOP_INTERVAL_MS: u64 = 100;
+
+/// Maximum reconnect delay in milliseconds (1 minute).
+const RECONNECT_MAX_MS: u64 = serve_integration.DEFAULT_RECONNECT_MAX_MS;
 
 /// Format peer address as string for logging.
 fn formatPeerAddr(addr: [4]u8, buf: *[32]u8) []const u8 {
@@ -41,8 +59,12 @@ fn bgpLogToStdout(bytes: []const u8) void {
 
 /// BGP FSM runtime worker.
 /// This function runs in a detached thread, driving the BGP session state machine.
-/// The thread logs FSM transitions and sleeps between iterations.
+/// The thread handles FSM transitions and reconnect scheduling.
+/// Thread exits when isCleanupRequested() returns true.
 pub fn bgpRuntimeThread(bundle: *serve_integration.BgpServeBundle) void {
+    // Use real clock for production time tracking
+    const clock_interface = clock.RealClock;
+
     // Log TCP connected event (TCP connection was already established at load time)
     {
         var log_buf = logging.BufferedWriter.init();
@@ -53,10 +75,55 @@ pub fn bgpRuntimeThread(bundle: *serve_integration.BgpServeBundle) void {
         bgpLogToStdout(log_buf.slice());
     }
 
-    // Main FSM loop - bounded and non-hot-spinning
+    // Main FSM loop - bounded and non-hot-spinning with reconnect support
     var previous_state: session.SessionState = .idle;
     var previous_keepalives_sent: u64 = 0;
     while (true) {
+        // Check for cleanup request first - this is the safe cleanup coordination point
+        if (serve_integration.isCleanupRequested(bundle)) {
+            var log_buf = logging.BufferedWriter.init();
+            logging.emit(.bgp_error, &log_buf, &.{
+                .{ .name = "detail", .value = logging.FieldValue{ .string = "cleanup requested, exiting" } },
+            }) catch break;
+            bgpLogToStdout(log_buf.slice());
+            return;
+        }
+
+        // Handle reconnect wait state
+        if (bundle.state == .reconnect_wait) {
+            if (serve_integration.isReconnectReady(bundle, clock_interface)) {
+                // Deadline elapsed, attempt reconnect
+                serve_integration.doReconnect(bundle) catch |reconnect_err| {
+                    // Reconnect failed, schedule next attempt with backoff
+                    var log_buf = logging.BufferedWriter.init();
+                    logging.emit(.bgp_error, &log_buf, &.{
+                        .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(reconnect_err) } },
+                        .{ .name = "detail", .value = logging.FieldValue{ .string = "reconnect failed, scheduling retry" } },
+                    }) catch break;
+                    bgpLogToStdout(log_buf.slice());
+
+                    serve_integration.scheduleReconnect(bundle, clock_interface, RECONNECT_MAX_MS);
+                    continue;
+                };
+
+                // Reconnect successful, log and continue FSM
+                var log_buf = logging.BufferedWriter.init();
+                logging.emit(.bgp_connected, &log_buf, &.{
+                    .{ .name = "detail", .value = logging.FieldValue{ .string = "reconnected after failure" } },
+                }) catch break;
+                bgpLogToStdout(log_buf.slice());
+            } else {
+                // Still waiting for deadline, sleep and check again
+                var ts: c.timespec = .{
+                    .sec = @intCast(BGP_LOOP_INTERVAL_MS / 1000),
+                    .nsec = @intCast((BGP_LOOP_INTERVAL_MS % 1000) * 1_000_000),
+                };
+                _ = c.nanosleep(&ts, null);
+                continue;
+            }
+        }
+
+        // Run one FSM iteration
         const result = serve_integration.runSessionOnce(bundle);
 
         // Log FSM transitions when state changes
@@ -116,29 +183,40 @@ pub fn bgpRuntimeThread(bundle: *serve_integration.BgpServeBundle) void {
             previous_keepalives_sent = current_keepalives;
         }
 
-        // Handle session termination
+        // Handle session termination and success
         switch (result) {
+            .established => {
+                // Session established - reset backoff for future failures
+                serve_integration.resetBackoff(bundle);
+                // Continue running session
+            },
             .failed => {
-                // Session failed - log concrete error and exit thread
+                // Session failed - schedule reconnect instead of exiting
                 var log_buf = logging.BufferedWriter.init();
                 const err_msg = getConcreteErrorMessage(bundle);
                 logging.emit(.bgp_error, &log_buf, &.{
                     .{ .name = "error", .value = logging.FieldValue{ .string = err_msg } },
-                    .{ .name = "detail", .value = logging.FieldValue{ .string = "BGP runtime thread exiting" } },
+                    .{ .name = "detail", .value = logging.FieldValue{ .string = "session failed, scheduling reconnect" } },
                 }) catch break;
                 bgpLogToStdout(log_buf.slice());
-                return;
+
+                // Schedule reconnect with backoff
+                serve_integration.scheduleReconnect(bundle, clock_interface, RECONNECT_MAX_MS);
+                // Loop will handle reconnect_wait state on next iteration
             },
             .stopped => {
-                // Session stopped cleanly - log and exit thread
+                // Session stopped cleanly - schedule reconnect
                 var log_buf = logging.BufferedWriter.init();
                 logging.emit(.bgp_error, &log_buf, &.{
-                    .{ .name = "detail", .value = logging.FieldValue{ .string = "session stopped cleanly" } },
+                    .{ .name = "detail", .value = logging.FieldValue{ .string = "session stopped, scheduling reconnect" } },
                 }) catch break;
                 bgpLogToStdout(log_buf.slice());
-                return;
+
+                serve_integration.scheduleReconnect(bundle, clock_interface, RECONNECT_MAX_MS);
             },
-            .ok, .established => {},
+            .ok => {
+                // Session running normally
+            },
         }
 
         // Sleep between iterations to avoid hot-spinning
@@ -165,9 +243,13 @@ fn getConcreteErrorMessage(bundle: *serve_integration.BgpServeBundle) []const u8
 /// Start the BGP runtime thread for a configured bundle.
 /// Returns true if thread was spawned successfully.
 /// Thread failures are non-fatal - caller should log and continue.
+/// 
+/// Thread is stored in bundle.runtime_thread for join on cleanup.
+/// cleanupBgpBundle() will join this thread before destroying bundle.
 pub fn startBgpRuntimeThread(bundle: *serve_integration.BgpServeBundle, stderr: anytype) bool {
     if (std.Thread.spawn(.{}, bgpRuntimeThread, .{bundle})) |thread| {
-        thread.detach();
+        // Store thread handle for join on cleanup (NOT detached)
+        bundle.runtime_thread = thread;
         return true;
     } else |spawn_err| {
         // Log error, continue serving HTTP (non-fatal)

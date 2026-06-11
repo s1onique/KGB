@@ -25,6 +25,16 @@ pub const BgpCheck = struct {
     detail: []const u8,
 };
 
+/// Reconnect wait info for status reporting.
+pub const ReconnectWait = struct {
+    /// Current backoff delay in milliseconds.
+    backoff_ms: u64,
+    /// Peer address for context.
+    peer_address: [4]u8,
+    /// Last error that triggered reconnect.
+    last_error: ?[]const u8,
+};
+
 /// BGP status state for status reporting.
 /// This represents the effective runtime state derived at serve startup.
 /// 
@@ -43,6 +53,8 @@ pub const BgpStatusState = union(enum) {
     failed: Failure,
     /// BGP runtime failed post-startup.
     runtime_failed: Failure,
+    /// BGP waiting to reconnect after failure with backoff.
+    reconnect_wait: ReconnectWait,
 
     pub const Configured = struct {
         /// Number of advertised prefixes (may be 0).
@@ -171,6 +183,25 @@ pub fn buildBgpCheckInto(
             .status = .@"error",
             .detail = fail.message,
         },
+        .reconnect_wait => |rw| {
+            // Report warn while reconnecting - not an error, but not ok
+            const detail = std.fmt.bufPrint(
+                detail_buf,
+                "BGP reconnecting in {d}ms",
+                .{rw.backoff_ms},
+            ) catch {
+                return .{
+                    .name = "bgp",
+                    .status = .warn,
+                    .detail = "BGP reconnecting",
+                };
+            };
+            return .{
+                .name = "bgp",
+                .status = .warn,
+                .detail = detail,
+            };
+        },
     }
 }
 
@@ -179,6 +210,7 @@ pub fn buildBgpCheckInto(
 /// Returns .not_configured when bundle state is .not_configured.
 /// Returns .disabled when bundle state is .disabled.
 /// Returns .configured when bundle state is .configured.
+/// Returns .reconnect_wait when bundle state is .reconnect_wait.
 /// Returns .failed when bundle state is .failed.
 /// Returns .failed when bundle has last_error set.
 /// 
@@ -192,6 +224,17 @@ pub fn deriveStatusStateFromBundle(bundle: ?*serve_integration.BgpServeBundle) B
     switch (b.state) {
         .not_configured => return .not_configured,
         .disabled => return .disabled,
+        .reconnect_wait => {
+            // Get session status for peer info
+            const sess_status = serve_integration.getSessionStatus(b);
+            return .{
+                .reconnect_wait = .{
+                    .backoff_ms = b.backoff_ms,
+                    .peer_address = sess_status.peer_address,
+                    .last_error = b.last_error,
+                },
+            };
+        },
         .configured => {
             // Get session status for runtime data
             const sess_status = serve_integration.getSessionStatus(b);
@@ -328,6 +371,20 @@ test "buildBgpCheckInto returns error for runtime_failed" {
     try std.testing.expectEqualStrings("bgp", check.name);
     try std.testing.expect(check.status == .@"error");
     try std.testing.expectEqualStrings("session lost", check.detail);
+}
+
+test "buildBgpCheckInto returns warn for reconnect_wait" {
+    var detail_buf: [BGP_DETAIL_BUF_SIZE]u8 = undefined;
+    const check = buildBgpCheckInto(.{
+        .reconnect_wait = .{
+            .backoff_ms = 5000,
+            .peer_address = .{ 10, 0, 0, 2 },
+            .last_error = "connection reset",
+        },
+    }, &detail_buf);
+    try std.testing.expectEqualStrings("bgp", check.name);
+    try std.testing.expect(check.status == .warn);
+    try std.testing.expect(std.mem.containsAtLeast(u8, check.detail, 1, "5000"));
 }
 
 test "buildBgpCheckInto uses caller's buffer" {

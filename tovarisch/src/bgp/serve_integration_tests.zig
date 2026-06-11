@@ -30,10 +30,12 @@ test "loadConfigAndBgp returns no_config when no config path" {
 }
 
 test "BgpRuntimeState enum has expected variants" {
-    try std.testing.expectEqual(@as(usize, 4), @typeInfo(serve_integration.BgpRuntimeState).@"enum".fields.len);
+    // 5 variants: not_configured, disabled, configured, reconnect_wait, failed
+    try std.testing.expectEqual(@as(usize, 5), @typeInfo(serve_integration.BgpRuntimeState).@"enum".fields.len);
     try std.testing.expectEqualStrings("not_configured", @tagName(.not_configured));
     try std.testing.expectEqualStrings("disabled", @tagName(.disabled));
     try std.testing.expectEqualStrings("configured", @tagName(.configured));
+    try std.testing.expectEqualStrings("reconnect_wait", @tagName(.reconnect_wait));
     try std.testing.expectEqualStrings("failed", @tagName(.failed));
 }
 
