@@ -29,6 +29,7 @@ pub const FakeTransport = transport.FakeTransport;
 pub const transportSend = transport.transportSend;
 pub const transportRecv = transport.transportRecv;
 pub const transportClose = transport.transportClose;
+pub const TransportError = transport.TransportError;
 
 // ============================================================================
 // Session Configuration and Errors
@@ -164,9 +165,10 @@ pub fn stop(sess: *Session) void {
 }
 
 /// Flush any buffered send data.
-fn flushSend(sess: *Session) void {
+/// Returns error if send fails. Caller must handle error before updating state.
+fn flushSend(sess: *Session) TransportError!void {
     if (sess.send_pos > 0) {
-        transportSend(sess.trans, sess.send_buf[0..sess.send_pos]);
+        try transportSend(sess.trans, sess.send_buf[0..sess.send_pos]);
         sess.send_pos = 0;
     }
 }
@@ -294,18 +296,47 @@ fn handleMessage(sess: *Session, frame: frame_decode.Frame) SessionErrorKind!Run
 pub fn runOnce(sess: *Session) SessionErrorKind!RunResult {
     switch (sess.status.state) {
         .idle => {
-            sess.status.state = .open_sent;
+            // Build OPEN message first
             sess.send_pos = message.encodeOpen(types.OpenParams{
                 .my_as = sess.config.local_as,
                 .hold_time = sess.config.hold_time_seconds,
                 .router_id = sess.config.router_id,
             }, &sess.send_buf);
+            // Send FIRST, then update state only on success
+            flushSend(sess) catch |err| {
+                sess.status.state = .failed;
+                sess.status.last_error = SessionError{
+                    .message = switch (err) {
+                        transport.TransportError.Closed => "transport closed",
+                        transport.TransportError.ConnectionClosed => "connection closed",
+                        transport.TransportError.SendFailed => "send failed",
+                        transport.TransportError.OutOfMemory => "out of memory",
+                    },
+                    .notification_code = null,
+                    .notification_subcode = null,
+                };
+                return SessionErrorKind.IoError;
+            };
+            // Only transition to open_sent after successful send
+            sess.status.state = .open_sent;
             sess.status.messages_sent += 1;
-            flushSend(sess);
             return .ok;
         },
         .open_sent, .open_confirm, .established => {
-            flushSend(sess);
+            flushSend(sess) catch |err| {
+                sess.status.state = .failed;
+                sess.status.last_error = SessionError{
+                    .message = switch (err) {
+                        transport.TransportError.Closed => "transport closed",
+                        transport.TransportError.ConnectionClosed => "connection closed",
+                        transport.TransportError.SendFailed => "send failed",
+                        transport.TransportError.OutOfMemory => "out of memory",
+                    },
+                    .notification_code = null,
+                    .notification_subcode = null,
+                };
+                return SessionErrorKind.IoError;
+            };
             recvIntoBuffer(sess);
             while (tryDecodeFrame(sess)) |frame| {
                 const msg_result = handleMessage(sess, frame) catch |err| {

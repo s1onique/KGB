@@ -5,12 +5,25 @@
 
 const std = @import("std");
 
+/// Transport send errors.
+/// BGP FSM state transitions depend on successful writes.
+pub const TransportError = error{
+    /// Transport is closed
+    Closed,
+    /// Peer closed connection (zero-length send)
+    ConnectionClosed,
+    /// Send system call failed
+    SendFailed,
+    /// Memory allocation failed
+    OutOfMemory,
+};
+
 /// Transport interface for BGP message send/receive.
 /// This abstraction allows testing with fake transports and
 /// production use with real TCP sockets.
 pub const Transport = struct {
-    /// Send bytes to the peer
-    sendFn: *const fn (ctx: *anyopaque, data: []const u8) void,
+    /// Send bytes to the peer (returns error on failure)
+    sendFn: *const fn (ctx: *anyopaque, data: []const u8) TransportError!void,
     /// Receive bytes from the peer (returns data or empty slice if no data)
     recvFn: *const fn (ctx: *anyopaque) []const u8,
     /// Close the transport
@@ -20,8 +33,8 @@ pub const Transport = struct {
 };
 
 /// Send data through transport.
-pub fn transportSend(trans: *const Transport, data: []const u8) void {
-    trans.sendFn(trans.ctx, data);
+pub fn transportSend(trans: *const Transport, data: []const u8) TransportError!void {
+    return trans.sendFn(trans.ctx, data);
 }
 
 /// Receive data from transport.
@@ -77,9 +90,10 @@ pub const FakeTransport = struct {
     }
 
     /// Send bytes (capture them).
-    pub fn send(self: *Self, data: []const u8) void {
-        self.captured_sent.appendSlice(self.allocator, data) catch return;
-        self.all_sent.appendSlice(self.allocator, data) catch return;
+    /// For fake transport, sends always succeed.
+    pub fn send(self: *Self, data: []const u8) TransportError!void {
+        try self.captured_sent.appendSlice(self.allocator, data);
+        try self.all_sent.appendSlice(self.allocator, data);
     }
 
     /// Receive bytes (return scripted response).
@@ -117,9 +131,9 @@ pub const FakeTransport = struct {
     pub fn toTransport(self: *Self) Transport {
         return Transport{
             .sendFn = struct {
-                fn send(ctx: *anyopaque, data: []const u8) void {
+                fn send(ctx: *anyopaque, data: []const u8) TransportError!void {
                     const fake: *Self = @ptrCast(@alignCast(ctx));
-                    fake.send(data);
+                    return fake.send(data);
                 }
             }.send,
             .recvFn = struct {

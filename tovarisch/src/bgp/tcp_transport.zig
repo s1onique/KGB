@@ -16,6 +16,9 @@
 const std = @import("std");
 const transport = @import("transport.zig");
 
+/// Re-export TransportError for convenience
+pub const TransportError = transport.TransportError;
+
 // ============================================================================
 // Socket Constants and Types
 // ============================================================================
@@ -207,25 +210,22 @@ pub const TcpTransport = struct {
     }
 
     /// Send bytes through the TCP socket.
-    /// Handles partial sends. Marks closed on any send error.
-    /// Note: Currently EAGAIN closes transport. TODO: handle EAGAIN without closing.
-    pub fn send(self: *Self, data: []const u8) void {
-        if (self.closed or self.socket_fd < 0) return;
+    /// Handles partial sends by looping until all data is sent.
+    /// Returns error on failure (socket error, peer closed).
+    pub fn send(self: *Self, data: []const u8) TransportError!void {
+        if (self.closed or self.socket_fd < 0) return TransportError.Closed;
 
         var offset: usize = 0;
         while (offset < data.len) {
             const remaining = data[offset..];
             const sent = std.c.send(self.socket_fd, @ptrCast(remaining.ptr), remaining.len, 0);
             if (sent < 0) {
-                // Error occurred - currently mark closed on any error
-                // TODO: distinguish EAGAIN/EWOULDBLOCK for retry without closing
                 self.closed = true;
-                return;
+                return TransportError.SendFailed;
             }
             if (sent == 0) {
-                // Zero send means peer closed connection
                 self.closed = true;
-                return;
+                return TransportError.ConnectionClosed;
             }
             offset += @as(usize, @intCast(sent));
         }
@@ -284,9 +284,9 @@ pub const TcpTransport = struct {
     pub fn toTransport(self: *Self) transport.Transport {
         return transport.Transport{
             .sendFn = struct {
-                fn send(ctx: *anyopaque, data: []const u8) void {
+                fn send(ctx: *anyopaque, data: []const u8) TransportError!void {
                     const tcp: *Self = @ptrCast(@alignCast(ctx));
-                    tcp.send(data);
+                    return tcp.send(data);
                 }
             }.send,
             .recvFn = struct {

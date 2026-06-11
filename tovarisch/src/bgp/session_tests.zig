@@ -93,8 +93,8 @@ test "isTerminal works on stopped session" {
 test "FakeTransport captures multiple sends" {
     var fake = session.FakeTransport.init(std.testing.allocator, &.{});
     defer fake.deinit();
-    fake.send(&[_]u8{ 1, 2, 3 });
-    fake.send(&[_]u8{ 4, 5, 6, 7 });
+    try fake.send(&[_]u8{ 1, 2, 3 });
+    try fake.send(&[_]u8{ 4, 5, 6, 7 });
     const sent = fake.getSent();
     try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4, 5, 6, 7 }, sent);
 }
@@ -246,4 +246,150 @@ test "getStatus returns current status" {
     try std.testing.expectEqualSlices(u8, &.{ 127, 0, 0, 1 }, &status.peer_address);
     try std.testing.expectEqual(@as(u16, 65001), status.local_as);
     try std.testing.expectEqual(@as(u16, 65002), status.peer_as);
+}
+
+// === Transport Send Error Tests ===
+
+/// A fake transport that always fails on send.
+const FailingFakeTransport = struct {
+    const Self = @This();
+
+    allocator: std.mem.Allocator,
+    closed: bool,
+
+    pub fn init(allocator: std.mem.Allocator) Self {
+        return Self{
+            .allocator = allocator,
+            .closed = false,
+        };
+    }
+
+    /// Always returns error to simulate failed TCP send.
+    pub fn send(self: *Self, data: []const u8) session.TransportError!void {
+        _ = data;
+        _ = self;
+        return session.TransportError.SendFailed;
+    }
+
+    pub fn recv(self: *Self) []const u8 {
+        _ = self;
+        return &[_]u8{};
+    }
+
+    pub fn close(self: *Self) void {
+        self.closed = true;
+    }
+
+    pub fn toTransport(self: *Self) session.Transport {
+        return session.Transport{
+            .sendFn = struct {
+                fn send(ctx: *anyopaque, data: []const u8) session.TransportError!void {
+                    const fake: *Self = @ptrCast(@alignCast(ctx));
+                    return fake.send(data);
+                }
+            }.send,
+            .recvFn = struct {
+                fn recv(ctx: *anyopaque) []const u8 {
+                    const fake: *Self = @ptrCast(@alignCast(ctx));
+                    return fake.recv();
+                }
+            }.recv,
+            .closeFn = struct {
+                fn close(ctx: *anyopaque) void {
+                    const fake: *Self = @ptrCast(@alignCast(ctx));
+                    fake.close();
+                }
+            }.close,
+            .ctx = @ptrCast(self),
+        };
+    }
+};
+
+test "failed OPEN send leaves session in failed state, not open_sent" {
+    const config = session.SessionConfig{
+        .peer_address = .{ 127, 0, 0, 1 },
+        .peer_port = 179,
+        .local_address = null,
+        .local_as = 65001,
+        .peer_as = 65002,
+        .router_id = .{ 10, 0, 0, 1 },
+        .hold_time_seconds = 180,
+        .keepalive_seconds = 60,
+        .connect_timeout_ms = 5000,
+        .prefixes = &.{types.Ipv4Prefix.init("10.0.0.0/8")},
+        .same_as = true,
+    };
+
+    var fake = FailingFakeTransport.init(std.testing.allocator);
+    var sess = try session.init(config, &fake.toTransport());
+
+    // Attempt to run from idle - OPEN send will fail
+    const result = session.runOnce(&sess);
+
+    // Should return error because send failed
+    try std.testing.expectError(session.SessionErrorKind.IoError, result);
+
+    // Session should be in failed state, NOT open_sent
+    try std.testing.expectEqual(session.SessionState.failed, sess.status.state);
+
+    // messages_sent should still be 0 - OPEN was never sent
+    try std.testing.expectEqual(@as(u64, 0), sess.status.messages_sent);
+
+    // last_error should be set
+    try std.testing.expect(sess.status.last_error != null);
+}
+
+test "successful OPEN send transitions to open_sent with captured frame" {
+    const config = session.SessionConfig{
+        .peer_address = .{ 127, 0, 0, 1 },
+        .peer_port = 179,
+        .local_address = null,
+        .local_as = 65001,
+        .peer_as = 65002,
+        .router_id = .{ 10, 0, 0, 1 },
+        .hold_time_seconds = 180,
+        .keepalive_seconds = 60,
+        .connect_timeout_ms = 5000,
+        .prefixes = &.{types.Ipv4Prefix.init("10.0.0.0/8")},
+        .same_as = true,
+    };
+
+    var fake = session.FakeTransport.init(std.testing.allocator, &.{});
+    defer fake.deinit();
+    var sess = try session.init(config, &fake.toTransport());
+
+    // Run from idle - should send OPEN
+    const result = try session.runOnce(&sess);
+    try std.testing.expectEqual(session.RunResult.ok, result);
+
+    // Session should be in open_sent state
+    try std.testing.expectEqual(session.SessionState.open_sent, sess.status.state);
+
+    // messages_sent should be 1
+    try std.testing.expectEqual(@as(u64, 1), sess.status.messages_sent);
+
+    // Fake transport should have captured a non-empty BGP OPEN frame
+    const sent = fake.getSent();
+    try std.testing.expect(sent.len > 0);
+
+    // BGP OPEN starts with 0xFF marker (RFC 4271 Section 4.1)
+    try std.testing.expectEqual(@as(u8, 0xFF), sent[0]);
+    try std.testing.expectEqual(@as(u8, 0xFF), sent[1]);
+    try std.testing.expectEqual(@as(u8, 0xFF), sent[2]);
+    try std.testing.expectEqual(@as(u8, 0xFF), sent[3]);
+    try std.testing.expectEqual(@as(u8, 0xFF), sent[4]);
+    try std.testing.expectEqual(@as(u8, 0xFF), sent[5]);
+    try std.testing.expectEqual(@as(u8, 0xFF), sent[6]);
+    try std.testing.expectEqual(@as(u8, 0xFF), sent[7]);
+    try std.testing.expectEqual(@as(u8, 0xFF), sent[8]);
+    try std.testing.expectEqual(@as(u8, 0xFF), sent[9]);
+    try std.testing.expectEqual(@as(u8, 0xFF), sent[10]);
+    try std.testing.expectEqual(@as(u8, 0xFF), sent[11]);
+    try std.testing.expectEqual(@as(u8, 0xFF), sent[12]);
+    try std.testing.expectEqual(@as(u8, 0xFF), sent[13]);
+    try std.testing.expectEqual(@as(u8, 0xFF), sent[14]);
+    try std.testing.expectEqual(@as(u8, 0xFF), sent[15]);
+
+    // Message type should be OPEN (1)
+    try std.testing.expectEqual(@as(u8, 1), sent[18]);
 }

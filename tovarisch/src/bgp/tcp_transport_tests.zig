@@ -199,7 +199,7 @@ test "TcpTransport sends bytes to listener" {
 
     // Send data through TCP transport
     const test_data = [_]u8{ 0xFF, 0xFF, 0x00, 0x13, 0x04 };
-    tcp.send(&test_data);
+    try tcp.send(&test_data);
 
     // Receive data on server side with BOUNDED timeout.
     // Nonblocking recv returns EAGAIN if no data; bounded poll ensures we don't hang forever.
@@ -258,9 +258,9 @@ test "TcpTransport closes cleanly" {
     tcp.close();
     try std.testing.expect(tcp.closed);
 
-    // Subsequent sends should be no-ops
+    // Subsequent sends should be no-ops (closed transport returns error but ignores)
     const test_data = [_]u8{ 0xFF };
-    tcp.send(&test_data);
+    tcp.send(&test_data) catch {};
 
     // Subsequent recv should return empty
     const received = tcp.recv();
