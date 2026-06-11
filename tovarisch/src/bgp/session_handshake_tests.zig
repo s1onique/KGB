@@ -40,7 +40,7 @@ test "complete BGP handshake reaches established" {
         session.PeerResponse{ .recv_bytes = &peer_keepalive },
     };
 
-    var fake = session.FakeTransport.init(std.testing.allocator, responses);
+    var fake = try session.FakeTransport.init(std.testing.allocator, responses);
     defer fake.deinit();
     const trans = fake.toTransport();
 
@@ -58,7 +58,7 @@ test "complete BGP handshake reaches established" {
         .same_as = true,
     };
 
-    var sess = try session.init(config, &trans);
+    var sess = try session.initWithClock(config, &trans, session.MockClock.interface());
 
     // runOnce from idle: sends OPEN
     var result = try session.runOnce(&sess);
@@ -77,6 +77,9 @@ test "complete BGP handshake reaches established" {
     result = try session.runOnce(&sess);
     try std.testing.expectEqual(session.RunResult.established, result);
     try std.testing.expectEqual(session.SessionState.established, sess.status.state);
+
+    // runOnce: send UPDATE (deferred from established transition)
+    result = try session.runOnce(&sess);
     try std.testing.expectEqual(@as(u64, 1), sess.status.updates_sent);
     try std.testing.expectEqual(@as(u64, 3), sess.status.messages_sent);
 
@@ -106,7 +109,7 @@ test "session validates peer AS on OPEN" {
         session.PeerResponse{ .recv_bytes = &peer_open },
     };
 
-    var fake = session.FakeTransport.init(std.testing.allocator, responses);
+    var fake = try session.FakeTransport.init(std.testing.allocator, responses);
     defer fake.deinit();
     const trans = fake.toTransport();
 
@@ -124,7 +127,7 @@ test "session validates peer AS on OPEN" {
         .same_as = true,
     };
 
-    var sess = try session.init(config, &trans);
+    var sess = try session.initWithClock(config, &trans, session.MockClock.interface());
 
     // Send OPEN
     _ = try session.runOnce(&sess);
@@ -179,7 +182,7 @@ test "incoming UPDATE is ignored (import-nothing)" {
         session.PeerResponse{ .recv_bytes = &peer_update },
     };
 
-    var fake = session.FakeTransport.init(std.testing.allocator, responses);
+    var fake = try session.FakeTransport.init(std.testing.allocator, responses);
     defer fake.deinit();
     const trans = fake.toTransport();
 
@@ -197,7 +200,7 @@ test "incoming UPDATE is ignored (import-nothing)" {
         .same_as = true,
     };
 
-    var sess = try session.init(config, &trans);
+    var sess = try session.initWithClock(config, &trans, session.MockClock.interface());
 
     // Complete handshake
     _ = try session.runOnce(&sess); // Send OPEN
@@ -257,7 +260,7 @@ test "incoming NOTIFICATION transitions to failed" {
         session.PeerResponse{ .recv_bytes = &peer_notif },
     };
 
-    var fake = session.FakeTransport.init(std.testing.allocator, responses);
+    var fake = try session.FakeTransport.init(std.testing.allocator, responses);
     defer fake.deinit();
     const trans = fake.toTransport();
 
@@ -275,7 +278,7 @@ test "incoming NOTIFICATION transitions to failed" {
         .same_as = true,
     };
 
-    var sess = try session.init(config, &trans);
+    var sess = try session.initWithClock(config, &trans, session.MockClock.interface());
 
     // Complete handshake
     _ = try session.runOnce(&sess);

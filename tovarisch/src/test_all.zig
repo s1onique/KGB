@@ -343,6 +343,14 @@ test {
 }
 
 test {
+    std.testing.refAllDecls(@import("bgp/clock.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/notification_decode.zig"));
+}
+
+test {
     std.testing.refAllDecls(@import("bgp/session.zig"));
 }
 
@@ -352,6 +360,18 @@ test {
 
 test {
     std.testing.refAllDecls(@import("bgp/session_handshake_tests.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/session_keepalive_basic_tests.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/session_keepalive_notification_tests.zig"));
+}
+
+test {
+    std.testing.refAllDecls(@import("bgp/session_keepalive_advanced_tests.zig"));
 }
 
 // BGP TCP transport tests (ACT 3: real TCP transport)

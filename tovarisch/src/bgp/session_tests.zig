@@ -60,9 +60,9 @@ test "session stop transitions to stopped state" {
         .prefixes = &.{types.Ipv4Prefix.init("10.0.0.0/8")},
         .same_as = true,
     };
-    var fake = session.FakeTransport.init(std.testing.allocator, &.{});
+    var fake = try session.FakeTransport.init(std.testing.allocator, &.{});
     defer fake.deinit();
-    var sess = try session.init(config, &fake.toTransport());
+    var sess = try session.initWithClock(config, &fake.toTransport(), session.MockClock.interface());
     session.stop(&sess);
     try std.testing.expectEqual(session.SessionState.stopped, sess.status.state);
 }
@@ -81,7 +81,7 @@ test "isTerminal works on stopped session" {
         .prefixes = &.{types.Ipv4Prefix.init("10.0.0.0/8")},
         .same_as = true,
     };
-    var fake = session.FakeTransport.init(std.testing.allocator, &.{});
+    var fake = try session.FakeTransport.init(std.testing.allocator, &.{});
     defer fake.deinit();
     var sess = try session.init(config, &fake.toTransport());
     session.stop(&sess);
@@ -91,7 +91,7 @@ test "isTerminal works on stopped session" {
 // === Transport Tests ===
 
 test "FakeTransport captures multiple sends" {
-    var fake = session.FakeTransport.init(std.testing.allocator, &.{});
+    var fake = try session.FakeTransport.init(std.testing.allocator, &.{});
     defer fake.deinit();
     try fake.send(&[_]u8{ 1, 2, 3 });
     try fake.send(&[_]u8{ 4, 5, 6, 7 });
@@ -104,7 +104,7 @@ test "FakeTransport returns responses in order" {
         session.PeerResponse{ .recv_bytes = &.{ 10, 20 } },
         session.PeerResponse{ .recv_bytes = &.{ 30, 40, 50 } },
     };
-    var fake = session.FakeTransport.init(std.testing.allocator, responses);
+    var fake = try session.FakeTransport.init(std.testing.allocator, responses);
     defer fake.deinit();
     try std.testing.expectEqualSlices(u8, &.{ 10, 20 }, fake.recv());
     try std.testing.expectEqualSlices(u8, &.{ 30, 40, 50 }, fake.recv());
@@ -131,7 +131,7 @@ test "advertised_prefix_count is set on init" {
         .prefixes = prefixes,
         .same_as = true,
     };
-    var fake = session.FakeTransport.init(std.testing.allocator, &.{});
+    var fake = try session.FakeTransport.init(std.testing.allocator, &.{});
     defer fake.deinit();
     const sess = try session.init(config, &fake.toTransport());
     try std.testing.expectEqual(@as(usize, 2), sess.status.advertised_prefix_count);
@@ -164,7 +164,7 @@ test "session init creates idle session" {
         .prefixes = &.{types.Ipv4Prefix.init("10.0.0.0/8")},
         .same_as = true,
     };
-    var fake = session.FakeTransport.init(std.testing.allocator, &.{});
+    var fake = try session.FakeTransport.init(std.testing.allocator, &.{});
     defer fake.deinit();
     const sess = try session.init(config, &fake.toTransport());
     try std.testing.expectEqual(session.SessionState.idle, sess.status.state);
@@ -238,7 +238,7 @@ test "getStatus returns current status" {
         .prefixes = &.{types.Ipv4Prefix.init("10.0.0.0/8")},
         .same_as = true,
     };
-    var fake = session.FakeTransport.init(std.testing.allocator, &.{});
+    var fake = try session.FakeTransport.init(std.testing.allocator, &.{});
     defer fake.deinit();
     var sess = try session.init(config, &fake.toTransport());
     const status = session.getStatus(&sess);
@@ -267,7 +267,7 @@ test "successful OPEN send transitions to open_sent with captured frame" {
         .same_as = true,
     };
 
-    var fake = session.FakeTransport.init(std.testing.allocator, &.{});
+    var fake = try session.FakeTransport.init(std.testing.allocator, &.{});
     defer fake.deinit();
     var sess = try session.init(config, &fake.toTransport());
 

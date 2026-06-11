@@ -16,9 +16,14 @@ const _bgp_prefix_file = @import("bgp/prefix_file.zig");
 const _bgp_frame_decode = @import("bgp/frame_decode.zig");
 const _bgp_session_status = @import("bgp/session_status.zig");
 const _bgp_transport = @import("bgp/transport.zig");
+const _bgp_clock = @import("bgp/clock.zig");
+const _bgp_notification_decode = @import("bgp/notification_decode.zig");
 const _bgp_session = @import("bgp/session.zig");
 const _bgp_session_tests = @import("bgp/session_tests.zig");
 const _bgp_session_handshake_tests = @import("bgp/session_handshake_tests.zig");
+const _bgp_session_keepalive_basic_tests = @import("bgp/session_keepalive_basic_tests.zig");
+const _bgp_session_keepalive_notification_tests = @import("bgp/session_keepalive_notification_tests.zig");
+const _bgp_session_keepalive_advanced_tests = @import("bgp/session_keepalive_advanced_tests.zig");
 
 // BGP TCP transport (uses loopback sockets - potential hang source on Linux)
 const _bgp_tcp_transport = @import("bgp/tcp_transport.zig");
@@ -47,6 +52,9 @@ test { std.testing.refAllDecls(@import("bgp/transport.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_handshake_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/session_keepalive_basic_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/session_keepalive_notification_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/session_keepalive_advanced_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/tcp_transport.zig")); }
 test { std.testing.refAllDecls(@import("bgp/tcp_transport_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/config_parse.zig")); }

@@ -89,13 +89,15 @@ pub const FakeTransport = struct {
     closed: bool,
 
     /// Create a fake transport with a scripted handshake.
-    pub fn init(allocator: std.mem.Allocator, responses: []const PeerResponse) Self {
+    pub fn init(allocator: std.mem.Allocator, responses: []const PeerResponse) !Self {
+        const captured = try std.ArrayList(u8).initCapacity(allocator, 0);
+        const all = try std.ArrayList(u8).initCapacity(allocator, 0);
         return Self{
             .allocator = allocator,
             .responses = responses,
             .response_idx = 0,
-            .captured_sent = std.ArrayList(u8).empty,
-            .all_sent = std.ArrayList(u8).empty,
+            .captured_sent = captured,
+            .all_sent = all,
             .closed = false,
         };
     }
@@ -130,6 +132,14 @@ pub const FakeTransport = struct {
     /// Get all sent bytes as a single slice.
     pub fn getAllSent(self: *const Self) []const u8 {
         return self.all_sent.items;
+    }
+
+    /// Get the last n bytes sent.
+    /// Returns empty slice if fewer than n bytes were sent.
+    pub fn lastSentBytes(self: *const Self, n: usize) []const u8 {
+        const all = self.all_sent.items;
+        if (all.len < n) return &[_]u8{};
+        return all[all.len - n ..];
     }
 
     /// Deinit and free memory.

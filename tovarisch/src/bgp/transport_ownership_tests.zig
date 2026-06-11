@@ -26,7 +26,7 @@ test "bundle transport context survives after construction from bundle-owned tcp
     // We manually construct the bundle and verify the transport ownership.
 
     // Create a fake TCP transport for testing
-    var fake_tcp = transport.FakeTransport.init(std.heap.page_allocator, &.{});
+    var fake_tcp = try transport.FakeTransport.init(std.heap.page_allocator, &.{});
     defer fake_tcp.deinit();
 
     // Create a transport wrapper as if we did: bundle.trans = bundle.tcp.toTransport()
@@ -66,7 +66,7 @@ test "session receives bundle-owned transport and can send after bundle construc
     };
 
     // Create a fake TCP transport owned by the "bundle"
-    var bundle_tcp = transport.FakeTransport.init(std.heap.page_allocator, &.{});
+    var bundle_tcp = try transport.FakeTransport.init(std.heap.page_allocator, &.{});
     defer bundle_tcp.deinit();
 
     // Create the transport wrapper from the bundle-owned TCP
