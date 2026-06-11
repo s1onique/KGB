@@ -189,7 +189,7 @@ test "SessionConfig validation rejects zero peer_port" {
     try std.testing.expectError(session.SessionErrorKind.InvalidConfig, session.validateConfig(config));
 }
 
-test "SessionConfig validation rejects empty prefixes" {
+test "SessionConfig validation accepts empty prefixes for zero-prefix smoke test" {
     const config = session.SessionConfig{
         .peer_address = .{ 127, 0, 0, 1 },
         .peer_port = 179,
@@ -203,7 +203,8 @@ test "SessionConfig validation rejects empty prefixes" {
         .prefixes = &.{},
         .same_as = true,
     };
-    try std.testing.expectError(session.SessionErrorKind.InvalidConfig, session.validateConfig(config));
+    // Zero prefixes is valid - allows OPEN/KEEPALIVE-only smoke test without route advertisement
+    try std.testing.expect(try session.validateConfig(config) == {});
 }
 
 test "SessionConfig validation rejects invalid hold_time" {

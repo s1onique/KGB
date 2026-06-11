@@ -6,7 +6,7 @@
 //
 // KEY CONSTRAINT TESTS:
 // - When BGP is disabled, ZERO sockets are created
-// - Empty prefixes config is rejected when enabled
+// - Empty prefixes config is ACCEPTED when enabled (zero-prefix smoke test mode)
 // - Enabled config builds valid session config
 
 const std = @import("std");
@@ -224,13 +224,20 @@ test "parsePrefixList parses multiple prefixes" {
     try std.testing.expectEqual(@as(usize, 2), result.len);
 }
 
-test "parsePrefixList rejects empty" {
-    try std.testing.expectError(config.ConfigError.EmptyValue, config_parse.parsePrefixList("", std.heap.page_allocator));
-    try std.testing.expectError(config.ConfigError.EmptyValue, config_parse.parsePrefixList("   ", std.heap.page_allocator));
+test "parsePrefixList accepts empty for zero-prefix BGP smoke test" {
+    const result = try config_parse.parsePrefixList("", std.heap.page_allocator);
+    defer std.heap.page_allocator.free(result);
+    try std.testing.expectEqual(@as(usize, 0), result.len);
 }
 
-test "parseBgpConfig rejects empty advertised_prefixes when enabled" {
-    // This test verifies config parsing succeeds but runtime would fail
+test "parsePrefixList accepts whitespace-only for zero-prefix BGP smoke test" {
+    const result = try config_parse.parsePrefixList("   ", std.heap.page_allocator);
+    defer std.heap.page_allocator.free(result);
+    try std.testing.expectEqual(@as(usize, 0), result.len);
+}
+
+test "parseBgpConfig accepts empty advertised_prefixes when enabled" {
+    // This test verifies config parsing succeeds with empty prefixes for zero-prefix smoke test
     var raw = config.RawConfig{};
     defer raw.deinit(std.heap.page_allocator);
 
@@ -242,7 +249,7 @@ test "parseBgpConfig rejects empty advertised_prefixes when enabled" {
     try bgp_section.put(std.heap.page_allocator, "local_as", "65001");
     try bgp_section.put(std.heap.page_allocator, "peer_address", "10.0.0.2");
     try bgp_section.put(std.heap.page_allocator, "peer_as", "65002");
-    // No advertised_prefixes - runtime will fail
+    // No advertised_prefixes - valid for zero-prefix smoke test mode
 
     const cfg = try config_parse.parseBgpConfig(&raw);
     try std.testing.expect(cfg.enabled);

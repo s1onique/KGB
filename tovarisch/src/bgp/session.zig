@@ -124,7 +124,7 @@ pub fn validateConfig(config: SessionConfig) SessionErrorKind!void {
     if (config.peer_as < 1 or config.peer_as > 65535) return SessionErrorKind.InvalidConfig;
     if (config.hold_time_seconds != 0 and config.hold_time_seconds < 3) return SessionErrorKind.InvalidConfig;
     if (config.hold_time_seconds != 0 and config.keepalive_seconds >= config.hold_time_seconds) return SessionErrorKind.InvalidConfig;
-    if (config.prefixes.len == 0) return SessionErrorKind.InvalidConfig;
+    // Zero prefixes is valid - allows OPEN/KEEPALIVE-only smoke test without route advertisement
 }
 
 /// Create a new BGP session.

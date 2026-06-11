@@ -84,9 +84,11 @@ pub fn parseIpv4Address(addr_str: []const u8) config.ConfigError![4]u8 {
 
 /// Parse a comma-separated list of CIDR prefixes.
 /// Returns allocated slice of CIDR strings.
+/// Empty string is allowed - enables zero-prefix BGP smoke test mode.
 pub fn parsePrefixList(prefix_list_str: []const u8, allocator: std.mem.Allocator) config.ConfigError![]const []const u8 {
+    // Empty string is valid - returns empty slice for zero-prefix BGP smoke test
     if (prefix_list_str.len == 0) {
-        return config.ConfigError.EmptyValue;
+        return &[_][]const u8{};
     }
 
     var result = std.ArrayList([]const u8).empty;
@@ -108,10 +110,7 @@ pub fn parsePrefixList(prefix_list_str: []const u8, allocator: std.mem.Allocator
         result.append(allocator, last) catch return config.ConfigError.InvalidValue;
     }
 
-    if (result.items.len == 0) {
-        return config.ConfigError.EmptyValue;
-    }
-
+    // Empty result is valid - caller handles zero prefixes case
     return result.toOwnedSlice(allocator) catch return config.ConfigError.InvalidValue;
 }
 
@@ -360,7 +359,14 @@ test "parsePrefixList parses multiple prefixes" {
     try std.testing.expectEqual(@as(usize, 2), result.len);
 }
 
-test "parsePrefixList rejects empty" {
-    try std.testing.expectError(config.ConfigError.EmptyValue, parsePrefixList("", std.heap.page_allocator));
-    try std.testing.expectError(config.ConfigError.EmptyValue, parsePrefixList("   ", std.heap.page_allocator));
+test "parsePrefixList accepts empty for zero-prefix BGP smoke test" {
+    const result = try parsePrefixList("", std.heap.page_allocator);
+    defer std.heap.page_allocator.free(result);
+    try std.testing.expectEqual(@as(usize, 0), result.len);
+}
+
+test "parsePrefixList accepts whitespace-only for zero-prefix BGP smoke test" {
+    const result = try parsePrefixList("   ", std.heap.page_allocator);
+    defer std.heap.page_allocator.free(result);
+    try std.testing.expectEqual(@as(usize, 0), result.len);
 }

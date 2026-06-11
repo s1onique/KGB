@@ -177,13 +177,7 @@ pub fn loadConfigAndBgp(
         };
     }
 
-    // Require at least one prefix when enabled
-    if (prefixes.items.len == 0) {
-        stderr.writeAll("error: no advertised_prefixes configured\n") catch {};
-        prefixes.deinit(allocator);
-        raw.deinit(std.heap.page_allocator);
-        return .{ .failed = .{ .message = "no advertised_prefixes configured" } };
-    }
+    // Zero prefixes is valid - allows OPEN/KEEPALIVE-only smoke test without route advertisement
 
     // Build SessionConfig for BGP session
     const session_config = session.SessionConfig{
