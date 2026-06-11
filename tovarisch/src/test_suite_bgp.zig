@@ -41,6 +41,10 @@ const _bgp_prefix_file_integration_tests = @import("bgp/prefix_file_integration_
 // BGP status
 const _bgp_status = @import("bgp/status.zig");
 
+// BGP hold timer expiry recovery tests (this ACT)
+const _bgp_reconnect_hold_timer_tests = @import("bgp/reconnect_hold_timer_tests.zig");
+const _bgp_reconnect_recovery_tests = @import("bgp/reconnect_recovery_tests.zig");
+
 // (New BGP modules owned by test_suite_bgp_tcp.zig)
 
 // Force test discovery
@@ -68,3 +72,5 @@ test { std.testing.refAllDecls(@import("bgp/transport_ownership_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/prefix_file_loader.zig")); }
 test { std.testing.refAllDecls(@import("bgp/prefix_file_integration_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/status.zig")); }
+test { std.testing.refAllDecls(@import("bgp/reconnect_hold_timer_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/reconnect_recovery_tests.zig")); }
