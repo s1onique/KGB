@@ -1,0 +1,82 @@
+// test_suite_base.zig — Base test suite for core modules
+//
+// Tests: config, metrics, status, net utilities, logging.
+// These tests are CPU-bound and have no socket/thread dependencies.
+
+const std = @import("std");
+
+// Core modules
+const _config = @import("config.zig");
+const _logging = @import("logging.zig");
+const _status = @import("status.zig");
+const _status_checks = @import("status_checks.zig");
+
+// Metrics modules
+const _metrics = @import("metrics.zig");
+const _metrics_tests = @import("metrics_tests.zig");
+const _metrics_conversion_tests = @import("metrics_conversion_tests.zig");
+const _metrics_dto = @import("metrics_dto.zig");
+const _metrics_dto_tests = @import("metrics_dto_tests.zig");
+const _metrics_fallback_dto_tests = @import("metrics_fallback_dto_tests.zig");
+const _metrics_state = @import("metrics_state.zig");
+const _metrics_state_tests = @import("metrics_state_tests.zig");
+const _metrics_tunnel_contract_tests = @import("metrics_tunnel_contract_tests.zig");
+
+// Net utility modules
+const _net_private_ip = @import("net/private_ip.zig");
+const _net_rates = @import("net/rates.zig");
+const _net_interface_sampler = @import("net/interface_sampler.zig");
+const _net_interface_sampler_tests = @import("net/interface_sampler_tests.zig");
+const _net_linux_stats = @import("net/linux_stats.zig");
+const _net_linux_stats_tests = @import("net/linux_stats_tests.zig");
+const _net_linux_interfaces = @import("net/linux_interfaces.zig");
+const _net_linux_interfaces_tests = @import("net/linux_interfaces_tests.zig");
+const _net_linux_interface_stats = @import("net/linux_interface_stats.zig");
+const _net_linux_interface_stats_tests = @import("net/linux_interface_stats_tests.zig");
+const _net_interface_filter = @import("net/interface_filter.zig");
+const _net_interface_filter_tests = @import("net/interface_filter_tests.zig");
+const _net_linux_addr = @import("net/linux_addr.zig");
+const _net_linux_addr_tests = @import("net/linux_addr_tests.zig");
+const _net_linux_addr_parse = @import("net/linux_addr_parse.zig");
+const _net_wg_show_parser = @import("net/wg_show_parser.zig");
+const _net_wg_show_parser_tests = @import("net/wg_show_parser_tests.zig");
+const _net_wg_show_collector = @import("net/wg_show_collector.zig");
+const _net_wg_show_collector_tests = @import("net/wg_show_collector_tests.zig");
+const _net_private_interface_stats = @import("net/private_interface_stats.zig");
+const _net_private_interface_stats_tests = @import("net/private_interface_stats_tests.zig");
+
+// Force test discovery
+test { std.testing.refAllDecls(@import("config.zig")); }
+test { std.testing.refAllDecls(@import("logging.zig")); }
+test { std.testing.refAllDecls(@import("status.zig")); }
+test { std.testing.refAllDecls(@import("status_checks.zig")); }
+test { std.testing.refAllDecls(@import("metrics.zig")); }
+test { std.testing.refAllDecls(@import("metrics_tests.zig")); }
+test { std.testing.refAllDecls(@import("metrics_conversion_tests.zig")); }
+test { std.testing.refAllDecls(@import("metrics_dto.zig")); }
+test { std.testing.refAllDecls(@import("metrics_dto_tests.zig")); }
+test { std.testing.refAllDecls(@import("metrics_fallback_dto_tests.zig")); }
+test { std.testing.refAllDecls(@import("metrics_state.zig")); }
+test { std.testing.refAllDecls(@import("metrics_state_tests.zig")); }
+test { std.testing.refAllDecls(@import("metrics_tunnel_contract_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/private_ip.zig")); }
+test { std.testing.refAllDecls(@import("net/rates.zig")); }
+test { std.testing.refAllDecls(@import("net/interface_sampler.zig")); }
+test { std.testing.refAllDecls(@import("net/interface_sampler_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/linux_stats.zig")); }
+test { std.testing.refAllDecls(@import("net/linux_stats_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/linux_interfaces.zig")); }
+test { std.testing.refAllDecls(@import("net/linux_interfaces_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/linux_interface_stats.zig")); }
+test { std.testing.refAllDecls(@import("net/linux_interface_stats_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/interface_filter.zig")); }
+test { std.testing.refAllDecls(@import("net/interface_filter_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/linux_addr.zig")); }
+test { std.testing.refAllDecls(@import("net/linux_addr_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/linux_addr_parse.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_show_parser.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_show_parser_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_show_collector.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_show_collector_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/private_interface_stats.zig")); }
+test { std.testing.refAllDecls(@import("net/private_interface_stats_tests.zig")); }

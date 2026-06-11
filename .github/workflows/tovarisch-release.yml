@@ -47,9 +47,25 @@ jobs:
       - name: Build tovarisch
         run: make tovarisch-build
 
-      - name: Run tovarisch tests
-        timeout-minutes: 5
-        run: make tovarisch-test
+      - name: Run tovarisch base tests
+        timeout-minutes: 3
+        run: cd tovarisch && zig build test-base --summary all
+
+      - name: Run tovarisch BFD tests
+        timeout-minutes: 3
+        run: cd tovarisch && zig build test-bfd --summary all
+
+      - name: Run tovarisch BGP tests
+        timeout-minutes: 3
+        run: cd tovarisch && zig build test-bgp --summary all
+
+      - name: Run tovarisch HTTP tests
+        timeout-minutes: 3
+        run: cd tovarisch && zig build test-http --summary all
+
+      - name: Run tovarisch CLI tests
+        timeout-minutes: 3
+        run: cd tovarisch && zig build test-cli --summary all
 
       - name: Verify tovarisch status contract
         run: make verify-status-contract

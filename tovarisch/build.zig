@@ -150,4 +150,89 @@ pub fn build(b: *std.Build) void {
         .dest_sub_path = "tovarisch-test",
     });
     test_bin_step.dependOn(&install_test.step);
+
+    // ============================================================================
+    // Split Test Suites for CI Isolation
+    //
+    // Split the monolithic test binary into named suites so Linux CI can identify
+    // which suite hangs. Each suite has explicit timeout in the workflow.
+    // ============================================================================
+
+    // Base tests: core modules, config, metrics, status, net utilities
+    const base_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/test_suite_base.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    base_tests.root_module.addOptions("build_options", build_options);
+
+    const test_base_step = b.step("test-base", "Run base tests (core, config, metrics, status, net)");
+    test_base_step.dependOn(&b.addRunArtifact(base_tests).step);
+
+    // BFD tests: BFD protocol state machine and runtime
+    const bfd_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/test_suite_bfd.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    bfd_tests.root_module.addOptions("build_options", build_options);
+
+    const test_bfd_step = b.step("test-bfd", "Run BFD tests (protocol, session, runtime)");
+    test_bfd_step.dependOn(&b.addRunArtifact(bfd_tests).step);
+
+    // BGP tests: BGP protocol state machine and TCP transport
+    const bgp_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/test_suite_bgp.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    bgp_tests.root_module.addOptions("build_options", build_options);
+
+    const test_bgp_step = b.step("test-bgp", "Run BGP tests (protocol, session, TCP transport)");
+    test_bgp_step.dependOn(&b.addRunArtifact(bgp_tests).step);
+
+    // HTTP tests: HTTP server, routes, serve context
+    const http_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/test_suite_http.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    http_tests.root_module.addOptions("build_options", build_options);
+
+    const test_http_step = b.step("test-http", "Run HTTP server tests");
+    test_http_step.dependOn(&b.addRunArtifact(http_tests).step);
+
+    // CLI tests: command parsing, config handling, serve commands
+    const cli_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/test_suite_cli.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    cli_tests.root_module.addOptions("build_options", build_options);
+
+    const test_cli_step = b.step("test-cli", "Run CLI tests");
+    test_cli_step.dependOn(&b.addRunArtifact(cli_tests).step);
+
+    // Combined split-test step for CI
+    const test_split_step = b.step("test-split", "Run all split test suites");
+    test_split_step.dependOn(test_base_step);
+    test_split_step.dependOn(test_bfd_step);
+    test_split_step.dependOn(test_bgp_step);
+    test_split_step.dependOn(test_http_step);
+    test_split_step.dependOn(test_cli_step);
 }
