@@ -6,6 +6,11 @@
 
 const std = @import("std");
 
+// Breadcrumb: confirms suite reached test execution.
+test "BGP TCP suite starts" {
+    std.debug.print("[BREADCRUMB] bgp-tcp-suite: started\n", .{});
+}
+
 // Force test discovery for BGP TCP transport layer
 test { std.testing.refAllDecls(@import("bgp/tcp_transport.zig")); }
 test { std.testing.refAllDecls(@import("bgp/tcp_transport_tests.zig")); }

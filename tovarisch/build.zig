@@ -237,6 +237,17 @@ pub fn build(b: *std.Build) void {
     const test_bgp_tcp_step = b.step("test-bgp-tcp", "Run BGP TCP transport tests (loopback sockets)");
     test_bgp_tcp_step.dependOn(&b.addRunArtifact(bgp_tcp_tests).step);
 
+    // Install BGP TCP test binary without running it — for CI isolation of compile vs runtime.
+    const install_bgp_tcp_tests = b.addInstallArtifact(bgp_tcp_tests, .{
+        .dest_dir = .{ .override = .{ .custom = "bin" } },
+        .dest_sub_path = "tovarisch-test-bgp-tcp",
+    });
+    const install_bgp_tcp_test_step = b.step(
+        "install-test-bgp-tcp",
+        "Compile/install BGP TCP test binary without running it",
+    );
+    install_bgp_tcp_test_step.dependOn(&install_bgp_tcp_tests.step);
+
     const bgp_integration_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/test_suite_bgp_integration.zig"),
