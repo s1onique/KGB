@@ -386,6 +386,10 @@ test {
 }
 
 test {
+    std.testing.refAllDecls(@import("bgp/transport_ownership_tests.zig"));
+}
+
+test {
     std.testing.refAllDecls(@import("cli/bgp_serve.zig"));
 }
 

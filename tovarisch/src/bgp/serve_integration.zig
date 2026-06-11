@@ -246,12 +246,12 @@ pub fn loadConfigAndBgp(
         .sess = undefined,
     };
     bundle.tcp = tcp;
-    bundle.trans = tcp.toTransport();
+    bundle.trans = bundle.tcp.toTransport();
 
     // Create BGP session with the bundle-owned transport
     const sess = session.init(session_config, &bundle.trans) catch |e| {
         stderr.print("error: failed to create BGP session: {s}\n", .{@errorName(e)}) catch {};
-        tcp.close();
+        bundle.tcp.close();
         prefixes.deinit(allocator);
         raw.deinit(std.heap.page_allocator);
         std.heap.page_allocator.destroy(bundle);
