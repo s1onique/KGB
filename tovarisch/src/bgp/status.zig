@@ -74,7 +74,7 @@ pub const BgpStatusState = union(enum) {
 };
 
 /// Maximum buffer size for BGP detail formatting.
-/// Format: "BGP configured; 9999 advertised prefixes" = 42 chars max.
+/// Format: "BGP established; 9999 advertised prefixes" = 42 chars max.
 const BGP_DETAIL_BUF_SIZE: usize = 64;
 
 /// Build a BGP check from BgpStatusState using caller-provided buffer.
@@ -104,6 +104,36 @@ pub fn buildBgpCheckInto(
             .detail = "BGP disabled by config",
         },
         .configured => |cfg| {
+            // If session is established, report live protocol health even with zero prefixes.
+            // The FSM state takes precedence over the pre-establishment zero-prefix warning.
+            if (std.mem.eql(u8, cfg.fsm_state, "established")) {
+                // Include prefix count in detail if we have prefixes.
+                if (cfg.advertised_prefix_count > 0) {
+                    const prefix_label = if (cfg.advertised_prefix_count == 1) "prefix" else "prefixes";
+                    const detail = std.fmt.bufPrint(
+                        detail_buf,
+                        "BGP established; {d} advertised {s}",
+                        .{ cfg.advertised_prefix_count, prefix_label },
+                    ) catch {
+                        return .{
+                            .name = "bgp",
+                            .status = .ok,
+                            .detail = "BGP established",
+                        };
+                    };
+                    return .{
+                        .name = "bgp",
+                        .status = .ok,
+                        .detail = detail,
+                    };
+                }
+                return .{
+                    .name = "bgp",
+                    .status = .ok,
+                    .detail = "BGP established",
+                };
+            }
+            // Warn only if session is not yet established AND zero prefixes.
             if (cfg.advertised_prefix_count == 0) {
                 return .{
                     .name = "bgp",
@@ -144,17 +174,6 @@ pub fn buildBgpCheckInto(
     }
 }
 
-/// Format IPv4 address as string into buffer.
-fn formatPeerAddress(addr: [4]u8, buf: *[16]u8) []const u8 {
-    const result = std.fmt.bufPrint(buf, "{}.{}.{}.{}", .{
-        addr[0],
-        addr[1],
-        addr[2],
-        addr[3],
-    }) catch unreachable;
-    return result;
-}
-
 /// Derive BgpStatusState from an optional BgpServeBundle pointer.
 /// Returns .no_config when bundle is null (no config path was provided).
 /// Returns .not_configured when bundle state is .not_configured.
@@ -178,8 +197,6 @@ pub fn deriveStatusStateFromBundle(bundle: ?*serve_integration.BgpServeBundle) B
             const sess_status = serve_integration.getSessionStatus(b);
 
             // If session has failed, report runtime failure with concrete error.
-            // This handles the case where bundle.state is still .configured but
-            // session.runOnce() failed with a concrete send error.
             if (sess_status.state == .failed) {
                 const err_msg = if (sess_status.last_error) |e| e.message else "session failed";
                 return .{ .runtime_failed = .{ .message = err_msg } };
