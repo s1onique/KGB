@@ -69,7 +69,7 @@ pub fn bgpRuntimeThread(bundle: *serve_integration.BgpServeBundle) void {
                 .open_sent => "OPEN sent",
                 .open_confirm => "OPEN received, sent KEEPALIVE",
                 .established => "session established",
-                .failed => if (bundle.last_error) |e| e else "session failed",
+                .failed => getConcreteErrorMessage(bundle),
                 else => @tagName(current_state),
             };
 
@@ -119,9 +119,9 @@ pub fn bgpRuntimeThread(bundle: *serve_integration.BgpServeBundle) void {
         // Handle session termination
         switch (result) {
             .failed => {
-                // Session failed - log error and exit thread
+                // Session failed - log concrete error and exit thread
                 var log_buf = logging.BufferedWriter.init();
-                const err_msg = bundle.last_error orelse "unknown error";
+                const err_msg = getConcreteErrorMessage(bundle);
                 logging.emit(.bgp_error, &log_buf, &.{
                     .{ .name = "error", .value = logging.FieldValue{ .string = err_msg } },
                     .{ .name = "detail", .value = logging.FieldValue{ .string = "BGP runtime thread exiting" } },
@@ -149,6 +149,17 @@ pub fn bgpRuntimeThread(bundle: *serve_integration.BgpServeBundle) void {
         };
         _ = c.nanosleep(&ts, null);
     }
+}
+
+/// Get the concrete error message for logging and status.
+/// Preferred lookup order:
+/// 1. bundle.last_error (bundle-owned, includes concrete session errors)
+/// 2. bundle.sess.status.last_error.message (session-owned fallback)
+/// 3. "unknown error" fallback
+fn getConcreteErrorMessage(bundle: *serve_integration.BgpServeBundle) []const u8 {
+    return bundle.last_error orelse
+        if (bundle.sess.status.last_error) |session_err| session_err.message else
+        "unknown error";
 }
 
 /// Start the BGP runtime thread for a configured bundle.

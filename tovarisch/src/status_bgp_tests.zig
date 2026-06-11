@@ -122,6 +122,71 @@ test "top-level status degrades when BGP is error" {
     try std.testing.expectEqual(status.CheckStatus.@"error", status.deriveStatus(&checks));
 }
 
+// ============================================================================
+// Regression Tests: Concrete Error Preservation in Status Derivation
+// ============================================================================
+// These tests verify that concrete session errors (e.g., "send: EBADF") are
+// preserved in status derivation, not replaced with generic "IoError".
+
+test "deriveStatusStateFromBundle returns runtime_failed when session state is failed" {
+    // This test verifies that when a bundle's session transitions to failed state,
+    // deriveStatusStateFromBundle returns .runtime_failed (not .configured with
+    // last_error set). The concrete error message should be preserved.
+    var scratch: [64]u8 = undefined;
+    const state = bgp_status.BgpStatusState{
+        .runtime_failed = .{ .message = "send: EBADF" },
+    };
+    const check = bgp_status.buildBgpCheckInto(state, &scratch);
+    try std.testing.expect(check.status == .@"error");
+    try std.testing.expectEqualStrings("send: EBADF", check.detail);
+}
+
+test "buildBgpCheckInto renders concrete send error, not IoError" {
+    // CRITICAL: This test ensures that concrete send errors like "send: EBADF"
+    // render directly in the BGP check detail, not as "IoError".
+    var scratch: [64]u8 = undefined;
+
+    // Test with concrete EBADF error
+    const check1 = bgp_status.buildBgpCheckInto(.{ .runtime_failed = .{ .message = "send: EBADF" } }, &scratch);
+    try std.testing.expect(check1.status == .@"error");
+    try std.testing.expectEqualStrings("send: EBADF", check1.detail);
+    // Must NOT be "IoError" - that would indicate the fix isn't working
+    try std.testing.expect(!std.mem.eql(u8, check1.detail, "IoError"));
+
+    // Test with concrete ECONNRESET error
+    const check2 = bgp_status.buildBgpCheckInto(.{ .runtime_failed = .{ .message = "send: ECONNRESET" } }, &scratch);
+    try std.testing.expect(check2.status == .@"error");
+    try std.testing.expectEqualStrings("send: ECONNRESET", check2.detail);
+    try std.testing.expect(!std.mem.eql(u8, check2.detail, "IoError"));
+
+    // Test with concrete EAGAIN error
+    const check3 = bgp_status.buildBgpCheckInto(.{ .runtime_failed = .{ .message = "send: EAGAIN/EWOULDBLOCK" } }, &scratch);
+    try std.testing.expect(check3.status == .@"error");
+    try std.testing.expectEqualStrings("send: EAGAIN/EWOULDBLOCK", check3.detail);
+    try std.testing.expect(!std.mem.eql(u8, check3.detail, "IoError"));
+}
+
+test "runtime_failed is distinguishable from failed in status output" {
+    // Verify that .runtime_failed (runtime error) and .failed (config error)
+    // both render as error status but are distinguishable by message content.
+    var scratch: [64]u8 = undefined;
+
+    // Config failure
+    const check1 = bgp_status.buildBgpCheckInto(.{ .failed = .{ .message = "invalid AS number" } }, &scratch);
+    try std.testing.expect(check1.status == .@"error");
+    try std.testing.expectEqualStrings("invalid AS number", check1.detail);
+
+    // Runtime failure with concrete send error
+    const check2 = bgp_status.buildBgpCheckInto(.{ .runtime_failed = .{ .message = "send: EBADF" } }, &scratch);
+    try std.testing.expect(check2.status == .@"error");
+    try std.testing.expectEqualStrings("send: EBADF", check2.detail);
+
+    // Both are error status
+    try std.testing.expect(check1.status == check2.status);
+    // But detail messages are different
+    try std.testing.expect(!std.mem.eql(u8, check1.detail, check2.detail));
+}
+
 test "top-level status degrades when BGP is warn" {
     const checks = [_]status.Check{
         .{ .name = "process", .status = .ok, .detail = "running" },

@@ -70,8 +70,12 @@ pub const BgpServeBundle = struct {
     session_config: session.SessionConfig,
     /// Current runtime state.
     state: BgpRuntimeState = .not_configured,
-    /// Last error message (null if no error).
+    /// Last error message (owned by bundle, not borrowed from session).
+    /// Format: concrete send errors like "send: EBADF" or "send: ECONNRESET".
     last_error: ?[]const u8 = null,
+    /// Owned buffer for last_error messages to avoid dangling slices.
+    /// Max: "send failed" = 12 chars, fits in 32 byte buffer.
+    last_error_buf: [64]u8 = undefined,
     /// Advertised prefixes (parsed from config).
     prefixes: []types.Ipv4Prefix = &.{},
     /// TCP transport for the BGP session.
@@ -288,7 +292,15 @@ pub fn getBgpLastError(bundle: *const BgpServeBundle) ?[]const u8 {
 /// Returns RunResult indicating session state after the iteration.
 pub fn runSessionOnce(bundle: *BgpServeBundle) session.RunResult {
     const result = session.runOnce(&bundle.sess) catch |e| {
-        bundle.last_error = @errorName(e);
+        // CRITICAL: Preserve concrete session error over wrapper-level @errorName(e).
+        // session.runOnce() sets sess.status.last_error with concrete send failures
+        // (e.g., "send: EBADF", "send: ECONNRESET"). We copy the message into
+        // bundle-owned storage to avoid dangling slices.
+        bundle.last_error = if (bundle.sess.status.last_error) |session_err|
+            copyErrorToBundle(bundle, session_err.message)
+        else
+            copyErrorToBundle(bundle, @errorName(e));
+
         bundle.state = .failed;
         return .failed;
     };
@@ -298,8 +310,9 @@ pub fn runSessionOnce(bundle: *BgpServeBundle) session.RunResult {
         .established => bundle.state = .configured,
         .failed => {
             bundle.state = .failed;
+            // Copy session's concrete error to bundle-owned buffer
             if (bundle.sess.status.last_error) |err| {
-                bundle.last_error = err.message;
+                bundle.last_error = copyErrorToBundle(bundle, err.message);
             }
         },
         .stopped => bundle.state = .configured,
@@ -307,6 +320,13 @@ pub fn runSessionOnce(bundle: *BgpServeBundle) session.RunResult {
     }
 
     return result;
+}
+
+/// Copy an error message into bundle-owned buffer and return a borrowed slice.
+/// This avoids dangling pointers when session error messages are short-lived.
+fn copyErrorToBundle(bundle: *BgpServeBundle, message: []const u8) []const u8 {
+    @memcpy(bundle.last_error_buf[0..message.len], message);
+    return bundle.last_error_buf[0..message.len];
 }
 
 /// Get the BGP session status for /status JSON output.

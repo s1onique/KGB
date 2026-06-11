@@ -176,6 +176,15 @@ pub fn deriveStatusStateFromBundle(bundle: ?*serve_integration.BgpServeBundle) B
         .configured => {
             // Get session status for runtime data
             const sess_status = serve_integration.getSessionStatus(b);
+
+            // If session has failed, report runtime failure with concrete error.
+            // This handles the case where bundle.state is still .configured but
+            // session.runOnce() failed with a concrete send error.
+            if (sess_status.state == .failed) {
+                const err_msg = if (sess_status.last_error) |e| e.message else "session failed";
+                return .{ .runtime_failed = .{ .message = err_msg } };
+            }
+
             const fsm_state = @tagName(sess_status.state);
             return .{
                 .configured = .{
