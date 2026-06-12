@@ -94,6 +94,8 @@ pub fn buildBgpCheckInto(
             }
 
             if (std.mem.eql(u8, cfg.fsm_state, "established")) {
+                // Established FSM always outranks zero-prefix warning.
+                // Live BGP connectivity is more important than prefix advertisement.
                 if (cfg.advertised_prefix_count > 0) {
                     const prefix_label = if (cfg.advertised_prefix_count == 1) "prefix" else "prefixes";
                     const detail = std.fmt.bufPrint(detail_buf, "BGP established; {d} advertised {s}", .{
@@ -104,9 +106,8 @@ pub fn buildBgpCheckInto(
                     return .{ .name = "bgp", .status = .ok, .detail = detail };
                 }
                 return .{ .name = "bgp", .status = .ok, .detail = "BGP established" };
-            }
-
-            if (cfg.advertised_prefix_count == 0) {
+            } else if (cfg.advertised_prefix_count == 0) {
+                // Zero-prefix warning only applies when BGP is NOT established.
                 return .{ .name = "bgp", .status = .warn, .detail = "BGP configured with no advertised prefixes" };
             }
 
