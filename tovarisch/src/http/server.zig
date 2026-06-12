@@ -294,7 +294,7 @@ pub fn serveForeverWithContext(
         std.heap.page_allocator,
         inputs.bfd_runtime,
         inputs.config_check,
-        inputs.bgp_bundle,
+        inputs.bgp_result,
     );
     defer serve_ctx.deinit();
 

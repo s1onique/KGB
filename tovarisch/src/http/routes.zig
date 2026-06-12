@@ -101,11 +101,11 @@ pub fn handleStatus(fd: i32, state: *anyopaque) !void {
         }
     }{ .buf = &buf, .len = &len };
 
-    // Pass BFD runtime, config check, and LIVE BGP state from context.
+    // Pass BFD runtime, config check, and FULL BGP load result.
     try status.renderPayloadWithContext(writer, .{
         .bfd_runtime = ctx.bfd_runtime,
         .config_check = ctx.config_check,
-        .bgp_bundle = ctx.bgp_bundle,
+        .bgp_result = ctx.bgp_result,
     });
     const json = buf[0..len];
 

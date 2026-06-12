@@ -131,25 +131,23 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
                 .configured => "configured",
                 .disabled => "disabled",
                 .no_config => "no_config",
+                .not_configured => "not_configured",
                 .failed => |load_err| load_err.message,
             };
             logging.logBgpLoadResult(&bgp_log_buf, result_tag, "") catch {};
             stderr.writeAll(bgp_log_buf.slice()) catch {};
 
-            // Preserve BgpLoadResult tag for status derivation.
-            // BGP failures must be visible as ".failed", not silently collapsed to ".no_config".
+// Preserve full BgpLoadResult for status derivation.
+            // BGP failures (.failed) must be visible in /status, not silently collapsed.
             const bgp_bundle: ?*bgp_serve.BgpServeBundle = switch (bgp_result) {
                 .configured => |bundle| bundle,
                 else => null,
             };
 
-            // Clean up bundle on any exit
+            // Clean up bundle ONLY when configured (defer after extracting bundle)
             defer if (bgp_bundle) |bundle| bgp_serve.cleanupBgpBundle(bundle);
 
             // ACT runtime: Start BGP FSM thread if bundle is configured.
-            // The thread drives runSessionOnce independently of HTTP serve.
-            // Thread failures are non-fatal - daemon continues with degraded BGP.
-            // Pass bundle pointer to ServeContext for LIVE status derivation.
             if (bgp_bundle) |bundle| {
                 _ = bgp_serve.startBgpRuntimeThread(bundle, stderr);
             }
@@ -172,7 +170,7 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
             http.serveForeverWithContext(serve_config.http_config, .{
                 .bfd_runtime = bfd_rt,
                 .config_check = config_check,
-                .bgp_bundle = bgp_bundle,
+                .bgp_result = bgp_result,
             }, stdout) catch |err| {
                 var log_buf = logging.BufferedWriter.init();
                 logging.emit(.server_error, &log_buf, &.{

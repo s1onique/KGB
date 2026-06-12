@@ -308,9 +308,9 @@ pub const RuntimeStatusInputs = struct {
     bfd_runtime: ?*const bfd_status.BfdRuntime = null,
     /// Config check state - defaults to warn with static message.
     config_check: ConfigCheckState = .no_config,
-    /// Optional BGP bundle pointer for LIVE status derivation.
-    /// When null, /status shows BGP not configured.
-    bgp_bundle: ?*bgp_serve.BgpServeBundle = null,
+    /// Full BGP load result preserving all variants.
+    /// This preserves .failed, .not_configured, .disabled, .no_config.
+    bgp_result: bgp_serve.BgpLoadResult = .{ .no_config = {} },
 };
 
 // ============================================================================
@@ -324,8 +324,8 @@ pub const RuntimeStatusInputs = struct {
 /// at this time (request time) rather than startup time.
 pub fn buildStatusWithInputs(inputs: RuntimeStatusInputs, scratch: *StatusScratch) Status {
     const config_check_built = buildConfigCheck(inputs.config_check);
-    // Derive LIVE BGP state from bundle pointer
-    const live_bgp_state = bgp_status.deriveStatusStateFromBundle(inputs.bgp_bundle);
+    // Derive LIVE BGP state from full BgpLoadResult (preserves .failed, .not_configured, etc.)
+    const live_bgp_state = bgp_status.statusStateFromLoadResult(inputs.bgp_result);
     const checks = getLocalChecksWithBgp(inputs.bfd_runtime, config_check_built, live_bgp_state, scratch);
     return Status{
         .service = "tovarisch",

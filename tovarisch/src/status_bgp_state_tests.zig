@@ -156,3 +156,54 @@ test "BgpStatusState.failed is distinguishable from disabled" {
     try std.testing.expect(failed_check.status == .@"error");
     try std.testing.expect(failed_check.status != disabled_check.status);
 }
+
+// REGRESSION: statusStateFromLoadResult preserves BgpLoadResult tag.
+// This verifies the fix for the collapse bug where .failed, .not_configured,
+// .disabled, and .no_config were all collapsed to null bundle pointer.
+
+test "REGRESSION: statusStateFromLoadResult(.no_config) returns no_config" {
+    const result = bgp_status.statusStateFromLoadResult(.{ .no_config = {} });
+    try std.testing.expect(result == .no_config);
+}
+
+test "REGRESSION: statusStateFromLoadResult(.not_configured) returns not_configured" {
+    const result = bgp_status.statusStateFromLoadResult(.{ .not_configured = {} });
+    try std.testing.expect(result == .not_configured);
+}
+
+test "REGRESSION: statusStateFromLoadResult(.disabled) returns disabled" {
+    const result = bgp_status.statusStateFromLoadResult(.{ .disabled = {} });
+    try std.testing.expect(result == .disabled);
+}
+
+test "REGRESSION: statusStateFromLoadResult(.failed) preserves message" {
+    const bgp_serve = @import("bgp/serve_integration.zig");
+    const load_failure = bgp_serve.LoadFailure{ .message = "missing peer_address" };
+    const result = bgp_status.statusStateFromLoadResult(.{ .failed = load_failure });
+    try std.testing.expect(result == .failed);
+    try std.testing.expectEqualStrings("missing peer_address", result.failed.message);
+}
+
+test "REGRESSION: .failed renders as error status with load error detail" {
+    var scratch: [64]u8 = undefined;
+    const bgp_serve = @import("bgp/serve_integration.zig");
+    const load_failure = bgp_serve.LoadFailure{ .message = "connection refused" };
+    const state = bgp_status.statusStateFromLoadResult(.{ .failed = load_failure });
+    const check = bgp_status.buildBgpCheckInto(state, &scratch);
+    try std.testing.expect(check.status == .@"error");
+    try std.testing.expectEqualStrings("connection refused", check.detail);
+}
+
+test "REGRESSION: .no_config and .not_configured both warn but are distinct tags" {
+    var scratch: [64]u8 = undefined;
+    const no_config_state = bgp_status.statusStateFromLoadResult(.{ .no_config = {} });
+    const no_config_check = bgp_status.buildBgpCheckInto(no_config_state, &scratch);
+    try std.testing.expect(no_config_check.status == .warn);
+    try std.testing.expectEqualStrings("BGP not configured", no_config_check.detail);
+    const not_configured_state = bgp_status.statusStateFromLoadResult(.{ .not_configured = {} });
+    const not_configured_check = bgp_status.buildBgpCheckInto(not_configured_state, &scratch);
+    try std.testing.expect(not_configured_check.status == .warn);
+    try std.testing.expectEqualStrings("BGP not configured", not_configured_check.detail);
+    // Both warn but render from different union tags
+    try std.testing.expect(@as(u32, @intFromEnum(@as(bgp_status.BgpStatusState, no_config_state))) != @as(u32, @intFromEnum(@as(bgp_status.BgpStatusState, not_configured_state))));
+}

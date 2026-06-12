@@ -38,11 +38,7 @@ const reconnect = @import("reconnect_lifecycle.zig");
 const prefix_file_loader = @import("prefix_file_loader.zig");
 const prefix_file = @import("prefix_file.zig");
 
-// ============================================================================
-// Runtime State
-// ============================================================================
-
-/// Runtime state for BGP session including reconnect lifecycle.
+// Runtime state for BGP session including reconnect lifecycle.
 pub const BgpRuntimeState = enum {
     not_configured,
     disabled,
@@ -51,12 +47,10 @@ pub const BgpRuntimeState = enum {
     failed,
 };
 
-// ============================================================================
-// Load Result
-// ============================================================================
-
+// Load result union: no_config, not_configured, disabled, configured, failed.
 pub const BgpLoadResult = union(enum) {
     no_config,
+    not_configured,
     disabled,
     configured: *BgpServeBundle,
     failed: LoadFailure,
@@ -66,10 +60,7 @@ pub const LoadFailure = struct {
     message: []const u8,
 };
 
-// ============================================================================
-// Serve Bundle
-// ============================================================================
-
+// Serve bundle: owns config memory, BGP runtime, passive listener.
 pub const BgpServeBundle = struct {
     const Self = @This();
 
@@ -128,6 +119,8 @@ pub fn loadConfigAndBgp(
         return .no_config;
     }
 
+    // [bgp] present but not enabled → .disabled (operator explicitly opted out).
+    // .not_configured is used when [bgp] section is absent entirely.
     if (!bgp_cfg.enabled) {
         raw.deinit(std.heap.page_allocator);
         return .disabled;

@@ -354,7 +354,7 @@ test "buildStatusWithInputs uses caller-provided scratch" {
     const s = status.buildStatusWithInputs(.{
         .bfd_runtime = null,
         .config_check = .no_config,
-        .bgp_bundle = null,
+        .bgp_result = .{ .no_config = {} },
     }, &scratch);
 
     // Status.checks should point to scratch

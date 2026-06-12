@@ -129,6 +129,22 @@ pub fn buildBgpCheckInto(
     }
 }
 
+// Extract BGP status state from BgpLoadResult union.
+// This preserves load result information (failed, not_configured, disabled)
+// that would be lost if we only carry ?*BgpServeBundle.
+pub fn statusStateFromLoadResult(result: serve_integration.BgpLoadResult) BgpStatusState {
+    switch (result) {
+        .no_config => return .no_config,
+        .not_configured => return .not_configured,
+        .disabled => return .disabled,
+        .configured => |bundle| {
+            // Delegate to bundle-based derivation for runtime state
+            return deriveStatusStateFromBundle(bundle);
+        },
+        .failed => |load_err| return .{ .failed = .{ .message = load_err.message } },
+    }
+}
+
 pub fn deriveStatusStateFromBundle(bundle: ?*serve_integration.BgpServeBundle) BgpStatusState {
     if (bundle == null) return .no_config;
 

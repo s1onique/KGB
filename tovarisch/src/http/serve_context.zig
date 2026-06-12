@@ -3,9 +3,9 @@
 // Context passed to HTTP route handlers containing runtime state derived at serve startup.
 // This is the canonical state container for /status endpoint rendering.
 //
-// KEY CHANGE: ServeContext now stores a LIVE BGP bundle pointer instead of a frozen
-// BgpStatusState snapshot. Status rendering derives state at request time so
-// /status reflects current FSM state and counters.
+// KEY CHANGE: ServeContext now stores the FULL BgpLoadResult union, not just the collapsed
+// ?*BgpServeBundle. This preserves load result information (.failed, .not_configured, etc.)
+// that would otherwise be lost in the collapse to null bundle pointer.
 
 const std = @import("std");
 const metrics_state = @import("../metrics_state.zig");
@@ -40,10 +40,10 @@ pub const ServeContext = struct {
     /// This is immutable for the daemon lifetime.
     config_check: status.ConfigCheckState,
 
-    /// Optional BGP bundle owned by the daemon.
-    /// Used to derive live BGP status at request time.
-    /// Null when BGP is not configured.
-    bgp_bundle: ?*bgp_serve.BgpServeBundle,
+    /// Full BGP load result union preserving all variants.
+    /// This preserves .failed, .not_configured, .disabled, .no_config
+    /// that would be lost if we only stored ?*BgpServeBundle.
+    bgp_result: bgp_serve.BgpLoadResult,
 
     /// Initialize serve context with allocator.
     /// Uses default no_config state since no config path is available.
@@ -52,7 +52,7 @@ pub const ServeContext = struct {
             .metrics = metrics_state.MetricsState.init(allocator),
             .bfd_runtime = null,
             .config_check = .no_config,
-            .bgp_bundle = null,
+            .bgp_result = .{ .no_config = {} },
         };
     }
 
@@ -63,7 +63,7 @@ pub const ServeContext = struct {
             .metrics = metrics_state.MetricsState.init(allocator),
             .bfd_runtime = bfd_runtime,
             .config_check = .no_config,
-            .bgp_bundle = null,
+            .bgp_result = .{ .no_config = {} },
         };
     }
 
@@ -73,20 +73,21 @@ pub const ServeContext = struct {
         allocator: std.mem.Allocator,
         bfd_runtime: ?*const bfd_status.BfdRuntime,
         config_check: status.ConfigCheckState,
-        bgp_bundle: ?*bgp_serve.BgpServeBundle,
+        bgp_result: bgp_serve.BgpLoadResult,
     ) Self {
         return .{
             .metrics = metrics_state.MetricsState.init(allocator),
             .bfd_runtime = bfd_runtime,
             .config_check = config_check,
-            .bgp_bundle = bgp_bundle,
+            .bgp_result = bgp_result,
         };
     }
 
-    /// Derive live BGP status state from the bundle pointer.
-    /// Returns .no_config when bundle is null.
+    /// Derive live BGP status state from the full load result.
+    /// This preserves .failed, .not_configured, .disabled, .no_config
+    /// that would be lost in the collapsed ?*BgpServeBundle approach.
     pub fn deriveLiveBgpState(self: *const Self) bgp_status.BgpStatusState {
-        return bgp_status.deriveStatusStateFromBundle(self.bgp_bundle);
+        return bgp_status.statusStateFromLoadResult(self.bgp_result);
     }
 
     /// Free all context-owned memory.
