@@ -9,6 +9,7 @@ const std = @import("std");
 const _bgp_types = @import("bgp/types.zig");
 const _bgp_message = @import("bgp/message.zig");
 const _bgp_message_tests = @import("bgp/message_tests.zig");
+const _bgp_message_wire_format_tests = @import("bgp/message_wire_format_tests.zig");
 const _bgp_validation = @import("bgp/validation.zig");
 const _bgp_prefix_file = @import("bgp/prefix_file.zig");
 
@@ -51,6 +52,7 @@ const _bgp_reconnect_recovery_tests = @import("bgp/reconnect_recovery_tests.zig"
 test { std.testing.refAllDecls(@import("bgp/types.zig")); }
 test { std.testing.refAllDecls(@import("bgp/message.zig")); }
 test { std.testing.refAllDecls(@import("bgp/message_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/message_wire_format_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/validation.zig")); }
 test { std.testing.refAllDecls(@import("bgp/prefix_file.zig")); }
 test { std.testing.refAllDecls(@import("bgp/frame_decode.zig")); }

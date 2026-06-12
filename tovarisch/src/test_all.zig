@@ -136,6 +136,7 @@ test { std.testing.refAllDecls(@import("bfd_serve_config_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/types.zig")); }
 test { std.testing.refAllDecls(@import("bgp/message.zig")); }
 test { std.testing.refAllDecls(@import("bgp/message_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/message_wire_format_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/validation.zig")); }
 test { std.testing.refAllDecls(@import("bgp/prefix_file.zig")); }
 
