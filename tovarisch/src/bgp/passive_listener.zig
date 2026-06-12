@@ -292,7 +292,7 @@ pub fn getListenAddress(self: *const PassiveListener) [32]u8 {
     var buf: [32]u8 = undefined;
     const addr = tcp_transport_helpers.fmtPeerAddress(self.config.local_address);
     const port = self.config.port;
-    const written = std.fmt.bufPrint(&buf, "{}:{}", .{ addr, port }) catch unreachable;
+    const written = std.fmt.bufPrint(&buf, "{s}:{d}", .{ addr, port }) catch unreachable;
     _ = written;
     return buf;
 }

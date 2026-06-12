@@ -193,3 +193,4 @@ test { std.testing.refAllDecls(@import("status_bgp_fsm_tests.zig")); }
 // Passive listener tests (split into focused files)
 test { std.testing.refAllDecls(@import("bgp/passive_listener_config_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/passive_listener_integration_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/passive_listener_serve_integration_tests.zig")); }

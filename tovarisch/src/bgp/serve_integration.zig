@@ -277,6 +277,11 @@ pub fn loadConfigAndBgp(
     bundle.sess = sess;
     bundle.state = .configured;
 
+    // Create passive listener for inbound BGP connections when local_address is configured.
+    // The passive listener binds to the configured local_address on port 179 and accepts
+    // incoming BGP peer connections alongside the active outbound session.
+    passive_listener_integration.createPassiveListener(bundle, stderr);
+
     return .{ .configured = bundle };
 }
 
@@ -293,6 +298,10 @@ pub fn cleanupBgpBundle(bundle: *BgpServeBundle, allocator: std.mem.Allocator) v
         thread.join();
         bundle.runtime_thread = null;
     }
+
+    // Clean up passive listener if it was created.
+    // This stops the listener thread, closes the listen socket, and clears the stored listener.
+    passive_listener_integration.closePassiveListener(bundle);
 
     // Now safe to clean up resources
     bundle.tcp.close();
