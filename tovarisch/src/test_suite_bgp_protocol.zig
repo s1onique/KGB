@@ -11,4 +11,5 @@ test { std.testing.refAllDecls(@import("bgp/message.zig")); }
 test { std.testing.refAllDecls(@import("bgp/message_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/validation.zig")); }
 test { std.testing.refAllDecls(@import("bgp/prefix_file.zig")); }
+test { std.testing.refAllDecls(@import("bgp/prefix_file_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/frame_decode.zig")); }

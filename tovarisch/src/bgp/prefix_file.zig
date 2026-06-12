@@ -1,8 +1,9 @@
 // prefix_file.zig — BIRD-style prefix-list parser
 //
-// ACT 1: Pure parsing only, no sockets or runtime behavior.
-// Supports BIRD static route-list format:
+// Supports both BIRD static route-list format and bare CIDR lines:
 //   route <IPv4 CIDR> reject;
+//   route <IPv4 CIDR> blackhole;
+//   10.149.149.0/24
 // Blank lines and # comments are ignored.
 // All other syntax is rejected (conservative parsing for security).
 
@@ -29,6 +30,8 @@ pub const ParseError = error{
     InvalidOctet,
     /// Prefix length out of range (0..32)
     InvalidPrefixLength,
+    /// Memory allocation failed
+    OutOfMemory,
 };
 
 /// Result of parsing a single prefix file
@@ -50,6 +53,15 @@ fn skipWhitespace(s: []const u8) []const u8 {
     return s[i..];
 }
 
+/// Trim trailing whitespace from a slice.
+fn trimTrailingWhitespace(s: []const u8) []const u8 {
+    var end = s.len;
+    while (end > 0 and (s[end - 1] == ' ' or s[end - 1] == '\t')) {
+        end -= 1;
+    }
+    return s[0..end];
+}
+
 /// Check if line is a blank line (empty or whitespace only).
 fn isBlankLine(line: []const u8) bool {
     return skipWhitespace(line).len == 0;
@@ -64,54 +76,106 @@ fn isComment(line: []const u8) bool {
 /// Parse a single route line and extract the CIDR.
 /// Returns the CIDR string (without leading/trailing whitespace).
 /// Returns error on any unexpected syntax.
+/// Supports both BIRD static route syntax and bare CIDR lines.
 fn extractCidrFromRouteLine(line: []const u8) ParseError![]const u8 {
-    // Must start with "route" (case-sensitive)
     const trimmed = skipWhitespace(line);
-    if (trimmed.len < 6) return ParseError.SyntaxError;
-    if (!std.mem.eql(u8, trimmed[0..5], "route")) {
-        return ParseError.UnknownDirective;
+    if (trimmed.len == 0) return ParseError.SyntaxError;
+
+    // Check if this is a BIRD route line (starts with "route")
+    if (trimmed.len >= 5 and std.mem.eql(u8, trimmed[0..5], "route")) {
+        return extractCidrFromBirdRouteLine(trimmed);
     }
 
-    // Find the end of the CIDR (look for "reject;" pattern)
-    // Look for "reject" keyword
-    var reject_pos: usize = 0;
-    for (trimmed, 0..) |c, i| {
-        if (c == 'r' and i + 6 <= trimmed.len) {
-            if (std.mem.eql(u8, trimmed[i..i+6], "reject")) {
-                reject_pos = i;
-                break;
+    // Otherwise, treat as bare CIDR line
+    return extractCidrFromBareLine(trimmed);
+}
+
+/// Extract CIDR from a BIRD static route line: "route <CIDR> <action>;"
+/// Supported actions: "reject", "blackhole"
+/// No allocation - uses std.mem.tokenizeScalar for pure parsing.
+fn extractCidrFromBirdRouteLine(trimmed: []const u8) ParseError![]const u8 {
+    // Tokenize by whitespace using std.mem.tokenizeScalar (no allocation)
+    var tokenizer = std.mem.tokenizeScalar(u8, trimmed, ' ');
+    var token_count: usize = 0;
+    var cidr: []const u8 = undefined;
+    var action_token: []const u8 = undefined;
+    var has_semicolon = false;
+
+    while (tokenizer.next()) |token| {
+        token_count += 1;
+        if (token_count == 1) {
+            // token[0] must be "route"
+            if (!std.mem.eql(u8, token, "route")) {
+                return ParseError.SyntaxError;
             }
-        }
-    }
-
-    if (reject_pos == 0) return ParseError.MissingSemicolon;
-
-    // Check for "via" between "route" and "reject" - indicates non-reject route type
-    const between_route_and_reject = trimmed[5..reject_pos];
-    if (std.mem.indexOf(u8, between_route_and_reject, "via") != null) {
-        return ParseError.UnsupportedRouteType;
-    }
-
-    // After "reject", we need semicolon
-    const after_reject = trimmed[reject_pos + 6 ..];
-    // Skip whitespace and look for semicolon
-    var found_semicolon = false;
-    for (after_reject) |c| {
-        if (c == ';') {
-            found_semicolon = true;
-            break;
-        }
-        if (c != ' ' and c != '\t') {
+        } else if (token_count == 2) {
+            // token[1] is CIDR
+            cidr = token;
+            // Check for injection attempts in CIDR
+            for (cidr) |c| {
+                if (c == '"' or c == '\'') return ParseError.PotentialInjection;
+            }
+        } else if (token_count == 3) {
+            // token[2] is action (reject or blackhole, possibly with trailing semicolon)
+            action_token = token;
+            // Check for trailing semicolon
+            if (action_token.len > 0 and action_token[action_token.len - 1] == ';') {
+                has_semicolon = true;
+            }
+        } else if (token_count == 4) {
+            // token[3] - must be semicolon if attached semicolon not present
+            if (!has_semicolon and !std.mem.eql(u8, token, ";")) {
+                return ParseError.SyntaxError;
+            }
+        } else {
+            // More than 4 tokens - extra tokens not allowed
             return ParseError.SyntaxError;
         }
     }
-    if (!found_semicolon) return ParseError.MissingSemicolon;
 
-    // Extract CIDR - it's everything between "route " and "reject"
-    const after_route = trimmed[5..reject_pos];
-    const cidr = skipWhitespace(after_route);
+    // Must have at least 3 tokens (route, CIDR, action)
+    if (token_count < 3) {
+        return ParseError.MissingSemicolon;
+    }
 
-    if (cidr.len == 0) return ParseError.SyntaxError;
+    // Normalize action: remove trailing semicolon if present
+    var action = action_token;
+    if (action.len > 0 and action[action.len - 1] == ';') {
+        action = action[0 .. action.len - 1];
+    }
+
+    // Require action is "reject" or "blackhole"
+    if (!std.mem.eql(u8, action, "reject") and !std.mem.eql(u8, action, "blackhole")) {
+        // Check for "via" which is unsupported
+        if (std.mem.indexOf(u8, action_token, "via") != null) {
+            return ParseError.UnsupportedRouteType;
+        }
+        return ParseError.SyntaxError;
+    }
+
+    // Validate token count based on semicolon position
+    if (has_semicolon) {
+        // Attached semicolon: must have exactly 3 tokens
+        if (token_count != 3) {
+            return ParseError.SyntaxError;
+        }
+    } else {
+        // Separate semicolon: must have exactly 4 tokens (route, CIDR, action, ;)
+        if (token_count != 4) {
+            return ParseError.MissingSemicolon;
+        }
+    }
+
+    // Verify CIDR contains slash
+    if (std.mem.indexOf(u8, cidr, "/") == null) return ParseError.InvalidCidr;
+
+    return cidr;
+}
+
+/// Extract CIDR from a bare CIDR line (e.g., "10.149.149.0/24")
+fn extractCidrFromBareLine(trimmed: []const u8) ParseError![]const u8 {
+    // Trim trailing whitespace
+    const cidr = trimTrailingWhitespace(trimmed);
 
     // Check for injection attempts
     for (cidr) |c| {
@@ -215,75 +279,4 @@ pub fn parse(content: []const u8, allocator: std.mem.Allocator) anyerror!ParseRe
         .skipped = skipped,
         .errors = 0,
     };
-}
-
-// === Tests ===
-
-test "ignores blank lines" {
-    // Empty string has no lines, so skipped = 0
-    const result = try parse("", std.testing.allocator);
-    defer std.testing.allocator.free(result.prefixes);
-    try std.testing.expectEqual(@as(usize, 0), result.prefixes.len);
-    try std.testing.expectEqual(@as(usize, 0), result.skipped);
-    
-    // String with just a newline is a blank line
-    const result2 = try parse("\n", std.testing.allocator);
-    defer std.testing.allocator.free(result2.prefixes);
-    try std.testing.expectEqual(@as(usize, 0), result2.prefixes.len);
-    try std.testing.expectEqual(@as(usize, 1), result2.skipped);
-}
-
-test "ignores # comments" {
-    const result = try parse("# This is a comment\n", std.testing.allocator);
-    defer std.testing.allocator.free(result.prefixes);
-    try std.testing.expectEqual(@as(usize, 0), result.prefixes.len);
-    try std.testing.expectEqual(@as(usize, 1), result.skipped);
-}
-
-test "rejects invalid CIDR" {
-    _ = parse("route invalid reject;\n", std.testing.allocator) catch |err| {
-        try std.testing.expect(err == ParseError.InvalidCidr or err == ParseError.SyntaxError);
-        return;
-    };
-    unreachable; // should have errored
-}
-
-test "rejects IPv6" {
-    _ = parse("route 2001:db8::/32 reject;\n", std.testing.allocator) catch |err| {
-        try std.testing.expect(err == ParseError.Ipv6NotSupported);
-        return;
-    };
-    unreachable; // should have errored
-}
-
-test "rejects missing semicolon" {
-    _ = parse("route 10.0.0.0/8 reject\n", std.testing.allocator) catch |err| {
-        try std.testing.expect(err == ParseError.MissingSemicolon);
-        return;
-    };
-    unreachable; // should have errored
-}
-
-test "rejects via routes" {
-    _ = parse("route 192.168.229.66/32 via 198.168.229.65 reject;\n", std.testing.allocator) catch |err| {
-        try std.testing.expect(err == ParseError.UnsupportedRouteType or err == ParseError.UnknownDirective);
-        return;
-    };
-    unreachable; // should have errored
-}
-
-test "rejects unknown BIRD directives" {
-    _ = parse("protocol bgp Test { }\n", std.testing.allocator) catch |err| {
-        try std.testing.expect(err == ParseError.UnknownDirective);
-        return;
-    };
-    unreachable; // should have errored
-}
-
-test "rejects quoted/injection-like input" {
-    _ = parse("route 10.0.0.0/8 \"reject;\"\n", std.testing.allocator) catch |err| {
-        try std.testing.expect(err == ParseError.PotentialInjection or err == ParseError.SyntaxError);
-        return;
-    };
-    unreachable; // should have errored
 }
