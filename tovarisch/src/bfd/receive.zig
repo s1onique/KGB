@@ -219,6 +219,15 @@ fn formatIPv4IntoBuf(buf: *[16]u8, b1: u8, b2: u8, b3: u8, b4: u8) usize {
     return formatted.len;
 }
 
+/// POLLIN event flag (from poll.h)
+const POLLIN: c_short = 0x0001;
+
+/// Default poll timeout in milliseconds (50ms = 20 polls/second max)
+/// This balances BFD responsiveness (typically 800ms+ intervals) with CPU savings.
+/// BFD packets arrive at most once per configured interval; 50ms is 1/16th of the
+/// minimum typical BFD interval (800ms), providing good responsiveness without busy-spin.
+const DEFAULT_POLL_TIMEOUT_MS: c_int = 50;
+
 /// BFD receive loop state passed to the receive thread.
 /// Includes the stop signal and runtime reference.
 /// Socket ownership: the loop state OWNS the socket; bundle does NOT copy it.
@@ -239,7 +248,17 @@ pub const BfdReceiveLoopState = struct {
 /// BFD receive loop function.
 /// Runs in a separate thread, receives BFD packets, and feeds them to the runtime.
 /// This enables the daemon to respond to peer's BFD session establishment.
+///
+/// Uses poll() with bounded timeout before recvfrom() to prevent CPU spin on EAGAIN.
+/// This ensures the daemon remains responsive to BFD packets while not consuming
+/// excessive CPU when no packets are arriving.
 pub fn bfdReceiveLoop(state: *BfdReceiveLoopState) void {
+    bfdReceiveLoopWithTimeout(state, DEFAULT_POLL_TIMEOUT_MS);
+}
+
+/// BFD receive loop with configurable poll timeout.
+/// Exposed for testing with shorter timeouts.
+pub fn bfdReceiveLoopWithTimeout(state: *BfdReceiveLoopState, poll_timeout_ms: c_int) void {
     // Set socket to non-blocking so we can check the stop flag
     state.socket.setNonBlocking();
 
@@ -252,17 +271,55 @@ pub fn bfdReceiveLoop(state: *BfdReceiveLoopState) void {
         return;
     }
 
+    // Prepare pollfd for the receive socket
+    // Use array of 1 pollfd for c.poll compatibility (expects [*]pollfd)
+    var pfd_arr: [1]c.pollfd = .{
+        .{
+            .fd = state.socket.fd,
+            .events = POLLIN,
+            .revents = 0,
+        },
+    };
+
     while (!state.stop.load()) {
-        // Receive one packet
+        // Use poll() with bounded timeout to avoid CPU spin on EAGAIN.
+        // This is the key fix: instead of busy-polling with yield(), we block
+        // on poll() until data is available or timeout expires.
+        const poll_result = c.poll(&pfd_arr, 1, poll_timeout_ms);
+
+        if (poll_result < 0) {
+            // Poll error - this shouldn't happen for UDP socket
+            // Yield to avoid tight loop on persistent errors
+            std.Thread.yield() catch {};
+            continue;
+        }
+
+        if (poll_result == 0) {
+            // Timeout - no data available, loop back to check stop flag
+            continue;
+        }
+
+        // revents is non-zero, data should be available
+        // Check for POLLIN - if not set, could be POLLERR/POLLHUP
+        if (pfd_arr[0].revents & POLLIN == 0) {
+            // Not POLLIN - could be POLLERR or POLLHUP, try recv to drain
+            const result = state.socket.receiveOne() catch {
+                continue;
+            };
+            _ = result;
+            continue;
+        }
+
+        // Receive one packet (data is confirmed available by poll)
         const result = state.socket.receiveOne() catch {
-            // On error, yield and retry
+            // On error, yield and retry (socket error, not EAGAIN since poll said ready)
             std.Thread.yield() catch {};
             continue;
         };
 
         const packet_opt = result orelse {
-            // No packet available, yield and retry
-            std.Thread.yield() catch {};
+            // No packet (shouldn't happen if poll said data available)
+            // but handle gracefully
             continue;
         };
 

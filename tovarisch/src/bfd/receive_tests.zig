@@ -382,5 +382,62 @@ test "session calculates detection timeout from peer packet" {
     try testing.expectEqual(@as(u32, 2500), sess2.detection_timeout_ms); // 500ms * 5
 }
 
+// ============================================================================
+// BFD receive loop EAGAIN bounding tests
+// ============================================================================
+
+test "DEFAULT_POLL_TIMEOUT_MS is bounded (not zero)" {
+    // Regression test: ensure the poll timeout is not zero to prevent CPU spin.
+    // A timeout of 0 would cause busy-spin on EAGAIN.
+    // The default should be a small positive value (e.g., 50ms).
+    try testing.expect(receive.DEFAULT_POLL_TIMEOUT_MS > 0);
+}
+
+test "poll timeout constant is reasonable for BFD" {
+    // BFD typically operates at 800ms+ intervals.
+    // A 50ms poll timeout = 20 polls/second max, which is 1/16th of min BFD interval.
+    // This is responsive enough without causing CPU spin.
+    const timeout_ms = receive.DEFAULT_POLL_TIMEOUT_MS;
+    try testing.expect(timeout_ms >= 10); // At least 10ms for any responsiveness
+    try testing.expect(timeout_ms <= 100); // At most 100ms (10 polls/second) for BFD
+}
+
+// ============================================================================
+// Fake transport for EAGAIN path testing
+// ============================================================================
+
+/// Fake socket for testing receive loop without real network.
+/// This allows us to simulate the EAGAIN scenario without actual sockets.
+const FakeSocket = struct {
+    const Self = @This();
+
+    fd: i32 = 0, // Fake fd (not a real socket)
+    poll_will_block: bool = true, // If true, poll returns no data
+    packets: std.ArrayList([packet.CONTROL_PACKET_LEN]u8) = undefined,
+    packets_received: usize = 0,
+
+    fn init(allocator: std.mem.Allocator) Self {
+        return Self{
+            .packets = std.ArrayList([packet.CONTROL_PACKET_LEN]u8).init(allocator),
+        };
+    }
+
+    fn deinit(self: *Self) void {
+        self.packets.deinit();
+    }
+
+    fn addPacket(self: *Self, pkt: [packet.CONTROL_PACKET_LEN]u8) void {
+        self.packets.append(pkt) catch unreachable;
+    }
+
+    fn setWillBlock(self: *Self, will_block: bool) void {
+        self.poll_will_block = will_block;
+    }
+
+    fn getFd(self: *const Self) i32 {
+        return self.fd;
+    }
+};
+
 // Import session for buildTransmitPacket
 const session = @import("session.zig");
