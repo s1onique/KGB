@@ -209,13 +209,6 @@ pub fn loadConfigAndBgp(
         }
     }
 
-    // Require at least one advertised prefix when BGP is enabled
-    if (prefixes.items.len == 0) {
-        stderr.writeAll("error: no advertised prefixes configured (need inline or prefix files)\n") catch {};
-        prefixes.deinit(allocator);
-        raw.deinit(std.heap.page_allocator);
-        return .{ .failed = .{ .message = "no advertised prefixes" } };
-    }
 
     const session_config = session.SessionConfig{
         .peer_address = peer_addr,

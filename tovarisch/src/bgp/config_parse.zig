@@ -201,16 +201,16 @@ pub fn parseBgpConfig(raw: *const config.RawConfig) config.ConfigError!BgpConfig
     }
 
     // Parse advertised_prefixes (comma-separated CIDR list)
-    // Store raw string - parsing into owned Ipv4Prefix slice happens in serve_integration.zig
+    // Store raw string - parsing into owned Ipv4Prefix slice happens in serve_integration.zig.
+    // Empty string is allowed for zero-prefix BGP smoke test mode.
     if (config.getString(bgp_section, "advertised_prefixes")) |value| {
-        try config.requireNonEmpty(value);
         cfg.advertised_prefixes_raw = value;
     }
 
     // Parse advertised_prefix_files (comma-separated file paths)
-    // Store raw string - parsing into owned Ipv4Prefix slice happens in serve_integration.zig
+    // Store raw string - parsing into owned Ipv4Prefix slice happens in serve_integration.zig.
+    // Empty string is allowed (treated as no prefix files).
     if (config.getString(bgp_section, "advertised_prefix_files")) |value| {
-        try config.requireNonEmpty(value);
         cfg.advertised_prefix_files_raw = value;
     }
 

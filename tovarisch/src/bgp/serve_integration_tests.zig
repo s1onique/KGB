@@ -249,6 +249,47 @@ test "parseBgpConfig accepts empty advertised_prefixes when enabled" {
     try std.testing.expectEqualStrings("", cfg.advertised_prefixes_raw);
 }
 
+// REGRESSION: parseBgpConfig accepts zero prefixes via explicit empty string.
+// This enables zero-prefix BGP smoke test mode where passive listener starts
+// even when no prefixes are advertised.
+test "REGRESSION: parseBgpConfig accepts advertised_prefixes empty string" {
+    var raw = config.RawConfig{};
+    defer raw.deinit(std.heap.page_allocator);
+    try raw.put(std.heap.page_allocator, "bgp", .{});
+    const bgp_section = raw.getPtr("bgp").?;
+    try bgp_section.put(std.heap.page_allocator, "enabled", "true");
+    try bgp_section.put(std.heap.page_allocator, "local_address", "10.0.0.1");
+    try bgp_section.put(std.heap.page_allocator, "router_id", "10.0.0.1");
+    try bgp_section.put(std.heap.page_allocator, "local_as", "65001");
+    try bgp_section.put(std.heap.page_allocator, "peer_address", "10.0.0.2");
+    try bgp_section.put(std.heap.page_allocator, "peer_as", "65002");
+    try bgp_section.put(std.heap.page_allocator, "advertised_prefixes", "");
+    const cfg = try config_parse.parseBgpConfig(&raw);
+    try std.testing.expect(cfg.enabled);
+    // Empty string should be stored as-is (not rejected)
+    try std.testing.expectEqualStrings("", cfg.advertised_prefixes_raw);
+}
+
+// REGRESSION: parseBgpConfig accepts advertised_prefixes whitespace-only.
+// getString() trims whitespace, so "   " becomes "" - which is still valid (zero prefixes).
+test "REGRESSION: parseBgpConfig accepts advertised_prefixes whitespace-only" {
+    var raw = config.RawConfig{};
+    defer raw.deinit(std.heap.page_allocator);
+    try raw.put(std.heap.page_allocator, "bgp", .{});
+    const bgp_section = raw.getPtr("bgp").?;
+    try bgp_section.put(std.heap.page_allocator, "enabled", "true");
+    try bgp_section.put(std.heap.page_allocator, "local_address", "10.0.0.1");
+    try bgp_section.put(std.heap.page_allocator, "router_id", "10.0.0.1");
+    try bgp_section.put(std.heap.page_allocator, "local_as", "65001");
+    try bgp_section.put(std.heap.page_allocator, "peer_address", "10.0.0.2");
+    try bgp_section.put(std.heap.page_allocator, "peer_as", "65002");
+    try bgp_section.put(std.heap.page_allocator, "advertised_prefixes", "   ");
+    const cfg = try config_parse.parseBgpConfig(&raw);
+    try std.testing.expect(cfg.enabled);
+    // getString trims whitespace, so "   " becomes "" - zero prefixes is valid
+    try std.testing.expectEqualStrings("", cfg.advertised_prefixes_raw);
+}
+
 // Concrete TransportError messages preserved through runSessionOnce().
 const FailingFakeTransport = struct {
     const Self = @This();
