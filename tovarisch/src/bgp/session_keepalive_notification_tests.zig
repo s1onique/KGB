@@ -302,7 +302,7 @@ test "status established zero prefixes remains ok" {
 
     try std.testing.expectEqual(session.RunResult.established, result);
     try std.testing.expectEqual(session.SessionState.established, sess.status.state);
-    try std.testing.expectEqual(@as(usize, 0), sess.status.advertised_prefix_count);
+    try std.testing.expectEqual(@as(usize, 0), sess.status.configured_prefix_count);
 
     // Session should remain established even with zero prefixes
     _ = try session.runOnce(&sess);

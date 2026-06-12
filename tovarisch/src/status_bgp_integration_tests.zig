@@ -43,7 +43,9 @@ test "getBgpCheck returns ok for configured with prefixes" {
     var scratch: [64]u8 = undefined;
     const check = status.getBgpCheck(.{
         .configured = .{
-            .advertised_prefix_count = 2,
+            .configured_prefix_count = 2,
+            .updates_sent = 1,
+            .nlri_sent_count = 2,
             .fsm_state = "established",
             .peer_address = .{ 10, 0, 0, 2 },
             .peer_as = 65002,
@@ -59,14 +61,16 @@ test "getBgpCheck returns ok for configured with prefixes" {
     }, &scratch);
     try std.testing.expectEqualStrings("bgp", check.name);
     try std.testing.expect(check.status == .ok);
-    try std.testing.expect(std.mem.containsAtLeast(u8, check.detail, 1, "2 advertised prefixes"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, check.detail, 1, "2 configured prefixes"));
 }
 
 test "getBgpCheck returns warn for configured with zero prefixes" {
     var scratch: [64]u8 = undefined;
     const check = status.getBgpCheck(.{
         .configured = .{
-            .advertised_prefix_count = 0,
+            .configured_prefix_count = 0,
+            .updates_sent = 0,
+            .nlri_sent_count = 0,
             .fsm_state = "idle",
             .peer_address = .{ 10, 0, 0, 2 },
             .peer_as = 65002,
@@ -82,7 +86,7 @@ test "getBgpCheck returns warn for configured with zero prefixes" {
     }, &scratch);
     try std.testing.expectEqualStrings("bgp", check.name);
     try std.testing.expect(check.status == .warn);
-    try std.testing.expectEqualStrings("BGP configured with no advertised prefixes", check.detail);
+    try std.testing.expectEqualStrings("BGP configured with no configured prefixes", check.detail);
 }
 
 test "getBgpCheck returns error for failed state" {
@@ -131,7 +135,9 @@ test "REGRESSION: getBgpCheck with established FSM and zero prefixes returns ok"
     // Create a BgpStatusState with established FSM but zero prefixes
     const bgp_state = bgp_status.BgpStatusState{
         .configured = .{
-            .advertised_prefix_count = 0,
+            .configured_prefix_count = 0,
+            .updates_sent = 0,
+            .nlri_sent_count = 0,
             .fsm_state = "established",
             .peer_address = .{ 10, 0, 0, 2 },
             .peer_as = 65002,

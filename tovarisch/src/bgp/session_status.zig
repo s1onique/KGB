@@ -47,14 +47,16 @@ pub const SessionStatus = struct {
     local_as: u16,
     /// Our router ID
     router_id: [4]u8,
-    /// Number of prefixes currently advertised
-    advertised_prefix_count: usize,
+    /// Number of prefixes configured for advertisement
+    configured_prefix_count: usize,
     /// Total BGP messages sent
     messages_sent: u64,
     /// Total BGP messages received
     messages_received: u64,
-    /// Number of UPDATE messages sent
+    /// Number of UPDATE messages sent (actual exports)
     updates_sent: u64,
+    /// Total prefixes encoded into UPDATE NLRI across this session/export run
+    nlri_sent_count: usize,
     /// Number of KEEPALIVE messages sent
     keepalives_sent: u64,
     /// Number of KEEPALIVE messages received
@@ -68,17 +70,18 @@ pub const SessionStatus = struct {
 };
 
 /// Create an initial SessionStatus in the idle state.
-pub fn initStatus(peer_addr: [4]u8, local_as: u16, peer_as: u16, router_id: [4]u8, advertised_prefix_count: usize) SessionStatus {
+pub fn initStatus(peer_addr: [4]u8, local_as: u16, peer_as: u16, router_id: [4]u8, configured_prefix_count: usize) SessionStatus {
     return SessionStatus{
         .state = .idle,
         .peer_address = peer_addr,
         .peer_as = peer_as,
         .local_as = local_as,
         .router_id = router_id,
-        .advertised_prefix_count = advertised_prefix_count,
+        .configured_prefix_count = configured_prefix_count,
         .messages_sent = 0,
         .messages_received = 0,
         .updates_sent = 0,
+        .nlri_sent_count = 0,
         .keepalives_sent = 0,
         .keepalives_received = 0,
         .last_error = null,
@@ -117,7 +120,8 @@ test "initStatus creates idle session" {
 test "SessionStatus has expected fields" {
     const status = initStatus(.{ 127, 0, 0, 1 }, 100, 200, .{ 127, 0, 0, 1 }, 0);
     // Verify all fields are present and initialized correctly
-    try std.testing.expect(status.advertised_prefix_count == 0);
+    try std.testing.expect(status.configured_prefix_count == 0);
+    try std.testing.expect(status.nlri_sent_count == 0);
     try std.testing.expect(status.last_notification_code == null);
     try std.testing.expect(status.last_notification_subcode == null);
 }

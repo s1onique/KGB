@@ -113,7 +113,7 @@ test "FakeTransport returns responses in order" {
 
 // === Session Counters Tests ===
 
-test "advertised_prefix_count is set on init" {
+test "configured_prefix_count is set on init" {
     const prefixes = &.{
         types.Ipv4Prefix.init("10.0.0.0/8"),
         types.Ipv4Prefix.init("192.168.0.0/16"),
@@ -134,7 +134,7 @@ test "advertised_prefix_count is set on init" {
     var fake = try session.FakeTransport.init(std.testing.allocator, &.{});
     defer fake.deinit();
     const sess = try session.init(config, &fake.toTransport());
-    try std.testing.expectEqual(@as(usize, 2), sess.status.advertised_prefix_count);
+    try std.testing.expectEqual(@as(usize, 2), sess.status.configured_prefix_count);
 }
 
 // === Session Core Tests ===

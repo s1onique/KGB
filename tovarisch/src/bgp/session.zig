@@ -67,6 +67,24 @@ pub const SessionErrorKind = error{
     HoldTimerExpired,
 };
 
+// ============================================================================
+// UPDATE Batching Constants
+// ============================================================================
+
+/// Maximum BGP message size (RFC 4271 Section 4.1)
+pub const MAX_BGP_MESSAGE_SIZE: usize = 4096;
+
+/// Maximum NLRI bytes available per UPDATE after header and path attributes.
+/// Header: 19 (marker+len+type), Withdrawn: 2, Path attrs: ~18 (ORIGIN+AS_PATH+NEXT_HOP)
+const MAX_UPDATE_BODY_SIZE: usize = MAX_BGP_MESSAGE_SIZE - 19 - 2 - 18;
+
+/// Maximum bytes per NLRI prefix entry (length byte + up to 4 bytes for IPv4)
+const NLRI_PREFIX_MAX_BYTES: usize = 5;
+
+/// Conservative max prefixes per UPDATE to stay within message size limits.
+/// This allows for /8 prefixes (2 bytes) up to /32 prefixes (5 bytes).
+pub const MAX_PREFIXES_PER_UPDATE: usize = MAX_UPDATE_BODY_SIZE / NLRI_PREFIX_MAX_BYTES;
+
 pub const RunResult = enum {
     ok,
     established,
@@ -94,6 +112,13 @@ pub const Session = struct {
     pending_keepalive: bool,
     pending_keepalive_ms: u64, // Session-owned timestamp for keepalive scheduling
     notification_detail_buf: [64]u8, // Session-owned storage for NOTIFICATION error detail
+
+    // UPDATE batching state
+    export_batch_index: usize = 0, // Current batch start index in prefixes array
+    export_complete: bool = false, // All prefixes have been exported
+
+    // Statistics tracking
+    nlri_sent_count: usize = 0, // Total prefixes encoded across all batches
 };
 
 pub fn validateConfig(config: SessionConfig) SessionErrorKind!void {
@@ -126,6 +151,7 @@ pub fn initWithClock(config: SessionConfig, trans: *const Transport, c: Clock) S
         .pending_keepalive = false,
         .pending_keepalive_ms = 0,
         .notification_detail_buf = undefined,
+        .nlri_sent_count = 0,
     };
 }
 
@@ -308,6 +334,8 @@ pub fn runOnce(sess: *Session) SessionErrorKind!RunResult {
             return .ok;
         },
         .open_sent, .open_confirm, .established => {
+            // Track pending UPDATE for counter increment after flush
+            var pending_update: ?struct { prefixes: usize, batch_end: usize } = null;
             if (sess.status.state == .established) {
                 const step_result = stepEstablished(sess);
                 switch (step_result) {
@@ -343,20 +371,30 @@ pub fn runOnce(sess: *Session) SessionErrorKind!RunResult {
                     },
                     .ok => {},
                 }
-                if (sess.config.prefixes.len > 0 and sess.send_pos == 0) {
+                // Send UPDATE batches when established and export not complete
+                if (sess.config.prefixes.len > 0 and sess.send_pos == 0 and !sess.export_complete) {
                     const next_hop = sess.config.local_address orelse sess.config.router_id;
+
+                    // Calculate batch bounds
+                    const batch_start = sess.export_batch_index;
+                    const batch_end = @min(batch_start + MAX_PREFIXES_PER_UPDATE, sess.config.prefixes.len);
+                    const batch = sess.config.prefixes[batch_start..batch_end];
+
                     sess.send_pos = message.encodeUpdate(types.UpdateParams{
                         .next_hop = next_hop,
                         .local_as = sess.config.local_as,
                         .same_as = sess.config.same_as,
-                        .prefixes = sess.config.prefixes,
+                        .prefixes = batch,
                     }, &sess.send_buf);
+
                     if (sess.send_pos > 0) {
-                        sess.status.updates_sent += 1;
+                        // Mark UPDATE as pending; track batch info for counter increment after flush
+                        pending_update = .{ .prefixes = batch.len, .batch_end = batch_end };
                         sess.status.messages_sent += 1;
                     }
                 }
             }
+            // Flush any pending message (OPEN, KEEPALIVE, UPDATE, etc.)
             flushSend(sess) catch |err| {
                 sess.status.state = .failed;
                 sess.status.last_error = SessionError{
@@ -376,6 +414,16 @@ pub fn runOnce(sess: *Session) SessionErrorKind!RunResult {
                 };
                 return SessionErrorKind.IoError;
             };
+            // Increment "sent" counters only after successful flush
+            if (pending_update) |update| {
+                sess.status.updates_sent += 1;
+                sess.nlri_sent_count += update.prefixes;
+                sess.status.nlri_sent_count = sess.nlri_sent_count; // Sync to status
+                sess.export_batch_index = update.batch_end;
+                if (update.batch_end >= sess.config.prefixes.len) {
+                    sess.export_complete = true;
+                }
+            }
             recvIntoBuffer(sess);
             while (tryDecodeFrame(sess)) |frame| {
                 const msg_result = handleMessage(sess, frame) catch |err| {

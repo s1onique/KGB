@@ -140,7 +140,9 @@ test "repeated BFD renders with partial peers don't corrupt previous output" {
 test "buildBgpCheckInto uses caller-owned buffer for configured case" {
     const state = bgp_status.BgpStatusState{
         .configured = .{
-            .advertised_prefix_count = 3,
+            .configured_prefix_count = 3,
+            .updates_sent = 1,
+            .nlri_sent_count = 3,
             .fsm_state = "established",
             .peer_address = .{ 10, 0, 0, 2 },
             .peer_as = 65002,
@@ -159,7 +161,7 @@ test "buildBgpCheckInto uses caller-owned buffer for configured case" {
     const check = bgp_status.buildBgpCheckInto(state, &caller_buf);
 
     try std.testing.expect(check.status == .ok);
-    try std.testing.expect(std.mem.containsAtLeast(u8, check.detail, 1, "3 advertised"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, check.detail, 1, "3 configured"));
     // CRITICAL: Verify detail points to our buffer
     try std.testing.expect(@intFromPtr(check.detail.ptr) == @intFromPtr(&caller_buf[0]));
 }
@@ -167,7 +169,9 @@ test "buildBgpCheckInto uses caller-owned buffer for configured case" {
 test "two BGP scratch buffers are independent (no aliasing)" {
     const state1 = bgp_status.BgpStatusState{
         .configured = .{
-            .advertised_prefix_count = 10,
+            .configured_prefix_count = 10,
+            .updates_sent = 0,
+            .nlri_sent_count = 0,
             .fsm_state = "open_sent",
             .peer_address = .{ 10, 0, 0, 2 },
             .peer_as = 65002,
@@ -183,7 +187,9 @@ test "two BGP scratch buffers are independent (no aliasing)" {
     };
     const state2 = bgp_status.BgpStatusState{
         .configured = .{
-            .advertised_prefix_count = 1,
+            .configured_prefix_count = 1,
+            .updates_sent = 0,
+            .nlri_sent_count = 0,
             .fsm_state = "established",
             .peer_address = .{ 10, 0, 0, 2 },
             .peer_as = 65002,
@@ -208,8 +214,8 @@ test "two BGP scratch buffers are independent (no aliasing)" {
     try std.testing.expect(@intFromPtr(check1.detail.ptr) != @intFromPtr(check2.detail.ptr));
 
     // Verify content is correct for each state
-    try std.testing.expect(std.mem.containsAtLeast(u8, check1.detail, 1, "10 advertised"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, check2.detail, 1, "1 advertised prefix"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, check1.detail, 1, "10 configured"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, check2.detail, 1, "1 configured prefix"));
 }
 
 // ============================================================================
@@ -272,7 +278,9 @@ test "two independent StatusScratch contexts don't alias" {
         status.getDefaultConfigCheck(),
         .{
             .configured = .{
-                .advertised_prefix_count = 5,
+                .configured_prefix_count = 5,
+                .updates_sent = 0,
+                .nlri_sent_count = 0,
                 .fsm_state = "established",
                 .peer_address = .{ 10, 0, 0, 2 },
                 .peer_as = 65002,
@@ -307,7 +315,7 @@ test "two independent StatusScratch contexts don't alias" {
 
     // Verify content is correct
     try std.testing.expectEqualStrings("BGP not configured", bgp_check1.?.detail);
-    try std.testing.expect(std.mem.containsAtLeast(u8, bgp_check2.?.detail, 1, "5 advertised"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, bgp_check2.?.detail, 1, "5 configured"));
 }
 
 test "repeated rendering with separate scratch is consistent" {

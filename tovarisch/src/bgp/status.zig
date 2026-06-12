@@ -44,7 +44,12 @@ pub const BgpStatusState = union(enum) {
     reconnect_wait: ReconnectWait,
 
     pub const Configured = struct {
-        advertised_prefix_count: usize,
+        /// Number of prefixes configured for advertisement
+        configured_prefix_count: usize,
+        /// Number of UPDATE messages sent (actual exports)
+        updates_sent: u64,
+        /// Total prefixes encoded into UPDATE NLRI across this session/export run
+        nlri_sent_count: usize,
         fsm_state: []const u8,
         peer_address: [4]u8,
         peer_as: u16,
@@ -96,24 +101,24 @@ pub fn buildBgpCheckInto(
             if (std.mem.eql(u8, cfg.fsm_state, "established")) {
                 // Established FSM always outranks zero-prefix warning.
                 // Live BGP connectivity is more important than prefix advertisement.
-                if (cfg.advertised_prefix_count > 0) {
-                    const prefix_label = if (cfg.advertised_prefix_count == 1) "prefix" else "prefixes";
-                    const detail = std.fmt.bufPrint(detail_buf, "BGP established; {d} advertised {s}", .{
-                        cfg.advertised_prefix_count, prefix_label,
+                if (cfg.configured_prefix_count > 0) {
+                    const prefix_label = if (cfg.configured_prefix_count == 1) "prefix" else "prefixes";
+                    const detail = std.fmt.bufPrint(detail_buf, "BGP established; {d} configured {s}", .{
+                        cfg.configured_prefix_count, prefix_label,
                     }) catch {
                         return .{ .name = "bgp", .status = .ok, .detail = "BGP established" };
                     };
                     return .{ .name = "bgp", .status = .ok, .detail = detail };
                 }
                 return .{ .name = "bgp", .status = .ok, .detail = "BGP established" };
-            } else if (cfg.advertised_prefix_count == 0) {
+            } else if (cfg.configured_prefix_count == 0) {
                 // Zero-prefix warning only applies when BGP is NOT established.
-                return .{ .name = "bgp", .status = .warn, .detail = "BGP configured with no advertised prefixes" };
+                return .{ .name = "bgp", .status = .warn, .detail = "BGP configured with no configured prefixes" };
             }
 
-            const prefix_label = if (cfg.advertised_prefix_count == 1) "prefix" else "prefixes";
-            const detail = std.fmt.bufPrint(detail_buf, "BGP configured; {d} advertised {s}", .{
-                cfg.advertised_prefix_count, prefix_label,
+            const prefix_label = if (cfg.configured_prefix_count == 1) "prefix" else "prefixes";
+            const detail = std.fmt.bufPrint(detail_buf, "BGP configured; {d} configured {s}", .{
+                cfg.configured_prefix_count, prefix_label,
             }) catch {
                 return .{ .name = "bgp", .status = .ok, .detail = "BGP configured" };
             };
@@ -179,7 +184,9 @@ pub fn deriveStatusStateFromBundle(bundle: ?*serve_integration.BgpServeBundle) B
             }
 
             return .{ .configured = .{
-                .advertised_prefix_count = b.prefixes.len,
+                .configured_prefix_count = b.prefixes.len,
+                .updates_sent = sess_status.updates_sent,
+                .nlri_sent_count = sess_status.nlri_sent_count,
                 .fsm_state = fsm_state,
                 .peer_address = sess_status.peer_address,
                 .peer_as = sess_status.peer_as,
