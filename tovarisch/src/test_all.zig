@@ -197,3 +197,9 @@ test { std.testing.refAllDecls(@import("status_bgp_fsm_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/passive_listener_config_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/passive_listener_integration_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/passive_listener_serve_integration_tests.zig")); }
+
+// Same-AS/iBGP AS_PATH regression tests
+test { std.testing.refAllDecls(@import("bgp/same_as_regression_tests.zig")); }
+
+// Session config builder tests
+test { std.testing.refAllDecls(@import("bgp/session_config_builder.zig")); }

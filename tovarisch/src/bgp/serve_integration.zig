@@ -36,6 +36,7 @@ const clock = @import("clock.zig");
 const reconnect = @import("reconnect_lifecycle.zig");
 const prefix_file_loader = @import("prefix_file_loader.zig");
 const prefix_file = @import("prefix_file.zig");
+const session_config_builder = @import("session_config_builder.zig");
 const update_diagnostics = @import("update_diagnostics.zig");
 
 // Runtime state for BGP session including reconnect lifecycle.
@@ -126,24 +127,6 @@ pub fn loadConfigAndBgp(
         return .disabled;
     }
 
-    const local_addr = config_parse.parseIpv4Address(bgp_cfg.local_address) catch |e| {
-        stderr.print("error: invalid local_address '{s}': {s}\n", .{ bgp_cfg.local_address, @errorName(e) }) catch {};
-        raw.deinit(std.heap.page_allocator);
-        return .{ .failed = .{ .message = "invalid local_address" } };
-    };
-
-    const router_addr = config_parse.parseIpv4Address(bgp_cfg.router_id) catch |e| {
-        stderr.print("error: invalid router_id '{s}': {s}\n", .{ bgp_cfg.router_id, @errorName(e) }) catch {};
-        raw.deinit(std.heap.page_allocator);
-        return .{ .failed = .{ .message = "invalid router_id" } };
-    };
-
-    const peer_addr = config_parse.parseIpv4Address(bgp_cfg.peer_address) catch |e| {
-        stderr.print("error: invalid peer_address '{s}': {s}\n", .{ bgp_cfg.peer_address, @errorName(e) }) catch {};
-        raw.deinit(std.heap.page_allocator);
-        return .{ .failed = .{ .message = "invalid peer_address" } };
-    };
-
     var prefixes = std.ArrayList(types.Ipv4Prefix).empty;
     errdefer prefixes.deinit(allocator);
 
@@ -209,19 +192,11 @@ pub fn loadConfigAndBgp(
         }
     }
 
-
-    const session_config = session.SessionConfig{
-        .peer_address = peer_addr,
-        .peer_port = bgp_cfg.peer_port,
-        .local_address = local_addr,
-        .local_as = bgp_cfg.local_as,
-        .peer_as = bgp_cfg.peer_as,
-        .router_id = router_addr,
-        .hold_time_seconds = bgp_cfg.hold_time_seconds,
-        .keepalive_seconds = bgp_cfg.keepalive_seconds,
-        .connect_timeout_ms = bgp_cfg.connect_timeout_ms,
-        .prefixes = prefixes.items,
-        .same_as = bgp_cfg.same_as,
+    const session_config = session_config_builder.buildSessionConfig(bgp_cfg, prefixes.items) catch |e| {
+        stderr.print("error: failed to build BGP session config: {s}\n", .{@errorName(e)}) catch {};
+        prefixes.deinit(allocator);
+        raw.deinit(std.heap.page_allocator);
+        return .{ .failed = .{ .message = "failed to build BGP session config" } };
     };
 
     session.validateConfig(session_config) catch |e| {
@@ -232,9 +207,9 @@ pub fn loadConfigAndBgp(
     };
 
     const tcp_config = tcp_transport.TcpTransportConfig{
-        .peer_address = peer_addr,
+        .peer_address = session_config.peer_address,
         .peer_port = bgp_cfg.peer_port,
-        .local_address = local_addr,
+        .local_address = session_config.local_address,
         .connect_timeout_ms = bgp_cfg.connect_timeout_ms,
     };
     var tcp = tcp_transport.TcpTransport.connect(tcp_config) catch |e| {
