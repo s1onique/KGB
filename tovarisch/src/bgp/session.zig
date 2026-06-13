@@ -112,13 +112,10 @@ pub const Session = struct {
     pending_keepalive: bool,
     pending_keepalive_ms: u64, // Session-owned timestamp for keepalive scheduling
     notification_detail_buf: [64]u8, // Session-owned storage for NOTIFICATION error detail
-
-    // UPDATE batching state
     export_batch_index: usize = 0, // Current batch start index in prefixes array
     export_complete: bool = false, // All prefixes have been exported
-
-    // Statistics tracking
     nlri_sent_count: usize = 0, // Total prefixes encoded across all batches
+    outgoing_update_log_count: usize = 0, // Runtime: log first 5 UPDATE frames
 };
 
 pub fn validateConfig(config: SessionConfig) SessionErrorKind!void {
@@ -334,7 +331,6 @@ pub fn runOnce(sess: *Session) SessionErrorKind!RunResult {
             return .ok;
         },
         .open_sent, .open_confirm, .established => {
-            // Track pending UPDATE for counter increment after flush
             var pending_update: ?struct { prefixes: usize, batch_end: usize } = null;
             if (sess.status.state == .established) {
                 const step_result = stepEstablished(sess);
@@ -371,30 +367,35 @@ pub fn runOnce(sess: *Session) SessionErrorKind!RunResult {
                     },
                     .ok => {},
                 }
-                // Send UPDATE batches when established and export not complete
                 if (sess.config.prefixes.len > 0 and sess.send_pos == 0 and !sess.export_complete) {
                     const next_hop = sess.config.local_address orelse sess.config.router_id;
-
-                    // Calculate batch bounds
                     const batch_start = sess.export_batch_index;
                     const batch_end = @min(batch_start + MAX_PREFIXES_PER_UPDATE, sess.config.prefixes.len);
                     const batch = sess.config.prefixes[batch_start..batch_end];
-
                     sess.send_pos = message.encodeUpdate(types.UpdateParams{
                         .next_hop = next_hop,
                         .local_as = sess.config.local_as,
                         .same_as = sess.config.same_as,
                         .prefixes = batch,
                     }, &sess.send_buf);
-
                     if (sess.send_pos > 0) {
-                        // Mark UPDATE as pending; track batch info for counter increment after flush
                         pending_update = .{ .prefixes = batch.len, .batch_end = batch_end };
                         sess.status.messages_sent += 1;
+                        if (sess.outgoing_update_log_count < 5) {
+                            if (frame_decode.decodeFrame(sess.send_buf[0..sess.send_pos])) |frame| {
+                                if (frame_decode.isUpdate(frame)) {
+                                    if (frame_decode.parseUpdateBody(frame)) |ub| {
+                                        std.log.info("bgp outgoing update: len={d} withdrawn_len={d} attrs_len={d} nlri_prefixes={d} nlri_bytes={d} batch_end={d} configured={d}", .{
+                                            ub.total_length, ub.withdrawn_routes_length, ub.path_attributes_length, ub.nlri_prefix_count, ub.nlri_byte_count, batch_end, sess.config.prefixes.len,
+                                        });
+                                        sess.outgoing_update_log_count += 1;
+                                    } else std.log.err("bgp outgoing update: failed to parse encoded UPDATE before flush", .{});
+                                }
+                            } else |err| std.log.err("bgp outgoing update: failed to decode frame: {any}", .{err});
+                        }
                     }
                 }
             }
-            // Flush any pending message (OPEN, KEEPALIVE, UPDATE, etc.)
             flushSend(sess) catch |err| {
                 sess.status.state = .failed;
                 sess.status.last_error = SessionError{
@@ -414,7 +415,6 @@ pub fn runOnce(sess: *Session) SessionErrorKind!RunResult {
                 };
                 return SessionErrorKind.IoError;
             };
-            // Increment "sent" counters only after successful flush
             if (pending_update) |update| {
                 sess.status.updates_sent += 1;
                 sess.nlri_sent_count += update.prefixes;
