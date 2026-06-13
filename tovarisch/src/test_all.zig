@@ -152,6 +152,8 @@ test { std.testing.refAllDecls(@import("bgp/session_handshake_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_keepalive_basic_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_keepalive_notification_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_keepalive_advanced_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/session_update_capture_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/update_frame_decode_tests.zig")); }
 
 // BGP TCP transport tests
 test { std.testing.refAllDecls(@import("bgp/tcp_transport.zig")); }

@@ -175,6 +175,76 @@ pub fn isNotification(frame: Frame) bool {
     return frame.msg_type == .notification;
 }
 
+/// Decoded UPDATE message body metadata.
+/// Used for structural validation of sent UPDATE frames.
+pub const UpdateBody = struct {
+    /// withdrawn_routes_length (MUST be 0 for route announcements)
+    withdrawn_routes_length: u16,
+    /// total_path_attributes_length (MUST be > 0)
+    path_attributes_length: u16,
+    /// Number of NLRI prefixes detected
+    nlri_prefix_count: usize,
+    /// Total NLRI bytes (after path attributes)
+    nlri_byte_count: usize,
+    /// Full message length
+    total_length: u16,
+};
+
+/// Decode an UPDATE frame's body metadata.
+/// Returns UpdateBody with key structural fields for validation.
+/// 
+/// This decodes the UPDATE wire format per RFC 4271 Section 4.3:
+///   - withdrawn_routes_length (2 bytes)
+///   - path_attributes_length (2 bytes)
+///   - path attributes (variable)
+///   - NLRI prefixes (variable, no length byte per RFC 4271)
+///
+/// Used for test verification and debug instrumentation.
+pub fn parseUpdateBody(frame: Frame) ?UpdateBody {
+    const body = frame.body;
+    if (body.len < 4) return null; // Need at least 2+2 bytes for withdrawn_len + attrs_len
+
+    // Withdrawn routes length (bytes 0-1, big-endian)
+    const withdrawn_len = @as(u16, body[0]) * 256 + @as(u16, body[1]);
+
+    // Path attributes length (bytes 2-3, big-endian)
+    const attrs_len = @as(u16, body[2]) * 256 + @as(u16, body[3]);
+
+    // NLRI starts after the fixed fields and path attributes in the body:
+    // body = [withdrawn_len(2) + withdrawn_routes(withdrawn_len) + attrs_len(2) + path_attrs(attrs_len) + NLRI]
+    // The fixed header (19 bytes) is already excluded from body.
+    // NLRI offset within body = 2 (withdrawn_len field) + withdrawn_len + 2 (attrs_len field) + attrs_len
+    const nlri_start_in_body = 2 + withdrawn_len + 2 + attrs_len;
+    if (body.len < 4 + withdrawn_len + attrs_len) return null;
+    if (body.len < nlri_start_in_body) return null;
+
+    // Count NLRI prefixes
+    var nlri_offset = nlri_start_in_body;
+    var prefix_count: usize = 0;
+    var nlri_bytes: usize = 0;
+    while (nlri_offset < body.len) {
+        const prefix_len_bits = body[nlri_offset];
+        nlri_offset += 1; // Skip length byte
+        
+        if (prefix_len_bits == 0) break; // Safety: no more prefixes
+        
+        const prefix_len_bytes = (prefix_len_bits + 7) / 8;
+        if (nlri_offset + prefix_len_bytes > body.len) break;
+        
+        nlri_offset += prefix_len_bytes;
+        prefix_count += 1;
+        nlri_bytes += 1 + prefix_len_bytes;
+    }
+
+    return UpdateBody{
+        .withdrawn_routes_length = withdrawn_len,
+        .path_attributes_length = attrs_len,
+        .nlri_prefix_count = prefix_count,
+        .nlri_byte_count = nlri_bytes,
+        .total_length = frame.length,
+    };
+}
+
 // === Tests ===
 
 test "Frame rejects bad marker" {
@@ -305,3 +375,6 @@ test "isUpdate and isNotification work correctly" {
     try std.testing.expect(!isUpdate(frame));
     try std.testing.expect(isNotification(frame));
 }
+
+// Note: UPDATE-specific decode tests have been moved to update_frame_decode_tests.zig
+// to satisfy LLM-friendliness line limits.
