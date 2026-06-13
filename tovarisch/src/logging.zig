@@ -48,6 +48,12 @@ pub const Event = enum(u8) {
     bgp_notification,
     /// BGP session failed or error.
     bgp_error,
+    /// BGP outgoing UPDATE frame logged (info-level diagnostic).
+    bgp_outgoing_update,
+    /// BGP failed to parse encoded UPDATE before flush.
+    bgp_outgoing_update_parse_failed,
+    /// BGP failed to decode frame.
+    bgp_outgoing_update_decode_failed,
 };
 
 /// Get the log level string for a given event.
@@ -65,14 +71,17 @@ fn levelFor(event: Event) []const u8 {
         .bgp_open_sent,
         .bgp_open_received,
         .bgp_keepalive_sent,
-        .bgp_established => "info",
+        .bgp_established,
+        .bgp_outgoing_update => "info",
 
         .bgp_notification,
         .bgp_error,
         .http_accept_loop_error,
         .server_error,
         .heartbeat_init_failed,
-        .heartbeat_thread_start_failed => "error",
+        .heartbeat_thread_start_failed,
+        .bgp_outgoing_update_parse_failed,
+        .bgp_outgoing_update_decode_failed => "error",
     };
 }
 

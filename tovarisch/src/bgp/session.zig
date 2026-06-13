@@ -12,6 +12,7 @@ const transport = @import("transport.zig");
 const clock = @import("clock.zig");
 const notification_decode = @import("notification_decode.zig");
 const timers = @import("session_timers.zig");
+const diagnostics = @import("session_diagnostics.zig");
 
 // Re-export types for convenience
 pub const SessionState = timers.SessionState;
@@ -36,6 +37,10 @@ pub const TransportError = transport.TransportError;
 pub const formatNotification = timers.formatNotification;
 pub const getErrorCodeName = timers.getErrorCodeName;
 pub const getErrorSubcodeName = timers.getErrorSubcodeName;
+
+// Re-export diagnostics types
+pub const UpdateInfo = diagnostics.UpdateInfo;
+pub const UpdateDiagnostic = diagnostics.UpdateDiagnostic;
 
 // ============================================================================
 // Session Configuration and Errors
@@ -115,7 +120,7 @@ pub const Session = struct {
     export_batch_index: usize = 0, // Current batch start index in prefixes array
     export_complete: bool = false, // All prefixes have been exported
     nlri_sent_count: usize = 0, // Total prefixes encoded across all batches
-    outgoing_update_log_count: usize = 0, // Runtime: log first 5 UPDATE frames
+    last_update_diagnostic: UpdateDiagnostic = .none, // Captured before flush for structured logging
 };
 
 pub fn validateConfig(config: SessionConfig) SessionErrorKind!void {
@@ -250,12 +255,20 @@ fn handleMessage(sess: *Session, frame: frame_decode.Frame) SessionErrorKind!Run
             if (frame_decode.isOpen(frame)) {
                 const open_body = frame_decode.parseOpenBody(frame.body) catch {
                     sess.status.state = .failed;
-                    sess.status.last_error = SessionError{ .message = "malformed OPEN", .notification_code = null, .notification_subcode = null };
+                    sess.status.last_error = SessionError{
+                        .message = "malformed OPEN",
+                        .notification_code = null,
+                        .notification_subcode = null,
+                    };
                     return SessionErrorKind.DecodeError;
                 };
                 if (open_body.peer_as != sess.config.peer_as) {
                     sess.status.state = .failed;
-                    sess.status.last_error = SessionError{ .message = "peer AS mismatch", .notification_code = null, .notification_subcode = null };
+                    sess.status.last_error = SessionError{
+                        .message = "peer AS mismatch",
+                        .notification_code = null,
+                        .notification_subcode = null,
+                    };
                     return SessionErrorKind.InvalidFrame;
                 }
                 sess.peer_open = open_body;
@@ -286,9 +299,6 @@ fn handleMessage(sess: *Session, frame: frame_decode.Frame) SessionErrorKind!Run
             resetHoldTimer(sess);
             if (frame_decode.isKeepalive(frame)) {
                 sess.status.keepalives_received += 1;
-                return .ok;
-            } else if (frame_decode.isUpdate(frame)) {
-                return .ok;
             } else if (frame_decode.isNotification(frame)) {
                 timers.handleNotificationError(frame, &sess.status, &sess.notification_detail_buf) catch return RunResult.failed;
                 return RunResult.failed;
@@ -332,6 +342,7 @@ pub fn runOnce(sess: *Session) SessionErrorKind!RunResult {
         },
         .open_sent, .open_confirm, .established => {
             var pending_update: ?struct { prefixes: usize, batch_end: usize } = null;
+            sess.last_update_diagnostic = .none;
             if (sess.status.state == .established) {
                 const step_result = stepEstablished(sess);
                 switch (step_result) {
@@ -381,18 +392,8 @@ pub fn runOnce(sess: *Session) SessionErrorKind!RunResult {
                     if (sess.send_pos > 0) {
                         pending_update = .{ .prefixes = batch.len, .batch_end = batch_end };
                         sess.status.messages_sent += 1;
-                        if (sess.outgoing_update_log_count < 5) {
-                            if (frame_decode.decodeFrame(sess.send_buf[0..sess.send_pos])) |frame| {
-                                if (frame_decode.isUpdate(frame)) {
-                                    if (frame_decode.parseUpdateBody(frame)) |ub| {
-                                        std.log.info("bgp outgoing update: len={d} withdrawn_len={d} attrs_len={d} nlri_prefixes={d} nlri_bytes={d} batch_end={d} configured={d}", .{
-                                            ub.total_length, ub.withdrawn_routes_length, ub.path_attributes_length, ub.nlri_prefix_count, ub.nlri_byte_count, batch_end, sess.config.prefixes.len,
-                                        });
-                                        sess.outgoing_update_log_count += 1;
-                                    } else std.log.err("bgp outgoing update: failed to parse encoded UPDATE before flush", .{});
-                                }
-                            } else |err| std.log.err("bgp outgoing update: failed to decode frame: {any}", .{err});
-                        }
+                        // Capture UpdateDiagnostic before flush for structured logging
+                        diagnostics.captureUpdateDiagnostic(sess, &sess.send_buf, sess.send_pos, batch_end, sess.config.prefixes.len);
                     }
                 }
             }

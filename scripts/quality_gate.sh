@@ -201,5 +201,9 @@ echo "[gate] checking structured logs"
 
 ./scripts/verify_structured_logs.sh
 
+echo "[gate] checking plaintext logging policy"
+
+./scripts/verify_plaintext_logs.sh
+
 echo ""
 echo "[gate] PASS"

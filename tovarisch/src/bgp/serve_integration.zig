@@ -32,11 +32,11 @@ const tcp_transport = @import("tcp_transport.zig");
 const transport = @import("transport.zig");
 const passive_listener = @import("passive_listener.zig");
 const passive_listener_integration = @import("passive_listener_integration.zig");
-const logging = @import("../logging.zig");
 const clock = @import("clock.zig");
 const reconnect = @import("reconnect_lifecycle.zig");
 const prefix_file_loader = @import("prefix_file_loader.zig");
 const prefix_file = @import("prefix_file.zig");
+const update_diagnostics = @import("update_diagnostics.zig");
 
 // Runtime state for BGP session including reconnect lifecycle.
 pub const BgpRuntimeState = enum {
@@ -339,6 +339,9 @@ pub fn runSessionOnce(bundle: *BgpServeBundle) session.RunResult {
         bundle.state = .failed;
         return .failed;
     };
+
+    // Log UPDATE using session.last_update_info captured before flush
+    update_diagnostics.logUpdateFromSession(&bundle.sess);
 
     switch (result) {
         .established => bundle.state = .configured,
