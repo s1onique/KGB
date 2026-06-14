@@ -108,6 +108,7 @@ echo "[gate] checking forbidden generic naming"
 status=0
 timeout 15s git grep -n -i -E 'kgb-agent|KGB agent' -- . \
   ':(exclude)scripts/quality_gate.sh' \
+  ':(exclude)scripts/audit_repo_health.sh' \
   ':(exclude).clinerules/' || status=$?
 
 if [[ "$status" -eq 1 ]]; then

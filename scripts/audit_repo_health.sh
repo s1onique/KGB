@@ -125,7 +125,12 @@ FORBIDDEN_PATTERNS=(
 
 NAMING_VIOLATIONS=0
 for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
-    COUNT=$(grep -r --include='*.md' --include='*.zig' --include='*.sh' -l "${pattern}" . 2>/dev/null | wc -l || true)
+    # Exclude audit infrastructure files - they define the forbidden patterns, so they must contain them.
+    # Excludes: audit_repo_health.sh, quality_gate.sh, .clinerules/
+    COUNT=$(grep -r --include='*.md' --include='*.zig' --include='*.sh' -l "${pattern}" . 2>/dev/null | \
+        grep -v 'scripts/audit_repo_health.sh' | \
+        grep -v 'scripts/quality_gate.sh' | \
+        grep -v '\.clinerules/' | wc -l || true)
     if [[ "${COUNT}" -gt 0 ]]; then
         log_find "WARN" "Found '${pattern}' in ${COUNT} files (should use 'tovarisch' or 'leaf')"
         NAMING_VIOLATIONS=$((NAMING_VIOLATIONS + COUNT))
