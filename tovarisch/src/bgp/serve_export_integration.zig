@@ -61,7 +61,7 @@ pub fn initPrefixWatcher(
         // Access the underlying linux state to add watches
         const linux_state = @as(*linux_watch.State, @ptrCast(@alignCast(watcher.state)));
         for (file_paths) |file_path| {
-            linux_state.addWatch(file_path) catch |e| {
+            linux_watch.addWatch(linux_state, file_path) catch |e| {
                 stderr.print("warning: failed to watch prefix file '{s}': {s}\n", .{
                     file_path,
                     @errorName(e),

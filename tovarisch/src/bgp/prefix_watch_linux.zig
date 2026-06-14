@@ -253,6 +253,11 @@ const vtable = prefix_watch.Watcher.WatcherVTable{
     .refreshWatch = refreshWatch,
 };
 
+/// Add a watch for a file path via the State wrapper.
+pub fn addWatch(state: *State, path: []const u8) !void {
+    _ = try state.state.addWatch(path);
+}
+
 /// Map inotify event mask to WatcherEvent.
 fn mapInotifyEvent(mask: u32) prefix_watch.WatcherEvent {
     const CLOSE_WRITE_MASK = 0x00000008;
