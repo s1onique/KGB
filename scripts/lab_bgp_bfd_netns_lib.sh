@@ -131,10 +131,12 @@ router id $BIRD_ROUTER_ID;
 
 # Control socket for lab-specific targeting
 protocol kernel {
+    ipv4 {
+        import none;
+        export all;
+    };
     learn;
     scan time 10;
-    import none;
-    export all;
 }
 
 # Device protocol
@@ -144,7 +146,7 @@ protocol device {
 
 # Static routes (for lab routes)
 protocol static {
-    # Lab static route placeholder
+    ipv4;
 }
 
 EOF
@@ -167,11 +169,10 @@ protocol bgp tovarisch {
     passive;
     enable extended messages;
 
-    # Import routes from tovarisch (if any advertised)
-    import all;
-
-    # Export our static routes
-    export where source = RTS_STATIC;
+    ipv4 {
+        import all;
+        export where source = RTS_STATIC;
+    };
 }
 
 EOF
