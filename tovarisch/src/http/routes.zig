@@ -144,7 +144,8 @@ pub fn handleMetrics(fd: i32, state: *anyopaque) !void {
         }
     }{ .buf = &buf, .len = &len };
 
-    // Use stateful metrics collection with sampler for rates
+    // MemoryOwnership: Transient allocation within HTTP request handler scope.
+    // All memory is released before the handler returns.
     ctx.metrics.renderMetricsPayload(std.heap.page_allocator, &writer, "/sys/class/net") catch {
         // Fallback: render warning payload
         len = 0;

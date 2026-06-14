@@ -162,6 +162,9 @@ fn emitHeartbeatToFd(uptime_seconds: u64) void {
 
     // Collect tunnel summary using the same interface enumeration as /metrics.json
     // This ensures heartbeat logs are consistent with metrics output.
+    //
+    // MemoryOwnership: Transient allocation within heartbeat emit cycle.
+    // Memory is released after JSON formatting completes.
     const tunnel_summary = collectTunnelSummary(std.heap.page_allocator, "/sys/class/net");
 
     // Format the heartbeat JSON into our own 4096-byte buffer

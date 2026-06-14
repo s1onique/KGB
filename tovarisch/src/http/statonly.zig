@@ -143,6 +143,8 @@ pub fn printCompactStatsWithRate(
     previous: ?PreviousSnapshots,
     sysfs_root: []const u8,
 ) !?PreviousSnapshots {
+    // MemoryOwnership: Transient allocation freed within same function scope.
+    // All memory is released via freeInterfaceStatsSnapshots() before function returns.
     const allocator = std.heap.page_allocator;
     const now_ms = statonlyNowMillis();
 
@@ -169,6 +171,9 @@ pub fn printCompactStatsWithRate(
         // Only include tunnel interfaces (wg*, tun*, tap*, sit*, ip6tnl*, gre*, ipip*)
         if (!interface_filter.isTunnelInterface(snap.name)) continue;
         // Make an owned copy of the name
+        // MemoryOwnership: dupe() allocates a heap copy owned by tunnel_ifaces.
+        // The ArrayList is deinit'd below if tunnel_ifaces is discarded;
+        // if toOwnedSlice succeeds, ownership transfers to PreviousSnapshots.
         const name_copy = try allocator.dupe(u8, snap.name);
         errdefer allocator.free(name_copy);
         try tunnel_ifaces.append(allocator, .{
@@ -187,6 +192,8 @@ pub fn printCompactStatsWithRate(
 
     // If we can't compute rates yet (first sample), collect silently and return
     if (!can_compute_rate) {
+        // MemoryOwnership: toOwnedSlice transfers ArrayList memory to PreviousSnapshots.
+        // Caller owns the returned snapshots and is responsible for freeing them.
         return PreviousSnapshots{
             .snapshots = try tunnel_ifaces.toOwnedSlice(allocator),
             .sampled_at_ms = now_ms,
@@ -234,6 +241,8 @@ pub fn printCompactStatsWithRate(
     try out_writer.writeAll("\n");
     try out_writer.flush();
 
+    // MemoryOwnership: toOwnedSlice transfers ArrayList memory to PreviousSnapshots.
+    // Caller owns the returned snapshots and is responsible for freeing them.
     return PreviousSnapshots{
         .snapshots = try tunnel_ifaces.toOwnedSlice(allocator),
         .sampled_at_ms = now_ms,
@@ -245,6 +254,7 @@ pub fn printCompactStatsWithRate(
 pub fn printCompactStats(out_writer: anytype) !void {
     const result = try printCompactStatsWithRate(out_writer, null, "/sys/class/net");
     if (result) |r| {
+        // MemoryOwnership: page_allocator matches allocator used in printCompactStatsWithRate
         linux_interface_stats.freeInterfaceStatsSnapshots(std.heap.page_allocator, r.snapshots);
     }
 }
@@ -284,6 +294,7 @@ pub fn serveStatonly(
 
             // Now safe to free old snapshots
             if (old_previous) |prev| {
+                // MemoryOwnership: page_allocator matches allocator used in printCompactStatsWithRate
                 linux_interface_stats.freeInterfaceStatsSnapshots(std.heap.page_allocator, prev.snapshots);
             }
 

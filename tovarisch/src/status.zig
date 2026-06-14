@@ -278,6 +278,9 @@ pub fn getLocalChecksWithBgp(
     scratch.checks[3] = getStateDirCheck();
     scratch.checks[4] = http_check;
     scratch.checks[5] = tunnel_check.getTunnelCheckDefault();
+    // MemoryOwnership: page_allocator is used to collect WireGuard diagnostics.
+    // The getWgPeersCheck() function deallocates via defer diag.deinit(allocator)
+    // before returning, so memory is released within the same call scope.
     scratch.checks[6] = status_checks.getWgPeersCheck(std.heap.page_allocator);
     scratch.checks[7] = getBfdCheck(bfd_runtime, &scratch.bfd_detail);
     scratch.checks[8] = getBgpCheck(bgp_state, &scratch.bgp_detail);

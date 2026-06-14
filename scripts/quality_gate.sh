@@ -16,6 +16,12 @@ fi
 echo "[gate] checking LLM-friendliness"
 ./scripts/check_llm_friendliness.sh
 
+echo "[gate] checking memory ownership hygiene in status/request paths"
+./scripts/check_memory_ownership.sh
+
+echo "[gate] checking memory ownership hygiene sentinel self-test"
+./scripts/check_memory_ownership.sh --self-test
+
 echo "[gate] checking final newlines"
 
 missing_newline=0

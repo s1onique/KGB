@@ -290,6 +290,9 @@ pub fn serveForeverWithContext(
     defer server.deinit();
 
     // Initialize serve context with full runtime inputs (BFD + config check + BGP bundle).
+    // MemoryOwnership: Startup-only one-time allocation at daemon init.
+    // The ServeContext allocator is used once at serve startup, not per-request.
+    // This is a single allocation that persists for daemon lifetime (acceptable).
     var serve_ctx = ServeContext.initWithContext(
         std.heap.page_allocator,
         inputs.bfd_runtime,
