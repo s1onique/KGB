@@ -175,6 +175,9 @@ test { std.testing.refAllDecls(@import("bgp/prefix_file_loader.zig")); }
 test { std.testing.refAllDecls(@import("bgp/prefix_file_integration_tests.zig")); }
 test { std.testing.refAllDecls(@import("cli/bgp_serve.zig")); }
 
+// BGP prefix file watcher tests (ACT: inotify watcher for BGP prefix files)
+test { std.testing.refAllDecls(@import("bgp/prefix_watch_tests.zig")); }
+
 // BGP status tests
 test { std.testing.refAllDecls(@import("bgp/status.zig")); }
 
