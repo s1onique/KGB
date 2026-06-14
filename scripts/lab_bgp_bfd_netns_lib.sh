@@ -132,14 +132,14 @@ router id $BIRD_ROUTER_ID;
 # Control socket for lab-specific targeting
 protocol kernel {
     learn;
-    scan 10;
+    scan time 10;
     import none;
     export all;
 }
 
 # Device protocol
 protocol device {
-    scan 10;
+    scan time 10;
 }
 
 # Static routes (for lab routes)
