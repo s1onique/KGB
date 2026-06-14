@@ -1,4 +1,4 @@
-// message.zig — BGP message frame encoding (KEEPALIVE, OPEN, UPDATE)
+// message.zig — BGP message frame encoding (KEEPALIVE, OPEN, UPDATE, WITHDRAW)
 //
 // ACT 1: Pure encoding only, no sockets or runtime behavior.
 // BGP message format per RFC 4271 Section 4.1:
@@ -6,6 +6,12 @@
 //   - 2-byte message length (big-endian)
 //   - 1-byte message type
 //   - message body (variable)
+//
+// For withdrawals, UPDATE format per RFC 4271 Section 4.3:
+//   - withdrawn_routes_length (2)
+//   - withdrawn routes (NLRI-encoded prefixes)
+//   - path_attributes_length (2) = 0 for withdrawal-only UPDATE
+//   - No NLRI field (prefixes are in withdrawn section)
 
 const std = @import("std");
 const types = @import("types.zig");
@@ -203,6 +209,72 @@ pub fn encodeUpdate(params: types.UpdateParams, buf: []u8) usize {
     return total_len;
 }
 
+/// Encode a BGP UPDATE withdrawal message into buf.
+/// Returns the number of bytes written, or 0 if buffer too small.
+///
+/// Withdrawal UPDATE format per RFC 4271 Section 4.3:
+///   - withdrawn_routes_length (2) = non-zero
+///   - withdrawn routes (NLRI-encoded prefixes in withdrawn section)
+///   - path_attributes_length (2) = 0
+///   - No NLRI field (prefixes are in withdrawn section only)
+pub fn encodeWithdraw(prefixes: []const types.Ipv4Prefix, buf: []u8) usize {
+    // Calculate withdrawn routes byte count (each prefix: length byte + prefix bytes)
+    const withdrawn_byte_count = blk: {
+        var total: usize = 0;
+        for (prefixes) |prefix| {
+            total += 1 + prefix.nlriByteCount(); // length byte + prefix bytes
+        }
+        break :blk total;
+    };
+
+    // Body: withdrawn_len(2) + withdrawn_routes + attrs_len(2) + attrs + nlri
+    // For withdrawal-only: withdrawn_len > 0, attrs_len = 0, no NLRI
+    const total_body_len = 2 + withdrawn_byte_count + 2;
+    const total_len = FRAME_HEADER_SIZE + total_body_len;
+
+    if (buf.len < total_len) return 0;
+    if (prefixes.len == 0) return 0; // Reject empty prefix list for withdrawal
+
+    // Write marker
+    writeMarker(buf);
+
+    // Write message length (big-endian)
+    buf[16] = @as(u8, @intCast(total_len / 256));
+    buf[17] = @as(u8, @intCast(total_len % 256));
+
+    // Write message type (2 = UPDATE)
+    buf[18] = @intFromEnum(types.MessageType.update);
+
+    // Write UPDATE body
+    var offset: usize = FRAME_HEADER_SIZE;
+
+    // Withdrawn routes length (big-endian)
+    buf[offset] = @as(u8, @intCast(withdrawn_byte_count / 256));
+    buf[offset + 1] = @as(u8, @intCast(withdrawn_byte_count % 256));
+    offset += 2;
+
+    // Withdrawn routes (NLRI-encoded prefixes)
+    for (prefixes) |prefix| {
+        // Write prefix length byte
+        buf[offset] = prefix.len;
+        offset += 1;
+
+        // Write minimum prefix bytes
+        const byte_count = prefix.nlriByteCount();
+        if (byte_count > 0) {
+            @memcpy(buf[offset .. offset + byte_count], prefix.addr[0..byte_count]);
+            offset += byte_count;
+        }
+    }
+
+    // Path attributes length = 0 (no new announcements)
+    buf[offset] = 0;
+    buf[offset + 1] = 0;
+    // offset += 2; // Not needed as we return immediately after
+
+    return total_len;
+}
+
 // === Tests ===
 
 test "KEEPALIVE encodes to 19 bytes" {
@@ -293,4 +365,55 @@ test "OPEN optional parameter length is 0" {
     const len = encodeOpen(params, &buf);
     try std.testing.expect(len == 29); // 19 header + 10 body
     try std.testing.expect(buf[28] == 0); // optional parameter length
+}
+
+test "WITHDRAW encodes single prefix correctly" {
+    var buf: [1024]u8 = undefined;
+    const prefixes = &.{types.Ipv4Prefix.init("10.0.0.0/8")};
+    const len = encodeWithdraw(prefixes, &buf);
+    try std.testing.expect(len > 0);
+
+    // Message type must be UPDATE (2)
+    try std.testing.expect(buf[18] == 2);
+
+    // withdrawn_routes_length must be non-zero
+    try std.testing.expect(buf[19] > 0 or buf[20] > 0);
+
+    // Prefix length byte should be present (8 for /8)
+    try std.testing.expect(buf[21] == 8);
+
+    // path_attributes_length must be 0 (no announcements) at offset 23
+    try std.testing.expect(buf[23] == 0);
+    try std.testing.expect(buf[24] == 0);
+}
+
+test "WITHDRAW has zero path attributes" {
+    var buf: [1024]u8 = undefined;
+    const prefixes = &.{types.Ipv4Prefix.init("192.168.0.0/16")};
+    const len = encodeWithdraw(prefixes, &buf);
+    try std.testing.expect(len > 0);
+
+    // Message type must be UPDATE (2)
+    try std.testing.expect(buf[18] == 2);
+}
+
+test "WITHDRAW rejects empty prefix list" {
+    var buf: [1024]u8 = undefined;
+    const prefixes: []const types.Ipv4Prefix = &.{};
+    const len = encodeWithdraw(prefixes, &buf);
+    try std.testing.expect(len == 0);
+}
+
+test "WITHDRAW encodes multiple prefixes" {
+    var buf: [1024]u8 = undefined;
+    const prefixes = &.{
+        types.Ipv4Prefix.init("10.0.0.0/8"),
+        types.Ipv4Prefix.init("172.16.0.0/12"),
+        types.Ipv4Prefix.init("192.168.0.0/16"),
+    };
+    const len = encodeWithdraw(prefixes, &buf);
+    try std.testing.expect(len > 0);
+
+    // Message type must be UPDATE (2)
+    try std.testing.expect(buf[18] == 2);
 }

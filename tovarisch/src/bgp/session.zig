@@ -174,7 +174,7 @@ pub fn stop(sess: *Session) void {
     sess.status.state = .stopped;
 }
 
-fn flushSend(sess: *Session) TransportError!void {
+pub fn flushSend(sess: *Session) TransportError!void {
     if (sess.send_pos > 0) {
         try transportSend(sess.trans, sess.send_buf[0..sess.send_pos]);
         sess.send_pos = 0;

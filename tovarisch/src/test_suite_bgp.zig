@@ -46,6 +46,12 @@ const _bgp_status = @import("bgp/status.zig");
 const _bgp_reconnect_hold_timer_tests = @import("bgp/reconnect_hold_timer_tests.zig");
 const _bgp_reconnect_recovery_tests = @import("bgp/reconnect_recovery_tests.zig");
 
+// BGP export delta tests (ACT: Apply BGP export deltas after watched prefix reload)
+const _bgp_export_delta = @import("bgp/export_delta.zig");
+const _bgp_session_delta = @import("bgp/session_delta.zig");
+const _bgp_session_delta_tests = @import("bgp/session_delta_tests.zig");
+const _bgp_export_delta_workflow_tests = @import("bgp/export_delta_workflow_tests.zig");
+
 // (New BGP modules owned by test_suite_bgp_tcp.zig)
 
 // Force test discovery
@@ -78,3 +84,9 @@ test { std.testing.refAllDecls(@import("bgp/status.zig")); }
 // BGP hold timer expiry recovery tests (this ACT)
 test { std.testing.refAllDecls(@import("bgp/reconnect_hold_timer_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/reconnect_recovery_tests.zig")); }
+
+// BGP export delta tests (ACT: Apply BGP export deltas after watched prefix reload)
+test { std.testing.refAllDecls(@import("bgp/export_delta.zig")); }
+test { std.testing.refAllDecls(@import("bgp/session_delta.zig")); }
+test { std.testing.refAllDecls(@import("bgp/session_delta_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/export_delta_workflow_tests.zig")); }
