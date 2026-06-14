@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 87
@@ -128,3 +128,12 @@ release-artifacts: package-deb
 
 health-audit:
 	@./scripts/audit_repo_health.sh
+
+# === BGP/BFD Netns Lab (Manual CI) ===
+# Manual lab for tovarisch BFD/BGP behavior using Linux network namespaces.
+# Primary execution: GitHub Actions (workflow_dispatch)
+# Local execution: optional for debugging only
+# NOT part of make gate
+
+lab-bgp-bfd:
+	@./scripts/lab_bgp_bfd_netns.sh

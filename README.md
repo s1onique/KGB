@@ -51,3 +51,27 @@ Checks include:
 - LLM-friendliness gate reuse
 - Memory ownership hygiene gate reuse
 - Git state
+
+### BGP/BFD Netns Lab (manual only)
+
+```bash
+make lab-bgp-bfd
+```
+
+Manual CI lab for tovarisch BFD/BGP behavior using Linux network namespaces.
+
+**Important:** This is NOT part of `make gate`. Primary execution is GitHub Actions manual workflow (`workflow_dispatch`). Local Linux execution is optional for debugging only.
+
+To run the lab in GitHub Actions:
+1. Go to the Actions tab
+2. Select "BGP/BFD Netns Lab"
+3. Click "Run workflow"
+
+The lab creates isolated network namespaces with:
+- `kgb-lab-tovarisch` namespace (tovarisch daemon)
+- `kgb-lab-bird` namespace (BIRD router)
+- veth pair connection (10.77.0.1/30 ↔ 10.77.0.2/30)
+
+Artifacts (logs, configs, status) are uploaded automatically on completion or failure.
+
+**Status:** Manual execution only. Will be promoted to scheduled advisory workflow after 3-5 clean manual runs.

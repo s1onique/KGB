@@ -1,0 +1,57 @@
+name: BGP/BFD Netns Lab
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bgp-bfd-netns-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      ZIG_VERSION: "0.16.0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Show Zig version
+        run: zig version
+
+      - name: Install lab dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iproute2 bird2 tcpdump jq iputils-ping
+
+      - name: Detect BIRD version
+        run: |
+          if command -v birdc &> /dev/null; then
+            echo "BIRD command client available"
+            birdc show version 2>/dev/null || bird --version 2>/dev/null || true
+          elif command -v bird &> /dev/null; then
+            bird --version
+          else
+            echo "WARNING: BIRD not found after install"
+          fi
+
+      - name: Build tovarisch for Linux
+        run: |
+          cd tovarisch
+          zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
+
+      - name: Run lab
+        run: sudo --preserve-env=PATH,TOVARISCH_BINARY make lab-bgp-bfd
+
+      - name: Upload lab logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bgp-bfd-netns-lab-logs
+          path: |
+            /tmp/kgb-bgp-bfd-lab-*/**
+          retention-days: 7
