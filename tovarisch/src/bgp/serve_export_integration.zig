@@ -11,15 +11,14 @@
 // - Other: no watcher (prefixes loaded at startup only)
 
 const std = @import("std");
+const builtin = @import("builtin");
 const config_parse = @import("config_parse.zig");
 const export_reload_apply = @import("export_reload_apply.zig");
 const prefix_watch = @import("prefix_watch.zig");
 const serve_integration = @import("serve_integration.zig");
 
 // Linux-specific implementation for adding watches
-const linux_watch = if (@import("builtin").os.tag == .linux) struct {
-    const prefix_watch_linux = @import("prefix_watch_linux.zig");
-} else null;
+const linux_watch = if (builtin.os.tag == .linux) @import("prefix_watch_linux.zig") else void;
 
 /// Initialize the prefix file watcher for a bundle.
 /// Creates a real inotify watcher on Linux, or returns false on other platforms.
@@ -58,9 +57,9 @@ pub fn initPrefixWatcher(
 
     // Add watches for each prefix file path (Linux-specific)
     var failed_watches: usize = 0;
-    if (linux_watch) |impl| {
+    if (builtin.os.tag == .linux) {
         // Access the underlying linux state to add watches
-        const linux_state = @as(*impl.prefix_watch_linux.State, @ptrCast(@alignCast(watcher.state)));
+        const linux_state = @as(*linux_watch.State, @ptrCast(@alignCast(watcher.state)));
         for (file_paths) |file_path| {
             linux_state.addWatch(file_path) catch |e| {
                 stderr.print("warning: failed to watch prefix file '{s}': {s}\n", .{
@@ -71,6 +70,9 @@ pub fn initPrefixWatcher(
                 failed_watches += 1;
             };
         }
+    } else {
+        // Non-Linux: no inotify, all watches considered "failed"
+        failed_watches = file_paths.len;
     }
 
     // If all watches failed, destroy the watcher and return false
