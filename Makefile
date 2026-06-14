@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 87
@@ -121,3 +121,10 @@ deb-gate: package-deb verify-deb-systemd
 
 release-artifacts: package-deb
 	ls -lh dist/*.deb
+
+# === Scheduled Health Audit (Advisory) ===
+# This target runs advisory health checks on the repository.
+# It is scheduled via GitHub Actions and does NOT block development.
+
+health-audit:
+	@./scripts/audit_repo_health.sh
