@@ -61,6 +61,22 @@ pub const BgpStatusState = union(enum) {
         keepalives_received: u64,
         passive_listener_state: passive_listener.ListenerState,
         passive_listener_error: ?[]const u8,
+
+        // Export reload diagnostics
+        /// Currently exported prefix count (daemon-owned current set)
+        exported_prefix_count: usize = 0,
+        /// Last reload success flag
+        last_reload_success: bool = false,
+        /// Last reload error message
+        last_reload_error: ?[]const u8 = null,
+        /// Last delta added count
+        last_delta_added_count: usize = 0,
+        /// Last delta removed count
+        last_delta_removed_count: usize = 0,
+        /// Last delta unchanged count
+        last_delta_unchanged_count: usize = 0,
+        /// Last apply error message
+        last_apply_error: ?[]const u8 = null,
     };
 
     pub const Failure = struct {
@@ -198,6 +214,14 @@ pub fn deriveStatusStateFromBundle(bundle: ?*serve_integration.BgpServeBundle) B
                 .keepalives_received = sess_status.keepalives_received,
                 .passive_listener_state = listener_state,
                 .passive_listener_error = listener_error,
+                // Export reload diagnostics from daemon-owned export state
+                .exported_prefix_count = b.export_state.exportedCount(),
+                .last_reload_success = b.export_state.last_reload_success,
+                .last_reload_error = b.export_state.last_reload_error,
+                .last_delta_added_count = b.export_state.last_delta_added_count,
+                .last_delta_removed_count = b.export_state.last_delta_removed_count,
+                .last_delta_unchanged_count = b.export_state.last_delta_unchanged_count,
+                .last_apply_error = b.export_state.last_apply_error,
             }};
         },
         .failed => {

@@ -183,6 +183,11 @@ test { std.testing.refAllDecls(@import("bgp/export_delta.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_delta.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_delta_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/export_delta_workflow_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/export_reload_apply.zig")); }
+test { std.testing.refAllDecls(@import("bgp/export_reload_apply_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/export_reload_apply_integration_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/serve_export_integration.zig")); }
+test { std.testing.refAllDecls(@import("bgp/serve_export_integration_tests.zig")); }
 
 // BGP status tests
 test { std.testing.refAllDecls(@import("bgp/status.zig")); }

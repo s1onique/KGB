@@ -36,6 +36,8 @@ const _bgp_serve_integration = @import("bgp/serve_integration.zig");
 const _bgp_serve_integration_tests = @import("bgp/serve_integration_tests.zig");
 const _bgp_serve_lifetime_tests = @import("bgp/serve_lifetime_tests.zig");
 const _bgp_transport_ownership_tests = @import("bgp/transport_ownership_tests.zig");
+const _bgp_serve_export_integration = @import("bgp/serve_export_integration.zig");
+const _bgp_serve_export_integration_tests = @import("bgp/serve_export_integration_tests.zig");
 const _bgp_prefix_file_loader = @import("bgp/prefix_file_loader.zig");
 const _bgp_prefix_file_integration_tests = @import("bgp/prefix_file_integration_tests.zig");
 
@@ -51,6 +53,9 @@ const _bgp_export_delta = @import("bgp/export_delta.zig");
 const _bgp_session_delta = @import("bgp/session_delta.zig");
 const _bgp_session_delta_tests = @import("bgp/session_delta_tests.zig");
 const _bgp_export_delta_workflow_tests = @import("bgp/export_delta_workflow_tests.zig");
+const _bgp_export_reload_apply = @import("bgp/export_reload_apply.zig");
+const _bgp_export_reload_apply_tests = @import("bgp/export_reload_apply_tests.zig");
+const _bgp_export_reload_apply_integration_tests = @import("bgp/export_reload_apply_integration_tests.zig");
 
 // (New BGP modules owned by test_suite_bgp_tcp.zig)
 
@@ -77,6 +82,8 @@ test { std.testing.refAllDecls(@import("bgp/serve_integration.zig")); }
 test { std.testing.refAllDecls(@import("bgp/serve_integration_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/serve_lifetime_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/transport_ownership_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/serve_export_integration.zig")); }
+test { std.testing.refAllDecls(@import("bgp/serve_export_integration_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/prefix_file_loader.zig")); }
 test { std.testing.refAllDecls(@import("bgp/prefix_file_integration_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/status.zig")); }
@@ -90,3 +97,6 @@ test { std.testing.refAllDecls(@import("bgp/export_delta.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_delta.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_delta_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/export_delta_workflow_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/export_reload_apply.zig")); }
+test { std.testing.refAllDecls(@import("bgp/export_reload_apply_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/export_reload_apply_integration_tests.zig")); }

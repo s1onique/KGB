@@ -38,6 +38,9 @@ const prefix_file_loader = @import("prefix_file_loader.zig");
 const prefix_file = @import("prefix_file.zig");
 const session_config_builder = @import("session_config_builder.zig");
 const update_diagnostics = @import("update_diagnostics.zig");
+const export_reload_apply = @import("export_reload_apply.zig");
+const prefix_watch = @import("prefix_watch.zig");
+const serve_export_integration = @import("serve_export_integration.zig");
 
 // Runtime state for BGP session including reconnect lifecycle.
 pub const BgpRuntimeState = enum {
@@ -90,6 +93,14 @@ pub const BgpServeBundle = struct {
 
     // Runtime thread handle (null if not started or already joined)
     runtime_thread: ?std.Thread = null,
+
+    // Export state for prefix reload + delta application
+    export_state: export_reload_apply.ExportState = .{},
+
+    // Prefix file watcher and debouncer for watched reload
+    // null when no prefix files are configured
+    watcher: ?prefix_watch.Watcher = null,
+    debouncer: prefix_watch.Debouncer = .{},
 };
 
 // ============================================================================
@@ -237,9 +248,12 @@ pub fn loadConfigAndBgp(
         .tcp = undefined,
         .trans = undefined,
         .sess = undefined,
+        .export_state = .{},
     };
     bundle.tcp = tcp;
     bundle.trans = bundle.tcp.toTransport();
+    bundle.export_state.init(allocator);
+    export_reload_apply.initExportedPrefixes(&bundle.export_state, prefixes.items);
 
     const sess = session.init(session_config, &bundle.trans) catch |e| {
         stderr.print("error: failed to create BGP session: {s}\n", .{@errorName(e)}) catch {};
@@ -256,6 +270,9 @@ pub fn loadConfigAndBgp(
     // The passive listener binds to the configured local_address on port 179 and accepts
     // incoming BGP peer connections alongside the active outbound session.
     passive_listener_integration.createPassiveListener(bundle, stderr);
+
+    // Initialize prefix file watcher for watched reload (Linux inotify on Linux, fake elsewhere)
+    _ = serve_export_integration.initPrefixWatcher(bundle, stderr, allocator);
 
     return .{ .configured = bundle };
 }
@@ -277,6 +294,12 @@ pub fn cleanupBgpBundle(bundle: *BgpServeBundle, allocator: std.mem.Allocator) v
     // Clean up passive listener if it was created.
     // This stops the listener thread, closes the listen socket, and clears the stored listener.
     passive_listener_integration.closePassiveListener(bundle);
+
+    // Clean up prefix file watcher (closes inotify fd on Linux)
+    serve_export_integration.destroyPrefixWatcher(bundle);
+
+    // Clean up export state (frees daemon-owned prefix memory)
+    bundle.export_state.deinit();
 
     // Now safe to clean up resources
     bundle.tcp.close();

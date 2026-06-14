@@ -37,6 +37,7 @@ const serve_integration = @import("serve_integration.zig");
 const passive_listener_integration = @import("passive_listener_integration.zig");
 const tcp_transport = @import("tcp_transport.zig");
 const clock = @import("clock.zig");
+const serve_export_integration = @import("serve_export_integration.zig");
 
 /// BGP FSM loop interval in milliseconds.
 /// This is the sleep between runSessionOnce calls.
@@ -203,6 +204,11 @@ pub fn bgpRuntimeThread(bundle: *serve_integration.BgpServeBundle) void {
 
         // Run one FSM iteration
         const result = serve_integration.runSessionOnce(bundle);
+
+        // Check for prefix file changes and apply delta if watcher is configured.
+        // This handles the event -> debounce -> reload -> delta -> UPDATE path.
+        const now_ms = clock_interface.getMonoTimeMs();
+        _ = serve_export_integration.applyPrefixReloadIfWatched(bundle, now_ms);
 
         // Log FSM transitions when state changes
         const current_state = bundle.sess.status.state;

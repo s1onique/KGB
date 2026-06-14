@@ -17,6 +17,11 @@
 const std = @import("std");
 const types = @import("types.zig");
 
+// Conditional import for platform-specific watcher
+const linux_impl = if (@import("builtin").os.tag == .linux) struct {
+    const prefix_watch_linux = @import("prefix_watch_linux.zig");
+} else null;
+
 // ============================================================================
 // Watcher Interface (Trait)
 // ============================================================================
@@ -191,3 +196,17 @@ pub const LastGoodState = struct {
     /// Error buffer owned by this state (avoids stack-back slices).
     error_buf: [256]u8 = undefined,
 };
+
+// ============================================================================
+// Factory Functions
+// ============================================================================
+
+/// Create a real inotify watcher (Linux only).
+/// Returns error if platform doesn't support inotify or initialization fails.
+pub fn createInotifyWatcher(allocator: std.mem.Allocator) !Watcher {
+    if (linux_impl) |impl| {
+        return impl.prefix_watch_linux.create(allocator);
+    } else {
+        return error.InitFailed;
+    }
+}
