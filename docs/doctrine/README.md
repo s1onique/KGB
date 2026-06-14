@@ -7,6 +7,7 @@ Canonical doctrine documents for KGB project hygiene and architecture.
 | Document | Purpose |
 |----------|---------|
 | [factory.md](./factory.md) | Factory workflow, ACTs, epics |
+| [ai-native-code-discipline-axioms.md](./ai-native-code-discipline-axioms.md) | AI-Native Code Discipline manifesto axioms mapped to KGB/tovarisch behavior |
 | [verification-ladder.md](./verification-ladder.md) | T0–T4 verification tiers, non-substitution rule |
 | [kgb.md](./kgb.md) | KGB architecture, UVB-76 vs tovarisch split |
 | [privacy.md](./privacy.md) | Privacy principles, allowed/forbidden data |

@@ -4,7 +4,7 @@
 
 1. Read `AGENTS.md` — canonical agent contract for this repo.
 2. Read the current epic under `docs/epics/`.
-3. Read relevant doctrine docs under `docs/doctrine/`.
+3. Read relevant doctrine docs under `docs/doctrine/` (see `ai-native-code-discipline-axioms.md` for axiom mappings).
 
 ## If Touching Zig
 

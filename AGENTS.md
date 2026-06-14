@@ -21,6 +21,7 @@ Before any implementation work, read:
 
 - `README.md`
 - `docs/doctrine/factory.md`
+- `docs/doctrine/ai-native-code-discipline-axioms.md`
 - `docs/doctrine/karpathy-agent-guidelines.md`
 - `docs/doctrine/kgb.md`
 - `docs/doctrine/privacy.md`
