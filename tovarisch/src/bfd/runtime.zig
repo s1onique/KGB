@@ -185,8 +185,16 @@ pub const BfdRuntime = struct {
                 var buf: [packet.CONTROL_PACKET_LEN]u8 = undefined;
                 _ = packet.encode(tx_pkt, &buf);
 
+                // Send the BFD control packet
                 self.transport.sendPacket(self.transport.ctx, cfg.peer_addr, transport.MULTIHOP_PORT, &buf) 
-                    catch return RuntimeError.TransportError;
+                    catch |send_err| {
+                    // Diagnostic: send failed
+                    std.debug.print("[BFD] bfd_control_packet_send_failed to={s} reason={s}\n", .{ cfg.peer_addr, @errorName(send_err) });
+                    return RuntimeError.TransportError;
+                };
+
+                // Diagnostic: send succeeded
+                std.debug.print("[BFD] bfd_control_packet_sent to={s}\n", .{cfg.peer_addr});
 
                 _ = session.processEvent(sess, .transmitTimeout);
             }

@@ -253,6 +253,8 @@ pub const BfdReceiveLoopState = struct {
 /// This ensures the daemon remains responsive to BFD packets while not consuming
 /// excessive CPU when no packets are arriving.
 pub fn bfdReceiveLoop(state: *BfdReceiveLoopState) void {
+    // Emit diagnostics to stderr for production debugging
+    std.debug.print("[BFD] bfd_receive_loop_started addr={s}\n", .{state.local_addr});
     bfdReceiveLoopWithTimeout(state, DEFAULT_POLL_TIMEOUT_MS);
 }
 
@@ -326,19 +328,27 @@ pub fn bfdReceiveLoopWithTimeout(state: *BfdReceiveLoopState, poll_timeout_ms: c
         const pkt = packet_opt.bytes;
         const peer_addr = packet_opt.peerAddr();
 
+        // Diagnostic: BFD packet received from peer
+        std.debug.print("[BFD] bfd_receive_packet from={s} size={d}\n", .{ peer_addr, pkt.len });
+
         // Feed the packet to the runtime.
         // RFC 5880 Section 6.8.4: Your Discriminator = 0 is valid for initial
         // discovery packets. The session handles discriminator learning - we just
         // pass the packet through. handleDiscriminatorLearning() was incorrectly
         // returning SessionNotFound for new sessions before the session could process
         // the packet and learn the remote discriminator.
-        state.runtime.receivePacket(peer_addr, &pkt) catch {
-            // Failed to process packet, skip
+        state.runtime.receivePacket(peer_addr, &pkt) catch |err| {
+            // Failed to process packet - log reason
+            std.debug.print("[BFD] bfd_receive_packet_dropped from={s} reason={s}\n", .{ peer_addr, @errorName(err) });
             continue;
         };
+
+        // Diagnostic: packet accepted and processed
+        std.debug.print("[BFD] bfd_receive_packet_accepted from={s}\n", .{peer_addr});
     }
 
     // Clean up socket on exit
+    std.debug.print("[BFD] bfd_receive_loop_stopped\n", .{});
     state.socket.close();
 }
 

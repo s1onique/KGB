@@ -72,6 +72,9 @@ fn makeTimespec(ms: u32) c.timespec {
 /// - Proactively send periodic BFD control packets
 /// - Process detection timeouts
 pub fn bfdTransmitLoop(state: *BfdTransmitLoopState) void {
+    // Diagnostic: BFD tick loop started
+    std.debug.print("[BFD] bfd_tick_started interval_ms={d}\n", .{state.tick_interval_ms});
+
     // Verify stop_signal is false at startup
     if (state.stop.load()) {
         std.debug.print("[BFD] ERROR: transmit loop started with stop_signal already set\n", .{});
@@ -85,6 +88,7 @@ pub fn bfdTransmitLoop(state: *BfdTransmitLoopState) void {
         // Call runtime.tick() to process detection timeouts and send due packets
         state.runtime.tick() catch {
             // On error, yield and retry
+            std.debug.print("[BFD] bfd_control_packet_send_failed reason=tick_error\n", .{});
             std.Thread.yield() catch {};
             _ = c.nanosleep(&sleep_ts, null);
             continue;
@@ -94,7 +98,7 @@ pub fn bfdTransmitLoop(state: *BfdTransmitLoopState) void {
         _ = c.nanosleep(&sleep_ts, null);
     }
 
-    std.debug.print("[BFD] transmit loop stopped\n", .{});
+    std.debug.print("[BFD] bfd_tick_stopped\n", .{});
 }
 
 // ============================================================================
