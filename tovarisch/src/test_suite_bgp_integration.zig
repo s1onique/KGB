@@ -23,6 +23,9 @@ const _same_as_regression_tests = @import("bgp/same_as_regression_tests.zig");
 // Session config builder tests (extracted from serve_integration.zig)
 const _session_config_builder = @import("bgp/session_config_builder.zig");
 
+// BGP reconnect regression tests (ACT: BGP post-glitch reconnect/reset diagnostics)
+const _bgp_reconnect_regression_tests = @import("bgp/bgp_reconnect_regression_tests.zig");
+
 // Prefix file watcher tests (ACT: inotify watcher for BGP prefix files)
 const _prefix_watch_tests = @import("bgp/prefix_watch_tests.zig");
 
@@ -36,3 +39,4 @@ test { std.testing.refAllDecls(@import("bgp/passive_listener_serve_integration_t
 test { std.testing.refAllDecls(@import("bgp/same_as_regression_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_config_builder.zig")); }
 test { std.testing.refAllDecls(@import("bgp/prefix_watch_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/bgp_reconnect_regression_tests.zig")); }

@@ -86,6 +86,10 @@ pub const BgpServeBundle = struct {
     // Reconnect state
     backoff_ms: u64 = 0,
     reconnect_deadline: clock.MonoTime = 0,
+    // Reconnect statistics for status reporting and diagnostics
+    reconnect_count: u64 = 0, // Total reconnect attempts since startup
+    last_reconnect_time: clock.MonoTime = 0, // Monotonic ms of last reconnect attempt
+    last_socket_error: ?[]const u8 = null, // Last TCP socket error message
     // Thread safety: Atomic u8 for cross-thread signaling.
     // cleanupBgpBundle stores 1, isCleanupRequested loads with acquire ordering.
     // This ensures the runtime thread sees the flag before bundle destruction.
@@ -103,10 +107,7 @@ pub const BgpServeBundle = struct {
     debouncer: prefix_watch.Debouncer = .{},
 };
 
-// ============================================================================
 // Config Loading
-// ============================================================================
-
 pub fn loadConfigAndBgp(
     config_path: ?[]const u8,
     stderr: anytype,
@@ -277,10 +278,7 @@ pub fn loadConfigAndBgp(
     return .{ .configured = bundle };
 }
 
-// ============================================================================
 // Cleanup
-// ============================================================================
-
 pub fn cleanupBgpBundle(bundle: *BgpServeBundle, allocator: std.mem.Allocator) void {
     // Signal stop via atomic store (main thread -> runtime thread)
     @atomicStore(u8, &bundle.cleanup_requested, 1, .release);
@@ -308,10 +306,7 @@ pub fn cleanupBgpBundle(bundle: *BgpServeBundle, allocator: std.mem.Allocator) v
     std.heap.page_allocator.destroy(bundle);
 }
 
-// ============================================================================
 // Status Accessors
-// ============================================================================
-
 pub fn getBgpState(bundle: *const BgpServeBundle) BgpRuntimeState {
     return bundle.state;
 }
@@ -324,10 +319,7 @@ pub fn getSessionStatus(bundle: *BgpServeBundle) session.SessionStatus {
     return session.getStatus(&bundle.sess);
 }
 
-// ============================================================================
 // Session Execution
-// ============================================================================
-
 pub fn runSessionOnce(bundle: *BgpServeBundle) session.RunResult {
     const result = session.runOnce(&bundle.sess) catch |e| {
         bundle.last_error = if (bundle.sess.status.last_error) |session_err|
@@ -361,10 +353,7 @@ fn copyErrorToBundle(bundle: *BgpServeBundle, message: []const u8) []const u8 {
     return bundle.last_error_buf[0..message.len];
 }
 
-// ============================================================================
 // Reconnect/Backoff Lifecycle
-// ============================================================================
-
 pub fn computeNextBackoff(current_ms: u64, max_delay_ms: u64) u64 {
     return reconnect.computeNextBackoff(current_ms, max_delay_ms);
 }
@@ -427,7 +416,21 @@ pub fn reconnectTransport(bundle: *BgpServeBundle) !void {
 
 pub fn doReconnect(bundle: *BgpServeBundle) !void {
     closeForReconnect(bundle);
-    try reconnectTransport(bundle);
+
+    // Track reconnect attempt for diagnostics
+    bundle.reconnect_count += 1;
+    const clock_interface = clock.RealClock;
+    bundle.last_reconnect_time = clock_interface.getMonoTimeMs();
+
+    reconnectTransport(bundle) catch |reconnect_err| {
+        // Capture the socket error for status reporting
+        bundle.last_socket_error = copyErrorToBundle(bundle, @errorName(reconnect_err));
+        bundle.last_error = bundle.last_socket_error;
+        return reconnect_err;
+    };
+
+    // Clear socket error on successful reconnect
+    bundle.last_socket_error = null;
     resetBackoff(bundle);
     bundle.state = .configured;
     bundle.last_error = null;
@@ -437,10 +440,7 @@ pub fn isCleanupRequested(bundle: *BgpServeBundle) bool {
     return @atomicLoad(u8, &bundle.cleanup_requested, .acquire) != 0;
 }
 
-// ============================================================================
 // Constants Export
-// ============================================================================
-
 pub const DEFAULT_RECONNECT_INITIAL_MS = reconnect.DEFAULT_RECONNECT_INITIAL_MS;
 pub const DEFAULT_RECONNECT_MAX_MS = reconnect.DEFAULT_RECONNECT_MAX_MS;
 pub const DEFAULT_RECONNECT_MULTIPLIER = reconnect.DEFAULT_RECONNECT_MULTIPLIER;

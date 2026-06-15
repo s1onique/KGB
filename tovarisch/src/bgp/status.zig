@@ -31,6 +31,8 @@ pub const ReconnectWait = struct {
     backoff_ms: u64,
     peer_address: [4]u8,
     last_error: ?[]const u8,
+    reconnect_count: u64,
+    last_socket_error: ?[]const u8,
 };
 
 /// BGP status state for status reporting.
@@ -180,6 +182,8 @@ pub fn deriveStatusStateFromBundle(bundle: ?*serve_integration.BgpServeBundle) B
                 .backoff_ms = b.backoff_ms,
                 .peer_address = sess_status.peer_address,
                 .last_error = b.last_error,
+                .reconnect_count = b.reconnect_count,
+                .last_socket_error = b.last_socket_error,
             }};
         },
         .configured => {
