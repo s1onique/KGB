@@ -163,15 +163,23 @@ run_lab() {
         exit_code=1
     fi
 
-    # 7. Attempt BFD/BGP convergence (target v1 - bounded wait, deferred)
+    # 7. ACT 2: Assert BFD session reaches Up (required for ACT 2 completion)
     log_info ""
-    log_info "=== Convergence Assertions (Deferred) ==="
+    log_info "=== ACT 2: BFD Session Up Assertion ==="
 
-    wait_bfd_convergence || log_warn "[DEFERRED] BFD convergence not achieved in v1.5"
-    wait_bgp_convergence || log_warn "[DEFERRED] BGP convergence not achieved in v1.5"
+    if ! assert_bfd_up; then
+        log_error "[FAIL] BFD session did not reach Up"
+        exit_code=1
+    fi
 
-    # Collect routes (non-fatal in v1 since BGP convergence is deferred)
-    collect_bgp_routes || log_warn "[DEFERRED] BGP route collection unavailable in v1"
+    # 8. Attempt BGP convergence (deferred - not required for ACT 2)
+    log_info ""
+    log_info "=== BGP Convergence (Deferred) ==="
+
+    wait_bgp_convergence || log_warn "[DEFERRED] BGP convergence not achieved (ACT 2 scope is BFD only)"
+
+    # Collect routes (non-fatal since BGP convergence is deferred)
+    collect_bgp_routes || log_warn "[DEFERRED] BGP route collection unavailable (BGP deferred)"
 
     # Print diagnostics
     print_diagnostics

@@ -94,6 +94,113 @@ The running `serve` process wires BFD/BGP runtime from config into `ServeContext
 - [x] BFD/BGP convergence still deferred
 - [x] Workflow remains `workflow_dispatch` only
 
+## ACT 2 Scope
+
+Assert BFD session reaches Up between `tovarisch` and BIRD.
+
+### Root Cause of Previous BFD Non-Convergence
+
+**Single-hop vs multihop BFD port mismatch.**
+
+tovarisch implements BFD multihop on UDP port 4784 (per RFC 5883). The original BIRD config used:
+
+```
+protocol bfd {
+    interface "$VETH_BIRD" { ... };
+}
+```
+
+This is **single-hop BFD** which uses UDP port 3784. Both sides looked "configured" but could never form a session because they were listening on different UDP ports.
+
+### Fix
+
+Changed BIRD config to use multihop mode:
+
+```
+protocol bfd {
+    multihop {
+        interval $BFD_INTERVAL_MS ms;
+        multiplier $BFD_MULTIPLIER;
+    };
+}
+```
+
+This aligns BIRD with tovarisch's UDP 4784 multihop behavior.
+
+### Implementation
+
+1. **Fix BIRD config generation**: Use `multihop {}` block instead of `interface {}`
+2. **Add `assert_bfd_up()` function**: Bounded wait (30s) polling BIRD for "Up" state
+3. **Add packet-level diagnostics**: tcpdump captures for UDP 4784 and UDP 3784
+4. **Add BFD session artifact**: `bird-bfd-sessions.txt` for evidence
+5. **Add HTTP status collection**: `status-http-bfd.json` for tovarisch BFD state
+6. **Add failure diagnostics**: BIRD sessions, protocols, tovarisch logs, tcpdump
+
+### ACT 2 Board
+
+| ID | Work Item | Status |
+|----|-----------|--------|
+| netns-014 | Fix BIRD config to use multihop mode | **done** |
+| netns-015 | Add assert_bfd_up() function | **done** |
+| netns-016 | Add tcpdump packet diagnostics | **done** |
+| netns-017 | Add BFD session artifact collection | **done** |
+| netns-018 | Add HTTP status BFD evidence | **done** |
+| netns-019 | Update diagnostics on failure | **done** |
+| netns-020 | Update WAL with ACT 2 scope | **done** |
+| netns-021 | Run `make gate` | **done** |
+| netns-022 | Run manual GitHub Actions for BFD Up evidence | **pending** |
+
+### ACT 2 Acceptance Criteria
+
+#### Implemented (local verification)
+
+- [x] BIRD config fixed to use multihop mode
+- [x] `assert_bfd_up()` function added
+- [x] BFD Up detection regex: `(^|[[:space:]])Up([[:space:]]|$)`
+- [x] tcpdump packet diagnostics added
+- [x] BFD session artifact collection (`bird-bfd-sessions.txt`)
+- [x] HTTP status BFD evidence (`status-http-bfd.json`)
+- [x] Failure diagnostics with actionable output
+- [x] `make gate` passes
+- [x] Bash syntax checks pass
+- [x] Workflow remains `workflow_dispatch` only
+- [x] BGP convergence remains deferred (non-fatal)
+
+#### Requires Manual CI Verification
+
+- [ ] **BFD session reaches Up in GitHub Actions**
+- [ ] **BFD Up evidence saved in CI artifacts**
+- [ ] **Artifacts upload succeeds on both success and failure**
+- [ ] **Workflow PASS with BFD Up evidence**
+
+### BFD Mode: Multihop
+
+| Property | Value |
+|----------|-------|
+| Mode | multihop |
+| UDP Port | 4784 (RFC 5883) |
+| tovarisch | Always multihop |
+| BIRD | Configured as multihop |
+
+### Packet-Level Diagnostics Added
+
+| Artifact | Purpose |
+|----------|---------|
+| `bird-bfd-sessions.txt` | BIRD BFD session state evidence |
+| `status-http-bfd.json` | tovarisch runtime BFD state |
+| `tcpdump-bfd-bird.txt` | BFD packets captured in BIRD namespace (UDP 4784/3784) |
+
+### Remaining Deferred
+
+- BGP session establishes
+- Prefix file watch add/remove/invalid-reload
+- Route announcement/withdrawal visibility
+- Promotion to scheduled workflow
+
+### Next Step (ACT 3)
+
+Assert BGP session establishes after BFD is confirmed Up.
+
 ## Workflow Shape
 
 ```yaml
@@ -253,7 +360,7 @@ This keeps the promotion explicit and reviewable.
 
 ## Future Work
 
-- ACT 2: Assert BFD session reaches Up
+- ACT 2: Assert BFD session reaches Up — **implementation complete, pending manual CI evidence**
 - ACT 3: Assert BGP session establishes
 - ACT 4: Assert prefix file watch add/remove/invalid-reload behavior
 - ACT 5: Promote from manual to scheduled advisory workflow

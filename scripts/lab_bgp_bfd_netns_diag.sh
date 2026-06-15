@@ -44,4 +44,38 @@ print_diagnostics() {
 
     echo "--- tovarisch log (last 20 lines) ---"
     tail -n 20 "$TOVARISCH_LOG" 2>/dev/null || echo "Log not available"
+
+    echo "--- ACT 2 BFD Artifacts ---"
+    echo "BFD sessions: ${BFD_SESSIONS_OUTPUT:-not set}"
+    cat "$BFD_SESSIONS_OUTPUT" 2>/dev/null || echo "Not available"
+
+    echo "--- BFD HTTP Status (ACT 2) ---"
+    local http_bfd_file="${LAB_DIR:-}/status-http-bfd.json"
+    if [[ -s "$http_bfd_file" ]]; then
+        echo "File: $http_bfd_file"
+        jq '.' "$http_bfd_file" 2>/dev/null || cat "$http_bfd_file"
+    else
+        echo "Not available"
+    fi
+
+    echo "--- tcpdump BFD capture (BIRD namespace) ---"
+    if [[ -s "${TCPDUMP_BFD_BIRD:-}" ]]; then
+        cat "$TCPDUMP_BFD_BIRD"
+    else
+        echo "Not available or empty"
+    fi
+
+    echo "--- tcpdump BFD capture (tovarisch namespace) ---"
+    if [[ -s "${TCPDUMP_BFD_TOVARISCH:-}" ]]; then
+        cat "$TCPDUMP_BFD_TOVARISCH"
+    else
+        echo "Not available or empty"
+    fi
+
+    echo "--- All artifacts in lab directory ---"
+    if [[ -d "${LAB_DIR:-}" ]]; then
+        ls -la "$LAB_DIR" 2>/dev/null || echo "Cannot list"
+    else
+        echo "Lab directory not available"
+    fi
 }
