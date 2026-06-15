@@ -219,7 +219,9 @@ fn tryDecodeFrame(sess: *Session) ?frame_decode.Frame {
         return null;
     };
     if (sess.recv_len > declared_len) {
-        @memcpy(sess.recv_buf[0 .. sess.recv_len - declared_len], sess.recv_buf[declared_len..sess.recv_len]);
+        // Use copyForwards because source starts at declared_len which is >= 0 (destination start).
+        // This handles the overlapping case where both slices point into sess.recv_buf.
+        std.mem.copyForwards(u8, sess.recv_buf[0 .. sess.recv_len - declared_len], sess.recv_buf[declared_len..sess.recv_len]);
     }
     sess.recv_len -= declared_len;
     return frame;

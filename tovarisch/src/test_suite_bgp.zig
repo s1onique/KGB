@@ -22,6 +22,7 @@ const _bgp_notification_decode = @import("bgp/notification_decode.zig");
 const _bgp_session = @import("bgp/session.zig");
 const _bgp_session_tests = @import("bgp/session_tests.zig");
 const _bgp_session_handshake_tests = @import("bgp/session_handshake_tests.zig");
+const _bgp_session_buffer_compaction_tests = @import("bgp/session_buffer_compaction_tests.zig");
 const _bgp_session_keepalive_basic_tests = @import("bgp/session_keepalive_basic_tests.zig");
 const _bgp_session_keepalive_notification_tests = @import("bgp/session_keepalive_notification_tests.zig");
 const _bgp_session_keepalive_advanced_tests = @import("bgp/session_keepalive_advanced_tests.zig");
@@ -72,6 +73,7 @@ test { std.testing.refAllDecls(@import("bgp/transport.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_handshake_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/session_buffer_compaction_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_keepalive_basic_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_keepalive_notification_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_keepalive_advanced_tests.zig")); }

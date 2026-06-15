@@ -153,6 +153,7 @@ test { std.testing.refAllDecls(@import("bgp/notification_decode.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_handshake_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/session_buffer_compaction_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_keepalive_basic_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_keepalive_notification_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_keepalive_advanced_tests.zig")); }
