@@ -72,6 +72,45 @@ print_diagnostics() {
         echo "Not available or empty"
     fi
 
+    echo "--- ACT 2.2: tovarisch BFD diagnostics ---"
+    echo "Purpose: Prove tovarisch receive/respond path"
+    echo ""
+
+    echo "--- ACT 2.2: tovarisch socket state (UDP 4784 listener) ---"
+    local socket_file="${LAB_DIR:-}/tovarisch-socket-state.txt"
+    if [[ -s "$socket_file" ]]; then
+        cat "$socket_file"
+    else
+        echo "Not available (run assert_bfd_up to collect)"
+    fi
+
+    echo ""
+    echo "--- ACT 2.2: tovarisch BFD logs ---"
+    local bfd_logs_file="${LAB_DIR:-}/tovarisch-bfd-logs.txt"
+    if [[ -s "$bfd_logs_file" ]]; then
+        cat "$bfd_logs_file"
+    else
+        echo "Not available (run assert_bfd_up to collect)"
+    fi
+
+    echo ""
+    echo "--- ACT 2.2: veth interface statistics ---"
+    local veth_stats_file="${LAB_DIR:-}/veth-stats.txt"
+    if [[ -s "$veth_stats_file" ]]; then
+        cat "$veth_stats_file"
+    else
+        echo "Not available (run assert_bfd_up to collect)"
+    fi
+
+    echo ""
+    echo "--- ACT 2.2: BFD TX statistics ---"
+    local tx_stats_file="${LAB_DIR:-}/tovarisch-bfd-tx-stats.txt"
+    if [[ -s "$tx_stats_file" ]]; then
+        cat "$tx_stats_file"
+    else
+        echo "Not available (run assert_bfd_up to collect)"
+    fi
+
     echo "--- All artifacts in lab directory ---"
     if [[ -d "${LAB_DIR:-}" ]]; then
         ls -la "$LAB_DIR" 2>/dev/null || echo "Cannot list"

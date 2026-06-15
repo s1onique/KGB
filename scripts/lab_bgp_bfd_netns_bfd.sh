@@ -130,10 +130,18 @@ assert_bfd_up() {
     local elapsed=0
     local interval=2
     local last_bird_sessions=""
-    local last_http_status=""
+    local http_status_file="$LAB_DIR/status-http-bfd.json"
 
-    # Start tcpdump for packet diagnostics (non-fatal if unavailable)
-    start_tcpdump_bfd "$NS_BIRD" "$TCPDUMP_BFD_BIRD" "$((WAIT_BFD_CONVERGE + 5))" || true
+    # ACT 2.2: Collect tovarisch diagnostics BEFORE waiting for BFD Up
+    # This establishes baseline: is tovarisch listening, are packets arriving?
+    log_info ""
+    log_info "=== ACT 2.2 Pre-BFD Diagnostics ==="
+    collect_tovarisch_bfd_diagnostics
+
+    # Start tcpdump in BOTH namespaces for packet-level visibility
+    # ACT 2.1 only captured in BIRD namespace; ACT 2.2 adds tovarisch namespace
+    start_tcpdump_bfd "$NS_BIRD" "$TCPDUMP_BFD_BIRD" "$((WAIT_BFD_CONVERGE + 10))" || true
+    start_tcpdump_tovarisch_bfd "$((WAIT_BFD_CONVERGE + 10))" || true
 
     # Poll for BFD Up
     while [[ $elapsed -lt $WAIT_BFD_CONVERGE ]]; do
@@ -159,7 +167,6 @@ assert_bfd_up() {
     collect_bfd_sessions
 
     # Collect HTTP status for tovarisch BFD state
-    local http_status_file="$LAB_DIR/status-http-bfd.json"
     collect_status_http_bfd
 
     # Stop tcpdump and collect
@@ -173,6 +180,21 @@ assert_bfd_up() {
             log_info "tcpdump capture available: $f"
         fi
     done
+
+    # ACT 2.2: Collect post-wait tovarisch diagnostics
+    # This captures state AFTER the BFD wait period to prove receive/respond behavior
+    log_info "=== ACT 2.2: Collecting post-wait tovarisch diagnostics ==="
+    {
+        echo "=== Post-wait veth-tovarisch RX/TX stats ==="
+        ip netns exec "$NS_TOVARISCH" ip -s link show "$VETH_TOVARISCH" 2>/dev/null || echo "Cannot show veth"
+        echo ""
+        echo "=== Post-wait veth-bird RX/TX stats ==="
+        ip netns exec "$NS_BIRD" ip -s link show "$VETH_BIRD" 2>/dev/null || echo "Cannot show veth"
+    } > "$LAB_DIR/veth-stats.txt" 2>&1
+
+    # Re-collect tovarisch BFD logs after wait period
+    collect_tovarisch_bfd_logs || true
+    collect_tovarisch_bfd_tx_stats || true
 
     # Evaluate result
     if $bfd_up; then
@@ -193,27 +215,74 @@ assert_bfd_up() {
         log_error "[FAIL] BFD session did not reach Up within ${WAIT_BFD_CONVERGE}s"
         log_error "=== BFD Failure Diagnostics ==="
 
+        # ACT 2.2: Comprehensive tovarisch-side diagnostics
+        log_error ""
+        log_error "=== ACT 2.2: tovarisch BFD Receive/Respond Diagnostics ==="
+
         log_error "BIRD BFD sessions (final check):"
         cat "$BFD_SESSIONS_OUTPUT" 2>/dev/null || echo "No BFD sessions output"
 
         log_error "BIRD protocols:"
         birdc_lab show protocols all 2>/dev/null || echo "Cannot query BIRD protocols"
 
+        # ACT 2.2: Socket state - prove whether tovarisch is listening on UDP/4784
+        if [[ -s "$LAB_DIR/tovarisch-socket-state.txt" ]]; then
+            log_error ""
+            log_error "tovarisch socket state (UDP 4784 listener check):"
+            cat "$LAB_DIR/tovarisch-socket-state.txt" 2>/dev/null || echo "Not available"
+        fi
+
+        # ACT 2.2: tcpdump in tovarisch namespace - prove whether packets arrive
+        if [[ -s "$TCPDUMP_BFD_TOVARISCH" ]]; then
+            log_error ""
+            log_error "tcpdump capture (tovarisch namespace - veth-tovarisch):"
+            cat "$TCPDUMP_BFD_TOVARISCH" 2>/dev/null || echo "Empty"
+        else
+            log_error ""
+            log_error "NOTE: No tcpdump capture in tovarisch namespace (file empty or not created)"
+        fi
+
+        # BIRD-side tcpdump for comparison
+        if [[ -s "$TCPDUMP_BFD_BIRD" ]]; then
+            log_error ""
+            log_error "tcpdump capture (BIRD namespace):"
+            cat "$TCPDUMP_BFD_BIRD" 2>/dev/null || echo "Empty"
+        fi
+
+        # ACT 2.2: veth statistics - were there RX/TX errors?
+        if [[ -s "$LAB_DIR/veth-stats.txt" ]]; then
+            log_error ""
+            log_error "veth interface statistics:"
+            cat "$LAB_DIR/veth-stats.txt" 2>/dev/null || echo "Not available"
+        fi
+
         if [[ -s "$http_status_file" ]]; then
+            log_error ""
             log_error "tovarisch runtime BFD status:"
             jq '.' "$http_status_file" 2>/dev/null || cat "$http_status_file"
         fi
 
+        # ACT 2.2: tovarisch BFD logs - did tovarisch log any receive/transmit?
+        if [[ -s "$LAB_DIR/tovarisch-bfd-logs.txt" ]]; then
+            log_error ""
+            log_error "tovarisch BFD logs:"
+            cat "$LAB_DIR/tovarisch-bfd-logs.txt" 2>/dev/null || echo "Not available"
+        fi
+
+        log_error ""
         log_error "tovarisch log tail:"
         tail -n 30 "$TOVARISCH_LOG" 2>/dev/null || echo "Log not available"
 
         log_error "BIRD log tail:"
         tail -n 30 "$BIRD_LOG" 2>/dev/null || echo "Log not available"
 
-        if [[ -s "$TCPDUMP_BFD_BIRD" ]]; then
-            log_error "tcpdump capture (BIRD namespace):"
-            cat "$TCPDUMP_BFD_BIRD" 2>/dev/null || echo "Empty"
-        fi
+        log_error ""
+        log_error "=== ACT 2.2 Summary ==="
+        log_error "Questions to answer from diagnostics above:"
+        log_error "  1. Is tovarisch listening on UDP/4784? (check socket state)"
+        log_error "  2. Do BIRD packets arrive at veth-tovarisch? (check tovarisch tcpdump)"
+        log_error "  3. Does tovarisch log BFD packet receive? (check tovarisch logs)"
+        log_error "  4. Does tovarisch send BFD control packets back? (check tovarisch logs/tcpdump)"
 
         return 1
     fi

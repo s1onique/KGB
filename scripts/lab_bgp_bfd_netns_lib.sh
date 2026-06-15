@@ -12,6 +12,8 @@ source "${SCRIPT_DIR}/lab_bgp_bfd_netns_consts.sh"
 source "${SCRIPT_DIR}/lab_bgp_bfd_netns_diag.sh"
 # shellcheck source=lab_bgp_bfd_netns_bfd.sh
 source "${SCRIPT_DIR}/lab_bgp_bfd_netns_bfd.sh"
+# shellcheck source=lab_bgp_bfd_netns_tovarisch_diag.sh
+source "${SCRIPT_DIR}/lab_bgp_bfd_netns_tovarisch_diag.sh"
 # shellcheck source=lab_bgp_bfd_netns_config.sh
 source "${SCRIPT_DIR}/lab_bgp_bfd_netns_config.sh"
 # shellcheck source=lab_bgp_bfd_netns_collect.sh
