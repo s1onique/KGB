@@ -326,21 +326,12 @@ pub fn bfdReceiveLoopWithTimeout(state: *BfdReceiveLoopState, poll_timeout_ms: c
         const pkt = packet_opt.bytes;
         const peer_addr = packet_opt.peerAddr();
 
-        // Try to decode the packet
-        const decoded = packet.decode(&pkt) catch {
-            // Invalid packet, skip
-            continue;
-        };
-
-        // Handle discriminator learning: if our local_discr is 0 and the packet's
-        // Your Discriminator is 0, this is a new session initiation from BIRD.
-        // We need to assign a local discriminator before processing.
-        handleDiscriminatorLearning(state.runtime, peer_addr, decoded.your_discr) catch {
-            // Session not found or other error, skip
-            continue;
-        };
-
-        // Feed the packet to the runtime
+        // Feed the packet to the runtime.
+        // RFC 5880 Section 6.8.4: Your Discriminator = 0 is valid for initial
+        // discovery packets. The session handles discriminator learning - we just
+        // pass the packet through. handleDiscriminatorLearning() was incorrectly
+        // returning SessionNotFound for new sessions before the session could process
+        // the packet and learn the remote discriminator.
         state.runtime.receivePacket(peer_addr, &pkt) catch {
             // Failed to process packet, skip
             continue;

@@ -32,6 +32,27 @@ pub const RuntimeError = error{
     TransportError,
 };
 
+/// Runtime-level BFD receive statistics.
+/// These counters track packet flow through the receive path for diagnostics.
+pub const RuntimeReceiveStats = struct {
+    /// Packets received from network (before decode)
+    received: u64 = 0,
+    /// Packets successfully decoded
+    decoded: u64 = 0,
+    /// Packets dropped - invalid format
+    dropped_invalid_packet: u64 = 0,
+    /// Packets dropped - session not found
+    dropped_session_not_found: u64 = 0,
+    /// Packets dropped - bad discriminator
+    dropped_bad_discriminator: u64 = 0,
+    /// Packets with Your Discriminator = 0 accepted as initial startup
+    accepted_initial_zero_your_discr: u64 = 0,
+    /// Remote discriminator learned from packet
+    remote_discriminator_learned: u64 = 0,
+    /// Control packets sent in response
+    control_packets_sent: u64 = 0,
+};
+
 /// Peer state for status reporting
 pub const PeerStatus = struct {
     /// Peer address

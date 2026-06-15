@@ -20,7 +20,7 @@ const receive = @import("receive.zig");
 // ============================================================================
 
 /// Create a test runtime with one peer configured.
-fn createTestRuntimeWithPeer() !struct { rt: runtime.BfdRuntime, fake: *transport.FakeTransport } {
+fn createTestRuntimeWithPeer() struct { rt: runtime.BfdRuntime, fake: transport.FakeTransport, ctx: *transport.TransportContext } {
     clock.MockClock.reset();
     const mock_clock = clock.MockClock.interface();
 
