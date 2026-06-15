@@ -194,6 +194,8 @@ fn recvIntoBuffer(sess: *Session) RecvResult {
     const data = transportRecv(sess.trans);
     if (data.len > 0 and sess.recv_len < sess.recv_buf.len) {
         const copy_len = @min(data.len, sess.recv_buf.len - sess.recv_len);
+        // MemoryCopySafety: sess.recv_buf is the session receive buffer. data is from
+        // transportRecv which returns a fresh slice. They are distinct memory regions.
         @memcpy(sess.recv_buf[sess.recv_len .. sess.recv_len + copy_len], data[0..copy_len]);
         sess.recv_len += copy_len;
         return RecvResult{ .bytes_copied = copy_len, .connection_closed = false };

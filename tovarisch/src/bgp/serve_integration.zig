@@ -349,6 +349,8 @@ pub fn runSessionOnce(bundle: *BgpServeBundle) session.RunResult {
 }
 
 fn copyErrorToBundle(bundle: *BgpServeBundle, message: []const u8) []const u8 {
+    // MemoryCopySafety: message is a parameter slice, bundle.last_error_buf is a fixed [64]u8 field.
+    // These buffers are independent - message content is copied into the bundle's own storage.
     @memcpy(bundle.last_error_buf[0..message.len], message);
     return bundle.last_error_buf[0..message.len];
 }

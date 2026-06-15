@@ -163,6 +163,7 @@ pub fn parsePeerConfig(
 pub fn readPublicKey(key_path: []const u8, allocator: std.mem.Allocator) config.ConfigError![]const u8 {
     var path_buf: [4096]u8 = undefined;
     if (key_path.len >= path_buf.len) return config.ConfigError.InvalidValue;
+    // MemoryCopySafety: path_buf is a fixed [4096]u8 buffer, key_path is a caller-provided slice. These buffers are independent - no aliasing.
     @memcpy(path_buf[0..key_path.len], key_path);
     path_buf[key_path.len] = 0;
     const c_path: [*:0]const u8 = @ptrCast(&path_buf);

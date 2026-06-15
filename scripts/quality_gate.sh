@@ -22,6 +22,12 @@ echo "[gate] checking memory ownership hygiene in status/request paths"
 echo "[gate] checking memory ownership hygiene sentinel self-test"
 ./scripts/check_memory_ownership.sh --self-test
 
+echo "[gate] checking Zig memory copy safety hygiene"
+./scripts/check_zig_memory_copy_safety.py
+
+echo "[gate] checking Zig memory copy safety sentinel self-test"
+./scripts/check_zig_memory_copy_safety.py --self-test
+
 echo "[gate] checking final newlines"
 
 missing_newline=0
@@ -84,6 +90,7 @@ required=(
   docs/epics/kgb-repo-indoctrination.md
   docs/epics/bootstrap-zig-tovarisch-leaf-service.md
   docs/tooling/zig-0.16-field-manual.md
+  docs/tooling/zig-memory-copy-safety.md
   docs/tooling/cline-context.md
   docs/tooling/scripts-inventory.md
   docs/coverage/tovarisch-coverage.md

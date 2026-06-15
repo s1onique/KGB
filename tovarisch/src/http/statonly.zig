@@ -369,6 +369,8 @@ const TestWriterImpl = struct {
 
     pub fn writeAll(self: @This(), bytes: []const u8) !void {
         if (self.tw.len + bytes.len > TestWriter.BufSize) return error.BufferOverflow;
+        // MemoryCopySafety: bytes is a parameter slice, self.tw.buf is a separate fixed buffer.
+        // These buffers are independent - no aliasing risk.
         @memcpy(self.tw.buf[self.tw.len..][0..bytes.len], bytes);
         self.tw.len += bytes.len;
     }

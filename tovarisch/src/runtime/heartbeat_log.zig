@@ -87,6 +87,8 @@ const TestWriter = struct {
 
     pub fn writeAll(self: *Self, bytes: []const u8) !void {
         if (self.len + bytes.len > Self.BufSize) return error.BufferOverflow;
+        // MemoryCopySafety: self.buf is a fixed [512]u8 buffer. bytes is a caller-provided
+        // slice. They are distinct memory regions; no aliasing possible.
         @memcpy(self.buf[self.len..][0..bytes.len], bytes);
         self.len += bytes.len;
     }

@@ -69,6 +69,8 @@ pub const PrefixWatcherState = struct {
 
         var path_buf: [4096]u8 = undefined;
         if (path.len >= path_buf.len) return error.PathTooLong;
+        // MemoryCopySafety: path_buf is a [4096]u8 stack buffer. path is a caller-provided
+        // slice. They are distinct memory regions; no aliasing possible.
         @memcpy(path_buf[0..path.len], path);
         path_buf[path.len] = 0;
         const c_path: [*:0]const u8 = @ptrCast(@alignCast(path_buf[0..path.len].ptr));
@@ -95,6 +97,8 @@ pub const PrefixWatcherState = struct {
                 // Add new watch
                 var path_buf: [4096]u8 = undefined;
                 if (path.len >= path_buf.len) return error.PathTooLong;
+                // MemoryCopySafety: path_buf is a [4096]u8 stack buffer. path is a caller-provided
+                // slice. They are distinct memory regions; no aliasing possible.
                 @memcpy(path_buf[0..path.len], path);
                 path_buf[path.len] = 0;
                 const c_path: [*:0]const u8 = @ptrCast(@alignCast(path_buf[0..path.len].ptr));

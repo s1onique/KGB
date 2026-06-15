@@ -89,6 +89,8 @@ pub fn encodeOpen(params: types.OpenParams, buf: []u8) usize {
     buf[body_start + 2] = @as(u8, @intCast(params.my_as % 256));
     buf[body_start + 3] = @as(u8, @intCast(params.hold_time / 256));
     buf[body_start + 4] = @as(u8, @intCast(params.hold_time % 256));
+    // MemoryCopySafety: buf is the output buffer. params.router_id is a [4]u8 struct field.
+    // They are distinct memory regions; no aliasing possible.
     @memcpy(buf[body_start + 5 .. body_start + 9], &params.router_id);
     buf[body_start + 9] = 0; // optional parameters length = 0
 
@@ -189,6 +191,8 @@ pub fn encodeUpdate(params: types.UpdateParams, buf: []u8) usize {
     buf[offset] = 0x40; // TRANSITIVE flag
     buf[offset + 1] = 3; // NEXT_HOP type
     buf[offset + 2] = 4; // length = 4
+    // MemoryCopySafety: buf is the output buffer. params.next_hop is a [4]u8 struct field.
+    // They are distinct memory regions; no aliasing possible.
     @memcpy(buf[offset + 3 .. offset + 7], &params.next_hop);
     offset += 7;
 
@@ -201,6 +205,8 @@ pub fn encodeUpdate(params: types.UpdateParams, buf: []u8) usize {
         // Write minimum prefix bytes
         const byte_count = prefix.nlriByteCount();
         if (byte_count > 0) {
+            // MemoryCopySafety: buf is the output buffer. prefix.addr is a fixed [4]u8 array.
+            // They are distinct memory regions; no aliasing possible.
             @memcpy(buf[offset .. offset + byte_count], prefix.addr[0..byte_count]);
             offset += byte_count;
         }
@@ -262,6 +268,8 @@ pub fn encodeWithdraw(prefixes: []const types.Ipv4Prefix, buf: []u8) usize {
         // Write minimum prefix bytes
         const byte_count = prefix.nlriByteCount();
         if (byte_count > 0) {
+            // MemoryCopySafety: buf is the output buffer. prefix.addr is a fixed [4]u8 array.
+            // They are distinct memory regions; no aliasing possible.
             @memcpy(buf[offset .. offset + byte_count], prefix.addr[0..byte_count]);
             offset += byte_count;
         }

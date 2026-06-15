@@ -324,6 +324,7 @@ pub const FakeTransport = struct {
             const idx = self.captured_count;
             self.captured[idx].peer_addr = peer_addr;
             self.captured[idx].port = port;
+            // MemoryCopySafety: bytes is a parameter slice, self.captured is a separate fixed array. These buffers are independent - no aliasing risk.
             @memcpy(self.captured[idx].bytes[0..packet.CONTROL_PACKET_LEN], bytes[0..packet.CONTROL_PACKET_LEN]);
             self.captured_count += 1;
         }

@@ -71,6 +71,7 @@ pub const ClientGenerateResult = struct {
 /// Convert a Zig slice to a null-terminated C string for C path APIs.
 fn toCString(path: []const u8, buf: *[4096]u8) GenerateError![*:0]const u8 {
     if (path.len >= buf.len) return GenerateError.PathTooLong;
+    // MemoryCopySafety: buf is a fixed [4096]u8 buffer, path is a caller-provided slice. These buffers are independent - no aliasing.
     @memcpy(buf[0..path.len], path);
     buf[path.len] = 0;
     return @as([*:0]const u8, @ptrCast(buf));

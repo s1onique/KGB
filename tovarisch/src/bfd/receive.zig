@@ -178,6 +178,8 @@ pub const BfdReceiveSocket = struct {
             .peer_addr_len = 0,
         };
         const payload_start = @min(@as(usize, @intCast(received)), packet.CONTROL_PACKET_LEN);
+        // MemoryCopySafety: result.bytes is a fixed [128]u8 buffer. buf is a caller-provided
+        // slice from recv(). They are distinct memory regions; no aliasing possible.
         @memcpy(result.bytes[0..payload_start], buf[0..payload_start]);
 
         // Parse IPv4 address from network byte order (big-endian).

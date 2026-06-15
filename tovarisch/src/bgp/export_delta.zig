@@ -77,11 +77,15 @@ pub fn computeDelta(
     }
     if (current.len == 0) {
         const added = try allocator.alloc(types.Ipv4Prefix, candidate.len);
+        // MemoryCopySafety: added is a freshly allocated slice. candidate is a caller-provided
+        // slice. They are distinct memory regions; no aliasing possible.
         @memcpy(added, candidate);
         return DeltaResult{ .added = added, .removed = &.{}, .unchanged_count = 0 };
     }
     if (candidate.len == 0) {
         const removed = try allocator.alloc(types.Ipv4Prefix, current.len);
+        // MemoryCopySafety: removed is a freshly allocated slice. current is a caller-provided
+        // slice. They are distinct memory regions; no aliasing possible.
         @memcpy(removed, current);
         return DeltaResult{ .added = &.{}, .removed = removed, .unchanged_count = 0 };
     }
@@ -89,11 +93,15 @@ pub fn computeDelta(
     // Copy and sort both sets
     const current_sorted = try allocator.alloc(types.Ipv4Prefix, current.len);
     errdefer allocator.free(current_sorted);
+    // MemoryCopySafety: current_sorted is freshly allocated. current is caller-provided.
+    // They are distinct memory regions; no aliasing possible.
     @memcpy(current_sorted, current);
     sortPrefixes(current_sorted);
 
     const candidate_sorted = try allocator.alloc(types.Ipv4Prefix, candidate.len);
     errdefer allocator.free(candidate_sorted);
+    // MemoryCopySafety: candidate_sorted is freshly allocated. candidate is caller-provided.
+    // They are distinct memory regions; no aliasing possible.
     @memcpy(candidate_sorted, candidate);
     sortPrefixes(candidate_sorted);
 

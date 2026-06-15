@@ -76,8 +76,7 @@ pub fn handleStatus(fd: i32, state: *anyopaque) !void {
     // Cast opaque state to ServeContext to get BFD runtime, config check, and BGP state.
     const ctx = @as(*server.ServeContext, @ptrCast(@alignCast(state)));
 
-    // For HTTP, we need to render status to a buffer first
-    // then send it. Use a simple fixed buffer writer.
+    // For HTTP, we need to render status to a buffer first then send it. Use a simple fixed buffer writer.
     var buf: [4096]u8 = undefined;
     var len: usize = 0;
 
@@ -133,6 +132,7 @@ pub fn handleMetrics(fd: i32, state: *anyopaque) !void {
 
         pub fn writeAll(self: @This(), bytes: []const u8) !void {
             if (self.len.* + bytes.len > 8192) return error.BufferOverflow;
+            // MemoryCopySafety: self.buf is a fixed [8192]u8 buffer. bytes is a caller-provided slice. They are distinct memory regions; no aliasing possible.
             @memcpy(self.buf[self.len.*..][0..bytes.len], bytes);
             self.len.* += bytes.len;
         }
@@ -144,8 +144,7 @@ pub fn handleMetrics(fd: i32, state: *anyopaque) !void {
         }
     }{ .buf = &buf, .len = &len };
 
-    // MemoryOwnership: Transient allocation within HTTP request handler scope.
-    // All memory is released before the handler returns.
+    // MemoryOwnership: Transient allocation within HTTP request handler scope. All memory is released before the handler returns.
     ctx.metrics.renderMetricsPayload(std.heap.page_allocator, &writer, "/sys/class/net") catch {
         // Fallback: render warning payload
         len = 0;
@@ -264,8 +263,7 @@ test "parseMethod maps uppercase HTTP methods to enum" {
 // --- Metrics state pointer tests ---
 
 test "handleMetrics uses ServeContext.metrics for stateful collection" {
-    // This test proves that handleMetrics() casts *anyopaque to *ServeContext
-    // and accesses ctx.metrics. This is the consistent pattern for all handlers.
+    // This test proves that handleMetrics() casts *anyopaque to *ServeContext and accesses ctx.metrics. This is the consistent pattern for all handlers.
     const allocator = std.testing.allocator;
     var serve_ctx = server.ServeContext.init(allocator);
     defer serve_ctx.deinit();
@@ -403,6 +401,7 @@ test "serve status endpoint reflects configured BFD runtime" {
 
         pub fn writeAll(self: @This(), bytes: []const u8) !void {
             if (self.len.* + bytes.len > 4096) return error.BufferOverflow;
+            // MemoryCopySafety: self.buf is a fixed [4096]u8 buffer. bytes is a caller-provided slice. They are distinct memory regions; no aliasing.
             @memcpy(self.buf[self.len.*..][0..bytes.len], bytes);
             self.len.* += bytes.len;
         }
@@ -435,6 +434,7 @@ test "serve status endpoint with null BFD shows not configured" {
 
         pub fn writeAll(self: @This(), bytes: []const u8) !void {
             if (self.len.* + bytes.len > 4096) return error.BufferOverflow;
+            // MemoryCopySafety: self.buf is a fixed [4096]u8 buffer. bytes is a caller-provided slice. They are distinct memory regions; no aliasing.
             @memcpy(self.buf[self.len.*..][0..bytes.len], bytes);
             self.len.* += bytes.len;
         }

@@ -116,6 +116,8 @@ pub const ExportState = struct {
     /// Set apply error with buffer.
     fn setApplyError(self: *Self, message: []const u8) void {
         const copy_len = @min(message.len, self.apply_error_buf.len - 1);
+        // MemoryCopySafety: self.apply_error_buf is a fixed buffer. message is a
+        // caller-provided slice. They are distinct memory regions; no aliasing possible.
         @memcpy(self.apply_error_buf[0..copy_len], message[0..copy_len]);
         self.apply_error_buf[copy_len] = 0;
         self.last_apply_error = self.apply_error_buf[0..copy_len];
@@ -129,6 +131,8 @@ pub const ExportState = struct {
     /// Set reload error with buffer.
     fn setReloadError(self: *Self, message: []const u8) void {
         const copy_len = @min(message.len, self.reload_error_buf.len - 1);
+        // MemoryCopySafety: self.reload_error_buf is a fixed buffer. message is a
+        // caller-provided slice. They are distinct memory regions; no aliasing possible.
         @memcpy(self.reload_error_buf[0..copy_len], message[0..copy_len]);
         self.reload_error_buf[copy_len] = 0;
         self.last_reload_error = self.reload_error_buf[0..copy_len];
@@ -312,6 +316,8 @@ pub fn initExportedPrefixes(
             export_state.current_exported_prefixes = &.{};
             return;
         };
+        // MemoryCopySafety: current_exported_prefixes is freshly allocated. initial_prefixes
+        // is caller-provided. They are distinct memory regions; no aliasing possible.
         @memcpy(export_state.current_exported_prefixes, initial_prefixes);
     }
     export_state.last_reload_success = true;

@@ -142,6 +142,8 @@ pub fn formatNotification(
         subcode_name,
     }) catch {
         // Buffer too small - just return code name
+        // MemoryCopySafety: buf is a caller-provided fixed buffer. code_name is a
+        // compile-time constant string. They are distinct memory regions.
         @memcpy(buf[0..code_name.len], code_name);
         return buf[0..code_name.len];
     };

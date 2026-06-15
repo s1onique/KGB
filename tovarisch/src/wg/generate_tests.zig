@@ -16,6 +16,7 @@ test "readPrivateKey rejects invalid key length" {
     const tmp_path = "/tmp/wg-test-key-invalid";
 
     var path_buf: [256]u8 = undefined;
+    // MemoryCopySafety: path_buf is a fixed [256]u8 buffer, tmp_path is a string literal. These buffers are independent - no aliasing.
     @memcpy(path_buf[0..tmp_path.len], tmp_path);
     path_buf[tmp_path.len] = 0;
     const c_path: [*:0]const u8 = @ptrCast(&path_buf);
@@ -42,6 +43,7 @@ test "readPrivateKey accepts valid 44-char key" {
     const tmp_path = "/tmp/wg-test-key-valid";
 
     var path_buf: [256]u8 = undefined;
+    // MemoryCopySafety: path_buf is a fixed [256]u8 buffer, tmp_path is a string literal. These buffers are independent - no aliasing.
     @memcpy(path_buf[0..tmp_path.len], tmp_path);
     path_buf[tmp_path.len] = 0;
     const c_path: [*:0]const u8 = @ptrCast(&path_buf);
@@ -74,6 +76,7 @@ test "readPublicKey rejects invalid key length" {
     const tmp_path = "/tmp/wg-test-pubkey-invalid";
 
     var path_buf: [256]u8 = undefined;
+    // MemoryCopySafety: path_buf is a fixed [256]u8 buffer, tmp_path is a string literal. These buffers are independent - no aliasing.
     @memcpy(path_buf[0..tmp_path.len], tmp_path);
     path_buf[tmp_path.len] = 0;
     const c_path: [*:0]const u8 = @ptrCast(&path_buf);
@@ -99,6 +102,7 @@ test "readPublicKey accepts valid 44-char key" {
     const tmp_path = "/tmp/wg-test-pubkey-valid";
 
     var path_buf: [256]u8 = undefined;
+    // MemoryCopySafety: path_buf is a fixed [256]u8 buffer, tmp_path is a string literal. These buffers are independent - no aliasing.
     @memcpy(path_buf[0..tmp_path.len], tmp_path);
     path_buf[tmp_path.len] = 0;
     const c_path: [*:0]const u8 = @ptrCast(&path_buf);
@@ -126,6 +130,7 @@ test "readPublicKey accepts padded key" {
     const tmp_path = "/tmp/wg-test-pubkey-padded";
 
     var path_buf: [256]u8 = undefined;
+    // MemoryCopySafety: path_buf is a fixed [256]u8 buffer, tmp_path is a string literal. These buffers are independent - no aliasing.
     @memcpy(path_buf[0..tmp_path.len], tmp_path);
     path_buf[tmp_path.len] = 0;
     const c_path: [*:0]const u8 = @ptrCast(&path_buf);
@@ -153,6 +158,7 @@ test "readPublicKey rejects invalid characters" {
     const tmp_path = "/tmp/wg-test-pubkey-invalid-chars";
 
     var path_buf: [256]u8 = undefined;
+    // MemoryCopySafety: path_buf is a fixed [256]u8 buffer, tmp_path is a string literal. These buffers are independent - no aliasing.
     @memcpy(path_buf[0..tmp_path.len], tmp_path);
     path_buf[tmp_path.len] = 0;
     const c_path: [*:0]const u8 = @ptrCast(&path_buf);
@@ -179,6 +185,7 @@ test "readPublicKey rejects invalid padding" {
     const tmp_path = "/tmp/wg-test-pubkey-bad-padding";
 
     var path_buf: [256]u8 = undefined;
+    // MemoryCopySafety: path_buf is a fixed [256]u8 buffer, tmp_path is a string literal. These buffers are independent - no aliasing.
     @memcpy(path_buf[0..tmp_path.len], tmp_path);
     path_buf[tmp_path.len] = 0;
     const c_path: [*:0]const u8 = @ptrCast(&path_buf);
@@ -238,6 +245,7 @@ test "writeConfigFile creates file with correct permissions" {
 
     // Clean up any existing file
     var path_buf: [256]u8 = undefined;
+    // MemoryCopySafety: path_buf is a fixed [256]u8 buffer, tmp_path is a string literal. These buffers are independent - no aliasing.
     @memcpy(path_buf[0..tmp_path.len], tmp_path);
     path_buf[tmp_path.len] = 0;
     const c_path: [*:0]const u8 = @ptrCast(&path_buf);
@@ -280,6 +288,7 @@ test "readPublicKey accepts padded key ending with =" {
     const tmp_path = "/tmp/tovarisch-wg-test-padded-pubkey";
 
     var path_buf: [256]u8 = undefined;
+    // MemoryCopySafety: path_buf is a fixed [256]u8 buffer, tmp_path is a string literal. These buffers are independent - no aliasing.
     @memcpy(path_buf[0..tmp_path.len], tmp_path);
     path_buf[tmp_path.len] = 0;
     const c_path: [*:0]const u8 = @ptrCast(&path_buf);

@@ -143,6 +143,8 @@ pub fn reloadPrefixes(
 /// Copy an error message into the last-good state buffer.
 fn copyError(last_good: *prefix_watch.LastGoodState, message: []const u8) []const u8 {
     const copy_len = @min(message.len, last_good.error_buf.len - 1);
+    // MemoryCopySafety: last_good.error_buf is a fixed [256]u8 buffer. message is a
+    // caller-provided slice. They are distinct memory regions; no aliasing possible.
     @memcpy(last_good.error_buf[0..copy_len], message[0..copy_len]);
     last_good.error_buf[copy_len] = 0;
     last_good.last_error = last_good.error_buf[0..copy_len];

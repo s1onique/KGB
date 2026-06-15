@@ -57,6 +57,8 @@ fn poll(state: *anyopaque) !?[]const prefix_watch.WatcherEvent {
 
     // Copy events into owned buffer
     self.poll_count = @min(self.events.items.len, self.poll_events.len);
+    // MemoryCopySafety: self.poll_events is a fixed-size temp array. self.events.items is
+    // an ArrayList's heap-allocated items slice. Different allocations; no aliasing.
     @memcpy(self.poll_events[0..self.poll_count], self.events.items[0..self.poll_count]);
     self.events.clearRetainingCapacity();
     return self.poll_events[0..self.poll_count];
