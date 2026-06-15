@@ -288,15 +288,16 @@ pub const FakeTransport = struct {
 
 /// Wrapper that implements Transport using a FakeTransport instance.
 /// This allows the FakeTransport to be used where a Transport is expected.
-/// The wrapper OWNS the FakeTransport to ensure stable memory.
+/// The wrapper stores a POINTER to the FakeTransport to ensure the same
+/// instance is used when the test calls fake.reset().
 pub const FakeTransportWrapper = struct {
     const Self = @This();
 
-    /// Owned fake transport
-    fake: FakeTransport,
+    /// Pointer to the fake transport (not owned - test owns it)
+    fake: *FakeTransport,
 
-    /// Initialize with a fake transport.
-    pub fn init(fake: FakeTransport) Self {
+    /// Initialize with a pointer to a fake transport.
+    pub fn init(fake: *FakeTransport) Self {
         return Self{ .fake = fake };
     }
 
@@ -327,7 +328,9 @@ pub const TransportContext = struct {
     is_fake: bool = false,
 
     /// Create a context for a fake transport.
-    pub fn initFake(fake: FakeTransport) Self {
+    /// Takes a POINTER to the fake transport so that fake.reset() in tests
+    /// affects the same instance that the wrapper references.
+    pub fn initFake(fake: *FakeTransport) Self {
         return Self{
             .fake_wrapper = FakeTransportWrapper.init(fake),
             .is_fake = true,
@@ -346,7 +349,7 @@ pub const TransportContext = struct {
 
 /// Create a fake transport interface for a specific fake instance.
 /// Returns both the Transport interface and the context that owns it.
-pub fn makeFakeTransportInterface(fake: FakeTransport) struct { trans: Transport, ctx: *TransportContext } {
+pub fn makeFakeTransportInterface(fake: *FakeTransport) struct { trans: Transport, ctx: *TransportContext } {
     var ctx = std.heap.page_allocator.create(TransportContext) catch unreachable;
     ctx.* = TransportContext.initFake(fake);
     return .{

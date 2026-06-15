@@ -1,10 +1,6 @@
-// receive_tests.zig — Tests for BFD UDP receive socket
-//
-// Tests the receive module's ability to handle packet decode/feed path.
+// receive_tests.zig — Tests for BFD UDP receive socket.
 // Uses FakeTransport to test the receive logic without actual network.
-//
-// NOTE: These tests use the packet decoder and runtime integration,
-// not the actual UDP socket. For real socket tests, see receive.zig.
+// NOTE: These tests use the packet decoder and runtime integration, not the actual UDP socket.
 
 const std = @import("std");
 const testing = std.testing;
@@ -14,20 +10,41 @@ const transport = @import("transport.zig");
 const clock = @import("clock.zig");
 const config = @import("config.zig");
 const receive = @import("receive.zig");
+const session = @import("session.zig");
 
 // ============================================================================
 // Test helpers
 // ============================================================================
 
+/// Owned test runtime helper for proper memory ownership.
+/// This ensures the fake transport instance used by the runtime is heap-allocated
+/// and stable across function boundaries.
+const TestRuntime = struct {
+    rt: runtime.BfdRuntime,
+    fake: *transport.FakeTransport,
+    ctx: *transport.TransportContext,
+
+    fn deinit(self: *TestRuntime) void {
+        std.testing.allocator.destroy(self.ctx);
+        std.testing.allocator.destroy(self.fake);
+        std.testing.allocator.destroy(self);
+    }
+};
+
 /// Create a test runtime with one peer configured.
-fn createTestRuntimeWithPeer() struct { rt: runtime.BfdRuntime, fake: transport.FakeTransport, ctx: *transport.TransportContext } {
+/// Returns a TestRuntime with stable pointers so that fake.reset() and
+/// fake.captured_count in tests observe the same instance the runtime uses.
+fn createTestRuntimeWithPeer() !*TestRuntime {
     clock.MockClock.reset();
     const mock_clock = clock.MockClock.interface();
 
-    var fake = transport.FakeTransport.init(&.{ "10.149.149.10" });
+    // Allocate fake transport on heap so we have a stable pointer
+    var fake = try std.testing.allocator.create(transport.FakeTransport);
+    fake.* = transport.FakeTransport.init(&.{ "10.149.149.10" });
     fake.reset();
 
-    var ctx = std.heap.page_allocator.create(transport.TransportContext) catch unreachable;
+    // Allocate context that references the same fake instance
+    var ctx = try std.testing.allocator.create(transport.TransportContext);
     ctx.* = transport.TransportContext.initFake(fake);
 
     var rt = runtime.BfdRuntime.initWithContext(
@@ -46,7 +63,13 @@ fn createTestRuntimeWithPeer() struct { rt: runtime.BfdRuntime, fake: transport.
     try rt.addPeer(cfg);
     rt.startAll();
 
-    return .{ .rt = rt, .fake = fake };
+    const result = try std.testing.allocator.create(TestRuntime);
+    result.* = .{
+        .rt = rt,
+        .fake = fake,
+        .ctx = ctx,
+    };
+    return result;
 }
 
 // ============================================================================
@@ -80,7 +103,7 @@ test "packet decode extracts Your Discriminator" {
 
 test "runtime receives packet and learns peer discriminator" {
     var result = try createTestRuntimeWithPeer();
-    defer std.heap.page_allocator.destroy(result.fake.fake_wrapper.?.ctx);
+    defer result.deinit();
 
     var rt = result.rt;
 
@@ -91,7 +114,6 @@ test "runtime receives packet and learns peer discriminator" {
 
     // Simulate BIRD packet with Your Discriminator = 0
     var buf: [packet.CONTROL_PACKET_LEN]u8 = undefined;
-    const local_discr = sess.local_discr;
 
     const pkt = packet.ControlPacket{
         .state = .init,
@@ -114,7 +136,7 @@ test "runtime receives packet and learns peer discriminator" {
 
 test "runtime packet feed updates session state to Up" {
     var result = try createTestRuntimeWithPeer();
-    defer std.heap.page_allocator.destroy(result.fake.fake_wrapper.?.ctx);
+    defer result.deinit();
 
     var rt = result.rt;
 
@@ -163,7 +185,7 @@ test "runtime packet feed updates session state to Up" {
 
 test "runtime drops packets with wrong Your Discriminator" {
     var result = try createTestRuntimeWithPeer();
-    defer std.heap.page_allocator.destroy(result.fake.fake_wrapper.?.ctx);
+    defer result.deinit();
 
     var rt = result.rt;
 
@@ -198,7 +220,7 @@ test "runtime drops packets with wrong Your Discriminator" {
 
 test "runtime builds correct transmit packet" {
     var result = try createTestRuntimeWithPeer();
-    defer std.heap.page_allocator.destroy(result.fake.fake_wrapper.?.ctx);
+    defer result.deinit();
 
     var rt = result.rt;
 
@@ -245,7 +267,7 @@ test "runtime builds correct transmit packet" {
 
 test "session packet stats are tracked correctly" {
     var result = try createTestRuntimeWithPeer();
-    defer std.heap.page_allocator.destroy(result.fake.fake_wrapper.?.ctx);
+    defer result.deinit();
 
     var rt = result.rt;
 
@@ -280,7 +302,7 @@ test "session packet stats are tracked correctly" {
 
 test "runtime upCount reflects session state" {
     var result = try createTestRuntimeWithPeer();
-    defer std.heap.page_allocator.destroy(result.fake.fake_wrapper.?.ctx);
+    defer result.deinit();
 
     var rt = result.rt;
 
@@ -328,7 +350,7 @@ test "runtime upCount reflects session state" {
 
 test "session learns remote discriminator from Your_Discr_0 packet" {
     var result = try createTestRuntimeWithPeer();
-    defer std.heap.page_allocator.destroy(result.fake.fake_wrapper.?.ctx);
+    defer result.deinit();
 
     var rt = result.rt;
 
@@ -356,7 +378,7 @@ test "session learns remote discriminator from Your_Discr_0 packet" {
 
 test "session calculates detection timeout from peer packet" {
     var result = try createTestRuntimeWithPeer();
-    defer std.heap.page_allocator.destroy(result.fake.fake_wrapper.?.ctx);
+    defer result.deinit();
 
     var rt = result.rt;
 
@@ -402,42 +424,4 @@ test "poll timeout constant is reasonable for BFD" {
     try testing.expect(timeout_ms <= 100); // At most 100ms (10 polls/second) for BFD
 }
 
-// ============================================================================
-// Fake transport for EAGAIN path testing
-// ============================================================================
 
-/// Fake socket for testing receive loop without real network.
-/// This allows us to simulate the EAGAIN scenario without actual sockets.
-const FakeSocket = struct {
-    const Self = @This();
-
-    fd: i32 = 0, // Fake fd (not a real socket)
-    poll_will_block: bool = true, // If true, poll returns no data
-    packets: std.ArrayList([packet.CONTROL_PACKET_LEN]u8) = undefined,
-    packets_received: usize = 0,
-
-    fn init(allocator: std.mem.Allocator) Self {
-        return Self{
-            .packets = std.ArrayList([packet.CONTROL_PACKET_LEN]u8).init(allocator),
-        };
-    }
-
-    fn deinit(self: *Self) void {
-        self.packets.deinit();
-    }
-
-    fn addPacket(self: *Self, pkt: [packet.CONTROL_PACKET_LEN]u8) void {
-        self.packets.append(pkt) catch unreachable;
-    }
-
-    fn setWillBlock(self: *Self, will_block: bool) void {
-        self.poll_will_block = will_block;
-    }
-
-    fn getFd(self: *const Self) i32 {
-        return self.fd;
-    }
-};
-
-// Import session for buildTransmitPacket
-const session = @import("session.zig");

@@ -226,7 +226,7 @@ const POLLIN: c_short = 0x0001;
 /// This balances BFD responsiveness (typically 800ms+ intervals) with CPU savings.
 /// BFD packets arrive at most once per configured interval; 50ms is 1/16th of the
 /// minimum typical BFD interval (800ms), providing good responsiveness without busy-spin.
-const DEFAULT_POLL_TIMEOUT_MS: c_int = 50;
+pub const DEFAULT_POLL_TIMEOUT_MS: c_int = 50;
 
 /// BFD receive loop state passed to the receive thread.
 /// Includes the stop signal and runtime reference.

@@ -64,6 +64,8 @@ const _bfd_transport_tests = @import("bfd/transport_tests.zig");
 const _bfd_runtime = @import("bfd/runtime.zig");
 const _bfd_runtime_tests = @import("bfd/runtime_tests.zig");
 const _bfd_status = @import("bfd/status.zig");
+const _bfd_receive_startup_tests = @import("bfd/receive_startup_tests.zig");
+const _bfd_receive_tests = @import("bfd/receive_tests.zig");
 
 // Force test discovery for all imported modules
 test { std.testing.refAllDecls(@import("net/private_ip.zig")); }
@@ -122,6 +124,8 @@ test { std.testing.refAllDecls(@import("bfd/transport_tests.zig")); }
 test { std.testing.refAllDecls(@import("bfd/runtime.zig")); }
 test { std.testing.refAllDecls(@import("bfd/runtime_tests.zig")); }
 test { std.testing.refAllDecls(@import("bfd/status.zig")); }
+test { std.testing.refAllDecls(@import("bfd/receive_startup_tests.zig")); }
+test { std.testing.refAllDecls(@import("bfd/receive_tests.zig")); }
 
 // WireGuard tests
 test { std.testing.refAllDecls(@import("config.zig")); }

@@ -374,18 +374,18 @@ test "status handler includes http check in output" {
 // --- BFD runtime wiring tests ---
 
 test "serve status endpoint reflects configured BFD runtime" {
-    // This test proves that status rendering with a configured BFD runtime
-    // produces different output than with null runtime.
+    // Verifies status rendering with configured BFD runtime differs from null.
     const bfd_status_module = @import("../bfd/status.zig");
 
     // Create a test BFD runtime with a peer
-    var runtime = bfd_status_module.createTestRuntime();
-    try bfd_status_module.addTestPeer(&runtime, "10.0.0.1", "10.0.0.2");
+    var runtime = try bfd_status_module.createTestRuntime();
+    defer runtime.deinit();
+    try bfd_status_module.addTestPeer(&runtime.rt, "10.0.0.1", "10.0.0.2");
 
     // Create serve context with the runtime
     var serve_ctx = server.ServeContext.init(std.testing.allocator);
     defer serve_ctx.deinit();
-    serve_ctx.bfd_runtime = &runtime;
+    serve_ctx.bfd_runtime = &runtime.rt;
 
     // Render status with the BFD runtime
     var buf: [4096]u8 = undefined;

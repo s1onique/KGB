@@ -20,15 +20,35 @@ const session = @import("session.zig");
 // Test helpers
 // ============================================================================
 
+/// Stable test runtime that holds pointers to all owned resources.
+/// This ensures the fake transport instance used by the runtime is the same
+/// one that the test inspects for captured packets.
+const TestRuntime = struct {
+    rt: runtime.BfdRuntime,
+    fake: *transport.FakeTransport,
+    ctx: *transport.TransportContext,
+
+    fn deinit(self: *TestRuntime) void {
+        std.testing.allocator.destroy(self.ctx);
+        std.testing.allocator.destroy(self.fake);
+        std.testing.allocator.destroy(self);
+    }
+};
+
 /// Create a test runtime with one peer configured.
-fn createTestRuntimeWithPeer() !struct { rt: runtime.BfdRuntime, fake: *transport.FakeTransport } {
+/// Returns a TestRuntime with stable pointers so that fake.reset() and
+/// fake.captured_count in tests observe the same instance the runtime uses.
+fn createTestRuntimeWithPeer() !*TestRuntime {
     clock.MockClock.reset();
     const mock_clock = clock.MockClock.interface();
 
-    var fake = transport.FakeTransport.init(&.{ "10.149.149.10" });
+    // Allocate fake transport on heap so we have a stable pointer
+    var fake = try std.testing.allocator.create(transport.FakeTransport);
+    fake.* = transport.FakeTransport.init(&.{ "10.149.149.10" });
     fake.reset();
 
-    var ctx = std.heap.page_allocator.create(transport.TransportContext) catch unreachable;
+    // Allocate context that references the same fake instance
+    var ctx = try std.testing.allocator.create(transport.TransportContext);
     ctx.* = transport.TransportContext.initFake(fake);
 
     var rt = runtime.BfdRuntime.initWithContext(
@@ -47,7 +67,13 @@ fn createTestRuntimeWithPeer() !struct { rt: runtime.BfdRuntime, fake: *transpor
     try rt.addPeer(cfg);
     rt.startAll();
 
-    return .{ .rt = rt, .fake = fake };
+    const result = try std.testing.allocator.create(TestRuntime);
+    result.* = .{
+        .rt = rt,
+        .fake = fake,
+        .ctx = ctx,
+    };
+    return result;
 }
 
 // ============================================================================
@@ -57,10 +83,10 @@ fn createTestRuntimeWithPeer() !struct { rt: runtime.BfdRuntime, fake: *transpor
 test "BIRD startup: packet with your_discr_0 is accepted and response is sent" {
     // This is the exact scenario from ACT 2.3 - BIRD starts session with Your Discr = 0
     var result = try createTestRuntimeWithPeer();
-    defer std.heap.page_allocator.destroy(result.fake.fake_wrapper.?.ctx);
+    defer result.deinit();
 
     var rt = result.rt;
-    var fake = result.fake;
+    const fake = result.fake;
     fake.reset();
 
     const sess = rt.getSession("10.149.149.10").?;
@@ -104,24 +130,24 @@ test "BIRD startup: packet with your_discr_0 is accepted and response is sent" {
     try testing.expectEqual(@as(usize, 1), fake.captured_count);
 
     // Verify the response packet has correct discriminators
-    const response = &fake.captured[0];
+    const response = fake.lastPacket().?;
     try testing.expectEqualStrings("10.149.149.10", response.peer_addr);
     try testing.expectEqual(@as(u16, packet.MULTIHOP_UDP_PORT), response.port);
 
     // Decode and verify the response packet contents
     const response_pkt = try packet.decode(&response.bytes);
     try testing.expectEqual(local_discr, response_pkt.my_discr); // Our local discr
-    try testing.expectEqual(@as(u32, 0xB1D0001), response_pkt.your_discr); // Learned BIRD discr
+    try testing.expectEqual(@as(u32, 0xB1D00001), response_pkt.your_discr); // Learned BIRD discr
     try testing.expectEqual(packet.State.down, response_pkt.state);
 }
 
 test "BIRD startup: complete handshake to Up state" {
     // Simulate complete BFD handshake between tovarisch and BIRD
     var result = try createTestRuntimeWithPeer();
-    defer std.heap.page_allocator.destroy(result.fake.fake_wrapper.?.ctx);
+    defer result.deinit();
 
     var rt = result.rt;
-    var fake = result.fake;
+    const fake = result.fake;
     fake.reset();
 
     const sess = rt.getSession("10.149.149.10").?;
@@ -162,9 +188,12 @@ test "BIRD startup: complete handshake to Up state" {
     // Step 3: Trigger tick to process and send response
     try rt.tick();
 
-    // Verify response was sent
+    // Verify a packet was sent back to BIRD
     try testing.expectEqual(@as(usize, 1), fake.captured_count);
-    const response_pkt = try packet.decode(&fake.captured[0].bytes);
+
+    // Verify response packet contents
+    const response = fake.lastPacket().?;
+    const response_pkt = try packet.decode(&response.bytes);
     try testing.expectEqual(local_discr, response_pkt.my_discr);
     try testing.expectEqual(@as(u32, 0xB1D0001), response_pkt.your_discr);
     try testing.expectEqual(packet.State.up, response_pkt.state);
@@ -174,7 +203,7 @@ test "BIRD startup: packet not dropped when your_discr_0 from configured peer" {
     // Regression test: ensure packets with Your Discr = 0 from configured peers
     // are NOT counted as dropped. RFC 5880 Section 6.8.4 explicitly allows this.
     var result = try createTestRuntimeWithPeer();
-    defer std.heap.page_allocator.destroy(result.fake.fake_wrapper.?.ctx);
+    defer result.deinit();
 
     var rt = result.rt;
 

@@ -21,6 +21,8 @@ collect_tovarisch_socket_state() {
     log_info "=== ACT 2.2: Collecting tovarisch socket state ==="
 
     local output="$LAB_DIR/tovarisch-socket-state.txt"
+    local tovarisch_pid
+    tovarisch_pid=$(ip netns exec "$NS_TOVARISCH" pgrep -x tovarisch 2>/dev/null || echo "")
     local ok=false
 
     {
@@ -52,16 +54,10 @@ collect_tovarisch_socket_state() {
         ip netns exec "$NS_TOVARISCH" ps aux 2>&1 | grep -E "tovarisch|PID" || echo "No tovarisch process"
         echo ""
 
-        echo "--- UDP sockets owned by tovarisch PID ---"
-        local tovarisch_pid
-        tovarisch_pid=$(ip netns exec "$NS_TOVARISCH" pgrep -x tovarisch 2>/dev/null || echo "")
-        if [[ -n "$tovarisch_pid" ]]; then
-            echo "tovarisch PID: $tovarisch_pid"
-            ip netns exec "$NS_TOVARISCH" ss -lunp "sport = :4784" 2>&1 || echo "No UDP 4784"
-            ip netns exec "$NS_TOVARISCH" ss -unp "pid $tovarisch_pid" 2>&1 || echo "No sockets for PID"
-        else
-            echo "tovarisch PID not found"
-        fi
+        echo "--- UDP/4784 socket evidence ---"
+        echo "tovarisch PID: $tovarisch_pid"
+        ip netns exec "$NS_TOVARISCH" ss -lunp 2>&1 | grep ':4784' || echo "No UDP 4784 sockets"
+        echo ""
 
     } > "$output" 2>&1
 

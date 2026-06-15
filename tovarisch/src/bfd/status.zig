@@ -113,14 +113,48 @@ pub fn buildStatusCheckInto(
     };
 }
 
-/// Create a fresh runtime for testing.
-pub fn createTestRuntime() BfdRuntime {
+/// Owned test runtime helper for proper memory ownership.
+/// This ensures the fake transport instance used by the runtime is heap-allocated
+/// and stable across function boundaries.
+const TestRuntime = struct {
+    rt: BfdRuntime,
+    fake: *transport.FakeTransport,
+    ctx: *transport.TransportContext,
+
+    pub fn deinit(self: *TestRuntime) void {
+        std.testing.allocator.destroy(self.ctx);
+        std.testing.allocator.destroy(self.fake);
+        std.testing.allocator.destroy(self);
+    }
+};
+
+/// Create a fresh runtime for testing with proper memory ownership.
+pub fn createTestRuntime() !*TestRuntime {
     clock.MockClock.reset();
     const mock_clock = clock.MockClock.interface();
-    var fake = transport.FakeTransport.init(&.{});
+
+    // Allocate fake transport on heap
+    var fake = try std.testing.allocator.create(transport.FakeTransport);
+    fake.* = transport.FakeTransport.init(&.{});
     fake.reset();
-    const result = transport.makeFakeTransportInterface(fake);
-    return BfdRuntime.initWithContext(result.trans, mock_clock, result.ctx);
+
+    // Allocate context that references the same fake instance
+    var ctx = try std.testing.allocator.create(transport.TransportContext);
+    ctx.* = transport.TransportContext.initFake(fake);
+
+    const rt = BfdRuntime.initWithContext(
+        ctx.toTransport(),
+        mock_clock,
+        ctx,
+    );
+
+    const result = try std.testing.allocator.create(TestRuntime);
+    result.* = .{
+        .rt = rt,
+        .fake = fake,
+        .ctx = ctx,
+    };
+    return result;
 }
 
 /// Add a test peer with default BIRD-style config.
@@ -144,15 +178,20 @@ test "snapshotFromRuntime returns empty when runtime is null" {
 }
 
 test "snapshotFromRuntime returns empty when runtime has no peers" {
-    var rt = createTestRuntime();
-    const snapshot = snapshotFromRuntime(&rt);
+    var result = try createTestRuntime();
+    defer result.deinit();
+
+    const snapshot = snapshotFromRuntime(&result.rt);
     try std.testing.expectEqual(@as(usize, 0), snapshot.peer_count);
     try std.testing.expectEqual(@as(usize, 0), snapshot.up_count);
     try std.testing.expect(!snapshot.has_peers);
 }
 
 test "snapshotFromRuntime returns correct counts with peers" {
-    var rt = createTestRuntime();
+    var result = try createTestRuntime();
+    defer result.deinit();
+
+    var rt = result.rt;
     try addTestPeer(&rt, "10.0.0.1", "10.0.0.2");
     rt.startAll();
 
@@ -228,7 +267,10 @@ test "buildStatusCheckInto returns warn when some peers down" {
 }
 
 test "createTestRuntime and addTestPeer work together" {
-    var rt = createTestRuntime();
+    var result = try createTestRuntime();
+    defer result.deinit();
+
+    var rt = result.rt;
     try addTestPeer(&rt, "10.0.0.1", "10.0.0.2");
     
     try std.testing.expect(rt.hasPeers());
