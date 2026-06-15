@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect install-git-safety-hooks verify-git-history-safety verify-github-ruleset
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 87
@@ -146,6 +146,16 @@ lab-bgp-bfd:
 
 lab-bgp-bfd-reconnect:
 	@./scripts/lab_bgp_bfd_reconnect.sh
+
+# === BGP/BFD Reconnect Lab — BGP Protocol Reset Scenario ===
+# Proves: BGP protocol reset with BFD healthy, tovarisch reconnects without restart.
+# Failure injection: BIRD protocol disable/enable (peer-side BGP restart).
+# Sibling scenario to lab-bgp-bfd-reconnect.sh.
+# Primary execution: GitHub Actions (workflow_dispatch)
+# NOT part of make gate
+
+lab-bgp-bfd-reconnect-bgp-reset:
+	@./scripts/lab_bgp_bfd_reconnect_bgp_reset.sh
 
 # === Git History Safety ===
 # Prevents force pushes, branch/tag deletions, and history rewriting.

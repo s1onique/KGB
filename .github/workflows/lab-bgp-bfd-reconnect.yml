@@ -75,13 +75,21 @@ jobs:
       - name: Make scripts executable
         run: |
           chmod +x scripts/lab_bgp_bfd_reconnect.sh
+          chmod +x scripts/lab_bgp_bfd_reconnect_bgp_reset.sh
+          chmod +x scripts/lab_bgp_bfd_reconnect_lib.sh
           chmod +x scripts/verify_bgp_reconnect_artifact.sh
 
-      - name: Run BGP/BFD reconnect lab
+      - name: Run BGP/BFD reconnect lab (BIRD restart scenario)
         run: |
           set -euxo pipefail
           sudo --preserve-env=PATH,TOVARISCH_BINARY make lab-bgp-bfd-reconnect
         id: lab
+
+      - name: Run BGP/BFD reconnect lab (BGP protocol reset scenario)
+        run: |
+          set -euxo pipefail
+          sudo --preserve-env=PATH,TOVARISCH_BINARY make lab-bgp-bfd-reconnect-bgp-reset
+        id: lab-bgp-reset
 
       - name: Verify reconnect artifacts
         run: |
@@ -110,5 +118,6 @@ jobs:
           name: bgp-bfd-reconnect-lab-${{ github.run_id }}
           path: |
             /tmp/kgb-bgp-bfd-reconnect-*/artifacts/**
+            /tmp/kgb-bgp-bfd-reconnect-bgp-reset-*/artifacts/**
           if-no-files-found: warn
           retention-days: 14
