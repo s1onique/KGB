@@ -55,13 +55,15 @@ elif [[ "${1:-}" == "--self-test" ]]; then
         echo "SELFTEST FAIL: Script exited ${FAIL_RC} with ${FAIL_COUNT_INJECTED} failures (expected 1)"
     fi
 
-    # This self-test verifies the clean/warnings-only exit contract.
-    # A forced-failure contract test can be added later.
-    if [[ "${TEST_PASS}" -ge 2 ]]; then
-        echo "SELFTEST PASS: Exit contract verified (0 failures→0)"
+    # This self-test verifies both sides of the exit contract:
+    # - 0 failures => exit 0
+    # - failures present => exit 1
+    EXPECTED_SELFTEST_CHECKS=3
+    if [[ "${TEST_PASS}" -eq "${EXPECTED_SELFTEST_CHECKS}" ]]; then
+        echo "SELFTEST PASS: Exit contract verified (0 failures→0, failures→1)"
         exit 0
     else
-        echo "SELFTEST FAIL: ${TEST_PASS}/2 checks passed"
+        echo "SELFTEST FAIL: ${TEST_PASS}/${EXPECTED_SELFTEST_CHECKS} checks passed"
         exit 1
     fi
 fi
