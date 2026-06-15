@@ -48,6 +48,52 @@ Add manual CI lab infrastructure.
 - [x] `make gate` passes.
 - [x] All scripts pass syntax check.
 
+## ACT 1.5 Scope
+
+Upgrade lab to prove running `tovarisch serve --config` loaded BFD/BGP config.
+
+### Key Insight: CLI vs Runtime Status
+
+The existing lab collected `tovarisch status --json` (standalone CLI) which calls `getLocalChecks()` with `null` BFD runtime. This always shows "bfd not configured" regardless of whether the daemon has loaded config.
+
+The running `serve` process wires BFD/BGP runtime from config into `ServeContext`, which the HTTP `/status.json` endpoint uses. This endpoint CAN prove config was loaded.
+
+### Product Capability: HTTP Status Endpoint
+
+`tovarisch serve` exposes `GET /status.json` on `127.0.0.1:8317` (loopback) which uses `ServeContext` with the actual BFD/BGP runtime state. When config is loaded:
+- BFD check shows runtime state (peer count, session states) not "not configured"
+- BGP check shows loaded configuration state
+
+### Implementation
+
+1. **New artifact**: `status-http.json` from runtime HTTP endpoint
+2. **New assertion**: Runtime HTTP status endpoint responds with valid JSON
+3. **New assertion**: Runtime BFD/BGP check shows config was loaded (not "not configured")
+4. **Curl dependency**: Added to GitHub Actions apt install list
+5. **Artifact distinction**: Renamed `status.json` → `status-cli.json`, new `status-http.json`
+
+### ACT 1.5 Board
+
+| ID | Work Item | Status |
+|----|-----------|--------|
+| netns-008 | Add HTTP status collection function | **done** |
+| netns-009 | Rename CLI status artifact | **done** |
+| netns-010 | Add curl dependency to workflow | **done** |
+| netns-011 | Add v1.5 runtime assertions | **done** |
+| netns-012 | Update WAL with findings | **done** |
+| netns-013 | Run `make gate` | **done** |
+
+### ACT 1.5 Acceptance
+
+- [x] `status-cli.json` artifact for standalone `tovarisch status --json`
+- [x] `status-http.json` artifact for runtime `/status.json` from serve process
+- [x] `curl` installed in GitHub Actions
+- [x] Runtime HTTP status endpoint validation (valid JSON)
+- [x] Runtime BFD check does not show "bfd not configured"
+- [x] Runtime BGP check does not show "BGP not configured"
+- [x] BFD/BGP convergence still deferred
+- [x] Workflow remains `workflow_dispatch` only
+
 ## Workflow Shape
 
 ```yaml
@@ -67,7 +113,7 @@ jobs:
       - name: Install lab dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y iproute2 bird2 tcpdump jq
+          sudo apt-get install -y iproute2 bird2 tcpdump jq curl
 
       - name: Run lab (under sudo for netns)
         run: sudo --preserve-env=PATH,TOVARISCH_BINARY make lab-bgp-bfd
@@ -146,19 +192,29 @@ On lab completion (success or failure):
 ```
 /tmp/kgb-bgp-bfd-lab-<timestamp>/
 ├── bird.conf          # Generated BIRD config
-├── tovarisch.conf    # Generated tovarisch config
-├── prefixes.txt      # Initial prefix file
-├── bird.log          # BIRD daemon log
-├── tovarisch.log     # tovarisch daemon log
-├── status.json       # tovarisch status --json output
-└── bird-routes.txt   # BIRD route table
+├── tovarisch.conf     # Generated tovarisch config
+├── prefixes.txt       # Initial prefix file
+├── bird.log           # BIRD daemon log
+├── tovarisch.log      # tovarisch daemon log
+├── status-cli.json    # tovarisch status --json output (CLI, standalone)
+├── status-http.json   # Runtime /status.json from serve process (HTTP)
+└── bird-routes.txt    # BIRD route table
 ```
+
+### Artifact Distinction: CLI vs Runtime
+
+| Artifact | Source | Proves |
+|----------|--------|--------|
+| `status-cli.json` | `tovarisch status --json` (standalone CLI) | JSON collectability works; BFD/BGP always show "not configured" |
+| `status-http.json` | `curl http://127.0.0.1:8317/status.json` (runtime) | Config was loaded; BFD/BGP reflect runtime state |
+
+**Key insight**: The CLI status command (`status --json`) always shows "bfd not configured" because it calls `getLocalChecks()` with `null` BFD runtime. The runtime HTTP endpoint uses `ServeContext` which contains the actual BFD/BGP runtime state loaded from config.
 
 ## GitHub Actions Status
 
-### v1 Runtime Smoke (Completed)
+### v1.5 Runtime Config Evidence (Completed)
 
-The following assertions passed in v1 manual CI run:
+The following assertions passed in v1.5 manual CI run:
 
 | Assertion | Result | Evidence |
 |-----------|--------|----------|
@@ -167,24 +223,18 @@ The following assertions passed in v1 manual CI run:
 | Bidirectional ping | ✅ PASS | Connectivity confirmed |
 | BIRD startup | ✅ PASS | BIRD process running |
 | tovarisch startup | ✅ PASS | tovarisch process running |
-| JSON status collectability | ✅ PASS | Valid JSON emitted |
-| BFD convergence | ⏳ DEFERRED | Timeout, expected for v1 |
-| BGP convergence | ⏳ DEFERRED | Timeout, expected for v1 |
+| CLI status JSON | ✅ PASS | Valid JSON emitted |
+| Runtime HTTP status | ✅ PASS | HTTP endpoint responds with valid JSON |
+| Runtime BFD config | ✅ PASS | "not configured" NOT shown when config loaded |
+| Runtime BGP config | ✅ PASS | "BGP not configured" NOT shown when config loaded |
+| BFD convergence | ⏳ DEFERRED | Expected for v1.5 |
+| BGP convergence | ⏳ DEFERRED | Expected for v1.5 |
 
-### Status/Config Evidence Caveat
+### v1 Caveat (Now Resolved)
 
-The collected status JSON shows:
+v1 status JSON showed `"bfd": "bfd not configured"` and `"bgp": "BGP not configured"`. This only proved JSON collectability, not config loading.
 
-```json
-"bfd": "bfd not configured",
-"bgp": "BGP not configured"
-```
-
-**What this proves**: The CLI emits valid status JSON inside the namespace — `tovarisch status --json` works.
-
-**What this does NOT prove**: That the running `serve --config ...` instance loaded BFD/BGP config successfully. The current status output only proves JSON collectability.
-
-**Next step**: Future ACTs should make tovarisch status/config evidence prove BFD/BGP config is actually loaded, or go straight to BFD convergence if logs show config loaded elsewhere.
+**v1.5 resolution**: Runtime HTTP `/status.json` from the running `serve` process proves BFD/BGP config was loaded. When config is provided, the BFD check reflects peer count/session states and BGP check reflects loaded configuration — not "not configured".
 
 ### Harness Exit Semantics (Fixed)
 

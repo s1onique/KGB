@@ -19,6 +19,7 @@ declare -g PREFIX_FILE=""
 declare -g BIRD_LOG=""
 declare -g TOVARISCH_LOG=""
 declare -g STATUS_OUTPUT=""
+declare -g STATUS_HTTP_OUTPUT=""
 declare -g BGP_ROUTES_OUTPUT=""
 declare -g BIRD_SOCKET=""
 declare -g BIRD_VERSION="2"
@@ -61,7 +62,8 @@ setup_temp_dir() {
     PREFIX_FILE="$LAB_DIR/prefixes.txt"
     BIRD_LOG="$LAB_DIR/bird.log"
     TOVARISCH_LOG="$LAB_DIR/tovarisch.log"
-    STATUS_OUTPUT="$LAB_DIR/status.json"
+    STATUS_OUTPUT="$LAB_DIR/status-cli.json"
+    STATUS_HTTP_OUTPUT="$LAB_DIR/status-http.json"
     BGP_ROUTES_OUTPUT="$LAB_DIR/bird-routes.txt"
     BIRD_SOCKET="$LAB_DIR/bird.ctl"
 }
@@ -281,17 +283,40 @@ start_tovarisch() {
 }
 
 collect_status() {
-    log_info "Collecting tovarisch status..."
+    log_info "Collecting tovarisch CLI status..."
 
     local binary="${TOVARISCH_BINARY:-./tovarisch/zig-out/bin/tovarisch}"
 
     if ip netns exec "$NS_TOVARISCH" "$binary" status --json > "$STATUS_OUTPUT" 2>&1; then
-        log_info "Status collected:"
+        log_info "CLI status collected:"
         cat "$STATUS_OUTPUT"
         return 0
     else
-        log_error "Failed to collect status"
+        log_error "Failed to collect CLI status"
         cat "$STATUS_OUTPUT" 2>/dev/null || true
+        return 1
+    fi
+}
+
+collect_status_http() {
+    log_info "Collecting tovarisch runtime HTTP status from serve process..."
+
+    # tovarisch serve binds to 127.0.0.1:8317 by default
+    # Query from inside the namespace using curl.
+    # Returns 0 on success, 1 on failure. Caller decides whether to fail or warn.
+    if command -v curl &> /dev/null; then
+        if ip netns exec "$NS_TOVARISCH" curl -s -f "http://127.0.0.1:8317/status.json" > "$STATUS_HTTP_OUTPUT" 2>&1; then
+            log_info "Runtime HTTP status collected:"
+            cat "$STATUS_HTTP_OUTPUT"
+            return 0
+        else
+            log_error "Failed to collect runtime HTTP status"
+            cat "$STATUS_HTTP_OUTPUT" 2>/dev/null || true
+            return 1
+        fi
+    else
+        log_warn "curl not available - cannot query HTTP status endpoint"
+        echo "{}" > "$STATUS_HTTP_OUTPUT"
         return 1
     fi
 }
