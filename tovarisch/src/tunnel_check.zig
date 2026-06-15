@@ -124,6 +124,8 @@ pub fn getTunnelCheckDefault() Check {
 fn buildTunnelDetail(buf: *[4096]u8, tunnel_names: []const []const u8) []const u8 {
     // Start with the prefix
     const prefix = "detected tunnel interfaces: ";
+    // MemoryCopySafety: buf is a fixed [4096]u8 caller-owned buffer. prefix is a
+    // compile-time constant string literal. They are distinct memory regions.
     @memcpy(buf[0..prefix.len], prefix);
     var pos = prefix.len;
 
@@ -139,10 +141,14 @@ fn buildTunnelDetail(buf: *[4096]u8, tunnel_names: []const []const u8) []const u
         // Add the interface name
         if (pos + name.len > buf.len) {
             // Truncate if buffer too small
+            // MemoryCopySafety: buf[pos..] is a caller-owned sub-slice. name is a
+            // parameter slice from tunnel_names iteration. They are distinct.
             @memcpy(buf[pos..], name[0..@min(name.len, buf.len - pos)]);
             pos += @min(name.len, buf.len - pos);
             break;
         }
+        // MemoryCopySafety: buf is a fixed [4096]u8 buffer. name is a parameter
+        // slice from tunnel_names iteration. They are distinct memory regions.
         @memcpy(buf[pos..][0..name.len], name);
         pos += name.len;
     }

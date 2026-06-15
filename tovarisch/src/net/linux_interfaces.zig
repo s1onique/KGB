@@ -30,6 +30,8 @@ pub const ListError = error{
 /// C filesystem APIs require null-terminated paths.
 fn toCString(path: []const u8, buf: *[4096]u8) error{PathTooLong}![*:0]const u8 {
     if (path.len >= buf.len) return error.PathTooLong;
+    // MemoryCopySafety: buf is a fixed [4096]u8 buffer. path is a caller-provided
+    // slice. They are distinct memory regions; no aliasing.
     @memcpy(buf[0..path.len], path);
     buf[path.len] = 0;
     return @as([*:0]const u8, @ptrCast(buf));

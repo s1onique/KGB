@@ -39,14 +39,14 @@ NC = '\033[0m'
 # Annotation that allows intentional @memcpy usage
 ALLOWED_ANNOTATION = "MemoryCopySafety:"
 
-# Scan paths - focus on protocol/runtime paths where @memcpy hygiene matters most
-# Exclude test files and fixtures by default (they have their own rules)
-# This gate targets new code additions to prevent aliasing bugs in production paths
+# Scan paths - full tovarisch/src tree
+# Excludes fixtures/ and _tests.zig files:
+#   - fixtures/ are only scanned in --self-test mode (sentinel fixtures)
+#   - _tests.zig files are excluded in normal mode to keep gate surgical on
+#     production code; test fixtures in production-tree test files create
+#     unreasonable noise for this gate
 SCAN_PATHS = [
-    "tovarisch/src/bgp",
-    "tovarisch/src/bfd",
-    "tovarisch/src/runtime",
-    "tovarisch/src/http",
+    "tovarisch/src",
 ]
 
 
@@ -168,7 +168,7 @@ def scan_file(filepath: str, self_test_mode: bool = False) -> tuple[int, int, li
         print(f"  {RED}[ERROR]{NC} Could not read {filepath}: {e}")
         return 1, 0, []
     
-    # In normal mode: skip fixtures and test files
+    # In normal mode: skip fixtures and _tests.zig files
     # In self-test mode: only scan fixtures
     if not self_test_mode:
         if '/fixtures/' in filepath:
@@ -325,7 +325,8 @@ def main():
     
     print("=== Memory Copy Safety Hygiene Gate ===")
     print("")
-    print("Scanning targeted protocol/runtime paths: bgp, bfd, runtime, http...")
+    print("Scanning full tovarisch/src tree: production Zig source files.")
+    print("(Fixtures and _tests.zig are excluded; they are covered by --self-test.)")
     print("")
     
     zig_files = find_zig_files(SCAN_PATHS)

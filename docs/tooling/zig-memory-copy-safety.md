@@ -73,17 +73,23 @@ buf[path.len] = 0;
 
 ## Scanned Paths
 
-The gate scans protocol/runtime paths where `@memcpy` hygiene matters most:
+The gate scans production Zig source files under `tovarisch/src`:
 
-- `tovarisch/src/bgp/**/*.zig`
-- `tovarisch/src/bfd/**/*.zig`
-- `tovarisch/src/runtime/**/*.zig`
-- `tovarisch/src/http/**/*.zig`
+- `tovarisch/src/**/*.zig` — production Zig source files
 
 Excluding:
 
-- `*/fixtures/*.zig` in normal mode (fixtures are only scanned in `--self-test`)
-- `_tests.zig` files (test files have their own rules)
+- `*/fixtures/*.zig` — fixtures are only scanned in `--self-test` mode
+- `_tests.zig` files — excluded in normal scan mode
+
+### Scope rationale
+
+`_tests.zig` files are excluded in normal scan mode because:
+
+- Production-tree `_tests.zig` files contain heavy test-fixture copy patterns that
+  create unreasonable signal-to-noise for this production hygiene gate.
+- All production source files remain fully covered.
+- Fixtures are verified via `--self-test` sentinel behavior.
 
 ## Fixtures
 

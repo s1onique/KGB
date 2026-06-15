@@ -197,6 +197,8 @@ pub fn buildRequest() struct { buffer: [64]u8, len: usize } {
     req_buf[18] = 0; // ifa_flags
     req_buf[19] = 0; // ifa_scope
 
+    // MemoryCopySafety: result is a local [64]u8 buffer. req_buf is a local
+    // [nlmsg_len]u8. Both are on the stack; distinct regions; no aliasing.
     @memcpy(result[0..nlmsg_len], &req_buf);
     return .{ .buffer = result, .len = nlmsg_len };
 }

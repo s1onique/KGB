@@ -101,6 +101,8 @@ pub const CompactLineWriter = struct {
 
     pub fn writeAll(self: *Self, bytes: []const u8) !void {
         if (self.len + bytes.len > self.buf.len) return error.BufferOverflow;
+        // MemoryCopySafety: self.buf is a fixed [256]u8 buffer. bytes is a
+        // caller-provided slice. They are distinct memory regions; no aliasing.
         @memcpy(self.buf[self.len..][0..bytes.len], bytes);
         self.len += bytes.len;
     }

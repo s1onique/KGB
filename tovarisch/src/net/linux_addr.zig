@@ -52,6 +52,8 @@ fn readStruct(comptime T: type, bytes: []const u8) AddrError!T {
     if (bytes.len < @sizeOf(T)) return error.InvalidMessage;
 
     var value: T = undefined;
+    // MemoryCopySafety: value is a local struct on the stack. bytes is a
+    // caller-provided slice. Distinct memory regions; no aliasing.
     @memcpy(std.mem.asBytes(&value), bytes[0..@sizeOf(T)]);
     return value;
 }
@@ -224,6 +226,8 @@ pub fn discoverPrivateAddresses(
         .ifa_index = 0,
     };
 
+    // MemoryCopySafety: request is a local [nlmsg_len]u8 on the stack. hdr and
+    // msg are local structs. Distinct stack regions; no aliasing.
     @memcpy(request[0..@sizeOf(nlmsghdr)], std.mem.asBytes(&hdr));
     @memcpy(request[@sizeOf(nlmsghdr)..][0..@sizeOf(ifaddrmsg)], std.mem.asBytes(&msg));
 
@@ -346,6 +350,9 @@ pub fn discoverPrivateAddresses(
                     }
 
                     if (attr_type == IFA_ADDRESS and data_end >= data_start + 4) {
+                        // MemoryCopySafety: address_octets is a local [4]u8 array on
+                        // the stack. buffer[data_start..] is a read-only syscall
+                        // receive slice. Distinct memory regions; no aliasing.
                         @memcpy(address_octets[0..4], buffer[data_start .. data_start + 4]);
                         has_address = true;
                     }
@@ -369,6 +376,9 @@ pub fn discoverPrivateAddresses(
                         const data_end = attr_pos + attr_full_len;
 
                         if (attr_type == IFA_LOCAL and data_end >= data_start + 4) {
+                            // MemoryCopySafety: address_octets is a local [4]u8
+                            // array. buffer[data_start..] is a syscall recv slice.
+                            // Distinct memory regions; no aliasing.
                             @memcpy(address_octets[0..4], buffer[data_start .. data_start + 4]);
                             has_address = true;
                             break;

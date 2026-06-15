@@ -190,12 +190,16 @@ fn CapturingWriter(comptime capacity: usize) type {
 
         pub fn writeAll(self: *Self, data: []const u8) Overflow!void {
             if (self.len + data.len > capacity) return error.BufferOverflow;
+            // MemoryCopySafety: self.buffer is a fixed-size local array. data is a
+            // caller-provided slice. Distinct memory regions; no aliasing.
             @memcpy(self.buffer[self.len..][0..data.len], data);
             self.len += data.len;
         }
 
         pub fn write(self: *Self, data: []const u8) Overflow!usize {
             if (self.len + data.len > capacity) return error.BufferOverflow;
+            // MemoryCopySafety: self.buffer is a fixed-size local array. data is a
+            // caller-provided slice. Distinct memory regions; no aliasing.
             @memcpy(self.buffer[self.len..][0..data.len], data);
             self.len += data.len;
             return data.len;
