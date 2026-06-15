@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 87
@@ -137,3 +137,13 @@ health-audit:
 
 lab-bgp-bfd:
 	@./scripts/lab_bgp_bfd_netns.sh
+
+# === BGP/BFD Reconnect Lab ===
+# Proves: BGP recovers WITHOUT restarting tovarisch.
+# Failure injection: BIRD restart.
+# Primary execution: GitHub Actions (workflow_dispatch)
+# NOT part of make gate
+
+lab-bgp-bfd-reconnect:
+	@./scripts/lab_bgp_bfd_reconnect.sh
+
