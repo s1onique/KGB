@@ -156,9 +156,42 @@ On lab completion (success or failure):
 
 ## GitHub Actions Status
 
-**NOT YET RUN** — Infrastructure added. First manual CI run pending.
+### v1 Runtime Smoke (Completed)
 
-The workflow must be triggered manually from the Actions tab to validate the netns topology and BFD/BGP convergence.
+The following assertions passed in v1 manual CI run:
+
+| Assertion | Result | Evidence |
+|-----------|--------|----------|
+| Namespace creation | ✅ PASS | Both namespaces exist |
+| veth placement/IPs | ✅ PASS | IPs verified |
+| Bidirectional ping | ✅ PASS | Connectivity confirmed |
+| BIRD startup | ✅ PASS | BIRD process running |
+| tovarisch startup | ✅ PASS | tovarisch process running |
+| JSON status collectability | ✅ PASS | Valid JSON emitted |
+| BFD convergence | ⏳ DEFERRED | Timeout, expected for v1 |
+| BGP convergence | ⏳ DEFERRED | Timeout, expected for v1 |
+
+### Status/Config Evidence Caveat
+
+The collected status JSON shows:
+
+```json
+"bfd": "bfd not configured",
+"bgp": "BGP not configured"
+```
+
+**What this proves**: The CLI emits valid status JSON inside the namespace — `tovarisch status --json` works.
+
+**What this does NOT prove**: That the running `serve --config ...` instance loaded BFD/BGP config successfully. The current status output only proves JSON collectability.
+
+**Next step**: Future ACTs should make tovarisch status/config evidence prove BFD/BGP config is actually loaded, or go straight to BFD convergence if logs show config loaded elsewhere.
+
+### Harness Exit Semantics (Fixed)
+
+The lab now exits 0 for v1 assertions:
+- `collect_bgp_routes` is non-fatal: logs `[DEFERRED]` warning instead of failing
+- BIRD command corrected to `show route` (not `show routes`)
+- Artifact permissions fixed: harness-side `make_artifacts_readable()` + workflow belt-and-suspenders `sudo chmod`
 
 ## Promotion Policy
 

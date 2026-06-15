@@ -125,8 +125,8 @@ run_lab() {
     wait_bfd_convergence || log_warn "[DEFERRED] BFD convergence not achieved in v1"
     wait_bgp_convergence || log_warn "[DEFERRED] BGP convergence not achieved in v1"
 
-    # Collect routes
-    collect_bgp_routes
+    # Collect routes (non-fatal in v1 since BGP convergence is deferred)
+    collect_bgp_routes || log_warn "[DEFERRED] BGP route collection unavailable in v1"
 
     # Print diagnostics
     print_diagnostics

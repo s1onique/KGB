@@ -47,6 +47,10 @@ jobs:
       - name: Run lab
         run: sudo --preserve-env=PATH,TOVARISCH_BINARY make lab-bgp-bfd
 
+      - name: Make lab logs readable
+        if: always()
+        run: sudo chmod -R a+rX /tmp/kgb-bgp-bfd-lab-* 2>/dev/null || true
+
       - name: Upload lab logs
         if: always()
         uses: actions/upload-artifact@v4

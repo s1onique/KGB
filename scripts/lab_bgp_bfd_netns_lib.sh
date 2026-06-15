@@ -8,6 +8,8 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lab_bgp_bfd_netns_consts.sh
 source "${SCRIPT_DIR}/lab_bgp_bfd_netns_consts.sh"
+# shellcheck source=lab_bgp_bfd_netns_diag.sh
+source "${SCRIPT_DIR}/lab_bgp_bfd_netns_diag.sh"
 
 # Global variables (set by main script)
 declare -g LAB_DIR=""
@@ -64,8 +66,20 @@ setup_temp_dir() {
     BIRD_SOCKET="$LAB_DIR/bird.ctl"
 }
 
+# Make lab artifacts readable before cleanup/exit
+# Needed when lab runs under sudo (root-owned /tmp artifacts)
+make_artifacts_readable() {
+    if [[ -n "${LAB_DIR:-}" && -d "$LAB_DIR" ]]; then
+        chmod -R a+rX "$LAB_DIR" 2>/dev/null || true
+        log_info "Made lab artifacts readable: $LAB_DIR"
+    fi
+}
+
 cleanup() {
     log_info "Cleaning up..."
+
+    # Make artifacts readable for CI artifact upload (runs as non-root)
+    make_artifacts_readable
 
     # Use lab-specific socket for cleanup
     if [[ -S "$BIRD_SOCKET" ]]; then
@@ -335,7 +349,8 @@ wait_bgp_convergence() {
 collect_bgp_routes() {
     log_info "Collecting BGP routes from BIRD..."
 
-    if birdc_lab show routes 2>/dev/null > "$BGP_ROUTES_OUTPUT"; then
+    # BIRD uses "show route" not "show routes"
+    if birdc_lab show route 2>/dev/null > "$BGP_ROUTES_OUTPUT"; then
         log_info "Routes collected:"
         cat "$BGP_ROUTES_OUTPUT"
         return 0
@@ -405,46 +420,4 @@ verify_topology() {
         log_error "Topology verification failed"
         return 1
     fi
-}
-
-print_diagnostics() {
-    log_info "=== Lab Diagnostics ==="
-
-    echo "--- Temp directory ---"
-    echo "$LAB_DIR"
-
-    echo "--- Generated configs ---"
-    echo "BIRD config: $BIRD_CONFIG"
-    echo "tovarisch config: $TOVARISCH_CONFIG"
-
-    echo "--- Logs ---"
-    echo "BIRD log: $BIRD_LOG"
-    echo "tovarisch log: $TOVARISCH_LOG"
-    echo "Status output: $STATUS_OUTPUT"
-    echo "BGP routes: $BGP_ROUTES_OUTPUT"
-
-    echo "--- BIRD control socket ---"
-    echo "Socket: $BIRD_SOCKET"
-    ls -la "$BIRD_SOCKET" 2>/dev/null || echo "Socket not ready"
-
-    echo "--- Namespace list ---"
-    ip netns list
-
-    echo "--- tovarisch namespace interfaces ---"
-    ip netns exec "$NS_TOVARISCH" ip addr show 2>/dev/null || echo "Not accessible"
-
-    echo "--- BIRD namespace interfaces ---"
-    ip netns exec "$NS_BIRD" ip addr show 2>/dev/null || echo "Not accessible"
-
-    echo "--- BIRD protocols status (lab instance) ---"
-    birdc_lab show protocols 2>/dev/null || echo "BIRD not accessible"
-
-    echo "--- BIRD BFD sessions (lab instance) ---"
-    birdc_lab show bfd sessions 2>/dev/null || echo "BFD not accessible"
-
-    echo "--- BIRD BGP status (lab instance) ---"
-    birdc_lab show protocols bgp 2>/dev/null || echo "BGP not accessible"
-
-    echo "--- tovarisch log (last 20 lines) ---"
-    tail -n 20 "$TOVARISCH_LOG" 2>/dev/null || echo "Log not available"
 }
