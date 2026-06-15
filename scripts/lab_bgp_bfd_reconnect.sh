@@ -1,13 +1,6 @@
 #!/bin/bash
 # lab_bgp_bfd_reconnect.sh — BGP/BFD reconnect proof for tovarisch
-#
-# Proves: BGP loses TCP and returns to Established WITHOUT restarting tovarisch.
-#
-# Failure injection: BIRD restart (deterministic)
-#
-# Primary execution: GitHub Actions (workflow_dispatch)
-# Local execution: optional for debugging only
-#
+# Proves: BGP recovers WITHOUT restarting tovarisch (BIRD restart injection)
 # NOT part of make gate.
 
 set -euo pipefail
@@ -21,9 +14,7 @@ source "${SCRIPT_DIR}/lab_bgp_bfd_netns_lib.sh"
 declare -g LAB_NAME="kgb-bgp-bfd-reconnect"
 declare -g ARTIFACT_DIR=""
 
-# ============================================================================
-# Reconnect Lab Functions
-# ============================================================================
+# === Reconnect Lab Functions ===
 
 # Preflight check: require Linux
 require_linux() {
@@ -70,22 +61,40 @@ collect_baseline() {
 
     collect_status
     collect_status_http
+
+    # Explicitly write baseline HTTP artifact to expected location
+    local baseline_http="$ARTIFACT_DIR/baseline-status-http.json"
+    if command -v curl >/dev/null 2>&1; then
+        ip netns exec "$NS_TOVARISCH" curl -s -f "http://127.0.0.1:8317/status.json" \
+            > "$baseline_http" 2>&1 || {
+                log_warn "Failed to collect baseline HTTP status"
+                echo "FAILED_TO_COLLECT_BASELINE_STATUS_HTTP" > "$baseline_http"
+            }
+    fi
+
     collect_bgp_protocols
     collect_bfd_sessions
     collect_socket_state
 }
 
-# Collect during-failure artifacts
+# Collect during-failure artifacts (best-effort: BIRD intentionally stopped)
 collect_during_failure() {
     log_info "=== Collecting during-failure artifacts ==="
 
-    local output="$ARTIFACT_DIR/during-failure-status-http.json"
-    if command -v curl &> /dev/null; then
-        ip netns exec "$NS_TOVARISCH" curl -s -f "http://127.0.0.1:8317/status.json" > "$output" 2>&1 || true
+    # HTTP status (best-effort)
+    local http_out="$ARTIFACT_DIR/during-failure-status-http.json"
+    if command -v curl >/dev/null 2>&1; then
+        ip netns exec "$NS_TOVARISCH" curl -s -f "http://127.0.0.1:8317/status.json" \
+            > "$http_out" 2>&1 || echo "FAILED_TO_COLLECT_STATUS_HTTP" > "$http_out"
     fi
 
-    collect_bgp_protocols "during-failure"
-    collect_bfd_sessions
+    # BIRD intentionally stopped - best-effort BIRD artifact collection
+    birdc_lab show protocols all > "$ARTIFACT_DIR/during-failure-bird-protocols.txt" 2>&1 \
+        || echo "BIRD_STOPPED_DURING_FAILURE_INJECTION" > "$ARTIFACT_DIR/during-failure-bird-protocols.txt"
+    birdc_lab show bfd sessions > "$ARTIFACT_DIR/during-failure-bird-bfd-sessions.txt" 2>&1 \
+        || echo "BIRD_STOPPED_DURING_FAILURE_INJECTION" > "$ARTIFACT_DIR/during-failure-bird-bfd-sessions.txt"
+
+    collect_socket_state_for_phase "during-failure" || true
 }
 
 # Collect after-recovery artifacts
@@ -115,7 +124,7 @@ collect_bgp_protocols() {
     fi
 }
 
-# Collect socket state
+# Collect socket state (legacy, single file)
 collect_socket_state() {
     local output="$ARTIFACT_DIR/tovarisch-socket-state.txt"
 
@@ -123,6 +132,19 @@ collect_socket_state() {
         echo "=== tovarisch socket state ==="
         ip netns exec "$NS_TOVARISCH" ss -lunp 2>&1 || echo "ss failed"
     } > "$output" 2>&1
+}
+
+# Collect socket state for a specific phase (phase-specific file)
+collect_socket_state_for_phase() {
+    local suffix="$1"
+    local output="$ARTIFACT_DIR/${suffix}-socket-state.txt"
+
+    {
+        echo "=== tovarisch socket state: $suffix ==="
+        ip netns exec "$NS_TOVARISCH" ss -tanp 2>&1 || true
+        ip netns exec "$NS_TOVARISCH" ss -lunp 2>&1 || true
+    } > "$output" 2>&1
+    log_info "Socket state collected for phase '$suffix': $output"
 }
 
 # Wait for BFD Up
@@ -201,9 +223,9 @@ verify_after_recovery_status_ok() {
         return 1
     fi
 
-    # Check BGP status
+    # Check BGP status (runtime JSON uses .status, not .state)
     local bgp_state
-    bgp_state=$(jq -r '.checks[] | select(.name == "bgp") | .state // "unknown"' "$status_file" 2>/dev/null || echo "unknown")
+    bgp_state=$(jq -r '.checks[] | select(.name == "bgp") | (.status // .state // "unknown")' "$status_file" 2>/dev/null || echo "unknown")
 
     if [[ "$bgp_state" == "ok" ]] || [[ "$bgp_state" == "up" ]]; then
         log_info "[PASS] After-recovery BGP status: $bgp_state"
@@ -214,9 +236,7 @@ verify_after_recovery_status_ok() {
     fi
 }
 
-# ============================================================================
-# Main Lab Execution
-# ============================================================================
+# === Main Lab Execution ===
 
 run_reconnect_lab() {
     log_info "=== BGP/BFD Reconnect Lab ==="

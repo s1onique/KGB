@@ -121,9 +121,9 @@ verify_after_recovery_bgp_status_ok() {
         return 1
     fi
 
-    # Extract BGP state
+    # Extract BGP state (runtime JSON uses .status, not .state)
     local bgp_state
-    bgp_state=$(jq -r '.checks[] | select(.name == "bgp") | .state // "unknown"' "$status_file" 2>/dev/null || echo "unknown")
+    bgp_state=$(jq -r '.checks[] | select(.name == "bgp") | (.status // .state // "unknown")' "$status_file" 2>/dev/null || echo "unknown")
 
     if [[ "$bgp_state" == "ok" ]] || [[ "$bgp_state" == "up" ]]; then
         log_pass "After-recovery BGP status: $bgp_state"
