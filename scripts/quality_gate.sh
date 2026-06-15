@@ -91,6 +91,9 @@ required=(
   scripts/verify_tovarisch_status_contract.sh
   scripts/verify_manifesto_axiom_coverage.py
   scripts/verify_repo_local_memory.py
+  scripts/verify_cold_resume_checkpoints.py
+  docs/tooling/cold-resume-checkpoints.md
+  docs/reference_allowlists/cold_resume_checkpoint_legacy_allowlist.csv
   AGENTS.md
   .clinerules/00-bootstrap.md
   .clinerules/10-kgb-doctrine.md
@@ -116,6 +119,12 @@ python3 scripts/verify_repo_local_memory.py
 
 echo "[gate] checking AXIOM-1 repo-local memory self-test"
 python3 scripts/verify_repo_local_memory.py --self-test
+
+echo "[gate] checking AXIOM-2 cold-resume checkpoints"
+python3 scripts/verify_cold_resume_checkpoints.py
+
+echo "[gate] checking AXIOM-2 cold-resume checkpoints self-test"
+python3 scripts/verify_cold_resume_checkpoints.py --self-test
 
 echo "[gate] checking forbidden generic naming"
 

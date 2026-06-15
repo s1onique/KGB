@@ -1,0 +1,8 @@
+path,reason,planned_resolution,allowed_missing_markers
+docs/epics/kgb-repo-indoctrination.md,Initial epic with board table pattern; no close reports; board items all open,n/a (historical),"summary,files_changed,verification,caveats,next_step"
+docs/epics/act-2-2-bfd-tovarisch-diagnosis.md,Diagnostic ACT with manual CI close condition; artifacts are the deliverable,not closeable via doc alone,"status,next_step"
+docs/epics/kgb-security-doctrine-and-threat-model.md,Security epic ACTs 4-6 not started; ACTs 1-3 use "Complete" status without full close report structure,Future ACTs will add close reports,"summary,files_changed,verification,caveats,next_step,status"
+docs/epics/act-5-sysfs-collector.md,Slice pattern uses "done" status without full close report structure; slices tracked in epic board,Future ACTs will add close reports,"status,next_step"
+docs/epics/bgp-bfd-netns-lab.md,Lab epic with ACT slices using "done" status without full close report structure,Future ACTs will add close reports,"status,next_step"
+docs/epics/bootstrap-zig-tovarisch-leaf-service.md,Bootstrap epic with many ACT slices using "done" status without full close report structure,Future ACTs will add close reports,"status,next_step,summary,files_changed,caveats"
+docs/epics/tovarisch-webservice-day0.md,Webservice epic with ACT slices using "done" status without full close report structure,Future ACTs will add close reports,"status,next_step"

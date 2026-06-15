@@ -34,6 +34,7 @@ Canonical reference for gate scripts and tooling in KGB.
 | `scripts/verify_structured_logs.sh` | Verifies no prose runtime logs; uses structured logging | `make verify-structured-logs` |
 | `scripts/verify_manifesto_axiom_coverage.py` | Validates manifesto axiom matrix schema and coverage | auto-invoked |
 | `scripts/verify_repo_local_memory.py` | Validates AXIOM-1 repo-local memory structure | auto-invoked |
+| `scripts/verify_cold_resume_checkpoints.py` | Validates AXIOM-2 cold-resume checkpoint structure | auto-invoked |
 
 ## Coverage
 

@@ -5,9 +5,11 @@ AXIOM-1,Repo-Local Project Memory,docs,documented,docs/tooling/zig-0.16-field-ma
 AXIOM-1,Repo-Local Project Memory,docs,documented,docs/tooling/zig-0.16-observations.md,present,Zig observations recorded here
 AXIOM-1,Repo-Local Project Memory,epics,advisory,docs/epics/*-wal.md pattern,present,WAL pattern exists; not all epics have complete WALs
 AXIOM-2,Cold-Resume Checkpoint,doctrine,documented,docs/doctrine/ai-native-code-discipline-axioms.md,present,Axiom 2 documented with close report expectations
-AXIOM-2,Cold-Resume Checkpoint,gates,advisory,scripts/quality_gate.sh AGENTS.md content check,partial,AGENTS.md checks for required close report fields
-AXIOM-2,Cold-Resume Checkpoint,epics,advisory,docs/epics/* pattern,partial,ACTs expected to produce close reports; not mechanically enforced
+AXIOM-2,Cold-Resume Checkpoint,doctrine,documented,docs/tooling/cold-resume-checkpoints.md,present,Cold-resume checkpoint contract defined
+AXIOM-2,Cold-Resume Checkpoint,gates,hard_gate,scripts/verify_cold_resume_checkpoints.py,partial,Verifier checks required markers for closed ACTs; legacy allowlist handles historical gaps
+AXIOM-2,Cold-Resume Checkpoint,epics,advisory,docs/epics/* pattern,partial,ACTs expected to produce close reports; mechanically enforced via verifier
 AXIOM-2,Cold-Resume Checkpoint,wal,advisory,docs/epics/*-wal.md pattern,present,WAL pattern exists for epic-level tracking
+AXIOM-2,Cold-Resume Checkpoint,gates,documented,docs/reference_allowlists/cold_resume_checkpoint_legacy_allowlist.csv,present,Legacy allowlist for historical debt
 AXIOM-3,Periodic Health Audit,doctrine,documented,docs/doctrine/ai-native-code-discipline-axioms.md,present,Axiom 3 distinguishes normal gates from periodic audit
 AXIOM-3,Periodic Health Audit,gates,advisory,Makefile health-audit target,partial,health-audit target exists but is advisory only, not hard-gated
 AXIOM-3,Periodic Health Audit,scripts,advisory,scripts/audit_repo_health.sh,present,Health audit script exists; runs on schedule, not in CI gate
