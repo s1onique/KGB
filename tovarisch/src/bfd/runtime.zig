@@ -188,7 +188,7 @@ pub const BfdRuntime = struct {
                 // Send the BFD control packet
                 self.transport.sendPacket(self.transport.ctx, cfg.peer_addr, transport.MULTIHOP_PORT, &buf) 
                     catch |send_err| {
-                    // Diagnostic: send failed
+                    // Diagnostic: send failed - RealTransport already logged detailed info above
                     std.debug.print("[BFD] bfd_control_packet_send_failed to={s} reason={s}\n", .{ cfg.peer_addr, @errorName(send_err) });
                     return RuntimeError.TransportError;
                 };

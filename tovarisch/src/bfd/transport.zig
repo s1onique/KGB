@@ -13,15 +13,39 @@ const packet = @import("packet.zig");
 pub const MULTIHOP_PORT: u16 = packet.MULTIHOP_UDP_PORT;
 
 /// Transport error types
+/// These carry diagnostic info to help debug real UDP send failures.
 pub const TransportError = error{
     /// Peer address is not configured
     UnknownPeer,
-    /// Send failed (network issue)
-    SendFailed,
     /// Port validation failed
     InvalidPort,
     /// Address parsing failed
     AddressParseFailed,
+    /// Socket creation failed - check errno for details
+    SocketCreateFailed,
+    /// sendto failed - diagnostic payload has details
+    SendFailed,
+};
+
+/// Diagnostic information from a failed sendto call.
+/// This struct captures everything needed to debug UDP send failures.
+pub const SendFailureDiag = struct {
+    /// Peer address we tried to send to
+    peer_addr: []const u8,
+    /// Destination port
+    port: u16,
+    /// Socket file descriptor used
+    fd: i32,
+    /// sockaddr family (AF_INET = 2)
+    sa_family: c_ushort,
+    /// sockaddr length passed to sendto
+    sa_len: socklen_t,
+    /// Raw errno from sendto
+    errno: c_int,
+    /// Human-readable errno name
+    errno_name: []const u8,
+    /// Bytes attempted to send
+    byte_count: usize,
 };
 
 /// Transport interface for sending BFD packets.
@@ -77,6 +101,24 @@ var real_transport_sentinel: RealTransportSentinel = .{};
 /// Sentinel struct used when no context is needed (RealTransport).
 pub const RealTransportSentinel = struct {};
 
+/// errno string to name mapping for common socket errors
+fn errnoName(errno: c_int) []const u8 {
+    return switch (errno) {
+        1 => "EPERM",
+        2 => "ENOENT",
+        9 => "EBADF",
+        12 => "ENOMEM",
+        13 => "EACCES",
+        22 => "EINVAL",
+        28 => "ENOSPC",
+        51 => "EAFNOSUPPORT",
+        99 => "EADDRNOTAVAIL",
+        101 => "ENETUNREACH",
+        113 => "EHOSTUNREACH",
+        else => "UNKNOWN",
+    };
+}
+
 /// Real Linux UDP transport for production use.
 /// Sends BFD multihop packets via UDP socket to destination port 4784.
 pub const RealTransport = struct {
@@ -84,6 +126,7 @@ pub const RealTransport = struct {
 
     /// Send a BFD packet over UDP.
     /// Creates an ephemeral UDP socket, sends to peer_addr:port, and closes.
+    /// On send failure, logs detailed diagnostic info to stderr for debugging.
     pub fn sendPacket(peer_addr: []const u8, port: u16, bytes: []const u8) TransportError!void {
         if (port != MULTIHOP_PORT) {
             return TransportError.InvalidPort;
@@ -105,7 +148,13 @@ pub const RealTransport = struct {
         // Create UDP socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP)
         const sockfd = std.c.socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (sockfd < 0) {
-            return TransportError.SendFailed;
+            const socket_errno = std.c._errno().*;
+            // Log detailed socket creation failure
+            std.debug.print(
+                "[BFD] bfd_socket_create_failed addr={s} port={d} errno={d} errno_name={s}\n",
+                .{ peer_addr, port, socket_errno, errnoName(socket_errno) },
+            );
+            return TransportError.SocketCreateFailed;
         }
         defer _ = std.c.close(sockfd);
 
@@ -122,6 +171,12 @@ pub const RealTransport = struct {
         );
 
         if (result < 0) {
+            const send_errno = std.c._errno().*;
+            // Log detailed send failure with all diagnostic info
+            std.debug.print(
+                "[BFD] bfd_sendto_failed to={s} port={d} fd={d} sa_family={d} sa_len={d} errno={d} errno_name={s} bytes={d}\n",
+                .{ peer_addr, port, sockfd, addr.sin_family, addr_len, send_errno, errnoName(send_errno), bytes.len },
+            );
             return TransportError.SendFailed;
         }
 
