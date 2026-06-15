@@ -90,6 +90,7 @@ required=(
   docs/contracts/examples/tovarisch-status-v0.json
   scripts/verify_tovarisch_status_contract.sh
   scripts/verify_manifesto_axiom_coverage.py
+  scripts/verify_repo_local_memory.py
   AGENTS.md
   .clinerules/00-bootstrap.md
   .clinerules/10-kgb-doctrine.md
@@ -109,6 +110,12 @@ python3 scripts/verify_manifesto_axiom_coverage.py
 
 echo "[gate] checking manifesto axiom coverage matrix self-test"
 python3 scripts/verify_manifesto_axiom_coverage.py --self-test
+
+echo "[gate] checking AXIOM-1 repo-local memory"
+python3 scripts/verify_repo_local_memory.py
+
+echo "[gate] checking AXIOM-1 repo-local memory self-test"
+python3 scripts/verify_repo_local_memory.py --self-test
 
 echo "[gate] checking forbidden generic naming"
 

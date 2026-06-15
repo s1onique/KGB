@@ -32,6 +32,8 @@ Canonical reference for gate scripts and tooling in KGB.
 | `scripts/verify_tovarisch_status_contract.sh` | Validates status JSON contract | `make verify-status-contract` |
 | `scripts/verify_status_json.sh` | JSON schema validation for status output | auto-invoked |
 | `scripts/verify_structured_logs.sh` | Verifies no prose runtime logs; uses structured logging | `make verify-structured-logs` |
+| `scripts/verify_manifesto_axiom_coverage.py` | Validates manifesto axiom matrix schema and coverage | auto-invoked |
+| `scripts/verify_repo_local_memory.py` | Validates AXIOM-1 repo-local memory structure | auto-invoked |
 
 ## Coverage
 

@@ -1,6 +1,6 @@
 axiom_id,axiom_name,repo_area,enforcement_level,enforcement_artifact,status,notes
 AXIOM-1,Repo-Local Project Memory,doctrine,documented,docs/doctrine/ai-native-code-discipline-axioms.md,present,Axiom 1 documented with KGB/tovarisch interpretation
-AXIOM-1,Repo-Local Project Memory,gates,advisory,scripts/quality_gate.sh required docs check,partial,Required docs list exists; not all field manual entries enforced
+AXIOM-1,Repo-Local Project Memory,gates,hard_gate,scripts/verify_repo_local_memory.py,partial,Verifier checks required anchors, matrix coverage, epic/WAL pairing, bootstrap discoverability
 AXIOM-1,Repo-Local Project Memory,docs,documented,docs/tooling/zig-0.16-field-manual.md,present,Zig field lessons recorded here
 AXIOM-1,Repo-Local Project Memory,docs,documented,docs/tooling/zig-0.16-observations.md,present,Zig observations recorded here
 AXIOM-1,Repo-Local Project Memory,epics,advisory,docs/epics/*-wal.md pattern,present,WAL pattern exists; not all epics have complete WALs
