@@ -43,6 +43,9 @@ EOF
     # Add BFD multihop protocol (matching tovarisch UDP 4784 per RFC 5883)
     # NOTE: tovarisch uses multihop BFD on UDP port 4784
     # BIRD interface{} syntax is single-hop (UDP 3784) - WRONG for tovarisch
+    # BFD sessions are not created automatically; must declare explicit neighbor.
+    # BIRD docs: BFD sessions are created on demand by protocols like BGP,
+    # or explicitly via neighbor {} declarations.
     cat >> "$BIRD_CONFIG" << EOF
 # BFD multihop protocol - UDP 4784 (RFC 5883)
 # Must match tovarisch multihop mode on UDP port 4784
@@ -51,6 +54,10 @@ protocol bfd {
         interval $BFD_INTERVAL_MS ms;
         multiplier $BFD_MULTIPLIER;
     };
+
+    # ACT 2.1: Explicit multihop neighbor required to create BFD session.
+    # Without this, BIRD's bfd protocol is up but no session is created.
+    neighbor $IP_TOVARISCH local $IP_BIRD multihop;
 }
 
 EOF

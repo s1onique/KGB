@@ -188,7 +188,7 @@ wait_bgp_convergence() {
     local interval=2
     while [[ $elapsed -lt $WAIT_BGP_CONVERGE ]]; do
         local bgp_status
-        bgp_status=$(birdc_lab show protocols bgp tovarisch 2>/dev/null || echo "")
+        bgp_status=$(birdc_lab show protocols tovarisch 2>/dev/null || echo "")
         if echo "$bgp_status" | grep -qE "Established"; then
             log_info "BGP session is Established"
             return 0

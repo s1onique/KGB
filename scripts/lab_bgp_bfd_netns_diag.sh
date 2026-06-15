@@ -40,7 +40,7 @@ print_diagnostics() {
     birdc_lab show bfd sessions 2>/dev/null || echo "BFD not accessible"
 
     echo "--- BIRD BGP status (lab instance) ---"
-    birdc_lab show protocols bgp 2>/dev/null || echo "BGP not accessible"
+    birdc_lab show protocols tovarisch 2>/dev/null || echo "BGP not accessible"
 
     echo "--- tovarisch log (last 20 lines) ---"
     tail -n 20 "$TOVARISCH_LOG" 2>/dev/null || echo "Log not available"
