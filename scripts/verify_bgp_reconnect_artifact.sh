@@ -13,6 +13,10 @@
 # This verifier catches the production false-green condition:
 #   BGP Established + tovarisch says "configured prefixes" + BIRD 0 imported routes
 #
+# Supports both scenario vocabularies for "during" phase:
+#   during-failure-*  # BIRD restart/reconnect lab
+#   during-glitch-*   # BGP protocol reset lab
+#
 # Usage: scripts/verify_bgp_reconnect_artifact.sh "$ARTIFACT_DIR" [TEST_PREFIX]
 
 set -euo pipefail
@@ -29,34 +33,61 @@ log_pass() { echo -e "${GREEN}[PASS]${NC} $*"; }
 log_fail() { echo -e "${RED}[FAIL]${NC} $*"; }
 log_info() { echo -e "[INFO] $*"; }
 
+# Helper: require exactly one artifact (fails if missing)
+require_artifact() {
+    local artifact="$1"
+    local filepath="$ARTIFACT_DIR/$artifact"
+    if [[ -f "$filepath" ]]; then
+        log_pass "Artifact exists: $artifact"
+        return 0
+    else
+        log_fail "Artifact missing: $artifact"
+        return 1
+    fi
+}
+
+# Helper: require any of the provided artifact names (accepts aliases)
+# Usage: require_any_artifact "description" "artifact1" "artifact2" ...
+require_any_artifact() {
+    local description="$1"
+    shift
+
+    for artifact in "$@"; do
+        if [[ -f "$ARTIFACT_DIR/$artifact" ]]; then
+            log_pass "Artifact exists: $artifact ($description)"
+            return 0
+        fi
+    done
+
+    log_fail "Artifact missing: $description; expected one of: $*"
+    return 1
+}
+
 # Default artifact directory
 ARTIFACT_DIR="${1:-${LAB_DIR:-.}}"
-
-# Required artifact files
-REQUIRED_ARTIFACTS=(
-    "baseline-status-http.json"
-    "during-failure-status-http.json"
-    "after-recovery-status-http.json"
-    "baseline-bird-protocols.txt"
-    "during-failure-bird-protocols.txt"
-    "after-recovery-bird-protocols.txt"
-    "tovarisch-pid-before.txt"
-    "tovarisch-pid-after.txt"
-)
 
 verify_artifacts_exist() {
     log_info "=== Verifying required artifacts exist ==="
     local exit_code=0
 
-    for artifact in "${REQUIRED_ARTIFACTS[@]}"; do
-        local filepath="$ARTIFACT_DIR/$artifact"
-        if [[ -f "$filepath" ]]; then
-            log_pass "Artifact exists: $artifact"
-        else
-            log_fail "Artifact missing: $artifact"
-            exit_code=1
-        fi
-    done
+    # Baseline and after-recovery artifacts (exact names required)
+    require_artifact "baseline-status-http.json" || exit_code=1
+    require_artifact "after-recovery-status-http.json" || exit_code=1
+    require_artifact "baseline-bird-protocols.txt" || exit_code=1
+    require_artifact "after-recovery-bird-protocols.txt" || exit_code=1
+    require_artifact "tovarisch-pid-before.txt" || exit_code=1
+    require_artifact "tovarisch-pid-after.txt" || exit_code=1
+
+    # During-phase artifacts (accepts either naming convention)
+    require_any_artifact \
+        "during-phase HTTP status" \
+        "during-failure-status-http.json" \
+        "during-glitch-status-http.json" || exit_code=1
+
+    require_any_artifact \
+        "during-phase BIRD protocols" \
+        "during-failure-bird-protocols.txt" \
+        "during-glitch-bird-protocols.txt" || exit_code=1
 
     return $exit_code
 }
