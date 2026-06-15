@@ -397,7 +397,9 @@ pub fn closeForReconnect(bundle: *BgpServeBundle) void {
     bundle.sess.hold_timer_deadline = 0;
     bundle.sess.pending_keepalive = false;
     bundle.sess.pending_keepalive_ms = 0;
-    // Clear terminal error so session appears reconnectable
+    bundle.sess.export_batch_index = 0;
+    bundle.sess.export_complete = false;
+    bundle.sess.nlri_sent_count = 0;
     bundle.sess.status.last_error = null;
     bundle.sess.status.last_notification_code = null;
     bundle.sess.status.last_notification_subcode = null;

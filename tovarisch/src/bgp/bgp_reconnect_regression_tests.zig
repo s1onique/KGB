@@ -337,3 +337,51 @@ test "reconnect_wait status includes reconnect_count and last_socket_error" {
     try std.testing.expectEqualStrings("ConnectionRefused", rw.last_socket_error.?);
     try std.testing.expectEqual(@as(u64, 2000), rw.backoff_ms);
 }
+
+// ============================================================================
+// Regression Test 8: closeForReconnect resets export state for re-announcement
+// ============================================================================
+//
+// Root cause: After a BGP session established and exported all prefixes, a
+// reconnect was triggered. closeForReconnect() reset session state but did NOT
+// reset export_batch_index, export_complete, or nlri_sent_count. On reconnection,
+// the condition "sess.config.prefixes.len > 0 and sess.send_pos == 0 and
+// !sess.export_complete" would fail because export_complete was still true.
+//
+// Result: BIRD showed "Import updates: 0 received" despite tovarisch reporting
+// "BGP established; 15810 configured prefixes".
+//
+// Fix: Reset export state in closeForReconnect().
+
+test "closeForReconnect resets export state for initial prefix announcement on reconnect" {
+    const bundle = try createMinimalBundle(std.testing.allocator);
+    defer std.testing.allocator.destroy(bundle);
+
+    // Simulate a session that has completed export (established + all prefixes sent)
+    bundle.sess.status.state = .established;
+    bundle.sess.export_batch_index = 1000; // All prefixes exported
+    bundle.sess.export_complete = true; // Export is "done" from previous session
+    bundle.sess.nlri_sent_count = 1000; // All prefixes encoded
+
+    // Verify preconditions before closeForReconnect
+    try std.testing.expectEqual(@as(usize, 1000), bundle.sess.export_batch_index);
+    try std.testing.expectEqual(true, bundle.sess.export_complete);
+    try std.testing.expectEqual(@as(usize, 1000), bundle.sess.nlri_sent_count);
+
+    // Call closeForReconnect to prepare for reconnection
+    serve_integration.closeForReconnect(bundle);
+
+    // Verify export state is reset so initial prefixes will be announced on re-establishment
+    try std.testing.expectEqual(@as(usize, 0), bundle.sess.export_batch_index);
+    try std.testing.expectEqual(false, bundle.sess.export_complete);
+    try std.testing.expectEqual(@as(usize, 0), bundle.sess.nlri_sent_count);
+
+    // Verify session state is idle (ready for new BGP handshake)
+    try std.testing.expectEqual(session.SessionState.idle, bundle.sess.status.state);
+
+    // Verify the export encoding condition in session.runOnce() will now be true:
+    //   if (sess.config.prefixes.len > 0 and sess.send_pos == 0 and !sess.export_complete)
+    try std.testing.expect(bundle.sess.config.prefixes.len > 0);
+    try std.testing.expectEqual(@as(usize, 0), bundle.sess.send_pos);
+    try std.testing.expectEqual(false, bundle.sess.export_complete);
+}
