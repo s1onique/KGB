@@ -1,0 +1,12 @@
+Name Proto Table State Since Info
+tovarisch BGP master up 00:00:03 
+  Neighbor address: 10.77.0.2
+  Neighbor AS: 65001
+  Local AS: 65002
+  Router ID: 10.77.0.1
+  Source address: 10.77.0.1
+  Route updates: 2 received, 0 rejected, 0 filtered, 0 ignored
+  Route import: 2 imported, 0 filtered, 0 preferred
+  Routes: 1 imported, 1 exported, 0 preferred
+  Import updates: 2 received, 0 rejected, 0 filtered, 0 ignored, 2 accepted
+  Export updates: 2 sent, 0 withheld, 0 withdrawn

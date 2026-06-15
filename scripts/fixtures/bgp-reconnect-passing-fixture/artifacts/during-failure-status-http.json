@@ -1,0 +1,1 @@
+{"version":"0.1.0","uptime_seconds":20,"checks":[{"name":"bfd","status":"ok","detail":"bfd sessions up"},{"name":"bgp","status":"ok","detail":"BGP reconnecting"}],"bgp":{"state":"reconnect_wait","reconnect_count":1,"last_socket_error":"Connection reset by peer"}}

@@ -1,0 +1,6 @@
+Name Proto Table State Since Info
+tovarisch BGP master up 00:00:03 Idle
+kernel1 Kernel master up 00:00:05
+device1 Device master up 00:00:05
+static1 Static master up 00:00:05
+bfd1 BFD master up 00:00:03

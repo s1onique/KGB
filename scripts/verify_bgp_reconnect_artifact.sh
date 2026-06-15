@@ -6,8 +6,14 @@
 # - after-recovery status JSON contains BGP status "ok"
 # - PID before equals PID after
 # - baseline/during/after artifact files exist
+# - baseline BIRD route table contains deterministic prefix 10.77.77.0/24
+# - after-recovery BIRD route table contains deterministic prefix (catches false-green)
+# - BIRD import counters show non-zero routes imported
 #
-# Usage: scripts/verify_bgp_reconnect_artifact.sh "$ARTIFACT_DIR"
+# This verifier catches the production false-green condition:
+#   BGP Established + tovarisch says "configured prefixes" + BIRD 0 imported routes
+#
+# Usage: scripts/verify_bgp_reconnect_artifact.sh "$ARTIFACT_DIR" [TEST_PREFIX]
 
 set -euo pipefail
 
@@ -136,6 +142,113 @@ verify_after_recovery_bgp_status_ok() {
     fi
 }
 
+# NEW: Verify baseline BIRD has imported the deterministic prefix
+# This proves tovarisch actually announced the route before failure.
+verify_baseline_route_import() {
+    log_info "=== Verifying baseline route import ==="
+
+    local routes_file="$ARTIFACT_DIR/baseline-bird-routes.txt"
+    local expected_prefix="${TEST_PREFIX:-10.77.77.0/24}"
+
+    if [[ ! -f "$routes_file" ]] || [[ ! -s "$routes_file" ]]; then
+        log_fail "Baseline routes file not available"
+        return 1
+    fi
+
+    # Use -F for literal matching (prefixes contain dots which are regex wildcards)
+    if grep -qF -- "$expected_prefix" "$routes_file" 2>/dev/null; then
+        log_pass "Baseline: deterministic prefix '$expected_prefix' present in BIRD route table"
+        return 0
+    else
+        log_fail "Baseline: deterministic prefix '$expected_prefix' NOT found in BIRD route table"
+        echo "--- BIRD routes content ---"
+        cat "$routes_file" 2>/dev/null | head -20
+        return 1
+    fi
+}
+
+# NEW: Verify after-recovery BIRD has imported the deterministic prefix
+# This catches the false-green condition: BGP Established but 0 imported routes.
+verify_after_recovery_route_import() {
+    log_info "=== Verifying after-recovery route import ==="
+
+    local routes_file="$ARTIFACT_DIR/after-recovery-bird-routes.txt"
+    local expected_prefix="${TEST_PREFIX:-10.77.77.0/24}"
+
+    if [[ ! -f "$routes_file" ]] || [[ ! -s "$routes_file" ]]; then
+        log_fail "After-recovery routes file not available"
+        return 1
+    fi
+
+    # Use -F for literal matching (prefixes contain dots which are regex wildcards)
+    if grep -qF -- "$expected_prefix" "$routes_file" 2>/dev/null; then
+        log_pass "After-recovery: deterministic prefix '$expected_prefix' present in BIRD route table"
+        return 0
+    else
+        log_fail "After-recovery: deterministic prefix '$expected_prefix' NOT found in BIRD route table"
+        log_fail "FALSE-GREEN CONDITION: BGP Established but 0 imported routes"
+        echo "--- BIRD routes content ---"
+        cat "$routes_file" 2>/dev/null | head -20
+        return 1
+    fi
+}
+
+# NEW: Verify BIRD import counters show non-zero routes imported
+# Secondary signal: catches cases where routes appear but counters show 0.
+verify_bird_import_counters_nonzero() {
+    log_info "=== Verifying BIRD import counters ==="
+
+    local protocol_detail_file="$ARTIFACT_DIR/after-recovery-bird-protocol-detail.txt"
+
+    if [[ ! -f "$protocol_detail_file" ]] || [[ ! -s "$protocol_detail_file" ]]; then
+        log_fail "After-recovery protocol detail file not available"
+        return 1
+    fi
+
+    # Check for "Routes: N imported" where N > 0
+    if grep -qE "Routes: [1-9][0-9]* imported" "$protocol_detail_file" 2>/dev/null; then
+        local imported_count
+        imported_count=$(grep -E "Routes: [0-9]+ imported" "$protocol_detail_file" | head -1)
+        log_pass "BIRD shows non-zero import count: $imported_count"
+        return 0
+    fi
+
+    if grep -qE "Routes: 0 imported" "$protocol_detail_file" 2>/dev/null; then
+        log_fail "BIRD shows 0 imported routes (false-green condition)"
+        echo "--- BIRD protocol detail counters ---"
+        grep -E "(Routes:|Import updates:)" "$protocol_detail_file" 2>/dev/null || echo "(no match)"
+        return 1
+    fi
+
+    log_info "Could not parse import counters (not fatal if route is present)"
+    return 0
+}
+
+# NEW: Verify routes artifact files exist
+verify_routes_artifacts() {
+    log_info "=== Verifying routes artifacts ==="
+    local exit_code=0
+
+    local routes_artifacts=(
+        "baseline-bird-routes.txt"
+        "after-recovery-bird-routes.txt"
+        "baseline-bird-protocol-detail.txt"
+        "after-recovery-bird-protocol-detail.txt"
+    )
+
+    for artifact in "${routes_artifacts[@]}"; do
+        local filepath="$ARTIFACT_DIR/$artifact"
+        if [[ -f "$filepath" ]]; then
+            log_pass "Routes artifact exists: $artifact"
+        else
+            log_fail "Routes artifact missing: $artifact"
+            exit_code=1
+        fi
+    done
+
+    return $exit_code
+}
+
 main() {
     log_info "BGP reconnect artifact verifier"
     log_info "Artifact directory: $ARTIFACT_DIR"
@@ -147,6 +260,9 @@ main() {
     verify_artifacts_exist || exit_code=1
     echo ""
 
+    verify_routes_artifacts || exit_code=1
+    echo ""
+
     verify_pid_unchanged || exit_code=1
     echo ""
 
@@ -154,6 +270,16 @@ main() {
     echo ""
 
     verify_after_recovery_bgp_status_ok || exit_code=1
+    echo ""
+
+    # NEW: Route import verifications (catches false-green condition)
+    verify_baseline_route_import || exit_code=1
+    echo ""
+
+    verify_after_recovery_route_import || exit_code=1
+    echo ""
+
+    verify_bird_import_counters_nonzero || exit_code=1
     echo ""
 
     # Final result

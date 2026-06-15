@@ -57,6 +57,7 @@ assert_tovarisch_running() {
 }
 
 # Collect baseline artifacts (before failure injection)
+# Includes BIRD route table to verify initial route import.
 collect_baseline() {
     log_info "=== Collecting baseline artifacts ==="
 
@@ -75,10 +76,15 @@ collect_baseline() {
 
     collect_bgp_protocols
     collect_bfd_sessions
+    # NEW: Collect BIRD routes to verify initial route import
+    collect_bird_routes "baseline"
+    collect_bird_protocol_detail "baseline"
     collect_socket_state
 }
 
 # Collect after-recovery artifacts
+# Now includes BIRD routes to verify route import after reconnect.
+# Critical for catching the false-green: BGP Established but 0 imported routes.
 collect_after_recovery() {
     log_info "=== Collecting after-recovery artifacts ==="
 
@@ -89,6 +95,9 @@ collect_after_recovery() {
 
     collect_bgp_protocols "after-recovery"
     collect_bfd_sessions
+    # NEW: Collect BIRD routes to verify route import after reconnect
+    collect_bird_routes "after-recovery"
+    collect_bird_protocol_detail "after-recovery"
     collect_socket_state
 }
 
@@ -113,6 +122,89 @@ collect_bfd_sessions() {
     else
         echo "BFD_QUERY_FAILED" > "$output"
     fi
+}
+
+# Collect BIRD routes (primary: verify route import after reconnect)
+# This captures the route table so we can assert the deterministic prefix is present.
+# Critical for catching the false-green: BGP Established but 0 imported routes.
+collect_bird_routes() {
+    local suffix="${1:-baseline}"
+    local output="$ARTIFACT_DIR/${suffix}-bird-routes.txt"
+
+    # Collect routes from tovarisch protocol (the BGP peer)
+    if birdc_lab show route protocol tovarisch all 2>/dev/null > "$output"; then
+        log_info "BIRD routes collected for phase '$suffix': $output"
+    else
+        log_warn "Failed to collect BIRD routes for phase '$suffix'"
+        echo "BIRD_QUERY_FAILED" > "$output"
+    fi
+}
+
+# Collect BIRD protocol detailed stats (includes import counters)
+collect_bird_protocol_detail() {
+    local suffix="${1:-baseline}"
+    local output="$ARTIFACT_DIR/${suffix}-bird-protocol-detail.txt"
+
+    if birdc_lab "show protocol all tovarisch" 2>/dev/null > "$output"; then
+        log_info "BIRD protocol detail collected for phase '$suffix': $output"
+    else
+        log_warn "Failed to collect BIRD protocol detail for phase '$suffix'"
+        echo "BIRD_QUERY_FAILED" > "$output"
+    fi
+}
+
+# Verify BIRD has imported the deterministic test prefix.
+# Returns 0 if the prefix is present in BIRD's route table.
+# Returns 1 if the prefix is missing (the false-green condition).
+verify_bird_route_import() {
+    local routes_file="$1"
+    local expected_prefix="${2:-10.77.77.0/24}"
+
+    if [[ ! -f "$routes_file" ]] || [[ ! -s "$routes_file" ]]; then
+        log_error "[FAIL] Routes file not available: $routes_file"
+        return 1
+    fi
+
+    # Use -F for literal matching (prefixes contain dots which are regex wildcards)
+    if grep -qF -- "$expected_prefix" "$routes_file" 2>/dev/null; then
+        log_info "[PASS] Deterministic prefix '$expected_prefix' found in BIRD route table"
+        return 0
+    else
+        log_error "[FAIL] Deterministic prefix '$expected_prefix' NOT found in BIRD route table"
+        echo "--- BIRD routes content ---"
+        cat "$routes_file" 2>/dev/null || echo "(empty)"
+        return 1
+    fi
+}
+
+# Verify BIRD protocol shows non-zero import metrics.
+# This is secondary to route presence but provides additional proof.
+verify_bird_import_counters() {
+    local protocol_detail_file="$1"
+
+    if [[ ! -f "$protocol_detail_file" ]] || [[ ! -s "$protocol_detail_file" ]]; then
+        log_error "[FAIL] Protocol detail file not available: $protocol_detail_file"
+        return 1
+    fi
+
+    # Check for "Routes: N imported" where N > 0
+    # BIRD format: "Routes: 0 imported, 1 exported, 0 preferred"
+    if grep -qE "Routes: [1-9][0-9]* imported" "$protocol_detail_file" 2>/dev/null; then
+        local imported_count
+        imported_count=$(grep -E "Routes: [0-9]+ imported" "$protocol_detail_file" | head -1)
+        log_info "[PASS] BIRD shows non-zero import count: $imported_count"
+        return 0
+    fi
+
+    if grep -qE "Routes: 0 imported" "$protocol_detail_file" 2>/dev/null; then
+        log_error "[FAIL] BIRD shows 0 imported routes"
+        echo "--- BIRD protocol detail ---"
+        grep -E "(Routes:|Import updates:)" "$protocol_detail_file" 2>/dev/null || echo "(no match)"
+        return 1
+    fi
+
+    log_warn "[INFO] Could not parse import counters from BIRD protocol detail"
+    return 1
 }
 
 # Collect socket state (legacy, single file)
@@ -225,4 +317,67 @@ start_bird_reconnect() {
     fi
     log_info "BIRD started"
     return 0
+}
+
+# === Route Import Verification Functions ===
+# Moved from lab_bgp_bfd_reconnect.sh to reduce main script size.
+
+# Verify baseline route import (called from main script)
+verify_baseline_route_import() {
+    log_info "=== Phase 4b: Baseline route import verification ==="
+    if verify_bird_route_import "$ARTIFACT_DIR/baseline-bird-routes.txt" "10.77.77.0/24"; then
+        log_info "[PASS] Baseline: tovarisch advertised prefix 10.77.77.0/24 to BIRD"
+        return 0
+    else
+        log_error "[FAIL] Baseline: tovarisch did NOT advertise prefix to BIRD"
+        return 1
+    fi
+}
+
+# Verify after-recovery route import (called from main script)
+# Critical for catching the false-green: BGP Established but 0 imported routes.
+verify_after_recovery_route_import() {
+    log_info "=== Phase 4c: After-recovery route import verification ==="
+    if verify_bird_route_import "$ARTIFACT_DIR/after-recovery-bird-routes.txt" "10.77.77.0/24"; then
+        log_info "[PASS] After-recovery: tovarisch re-advertised prefix 10.77.77.0/24 to BIRD"
+        return 0
+    else
+        log_error "[FAIL] After-recovery: tovarisch did NOT re-advertise prefix to BIRD"
+        log_error "This is the false-green condition: BGP Established but 0 imported routes"
+        return 1
+    fi
+}
+
+# Verify after-recovery import counters (secondary proof, non-fatal)
+verify_after_recovery_import_counters() {
+    log_info "=== Phase 4d: After-recovery import counter verification ==="
+    if verify_bird_import_counters "$ARTIFACT_DIR/after-recovery-bird-protocol-detail.txt"; then
+        log_info "[PASS] After-recovery: BIRD shows non-zero import counters"
+        return 0
+    else
+        log_warn "[INFO] Could not verify import counters (not fatal if route present)"
+        return 0
+    fi
+}
+
+# Verify required route artifacts exist
+verify_route_artifacts() {
+    log_info "=== Verifying route artifacts ==="
+    local exit_code=0
+    local route_artifacts=(
+        "baseline-bird-routes.txt"
+        "after-recovery-bird-routes.txt"
+        "baseline-bird-protocol-detail.txt"
+        "after-recovery-bird-protocol-detail.txt"
+    )
+
+    for artifact in "${route_artifacts[@]}"; do
+        if [[ -f "$ARTIFACT_DIR/$artifact" ]]; then
+            log_info "[PASS] Artifact exists: $artifact"
+        else
+            log_error "[FAIL] Artifact missing: $artifact"
+            exit_code=1
+        fi
+    done
+    return $exit_code
 }

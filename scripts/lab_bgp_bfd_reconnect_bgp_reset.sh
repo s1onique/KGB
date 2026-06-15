@@ -292,6 +292,38 @@ run_bgp_reset_lab() {
         exit_code=1
     fi
 
+    # NEW: Baseline route import verification
+    # Prove tovarisch actually sent the deterministic prefix before glitch.
+    log_info ""
+    log_info "=== Phase 4b: Baseline route import verification ==="
+    if verify_bird_route_import "$ARTIFACT_DIR/baseline-bird-routes.txt" "10.77.77.0/24"; then
+        log_info "[PASS] Baseline: tovarisch advertised prefix 10.77.77.0/24 to BIRD"
+    else
+        log_error "[FAIL] Baseline: tovarisch did NOT advertise prefix to BIRD"
+        exit_code=1
+    fi
+
+    # NEW: After-recovery route import verification
+    # Critical for catching the false-green: BGP Established but 0 imported routes.
+    log_info ""
+    log_info "=== Phase 4c: After-recovery route import verification ==="
+    if verify_bird_route_import "$ARTIFACT_DIR/after-recovery-bird-routes.txt" "10.77.77.0/24"; then
+        log_info "[PASS] After-recovery: tovarisch re-advertised prefix 10.77.77.0/24 to BIRD"
+    else
+        log_error "[FAIL] After-recovery: tovarisch did NOT re-advertise prefix to BIRD"
+        log_error "This is the false-green condition: BGP Established but 0 imported routes"
+        exit_code=1
+    fi
+
+    # NEW: Verify import counters (secondary proof)
+    log_info ""
+    log_info "=== Phase 4d: After-recovery import counter verification ==="
+    if verify_bird_import_counters "$ARTIFACT_DIR/after-recovery-bird-protocol-detail.txt"; then
+        log_info "[PASS] After-recovery: BIRD shows non-zero import counters"
+    else
+        log_warn "[INFO] Could not verify import counters (not fatal if route present)"
+    fi
+
     log_info ""
     log_info "=== Artifact verification ==="
     local required_artifacts=(
@@ -301,6 +333,10 @@ run_bgp_reset_lab() {
         "baseline-bird-protocols.txt"
         "during-glitch-bird-protocols.txt"
         "after-recovery-bird-protocols.txt"
+        "baseline-bird-routes.txt"
+        "after-recovery-bird-routes.txt"
+        "baseline-bird-protocol-detail.txt"
+        "after-recovery-bird-protocol-detail.txt"
         "tovarisch-pid-before.txt"
         "tovarisch-pid-after.txt"
     )
