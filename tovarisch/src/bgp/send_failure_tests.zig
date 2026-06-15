@@ -67,6 +67,12 @@ const FailingFakeTransport = struct {
                     fake.close();
                 }
             }.close,
+            .isClosedFn = struct {
+                fn isClosed(ctx: *anyopaque) bool {
+                    const fake: *Self = @ptrCast(@alignCast(ctx));
+                    return fake.closed;
+                }
+            }.isClosed,
             .ctx = @ptrCast(self),
         };
     }

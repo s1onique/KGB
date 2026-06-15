@@ -44,6 +44,8 @@ const FakeTransportWithCounters = struct {
     responses: []const PeerResponse,
     /// Current response index
     response_idx: usize = 0,
+    /// Whether transport is closed
+    closed: bool = false,
 
     pub const PeerResponse = struct {
         recv_bytes: []const u8,
@@ -94,6 +96,12 @@ const FakeTransportWithCounters = struct {
                     fake.close();
                 }
             }.close,
+            .isClosedFn = struct {
+                fn isClosed(ctx: *anyopaque) bool {
+                    const fake: *Self = @ptrCast(@alignCast(ctx));
+                    return fake.closed;
+                }
+            }.isClosed,
             .ctx = @ptrCast(self),
         };
     }

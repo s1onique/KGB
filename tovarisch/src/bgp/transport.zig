@@ -39,6 +39,9 @@ pub const Transport = struct {
     recvFn: *const fn (ctx: *anyopaque) []const u8,
     /// Close the transport
     closeFn: *const fn (ctx: *anyopaque) void,
+    /// Check if transport is closed (returns true if connection was lost)
+    /// This allows session to detect TCP EOF/reset vs "no data yet"
+    isClosedFn: *const fn (ctx: *anyopaque) bool,
     /// Context pointer
     ctx: *anyopaque,
 };
@@ -56,6 +59,13 @@ pub fn transportRecv(trans: *const Transport) []const u8 {
 /// Close transport.
 pub fn transportClose(trans: *const Transport) void {
     trans.closeFn(trans.ctx);
+}
+
+/// Check if transport is closed.
+/// Returns true if the connection was lost (EOF or TCP reset).
+/// This allows callers to distinguish between "no data yet" and "connection lost".
+pub fn transportIsClosed(trans: *const Transport) bool {
+    return trans.isClosedFn(trans.ctx);
 }
 
 // ============================================================================
@@ -148,6 +158,11 @@ pub const FakeTransport = struct {
         self.all_sent.deinit(self.allocator);
     }
 
+    /// Check if the transport is closed.
+    pub fn isClosed(self: *const Self) bool {
+        return self.closed;
+    }
+
     /// Wrap this fake transport as a Transport interface.
     pub fn toTransport(self: *Self) Transport {
         return Transport{
@@ -169,6 +184,12 @@ pub const FakeTransport = struct {
                     fake.close();
                 }
             }.close,
+            .isClosedFn = struct {
+                fn isClosed(ctx: *anyopaque) bool {
+                    const fake: *Self = @ptrCast(@alignCast(ctx));
+                    return fake.isClosed();
+                }
+            }.isClosed,
             .ctx = @ptrCast(self),
         };
     }

@@ -13,6 +13,7 @@ const clock = @import("clock.zig");
 const notification_decode = @import("notification_decode.zig");
 const timers = @import("session_timers.zig");
 const diagnostics = @import("session_diagnostics.zig");
+const session_recv = @import("session_recv.zig");
 
 // Re-export types for convenience
 pub const SessionState = timers.SessionState;
@@ -42,10 +43,22 @@ pub const getErrorSubcodeName = timers.getErrorSubcodeName;
 pub const UpdateInfo = diagnostics.UpdateInfo;
 pub const UpdateDiagnostic = diagnostics.UpdateDiagnostic;
 
-// ============================================================================
-// Session Configuration and Errors
-// ============================================================================
-
+// Error Message Helpers
+/// Map a transport error to a human-readable error message.
+fn transportErrorMessage(err: TransportError) []const u8 {
+    return switch (err) {
+        TransportError.Closed => "transport closed",
+        TransportError.ConnectionClosed => "connection closed",
+        TransportError.OutOfMemory => "out of memory",
+        TransportError.WouldBlock => "send: EAGAIN/EWOULDBLOCK",
+        TransportError.ConnectionReset => "send: ECONNRESET",
+        TransportError.BrokenPipe => "send: EPIPE",
+        TransportError.NotConnected => "send: ENOTCONN",
+        TransportError.BadFileDescriptor => "send: EBADF",
+        TransportError.SendFailed => "send failed",
+    };
+}
+// Session Configuration
 pub const SessionConfig = struct {
     peer_address: [4]u8,
     peer_port: u16,
@@ -71,11 +84,7 @@ pub const SessionErrorKind = error{
     DecodeError,
     HoldTimerExpired,
 };
-
-// ============================================================================
 // UPDATE Batching Constants
-// ============================================================================
-
 /// Maximum BGP message size (RFC 4271 Section 4.1)
 pub const MAX_BGP_MESSAGE_SIZE: usize = 4096;
 
@@ -96,11 +105,7 @@ pub const RunResult = enum {
     stopped,
     failed,
 };
-
-// ============================================================================
-// Session
-// ============================================================================
-
+// Session struct
 pub const Session = struct {
     config: SessionConfig,
     status: SessionStatus,
@@ -181,13 +186,22 @@ pub fn flushSend(sess: *Session) TransportError!void {
     }
 }
 
-fn recvIntoBuffer(sess: *Session) void {
+// Re-export RecvResult from session_recv for backward compatibility
+pub const RecvResult = session_recv.RecvResult;
+
+/// Receive bytes into session buffer. Returns RecvResult with connection_closed flag.
+fn recvIntoBuffer(sess: *Session) RecvResult {
     const data = transportRecv(sess.trans);
     if (data.len > 0 and sess.recv_len < sess.recv_buf.len) {
         const copy_len = @min(data.len, sess.recv_buf.len - sess.recv_len);
-        @memcpy(sess.recv_buf[sess.recv_len..sess.recv_len + copy_len], data[0..copy_len]);
+        @memcpy(sess.recv_buf[sess.recv_len .. sess.recv_len + copy_len], data[0..copy_len]);
         sess.recv_len += copy_len;
+        return RecvResult{ .bytes_copied = copy_len, .connection_closed = false };
     }
+    if (session_recv.transportIsClosed(sess.trans)) {
+        return RecvResult{ .bytes_copied = 0, .connection_closed = true };
+    }
+    return RecvResult{ .bytes_copied = 0, .connection_closed = false };
 }
 
 fn tryDecodeFrame(sess: *Session) ?frame_decode.Frame {
@@ -205,7 +219,7 @@ fn tryDecodeFrame(sess: *Session) ?frame_decode.Frame {
         return null;
     };
     if (sess.recv_len > declared_len) {
-        @memcpy(sess.recv_buf[0..sess.recv_len - declared_len], sess.recv_buf[declared_len..sess.recv_len]);
+        @memcpy(sess.recv_buf[0 .. sess.recv_len - declared_len], sess.recv_buf[declared_len..sess.recv_len]);
     }
     sess.recv_len -= declared_len;
     return frame;
@@ -320,17 +334,7 @@ pub fn runOnce(sess: *Session) SessionErrorKind!RunResult {
             flushSend(sess) catch |err| {
                 sess.status.state = .failed;
                 sess.status.last_error = SessionError{
-                    .message = switch (err) {
-                        transport.TransportError.Closed => "transport closed",
-                        transport.TransportError.ConnectionClosed => "connection closed",
-                        transport.TransportError.OutOfMemory => "out of memory",
-                        transport.TransportError.WouldBlock => "send: EAGAIN/EWOULDBLOCK",
-                        transport.TransportError.ConnectionReset => "send: ECONNRESET",
-                        transport.TransportError.BrokenPipe => "send: EPIPE",
-                        transport.TransportError.NotConnected => "send: ENOTCONN",
-                        transport.TransportError.BadFileDescriptor => "send: EBADF",
-                        transport.TransportError.SendFailed => "send failed",
-                    },
+                    .message = transportErrorMessage(err),
                     .notification_code = null,
                     .notification_subcode = null,
                 };
@@ -359,17 +363,7 @@ pub fn runOnce(sess: *Session) SessionErrorKind!RunResult {
                         flushSend(sess) catch |err| {
                             sess.status.state = .failed;
                             sess.status.last_error = SessionError{
-                                .message = switch (err) {
-                                    transport.TransportError.Closed => "transport closed",
-                                    transport.TransportError.ConnectionClosed => "connection closed",
-                                    transport.TransportError.OutOfMemory => "out of memory",
-                                    transport.TransportError.WouldBlock => "send: EAGAIN/EWOULDBLOCK",
-                                    transport.TransportError.ConnectionReset => "send: ECONNRESET",
-                                    transport.TransportError.BrokenPipe => "send: EPIPE",
-                                    transport.TransportError.NotConnected => "send: ENOTCONN",
-                                    transport.TransportError.BadFileDescriptor => "send: EBADF",
-                                    transport.TransportError.SendFailed => "send failed",
-                                },
+                                .message = transportErrorMessage(err),
                                 .notification_code = null,
                                 .notification_subcode = null,
                             };
@@ -400,17 +394,7 @@ pub fn runOnce(sess: *Session) SessionErrorKind!RunResult {
             flushSend(sess) catch |err| {
                 sess.status.state = .failed;
                 sess.status.last_error = SessionError{
-                    .message = switch (err) {
-                        transport.TransportError.Closed => "transport closed",
-                        transport.TransportError.ConnectionClosed => "connection closed",
-                        transport.TransportError.OutOfMemory => "out of memory",
-                        transport.TransportError.WouldBlock => "send: EAGAIN/EWOULDBLOCK",
-                        transport.TransportError.ConnectionReset => "send: ECONNRESET",
-                        transport.TransportError.BrokenPipe => "send: EPIPE",
-                        transport.TransportError.NotConnected => "send: ENOTCONN",
-                        transport.TransportError.BadFileDescriptor => "send: EBADF",
-                        transport.TransportError.SendFailed => "send failed",
-                    },
+                    .message = transportErrorMessage(err),
                     .notification_code = null,
                     .notification_subcode = null,
                 };
@@ -425,7 +409,16 @@ pub fn runOnce(sess: *Session) SessionErrorKind!RunResult {
                     sess.export_complete = true;
                 }
             }
-            recvIntoBuffer(sess);
+            const recv_result = recvIntoBuffer(sess);
+            if (recv_result.connection_closed) {
+                sess.status.state = .failed;
+                sess.status.last_error = SessionError{
+                    .message = "TCP connection closed by peer",
+                    .notification_code = null,
+                    .notification_subcode = null,
+                };
+                return SessionErrorKind.ConnectionClosed;
+            }
             while (tryDecodeFrame(sess)) |frame| {
                 const msg_result = handleMessage(sess, frame) catch |err| {
                     if (err == SessionErrorKind.InvalidFrame and sess.status.state == .failed) {

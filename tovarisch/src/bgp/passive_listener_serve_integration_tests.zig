@@ -23,6 +23,7 @@ const VoidWriter = struct {
 // Fake transport for passive listener test
 const FakeTransport = struct {
     const Self = @This();
+    closed: bool = false,
     pub fn init() Self {
         return Self{};
     }
@@ -51,6 +52,12 @@ const FakeTransport = struct {
                     fake.close();
                 }
             }.close,
+            .isClosedFn = struct {
+                fn isClosed(ctx: *anyopaque) bool {
+                    const fake: *Self = @ptrCast(@alignCast(ctx));
+                    return fake.closed;
+                }
+            }.isClosed,
             .ctx = @ptrCast(self),
         };
     }

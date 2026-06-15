@@ -148,6 +148,7 @@ pub const TcpTransport = struct {
 
         const received = std.c.recv(self.socket_fd, @ptrCast(&self.recv_buf), self.recv_buf.len, 0);
         if (received < 0) {
+            self.closed = true;
             return &[_]u8{};
         }
         if (received == 0) {
@@ -182,11 +183,16 @@ pub const TcpTransport = struct {
         };
     }
 
+    /// Check if the transport is closed.
+    pub fn isClosed(self: *Self) bool {
+        return self.closed;
+    }
+
     /// Wrap this TCP transport as a Transport interface.
     pub fn toTransport(self: *Self) transport.Transport {
         return transport.Transport{
             .sendFn = struct {
-                fn send(ctx: *anyopaque, data: []const u8) TransportError!void {
+                fn send(ctx: *anyopaque, data: []const u8) transport.TransportError!void {
                     const tcp: *Self = @ptrCast(@alignCast(ctx));
                     return tcp.send(data);
                 }
@@ -203,6 +209,12 @@ pub const TcpTransport = struct {
                     tcp.close();
                 }
             }.close,
+            .isClosedFn = struct {
+                fn isClosed(ctx: *anyopaque) bool {
+                    const tcp: *Self = @ptrCast(@alignCast(ctx));
+                    return tcp.isClosed();
+                }
+            }.isClosed,
             .ctx = @ptrCast(self),
         };
     }
