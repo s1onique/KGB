@@ -247,8 +247,9 @@ pub fn parseIPv4Address(addr_str: []const u8, out: *in_addr) TransportError!void
         return TransportError.AddressParseFailed;
     }
 
-    // Store in network byte order (big-endian) in s_addr
-    out.s_addr = std.mem.readInt(u32, &parts, .big);
+    // Write IPv4 address in network byte order (big-endian).
+    // Copy bytes directly: parts[0]=first octet must be at s_addr[0] for kernel.
+    std.mem.copyForwards(u8, std.mem.asBytes(&out.s_addr), &parts);
 }
 
 /// Fake transport for testing.

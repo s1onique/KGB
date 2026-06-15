@@ -21,20 +21,44 @@ const timeval = @import("transport.zig").timeval;
 test "parseIPv4Address handles valid addresses" {
     var addr: in_addr = undefined;
 
-    // Test 127.0.0.1
+    // Test 127.0.0.1 - bytes are copied directly to s_addr memory
     try parseIPv4Address("127.0.0.1", &addr);
-    const expected_loopback = std.mem.readInt(u32, &[_]u8{ 127, 0, 0, 1 }, .big);
-    try std.testing.expectEqual(expected_loopback, addr.s_addr);
+    const bytes = std.mem.asBytes(&addr.s_addr);
+    try std.testing.expectEqual(@as(u8, 127), bytes[0]);
+    try std.testing.expectEqual(@as(u8, 0), bytes[1]);
+    try std.testing.expectEqual(@as(u8, 0), bytes[2]);
+    try std.testing.expectEqual(@as(u8, 1), bytes[3]);
 
     // Test 10.0.0.1
     try parseIPv4Address("10.0.0.1", &addr);
-    const expected_10 = std.mem.readInt(u32, &[_]u8{ 10, 0, 0, 1 }, .big);
-    try std.testing.expectEqual(expected_10, addr.s_addr);
+    const bytes2 = std.mem.asBytes(&addr.s_addr);
+    try std.testing.expectEqual(@as(u8, 10), bytes2[0]);
+    try std.testing.expectEqual(@as(u8, 0), bytes2[1]);
+    try std.testing.expectEqual(@as(u8, 0), bytes2[2]);
+    try std.testing.expectEqual(@as(u8, 1), bytes2[3]);
 
     // Test 192.168.1.100
     try parseIPv4Address("192.168.1.100", &addr);
-    const expected_192 = std.mem.readInt(u32, &[_]u8{ 192, 168, 1, 100 }, .big);
-    try std.testing.expectEqual(expected_192, addr.s_addr);
+    const bytes3 = std.mem.asBytes(&addr.s_addr);
+    try std.testing.expectEqual(@as(u8, 192), bytes3[0]);
+    try std.testing.expectEqual(@as(u8, 168), bytes3[1]);
+    try std.testing.expectEqual(@as(u8, 1), bytes3[2]);
+    try std.testing.expectEqual(@as(u8, 100), bytes3[3]);
+}
+
+test "parseIPv4Address 10.77.0.1 sockaddr bytes are 0a 4d 00 01" {
+    // ACT 2.4b: Verify the actual bytes passed to kernel.
+    // ENETUNREACH was caused by wrong byte order in sockaddr.
+    var addr: in_addr = undefined;
+    try parseIPv4Address("10.77.0.1", &addr);
+
+    // Verify the exact bytes in s_addr memory that get sent to kernel.
+    // Kernel expects network byte order: first byte = first octet.
+    const bytes = std.mem.asBytes(&addr.s_addr);
+    try std.testing.expectEqual(@as(u8, 10), bytes[0]);
+    try std.testing.expectEqual(@as(u8, 77), bytes[1]);
+    try std.testing.expectEqual(@as(u8, 0), bytes[2]);
+    try std.testing.expectEqual(@as(u8, 1), bytes[3]);
 }
 
 test "parseIPv4Address rejects malformed addresses" {
