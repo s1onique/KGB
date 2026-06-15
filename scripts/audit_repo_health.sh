@@ -38,6 +38,7 @@ REQUIRED_DOCS=(
     "docs/doctrine/privacy.md"
     "docs/doctrine/tiny-leafs.md"
     "docs/doctrine/ai-native-code-discipline-axioms.md"
+    "docs/doctrine/git-history-safety.md"
     "docs/tooling/zig-0.16-field-manual-rss-leak.md"
 )
 
@@ -60,6 +61,7 @@ echo "--- Check: Agent Configuration ---"
 AGENT_CONFIGS=(
     ".clinerules/00-bootstrap.md"
     ".clinerules/10-kgb-doctrine.md"
+    ".clinerules/10-git-history-safety.md"
     ".clinerules/20-zig-016.md"
     ".clinerules/30-karpathy.md"
     ".clinerules/30-verification.md"

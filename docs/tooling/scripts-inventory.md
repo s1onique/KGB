@@ -36,6 +36,15 @@ Canonical reference for gate scripts and tooling in KGB.
 | `scripts/verify_repo_local_memory.py` | Validates AXIOM-1 repo-local memory structure | auto-invoked |
 | `scripts/verify_cold_resume_checkpoints.py` | Validates AXIOM-2 cold-resume checkpoint structure | auto-invoked |
 
+## Git History Safety
+
+| Script | Purpose | Entry Point |
+|--------|---------|-------------|
+| `scripts/git_no_history_rewrite_pre_push.sh` | Pre-push hook preventing force pushes, deletions, rewrites | `make install-git-safety-hooks` |
+| `scripts/install_git_safety_hooks.sh` | Installs the git safety pre-push hook | `make install-git-safety-hooks` |
+| `scripts/verify_git_history_safety_policy.sh` | Verifies git history safety policy is configured | `make verify-git-history-safety`, `make gate` |
+| `scripts/verify_github_no_force_push_ruleset.sh` | Verifies GitHub ruleset blocks force pushes | `make verify-github-ruleset` |
+
 ## Coverage
 
 | Script | Purpose | Entry Point |

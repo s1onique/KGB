@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect install-git-safety-hooks verify-git-history-safety verify-github-ruleset
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 87
@@ -146,4 +146,19 @@ lab-bgp-bfd:
 
 lab-bgp-bfd-reconnect:
 	@./scripts/lab_bgp_bfd_reconnect.sh
+
+# === Git History Safety ===
+# Prevents force pushes, branch/tag deletions, and history rewriting.
+
+# Install the git safety pre-push hook
+install-git-safety-hooks:
+	@./scripts/install_git_safety_hooks.sh
+
+# Verify git history safety policy is properly configured
+verify-git-history-safety:
+	@./scripts/verify_git_history_safety_policy.sh
+
+# Verify GitHub ruleset blocks force pushes (skips if not in CI)
+verify-github-ruleset:
+	@./scripts/verify_github_no_force_push_ruleset.sh
 

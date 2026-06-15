@@ -77,6 +77,7 @@ required=(
   docs/doctrine/metrics.md
   docs/doctrine/ai-native-code-discipline-axioms.md
   docs/doctrine/manifesto_axiom_coverage.csv
+  docs/doctrine/git-history-safety.md
   docs/architecture/overview.md
   docs/architecture/naming.md
   docs/architecture/components.md
@@ -97,8 +98,14 @@ required=(
   AGENTS.md
   .clinerules/00-bootstrap.md
   .clinerules/10-kgb-doctrine.md
+  .clinerules/10-git-history-safety.md
   .clinerules/20-zig-016.md
+  .clinerules/30-karpathy.md
   .clinerules/30-verification.md
+  scripts/git_no_history_rewrite_pre_push.sh
+  scripts/install_git_safety_hooks.sh
+  scripts/verify_git_history_safety_policy.sh
+  scripts/verify_github_no_force_push_ruleset.sh
 )
 
 for path in "${required[@]}"; do
@@ -175,6 +182,11 @@ echo "[gate] checking .clinerules content"
 grep -q 'AGENTS.md' .clinerules/00-bootstrap.md
 grep -q 'docs/tooling/zig-0.16-field-manual.md' .clinerules/20-zig-016.md
 grep -q 'make gate' .clinerules/30-verification.md
+grep -qi 'git history safety' .clinerules/10-git-history-safety.md
+
+echo "[gate] checking git history safety policy"
+
+./scripts/verify_git_history_safety_policy.sh
 
 echo "[gate] checking split test inventory drift"
 
