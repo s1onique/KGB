@@ -2,6 +2,7 @@
 //
 // Tests the status module including BFD integration via explicit runtime wiring.
 // BGP status tests are in status_bgp_tests.zig.
+// BGP diagnostics tests are in status_bgp_diagnostics_tests.zig.
 // These tests are deterministic and do not depend on repository state.
 
 const std = @import("std");
@@ -284,7 +285,6 @@ const TestWriter = struct {
 
     pub fn writeAll(self: *Self, bytes: []const u8) !void {
         if (self.len + bytes.len > BufSize) return error.BufferOverflow;
-        // Use for loop instead of @memcpy to avoid aliasing panic in Zig 0.16
         for (bytes, 0..) |byte, i| {
             self.buf[self.len + i] = byte;
         }
@@ -363,9 +363,6 @@ test "version contains base_version prefix" {
 // Fix: replaced allocPrint with caller-owned buffer in bfd/status.zig.
 
 test "renderPayload multiple times produces consistent output" {
-    // This test verifies that repeated status rendering is consistent.
-    // Original bug: each call to buildStatusCheck() with partial BFD peers
-    // would allocate via allocPrint and leak memory.
     var w1 = TestWriter.init();
     var w2 = TestWriter.init();
     var w3 = TestWriter.init();
@@ -374,40 +371,28 @@ test "renderPayload multiple times produces consistent output" {
     try status.renderPayload(&w2);
     try status.renderPayload(&w3);
 
-    // All three renders should produce valid JSON with same structure
     try std.testing.expect(std.mem.containsAtLeast(u8, w1.slice(), 1, "\"service\":\"tovarisch\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w2.slice(), 1, "\"service\":\"tovarisch\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w3.slice(), 1, "\"service\":\"tovarisch\""));
-
-    // All should have same check count (8 checks)
     try std.testing.expect(std.mem.containsAtLeast(u8, w1.slice(), 1, "\"name\":\"bfd\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w2.slice(), 1, "\"name\":\"bfd\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w3.slice(), 1, "\"name\":\"bfd\""));
 }
 
 test "getBfdCheck with partial peers uses caller buffer" {
-    // Test that getBfdCheck with partial peers (some up, some down) works correctly.
-    // This is the exact code path that previously leaked: buildStatusCheck() with
-    // snapshot where up_count != peer_count.
     var rt = bfd_status.createTestRuntime();
     try bfd_status.addTestPeer(&rt, "10.0.0.1", "10.0.0.2");
     try bfd_status.addTestPeer(&rt, "10.0.0.3", "10.0.0.4");
     rt.startAll();
 
-    // Provide caller-owned scratch buffer
     var scratch = status.StatusScratch{};
     const check = status.getBfdCheck(&rt, &scratch.bfd_detail);
 
-    // Should return warn status
     try std.testing.expect(check.status == .warn);
-
-    // Detail should contain the partial session info
     try std.testing.expect(std.mem.containsAtLeast(u8, check.detail, 1, "bfd"));
 }
 
 test "buildStatusCheckInto with partial peers detail format" {
-    // Direct test of the buffer-based variant with partial peers scenario.
-    // This function requires caller-owned buffer - no static buffers.
     const snapshot = bfd_status.StatusSnapshot{
         .peer_count = 3,
         .up_count = 2,
@@ -418,13 +403,10 @@ test "buildStatusCheckInto with partial peers detail format" {
     const check = bfd_status.buildStatusCheckInto(snapshot, &detail_buf);
 
     try std.testing.expect(check.status == .warn);
-    // Detail should be "2/3 bfd sessions up" - uses caller's buffer, no leak
     try std.testing.expectEqualStrings("2/3 bfd sessions up", check.detail);
 }
 
 test "buildStatusCheckInto partial peers is allocation-free" {
-    // Test the buffer-based variant to verify no allocation occurs.
-    // This is the preferred API for safe usage.
     const snapshot = bfd_status.StatusSnapshot{
         .peer_count = 3,
         .up_count = 2,
@@ -436,7 +418,5 @@ test "buildStatusCheckInto partial peers is allocation-free" {
 
     try std.testing.expect(check.status == .warn);
     try std.testing.expectEqualStrings("2/3 bfd sessions up", check.detail);
-
-    // Verify the detail points to our buffer (not heap-allocated)
     try std.testing.expect(@intFromPtr(check.detail.ptr) == @intFromPtr(&detail_buf[0]));
 }

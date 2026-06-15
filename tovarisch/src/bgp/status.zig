@@ -64,6 +64,15 @@ pub const BgpStatusState = union(enum) {
         passive_listener_state: passive_listener.ListenerState,
         passive_listener_error: ?[]const u8,
 
+        // Reconnect diagnostics persisted after recovery
+        // These survive into established state so labs can verify reconnect_count.
+        /// Total reconnect attempts since startup.
+        /// Persists into established state for lab verification.
+        reconnect_count: u64 = 0,
+        /// Last TCP socket error message.
+        /// Persists into established state for diagnostics.
+        last_socket_error: ?[]const u8 = null,
+
         // Export reload diagnostics
         /// Currently exported prefix count (daemon-owned current set)
         exported_prefix_count: usize = 0,
@@ -218,6 +227,10 @@ pub fn deriveStatusStateFromBundle(bundle: ?*serve_integration.BgpServeBundle) B
                 .keepalives_received = sess_status.keepalives_received,
                 .passive_listener_state = listener_state,
                 .passive_listener_error = listener_error,
+                // Persist reconnect diagnostics into established state for lab verification.
+                // This ensures reconnect_count survives recovery to configured/established.
+                .reconnect_count = b.reconnect_count,
+                .last_socket_error = b.last_socket_error,
                 // Export reload diagnostics from daemon-owned export state
                 .exported_prefix_count = b.export_state.exportedCount(),
                 .last_reload_success = b.export_state.last_reload_success,

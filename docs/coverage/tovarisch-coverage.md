@@ -72,7 +72,8 @@ This document tracks which specific behaviors are covered by automated checks.
 The Zig test suite in `tovarisch/src/` covers:
 
 - **cli.zig**: `--help`, `-h`, `--version`, `check`, unknown command, missing args, `status` validation
-- **status.zig**: `deriveStatus()` derivation logic, JSON parsing/serialization round-trip, required fields
+- **status.zig**: `deriveStatus()` derivation logic, JSON parsing/serialization round-trip, required fields, BGP diagnostics field serialization, `renderBgpDiagnostics` JSON helper
+- **status_bgp_diagnostics.zig**: BGP reconnect diagnostics derivation (`deriveBgpDiagnostics`, `deriveBgpFromResult`)
 
 Run: `cd tovarisch && zig build test`
 
