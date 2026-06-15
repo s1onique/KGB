@@ -1,0 +1,25 @@
+axiom_id,axiom_name,repo_area,enforcement_level,enforcement_artifact,status,notes
+AXIOM-1,Repo-Local Project Memory,doctrine,documented,docs/doctrine/ai-native-code-discipline-axioms.md,present,Axiom 1 documented with KGB/tovarisch interpretation
+AXIOM-1,Repo-Local Project Memory,gates,advisory,scripts/quality_gate.sh required docs check,partial,Required docs list exists; not all field manual entries enforced
+AXIOM-1,Repo-Local Project Memory,docs,documented,docs/tooling/zig-0.16-field-manual.md,present,Zig field lessons recorded here
+AXIOM-1,Repo-Local Project Memory,docs,documented,docs/tooling/zig-0.16-observations.md,present,Zig observations recorded here
+AXIOM-1,Repo-Local Project Memory,epics,advisory,docs/epics/*-wal.md pattern,present,WAL pattern exists; not all epics have complete WALs
+AXIOM-2,Cold-Resume Checkpoint,doctrine,documented,docs/doctrine/ai-native-code-discipline-axioms.md,present,Axiom 2 documented with close report expectations
+AXIOM-2,Cold-Resume Checkpoint,gates,advisory,scripts/quality_gate.sh AGENTS.md content check,partial,AGENTS.md checks for required close report fields
+AXIOM-2,Cold-Resume Checkpoint,epics,advisory,docs/epics/* pattern,partial,ACTs expected to produce close reports; not mechanically enforced
+AXIOM-2,Cold-Resume Checkpoint,wal,advisory,docs/epics/*-wal.md pattern,present,WAL pattern exists for epic-level tracking
+AXIOM-3,Periodic Health Audit,doctrine,documented,docs/doctrine/ai-native-code-discipline-axioms.md,present,Axiom 3 distinguishes normal gates from periodic audit
+AXIOM-3,Periodic Health Audit,gates,advisory,Makefile health-audit target,partial,health-audit target exists but is advisory only, not hard-gated
+AXIOM-3,Periodic Health Audit,scripts,advisory,scripts/audit_repo_health.sh,present,Health audit script exists; runs on schedule, not in CI gate
+AXIOM-4,Production-Path Parity,doctrine,documented,docs/doctrine/ai-native-code-discipline-axioms.md,present,Axiom 4 documented with accepted exceptions
+AXIOM-4,Production-Path Parity,gates,hard_gate,scripts/coverage_gate.sh,partial,Coverage gate enforces production paths; Linux smoke tests gated
+AXIOM-4,Production-Path Parity,tests,hard_gate,tovarisch/src/*_tests.zig,present,Zig tests exist; real path tests mixed with fixture tests
+AXIOM-4,Production-Path Parity,ci,hard_gate,.github/workflows/* or Makefile cross-platform-gate,partial,Cross-platform compile gate exists; execute-only on Linux
+AXIOM-5,Managed Agent Blocks,doctrine,documented,docs/doctrine/ai-native-code-discipline-axioms.md,present,Axiom 5 documented with owner/source/regeneration semantics
+AXIOM-5,Managed Agent Blocks,docs,advisory,docs/coverage/tovarisch-coverage.md,partial,Coverage ledger pattern exists; not all generated blocks follow pattern
+AXIOM-5,Managed Agent Blocks,bootstrap,documented,.clinerules/* pattern,present,.clinerules files document generator and purpose
+AXIOM-5,Managed Agent Blocks,gates,advisory,scripts/quality_gate.sh coverage ledger check,partial,Coverage ledger checked for public commands only
+AXIOM-6,Stable Doctrine/ADR Links,doctrine,documented,docs/doctrine/ai-native-code-discipline-axioms.md,present,Axiom 6 documents kgb:// URI scheme
+AXIOM-6,Stable Doctrine/ADR Links,doctrine,advisory,docs/doctrine/README.md,present,Doctrine index provides stable references by filename
+AXIOM-6,Stable Doctrine/ADR Links,epics,advisory,docs/epics/* pattern,partial,Epics use slice IDs; some older docs may have unstable refs
+AXIOM-6,Stable Doctrine/ADR Links,gates,advisory,AGENTS.md kgb:// references,present,AGENTS.md uses kgb:// scheme; manual review only

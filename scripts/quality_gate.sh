@@ -75,6 +75,8 @@ required=(
   docs/doctrine/privacy.md
   docs/doctrine/tiny-leafs.md
   docs/doctrine/metrics.md
+  docs/doctrine/ai-native-code-discipline-axioms.md
+  docs/doctrine/manifesto_axiom_coverage.csv
   docs/architecture/overview.md
   docs/architecture/naming.md
   docs/architecture/components.md
@@ -87,6 +89,7 @@ required=(
   docs/contracts/tovarisch-status-v0.md
   docs/contracts/examples/tovarisch-status-v0.json
   scripts/verify_tovarisch_status_contract.sh
+  scripts/verify_manifesto_axiom_coverage.py
   AGENTS.md
   .clinerules/00-bootstrap.md
   .clinerules/10-kgb-doctrine.md
@@ -100,6 +103,12 @@ for path in "${required[@]}"; do
     exit 1
   fi
 done
+
+echo "[gate] checking manifesto axiom coverage matrix"
+python3 scripts/verify_manifesto_axiom_coverage.py
+
+echo "[gate] checking manifesto axiom coverage matrix self-test"
+python3 scripts/verify_manifesto_axiom_coverage.py --self-test
 
 echo "[gate] checking forbidden generic naming"
 
