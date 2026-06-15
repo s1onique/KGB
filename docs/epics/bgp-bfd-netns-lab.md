@@ -149,6 +149,7 @@ This aligns BIRD with tovarisch's UDP 4784 multihop behavior.
 | netns-020 | Update WAL with ACT 2 scope | **done** |
 | netns-021 | Run `make gate` | **done** |
 | netns-022 | Run manual GitHub Actions for BFD Up evidence | **pending** |
+| netns-023 | Add CI verification script for BFD Up artifact | **done** |
 
 ### ACT 2 Acceptance Criteria
 
@@ -165,6 +166,16 @@ This aligns BIRD with tovarisch's UDP 4784 multihop behavior.
 - [x] Bash syntax checks pass
 - [x] Workflow remains `workflow_dispatch` only
 - [x] BGP convergence remains deferred (non-fatal)
+- [x] CI verifies `bird-bfd-sessions.txt` contains `Up` before workflow can pass
+
+#### Manual CI Close Condition
+
+Manual workflow PASS means:
+- lab exited 0
+- `scripts/verify_bfd_up_artifact.sh` found latest lab artifact
+- `bird-bfd-sessions.txt` exists
+- `bird-bfd-sessions.txt` contains token `Up`
+- artifacts uploaded
 
 #### Requires Manual CI Verification
 
