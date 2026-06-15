@@ -25,6 +25,26 @@ declare -g ARTIFACT_DIR=""
 # Reconnect Lab Functions
 # ============================================================================
 
+# Preflight check: require Linux
+require_linux() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        log_error "This lab requires Linux network namespaces"
+        return 1
+    fi
+}
+
+# Preflight check: require reconnect-specific dependencies
+require_reconnect_dependencies() {
+    local missing=0
+    for cmd in ip ss jq curl pgrep pkill bird; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            log_error "missing required command: $cmd"
+            missing=1
+        fi
+    done
+    return "$missing"
+}
+
 # Capture tovarisch PID to a file
 capture_tovarisch_pid() {
     local output_file="$1"
@@ -204,8 +224,8 @@ run_reconnect_lab() {
     log_info ""
 
     # Preflight checks
-    check_linux
-    check_dependencies
+    require_linux
+    require_reconnect_dependencies
 
     # Setup
     setup_temp_dir
