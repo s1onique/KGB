@@ -8,6 +8,43 @@
 
 set -euo pipefail
 
+# === Self-Test Mode ===
+# When run with --self-test, verifies the script's own exit contract.
+# Must be checked early before any exit statements.
+if [[ "${1:-}" == "--self-test" ]]; then
+    # Run the audit and capture exit code
+    "$0" >/tmp/health-audit-self-test.out 2>&1
+    TEST_RC=$?
+
+    # Verify expected outputs
+    TEST_PASS=0
+    if grep -q "=== Audit Summary ===" /tmp/health-audit-self-test.out; then
+        TEST_PASS=$((TEST_PASS + 1))
+    else
+        echo "SELFTEST FAIL: Missing audit summary"
+    fi
+
+    # Check that script exits 0 when there are no failures (warnings are OK)
+    # Extract failure count from results line
+    FAIL_COUNT=$(grep "Results:" /tmp/health-audit-self-test.out | grep -oE '[0-9]+ failures' | grep -oE '[0-9]+' || echo "0")
+    if [[ "${FAIL_COUNT}" -eq 0 && "${TEST_RC}" -eq 0 ]]; then
+        TEST_PASS=$((TEST_PASS + 1))
+    elif [[ "${FAIL_COUNT}" -eq 0 && "${TEST_RC}" -ne 0 ]]; then
+        echo "SELFTEST FAIL: Script exited ${TEST_RC} when there are 0 failures (expected 0)"
+    fi
+
+    # When there are failures, script must exit non-zero
+    # (This is tested implicitly - if FAIL_COUNT>0 but RC=0, that would be a failure)
+
+    if [[ "${TEST_PASS}" -eq 2 ]]; then
+        echo "SELFTEST PASS: Exit contract verified"
+        exit 0
+    else
+        echo "SELFTEST FAIL: ${TEST_PASS}/2 checks passed"
+        exit 1
+    fi
+fi
+
 echo "=== KGB Repo Health Audit ==="
 echo "Started at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 echo ""
@@ -272,8 +309,13 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
     if git diff-index --quiet HEAD -- 2>/dev/null; then
         log_find "PASS" "Git working tree is clean"
     else
-        UNTRACKED=$(git status --porcelain 2>/dev/null | grep '^??' | wc -l || echo "0")
-        CHANGED=$(git status --porcelain 2>/dev/null | grep -v '^??' | wc -l || echo "0")
+        # Note: untracked files start with '?? ' in git status --porcelain
+        # grep -c outputs count (including "0") but exits 1 when no matches found
+        # Use || true to suppress exit code while preserving the output
+        UNTRACKED=$(git status --porcelain 2>/dev/null | grep -cE '^\?\?' || true)
+        TOTAL=$(git status --porcelain 2>/dev/null | wc -l 2>/dev/null || echo "0")
+        TOTAL=${TOTAL//[[:space:]]/}  # strip all whitespace
+        CHANGED=$((TOTAL - UNTRACKED))
         if [[ "${UNTRACKED}" -gt 5 || "${CHANGED}" -gt 0 ]]; then
             log_find "WARN" "Git has ${UNTRACKED} untracked + ${CHANGED} changed files"
         else
@@ -329,6 +371,14 @@ fi
 echo ""
 echo "=== End of Health Audit ==="
 
-# Exit with success - this is advisory only
-# The failures are logged distinctly for GitHub Actions visibility
+# === Explicit Exit Contract ===
+# This is an advisory audit - it reports findings but does not block development.
+# The script exits 0 on clean audit (0 FAIL_COUNT) or warnings-only.
+# It exits 1 only when hard failures are detected.
+
+if [[ "${FAIL_COUNT:-0}" -gt 0 ]]; then
+    exit 1
+fi
+
+# Warnings are reported but do not fail the scheduled audit.
 exit 0
