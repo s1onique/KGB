@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/s1onique/KGB/uvb76/config"
+	"github.com/s1onique/KGB/uvb76/probe"
 	"github.com/s1onique/KGB/uvb76/scraper"
 	"github.com/s1onique/KGB/uvb76/server"
 	"github.com/s1onique/KGB/uvb76/state"
@@ -55,6 +56,16 @@ func main() {
 	client := scraper.NewClient(&cfg.Scrape, stateManager, targets)
 	client.Start()
 
+	// Initialize probe client (independent latency probing)
+	probeClient := probe.NewClient(&latencyCfg, stateManager, targets)
+	if probeClient.IsEnabled() {
+		log.Printf("Latency probing enabled (interval: %ds, timeout: %dms)",
+			latencyCfg.IntervalSeconds, latencyCfg.TimeoutMilliseconds)
+	} else {
+		log.Println("Latency probing disabled")
+	}
+	probeClient.Start()
+
 	// Initialize server (HTTPS in production, HTTP in dev mode)
 	srv := server.NewServer(cfg, stateManager, client, *devMode)
 
@@ -73,6 +84,7 @@ func main() {
 	<-sigCh
 	log.Println("Shutting down...")
 	client.Stop()
+	probeClient.Stop()
 	srv.Stop()
 	log.Println("Shutdown complete.")
 }

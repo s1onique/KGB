@@ -12,6 +12,13 @@
     "interval_seconds": 30,
     "timeout_milliseconds": 5000
   },
+  "latency": {
+    "enabled": true,
+    "interval_seconds": 30,
+    "timeout_milliseconds": 5000,
+    "histogram_buckets_ms": [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
+    "recent_samples_max": 100
+  },
   "targets": [
     {
       "id": "home-router",
