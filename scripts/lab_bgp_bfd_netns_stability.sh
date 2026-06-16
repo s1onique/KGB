@@ -189,12 +189,34 @@ assert_bgp_stability() {
 
 collect_stability_routes() {
     log_info "Collecting BIRD routes for stability verification..."
-    if birdc_lab show route protocol tovarisch all 2>/dev/null > "$BIRD_ROUTES_OUTPUT"; then
-        local route_count
-        route_count=$(extract_bird_imported_route_count "$BIRD_ROUTES_OUTPUT")
-        [[ "$route_count" -gt 0 ]] && log_info "[PASS] BIRD imported routes: ${route_count} > 0" || log_error "[FAIL] BIRD imported routes: ${route_count}"
-        [[ "$route_count" -gt 0 ]] && return 0 || return 1
+
+    local routes_file="${BIRD_ROUTES_OUTPUT:-$LAB_DIR/bird-routes.txt}"
+    local route_cmd_rc=0
+
+    birdc_lab show route protocol tovarisch all > "$routes_file" 2>&1 || route_cmd_rc=$?
+
+    if [[ $route_cmd_rc -ne 0 ]]; then
+        log_error "[FAIL] Failed to collect BIRD routes: birdc rc=${route_cmd_rc}"
+        log_error "--- bird route command output ---"
+        cat "$routes_file" 2>/dev/null || true
+        return 1
     fi
-    log_error "[FAIL] Failed to collect BIRD routes"
+
+    if [[ ! -s "$routes_file" ]]; then
+        log_error "[FAIL] BIRD route output is empty: $routes_file"
+        return 1
+    fi
+
+    local route_count
+    route_count=$(grep -cE '^[[:space:]]*([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]+' "$routes_file" 2>/dev/null || echo "0")
+
+    if [[ "$route_count" =~ ^[0-9]+$ ]] && [[ "$route_count" -gt 0 ]]; then
+        log_info "[PASS] BIRD imported routes: ${route_count} > 0"
+        return 0
+    fi
+
+    log_error "[FAIL] BIRD imported routes: ${route_count:-0}"
+    log_error "--- bird-routes.txt ---"
+    cat "$routes_file" 2>/dev/null || true
     return 1
 }

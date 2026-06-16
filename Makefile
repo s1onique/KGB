@@ -135,8 +135,10 @@ health-audit:
 # Local execution: optional for debugging only
 # NOT part of make gate
 
+BASH ?= bash
+
 lab-bgp-bfd:
-	@./scripts/lab_bgp_bfd_netns.sh
+	@$(BASH) ./scripts/lab_bgp_bfd_netns.sh
 
 # === BGP/BFD Reconnect Lab ===
 # Proves: BGP recovers WITHOUT restarting tovarisch.

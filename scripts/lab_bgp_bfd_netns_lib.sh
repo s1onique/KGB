@@ -45,6 +45,7 @@ declare -g STATUS_AFTER_STABILITY_OUTPUT=""
 declare -g BIRD_PROTOCOL_BEFORE_OUTPUT=""
 declare -g BIRD_PROTOCOL_FIRST_ESTABLISHED_OUTPUT=""
 declare -g BIRD_PROTOCOL_AFTER_STABILITY_OUTPUT=""
+declare -g BIRD_ROUTES_OUTPUT=""
 
 log_info() { echo -e "${GREEN}[INFO]${NC} $*"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
@@ -100,6 +101,7 @@ setup_temp_dir() {
     BIRD_PROTOCOL_BEFORE_OUTPUT="$LAB_DIR/bird-protocol-before.txt"
     BIRD_PROTOCOL_FIRST_ESTABLISHED_OUTPUT="$LAB_DIR/bird-protocol-first-established.txt"
     BIRD_PROTOCOL_AFTER_STABILITY_OUTPUT="$LAB_DIR/bird-protocol-after-stability.txt"
+    BIRD_ROUTES_OUTPUT="$LAB_DIR/bird-routes.txt"
 }
 
 make_artifacts_readable() {
