@@ -14,6 +14,7 @@ type Config struct {
 	Listen   ListenConfig    `json:"listen"`
 	Auth     AuthConfig      `json:"auth"`
 	Scrape   ScrapeConfig    `json:"scrape"`
+	Latency  LatencyConfig   `json:"latency"`
 	Targets  []TargetConfig  `json:"targets"`
 }
 
@@ -34,6 +35,74 @@ type AuthConfig struct {
 type ScrapeConfig struct {
 	IntervalSeconds     int `json:"interval_seconds"`
 	TimeoutMilliseconds int `json:"timeout_milliseconds"`
+}
+
+// LatencyConfig holds latency measurement settings.
+type LatencyConfig struct {
+	Enabled            *bool   `json:"enabled"` // pointer so we can distinguish unset from false
+	IntervalSeconds    int     `json:"interval_seconds"`
+	TimeoutMilliseconds int    `json:"timeout_milliseconds"`
+	HistogramBucketsMS []int64 `json:"histogram_buckets_ms"`
+	RecentSamplesMax   int     `json:"recent_samples_max"`
+}
+
+// DefaultHistogramBuckets returns standard histogram bucket boundaries in ms.
+func DefaultHistogramBuckets() []int64 {
+	return []int64{5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000}
+}
+
+// DefaultLatencyIntervalSeconds is the default interval for latency probing.
+const DefaultLatencyIntervalSeconds = 30
+
+// DefaultLatencyTimeoutMilliseconds is the default timeout for latency probes.
+const DefaultLatencyTimeoutMilliseconds = 5000
+
+// DefaultRecentSamplesMax is the default max number of recent latency samples to keep.
+const DefaultRecentSamplesMax = 100
+
+// ApplyDefaults applies sensible defaults to latency config when values are missing.
+// Does NOT overwrite an explicit enabled=false.
+func (c *LatencyConfig) ApplyDefaults() {
+	// Only set enabled to true if not explicitly set to false
+	if c.Enabled == nil {
+		enabled := true
+		c.Enabled = &enabled
+	}
+	if c.HistogramBucketsMS == nil || len(c.HistogramBucketsMS) == 0 {
+		c.HistogramBucketsMS = DefaultHistogramBuckets()
+	}
+	if c.RecentSamplesMax <= 0 {
+		c.RecentSamplesMax = DefaultRecentSamplesMax
+	}
+	if c.IntervalSeconds <= 0 {
+		c.IntervalSeconds = DefaultLatencyIntervalSeconds
+	}
+	if c.TimeoutMilliseconds <= 0 {
+		c.TimeoutMilliseconds = DefaultLatencyTimeoutMilliseconds
+	}
+}
+
+// IsEnabled returns whether latency measurement is enabled.
+// Returns true if Enabled is nil (default) or true, false only if explicitly set to false.
+func (c *LatencyConfig) IsEnabled() bool {
+	return c.Enabled == nil || *c.Enabled
+}
+
+// ValidateLatencyConfig validates the latency configuration.
+func ValidateLatencyConfig(c LatencyConfig) error {
+	if c.RecentSamplesMax <= 0 {
+		return errors.New("latency.recent_samples_max must be > 0")
+	}
+	if len(c.HistogramBucketsMS) == 0 {
+		return errors.New("latency.histogram_buckets_ms cannot be empty")
+	}
+	// Check for non-positive bucket values
+	for _, bucket := range c.HistogramBucketsMS {
+		if bucket <= 0 {
+			return errors.New("latency.histogram_buckets_ms values must be > 0")
+		}
+	}
+	return nil
 }
 
 // TargetConfig represents a single tovarisch target.

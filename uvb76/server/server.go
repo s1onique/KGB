@@ -62,6 +62,11 @@ func (s *Server) Start() error {
 	protected.Handle("/targets", http.HandlerFunc(s.handleTargets)).Methods(http.MethodGet)
 	protected.Handle("/targets/{id}/snapshot", http.HandlerFunc(s.handleTargetSnapshot)).Methods(http.MethodGet)
 
+	// Latency API endpoints
+	protected.Handle("/targets/{id}/latency", http.HandlerFunc(s.handleTargetLatency)).Methods(http.MethodGet)
+	protected.Handle("/targets/{id}/latency/samples", http.HandlerFunc(s.handleTargetLatencySamples)).Methods(http.MethodGet)
+	protected.Handle("/latency", http.HandlerFunc(s.handleAllLatency)).Methods(http.MethodGet)
+
 	// Protected admin UI
 	adminRouter := router.PathPrefix("").Subrouter()
 	adminRouter.Use(s.authMw)
@@ -134,6 +139,76 @@ func (s *Server) handleTargetSnapshot(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(snap)
+}
+
+// handleTargetLatency returns the latency summary for a specific target.
+func (s *Server) handleTargetLatency(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	targetID := vars["id"]
+
+	// Find target in config
+	var found bool
+	for _, t := range s.cfg.Targets {
+		if t.ID == targetID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		http.Error(w, "Target not found", http.StatusNotFound)
+		return
+	}
+
+	summary := s.state.GetLatencySummary(targetID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(summary)
+}
+
+// handleTargetLatencySamples returns recent latency samples for a specific target.
+func (s *Server) handleTargetLatencySamples(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	targetID := vars["id"]
+
+	// Find target in config
+	var found bool
+	for _, t := range s.cfg.Targets {
+		if t.ID == targetID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		http.Error(w, "Target not found", http.StatusNotFound)
+		return
+	}
+
+	// Default limit to 100 samples if not specified
+	limit := 100
+	if l := r.URL.Query().Get("limit"); l != "" {
+		var parsedLimit int
+		if err := json.Unmarshal([]byte(l), &parsedLimit); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	samples := s.state.GetRecentLatencySamples(targetID, limit)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(samples)
+}
+
+// handleAllLatency returns latency summaries for all configured targets.
+// Uses stable API shape - includes all targets even with zero samples.
+func (s *Server) handleAllLatency(w http.ResponseWriter, r *http.Request) {
+	targetIDs := make([]string, len(s.cfg.Targets))
+	for i, t := range s.cfg.Targets {
+		targetIDs[i] = t.ID
+	}
+	summaries := s.state.GetAllTargetSummaries(targetIDs)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(summaries)
 }
 
 // handleAdmin serves the embedded admin HTML page.

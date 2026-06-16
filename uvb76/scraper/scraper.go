@@ -120,19 +120,29 @@ func (c *Client) scrapeTarget(t *config.TargetConfig) {
 		snap.Reachable = false
 		snap.Error = fmt.Sprintf("failed to create request: %v", err)
 		c.state.UpdateSnapshot(t.ID, snap)
+		// Record latency as timeout value
+		c.state.RecordLatency(t.ID, float64(c.cfg.TimeoutMilliseconds), false)
 		return
 	}
 
+	// Measure request latency
+	start := time.Now()
 	resp, err := c.httpClient.Do(req)
+	latencyMs := float64(time.Since(start).Milliseconds())
+
 	if err != nil {
 		snap.Reachable = false
 		snap.Error = fmt.Sprintf("request failed: %v", err)
 		c.state.UpdateSnapshot(t.ID, snap)
+		// Record latency for failed request (still useful for timeout monitoring)
+		c.state.RecordLatency(t.ID, latencyMs, false)
 		return
 	}
 	defer resp.Body.Close()
 
 	snap.Reachable = true
+	// Record successful latency measurement
+	c.state.RecordLatency(t.ID, latencyMs, true)
 
 	if resp.StatusCode != http.StatusOK {
 		snap.Error = fmt.Sprintf("unexpected status code: %d", resp.StatusCode)

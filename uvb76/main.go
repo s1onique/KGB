@@ -35,8 +35,15 @@ func main() {
 		log.Println("WARNING: Dev mode enabled - TLS not required")
 	}
 
-	// Initialize state manager
-	stateManager := state.NewManager()
+	// Apply latency config defaults and validate
+	latencyCfg := cfg.Latency
+	latencyCfg.ApplyDefaults()
+	if err := config.ValidateLatencyConfig(latencyCfg); err != nil {
+		log.Fatalf("Invalid latency config: %v", err)
+	}
+
+	// Initialize state manager with latency configuration
+	stateManager := state.NewManagerWithConfig(latencyCfg.HistogramBucketsMS, latencyCfg.RecentSamplesMax)
 
 	// Create target configs slice
 	targets := make([]*config.TargetConfig, 0, len(cfg.Targets))

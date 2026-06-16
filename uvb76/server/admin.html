@@ -28,6 +28,18 @@
         #auth-form button { width: 100%; padding: 0.75rem; background: #e94560; color: #fff; border: none; border-radius: 4px; cursor: pointer; margin-top: 1rem; }
         #auth-form button:hover { background: #ff6b6b; }
         .hidden { display: none; }
+        .latency-card { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #0f3460; }
+        .latency-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.5rem; margin-top: 0.5rem; }
+        .stat-item { background: #0f3460; padding: 0.5rem; border-radius: 4px; text-align: center; }
+        .stat-label { font-size: 0.75rem; color: #888; }
+        .stat-value { font-size: 1rem; color: #4ecca3; }
+        .sparkline-container { margin-top: 0.5rem; }
+        .sparkline { width: 100%; height: 60px; background: #0f3460; border-radius: 4px; }
+        .histogram-container { margin-top: 0.5rem; }
+        .histogram { display: flex; align-items: flex-end; height: 40px; gap: 2px; }
+        .histogram-bar { background: #4ecca3; flex: 1; min-width: 8px; border-radius: 2px 2px 0 0; }
+        .histogram-label { font-size: 0.625rem; color: #888; text-align: center; }
+        .histogram-row { display: flex; gap: 2px; }
     </style>
 </head>
 <body>
@@ -73,11 +85,24 @@
                     <strong>${t.name}</strong> (${t.id})
                     <br><span class="meta">${t.base_url}</span>
                     <div class="meta" id="status-${t.id}">Loading...</div>
+                    <div class="latency-card" id="latency-${t.id}">
+                        <div class="latency-stats" id="stats-${t.id}">Loading latency...</div>
+                        <div class="sparkline-container">
+                            <canvas class="sparkline" id="canvas-${t.id}" width="400" height="60"></canvas>
+                        </div>
+                    </div>
                 </div>
             `).join('');
             for (const t of targets) {
                 loadSnapshot(t.id);
+                loadLatency(t.id);
             }
+            // Refresh latency every 30 seconds
+            setInterval(() => {
+                for (const t of targets) {
+                    loadLatency(t.id);
+                }
+            }, 30000);
         }
         async function loadSnapshot(id) {
             const resp = await fetch('/api/v1/targets/' + id + '/snapshot', { headers: { 'Authorization': 'Basic ' + authToken } });
@@ -92,6 +117,125 @@
                     : `<span class="status error">unreachable</span> ${snap.error || ''}`;
             } else {
                 el.innerHTML = '<span class="status unknown">no data</span>';
+            }
+        }
+        async function loadLatency(id) {
+            const resp = await fetch('/api/v1/targets/' + id + '/latency', { headers: { 'Authorization': 'Basic ' + authToken } });
+            const statsEl = document.getElementById('stats-' + id);
+            const canvas = document.getElementById('canvas-' + id);
+            if (resp.ok) {
+                const summary = await resp.json();
+                if (summary.sample_count === 0) {
+                    statsEl.innerHTML = '<div class="stat-item"><span class="stat-label">No latency data</span></div>';
+                    return;
+                }
+                statsEl.innerHTML = `
+                    <div class="stat-item">
+                        <div class="stat-label">Samples</div>
+                        <div class="stat-value">${summary.sample_count}</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Min</div>
+                        <div class="stat-value">${summary.min_latency_ms.toFixed(1)}ms</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Avg</div>
+                        <div class="stat-value">${summary.avg_latency_ms.toFixed(1)}ms</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Median</div>
+                        <div class="stat-value">${summary.median_latency_ms.toFixed(1)}ms</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Max</div>
+                        <div class="stat-value">${summary.max_latency_ms.toFixed(1)}ms</div>
+                    </div>
+                `;
+                // Draw sparkline
+                drawSparkline(canvas, summary);
+            } else {
+                statsEl.innerHTML = '<div class="stat-item"><span class="stat-label">No latency data</span></div>';
+            }
+        }
+        async function loadSamplesAndDraw(id, canvas) {
+            const resp = await fetch('/api/v1/targets/' + id + '/latency/samples?limit=50', { headers: { 'Authorization': 'Basic ' + authToken } });
+            if (resp.ok) {
+                const samples = await resp.json();
+                if (samples.length > 0) {
+                    drawSparklineFromSamples(canvas, samples);
+                }
+            }
+        }
+        function drawSparkline(canvas, summary) {
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            const buckets = summary.histogram.buckets;
+            const counts = summary.histogram.counts;
+            
+            ctx.clearRect(0, 0, width, height);
+            
+            // Find max count for scaling
+            const maxCount = Math.max(...counts, 1);
+            const barWidth = (width - 20) / counts.length;
+            
+            // Draw histogram bars
+            ctx.fillStyle = '#4ecca3';
+            for (let i = 0; i < counts.length; i++) {
+                const barHeight = (counts[i] / maxCount) * (height - 20);
+                const x = 10 + i * barWidth;
+                const y = height - 15 - barHeight;
+                ctx.fillRect(x, y, barWidth - 2, barHeight);
+            }
+            
+            // Draw bucket labels
+            ctx.fillStyle = '#888';
+            ctx.font = '8px sans-serif';
+            ctx.textAlign = 'center';
+            for (let i = 0; i < buckets.length; i++) {
+                const x = 10 + i * barWidth + barWidth / 2;
+                ctx.fillText(buckets[i] + 'ms', x, height - 2);
+            }
+        }
+        function drawSparklineFromSamples(canvas, samples) {
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            
+            ctx.clearRect(0, 0, width, height);
+            
+            if (samples.length < 2) return;
+            
+            // Extract latencies
+            const latencies = samples.map(s => s.latency_ms);
+            const min = Math.min(...latencies);
+            const max = Math.max(...latencies);
+            const range = max - min || 1;
+            
+            // Draw line
+            ctx.strokeStyle = '#4ecca3';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            
+            for (let i = 0; i < latencies.length; i++) {
+                const x = 10 + (i / (latencies.length - 1)) * (width - 20);
+                const y = height - 15 - ((latencies[i] - min) / range) * (height - 30);
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.stroke();
+            
+            // Draw points
+            ctx.fillStyle = '#4ecca3';
+            for (let i = 0; i < latencies.length; i++) {
+                const x = 10 + (i / (latencies.length - 1)) * (width - 20);
+                const y = height - 15 - ((latencies[i] - min) / range) * (height - 30);
+                ctx.beginPath();
+                ctx.arc(x, y, 3, 0, Math.PI * 2);
+                ctx.fill();
             }
         }
     </script>
