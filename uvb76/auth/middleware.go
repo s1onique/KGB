@@ -2,53 +2,41 @@
 package auth
 
 import (
-	"encoding/base64"
 	"net/http"
-	"strings"
 
 	"github.com/s1onique/KGB/uvb76/config"
+)
+
+const (
+	// WWWAuthenticateHeader is the WWW-Authenticate header value for Basic Auth.
+	// Per RFC 9110, a server returning 401 must include this header.
+	WWWAuthenticateHeader = `Basic realm="uvb76", charset="UTF-8"`
 )
 
 // BasicAuthMiddleware returns a handler that enforces HTTP Basic Auth.
 func BasicAuthMiddleware(username, passwordHash string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" {
+			// Use r.BasicAuth() to extract credentials per Go stdlib patterns.
+			// Returns "" if no Authorization header is present.
+			providedUser, providedPass, ok := r.BasicAuth()
+			if !ok {
+				w.Header().Set("WWW-Authenticate", WWWAuthenticateHeader)
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
 
-			// Parse Basic auth header
-			if !strings.HasPrefix(authHeader, "Basic ") {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-
-			encoded := strings.TrimPrefix(authHeader, "Basic ")
-			decoded, err := base64.StdEncoding.DecodeString(encoded)
-			if err != nil {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-
-			parts := strings.SplitN(string(decoded), ":", 2)
-			if len(parts) != 2 {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-
-			providedUser := parts[0]
-			providedPass := parts[1]
-
-			// Validate credentials
+			// Validate username
 			if providedUser != username {
+				w.Header().Set("WWW-Authenticate", WWWAuthenticateHeader)
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
 
-			ok, err := config.VerifyPassword(providedPass, passwordHash)
-			if err != nil || !ok {
+			// Validate password using constant-time comparison
+			valid, err := config.VerifyPassword(providedPass, passwordHash)
+			if err != nil || !valid {
+				w.Header().Set("WWW-Authenticate", WWWAuthenticateHeader)
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
