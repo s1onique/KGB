@@ -136,6 +136,10 @@ test { std.testing.refAllDecls(@import("cli/bfd_serve.zig")); }
 test { std.testing.refAllDecls(@import("cli_serve_config_tests.zig")); }
 test { std.testing.refAllDecls(@import("bfd_serve_config_tests.zig")); }
 
+// VPN masquerade tests (ACT: Add config-controlled VPN masquerade rule with rule watcher)
+test { std.testing.refAllDecls(@import("net/iptables.zig")); }
+test { std.testing.refAllDecls(@import("status_vpn_masquerade.zig")); }
+
 // BGP protocol module tests
 test { std.testing.refAllDecls(@import("bgp/types.zig")); }
 test { std.testing.refAllDecls(@import("bgp/message.zig")); }

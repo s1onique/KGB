@@ -45,6 +45,8 @@ const _net_wg_show_collector = @import("net/wg_show_collector.zig");
 const _net_wg_show_collector_tests = @import("net/wg_show_collector_tests.zig");
 const _net_private_interface_stats = @import("net/private_interface_stats.zig");
 const _net_private_interface_stats_tests = @import("net/private_interface_stats_tests.zig");
+const _net_iptables = @import("net/iptables.zig");
+const _status_vpn_masquerade = @import("status_vpn_masquerade.zig");
 
 // Force test discovery
 test { std.testing.refAllDecls(@import("config.zig")); }
@@ -82,3 +84,5 @@ test { std.testing.refAllDecls(@import("net/wg_show_collector.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_show_collector_tests.zig")); }
 test { std.testing.refAllDecls(@import("net/private_interface_stats.zig")); }
 test { std.testing.refAllDecls(@import("net/private_interface_stats_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/iptables.zig")); }
+test { std.testing.refAllDecls(@import("status_vpn_masquerade.zig")); }
