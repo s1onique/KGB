@@ -25,6 +25,7 @@ from ipk_fixture_mutators import (
     mod_missing_config,
     mod_rc_unslung,
     mod_sha256_mismatch,
+    mod_ar_outer_format,
 )
 from ipk_verifier import verify_ipk, log_info, log_pass, log_fail
 
@@ -65,6 +66,7 @@ def run_self_tests() -> bool:
             ("missing config fails", mod_missing_config, "Missing in data payload"),
             ("rc.unslung sourcing fails", mod_rc_unslung, "rc.unslung"),
             ("sha256 mismatch fails", mod_sha256_mismatch, "SHA256 mismatch"),
+            ("ar outer format fails", mod_ar_outer_format, "outer package must be gzip tar"),
         ]
 
         print("=== Self-Test Results ===")

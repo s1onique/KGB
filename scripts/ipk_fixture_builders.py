@@ -5,7 +5,7 @@ import io
 import os
 import tarfile
 
-from ar_parser import create_ar_archive
+from ipk_tar_builder import create_gzip_tar_ipk
 
 
 def _build_control_tar(control_content: str, postinst: str = None,
@@ -59,7 +59,7 @@ def _build_data_tar(extra_files=None, init_mode=0o755, init_content=None) -> byt
 
 
 def create_good_fixture(work_dir: str) -> str:
-    """Create a valid ipk fixture. Returns the fixture path."""
+    """Create a valid ipk fixture using gzip tar format. Returns the fixture path."""
     fixture_path = os.path.join(work_dir, 'good.ipk')
 
     control_content = """Package: uvb76
@@ -115,12 +115,13 @@ echo "removing"
 
     data_tar = data_tar_buffer.getvalue()
 
+    # Use Entware-compatible outer gzip tar format
     members = {
-        'debian-binary': b'2.0\n',
-        'control.tar.gz': control_tar,
-        'data.tar.gz': data_tar
+        './debian-binary': b'2.0\n',
+        './control.tar.gz': control_tar,
+        './data.tar.gz': data_tar
     }
-    create_ar_archive(fixture_path, members)
+    create_gzip_tar_ipk(fixture_path, members)
 
     with open(fixture_path, 'rb') as f:
         sha256 = hashlib.sha256(f.read()).hexdigest()

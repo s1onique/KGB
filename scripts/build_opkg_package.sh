@@ -7,7 +7,7 @@
 #   /opt/etc/init.d/S76uvb76 - Entware init script
 #   /opt/var/log/uvb76/      - log directory
 #
-# The package uses ar format with debian-binary, control.tar.gz, and data.tar.gz.
+# The package uses Entware-compatible outer gzip tar containing debian-binary, data.tar.gz, and control.tar.gz.
 set -euo pipefail
 
 # Defaults
@@ -251,14 +251,19 @@ echo ""
 echo "=== Creating debian-binary ==="
 echo "2.0" > "${PKGROOT}/debian-binary"
 
-# --- Assemble final .ipk with ar ---
+# --- Assemble final .ipk with gzip tar (Entware-compatible format) ---
 echo ""
 echo "=== Assembling .ipk package ==="
 # Use absolute path for output since we've cd'd to PKGROOT
 mkdir -p "${OUTPUT_DIR}"
 AR_OUT="${OUTPUT_DIR}/$(basename "${PKG_PATH}")"
 rm -f "${AR_OUT}"
-ar -r "${AR_OUT}" debian-binary control.tar.gz data.tar.gz
+# Entware ipkg-build creates outer gzip tar, matching OpenEmbedded/Yocto style
+# Use portable tar syntax (works on both Linux and macOS)
+(
+    cd "${PKGROOT}"
+    tar cf - ./debian-binary ./data.tar.gz ./control.tar.gz | gzip -n - > "${AR_OUT}"
+)
 
 # Verify package was created
 if [ ! -s "${PKG_PATH}" ]; then

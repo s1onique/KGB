@@ -1,5 +1,6 @@
 """IPK package verification logic."""
 
+import gzip
 import hashlib
 import io
 import os
@@ -31,11 +32,42 @@ def log_verbose(msg: str, verbose: bool = False) -> None:
         print(f"[VERBOSE] {msg}")
 
 
+def _parse_gzip_tar_members(ipk_path: str) -> dict[str, bytes]:
+    """Parse outer gzip tar and return a dict of member_name -> content."""
+    members: dict[str, bytes] = {}
+    
+    with open(ipk_path, 'rb') as f:
+        # Decompress gzip
+        try:
+            gzip_file = gzip.GzipFile(fileobj=f)
+            # Read the entire gzip content into memory
+            content = gzip_file.read()
+        except Exception as e:
+            raise ValueError(f"Not a valid gzip archive: {e}")
+    
+    # Parse inner tar
+    tar_buffer = io.BytesIO(content)
+    with tarfile.open(fileobj=tar_buffer, mode='r') as tf:
+        for member in tf.getmembers():
+            if member.isfile():
+                f = tf.extractfile(member)
+                if f is not None:
+                    members[member.name] = f.read()
+    
+    return members
+
+
+def _normalize_entry(name: str) -> str:
+    """Normalize tar entry name by stripping leading ./"""
+    if name.startswith('./'):
+        return name[2:]
+    return name
+
+
 # === IPK Package Verification ===
 
 def verify_ipk(ipk_path: str, verbose: bool = False) -> bool:
     """Verify an ipk package. Returns True if valid, False otherwise."""
-    from ar_parser import parse_ar_members
 
     log_info(f"Verifying package: {ipk_path}")
     
@@ -49,28 +81,39 @@ def verify_ipk(ipk_path: str, verbose: bool = False) -> bool:
     
     log_verbose(f"File exists and non-empty: {os.path.getsize(ipk_path)} bytes", verbose)
     
+    # Parse outer gzip tar
+    try:
+        members = _parse_gzip_tar_members(ipk_path)
+    except ValueError as e:
+        log_fail(f"outer package must be gzip tar: {e}")
+        return False
+    
+    # Check for ar magic to give a better error message
     with open(ipk_path, 'rb') as f:
-        try:
-            ar_members = parse_ar_members(f)
-        except ValueError as e:
-            log_fail(f"Not a valid ar archive: {e}")
+        magic = f.read(8)
+        if magic.startswith(b"!<arch>"):
+            log_fail("outer package must be gzip tar, not ar archive (Debian format)")
             return False
     
-    required_ar_members = ['debian-binary', 'control.tar.gz', 'data.tar.gz']
-    for member in required_ar_members:
-        if member not in ar_members:
-            log_fail(f"Missing ar member: {member}")
+    required_members = ['debian-binary', 'control.tar.gz', 'data.tar.gz']
+    for member in required_members:
+        # Accept with or without leading ./
+        if member not in members and f'./{member}' not in members:
+            log_fail(f"Missing outer member: {member}")
             return False
     
-    log_verbose("ar archive: OK", verbose)
+    log_verbose("outer gzip tar: OK", verbose)
     
-    debian_binary = ar_members['debian-binary'].decode('utf-8', errors='replace').strip()
+    # Get debian-binary (with or without ./ prefix)
+    debian_binary = members.get('debian-binary') or members.get('./debian-binary')
+    debian_binary = debian_binary.decode('utf-8', errors='replace').strip()
     if debian_binary != '2.0':
         log_fail(f"debian-binary must be '2.0', got: '{debian_binary}'")
         return False
     log_verbose("debian-binary: OK", verbose)
     
-    control_tar = ar_members['control.tar.gz']
+    # Get control.tar.gz (with or without ./ prefix)
+    control_tar = members.get('control.tar.gz') or members.get('./control.tar.gz')
     try:
         with tarfile.open(fileobj=io.BytesIO(control_tar), mode='r:gz') as tf:
             control_entries = tf.getnames()
@@ -80,12 +123,7 @@ def verify_ipk(ipk_path: str, verbose: bool = False) -> bool:
     
     log_verbose("control.tar.gz: OK", verbose)
     
-    normalized_entries = set()
-    for entry in control_entries:
-        if entry.startswith('./'):
-            normalized_entries.add(entry[2:])
-        else:
-            normalized_entries.add(entry)
+    normalized_entries = {_normalize_entry(e) for e in control_entries}
     
     if 'control' not in normalized_entries:
         log_fail("control.tar.gz missing ./control")
@@ -143,7 +181,8 @@ def verify_ipk(ipk_path: str, verbose: bool = False) -> bool:
     
     log_verbose("control metadata: OK", verbose)
     
-    data_tar = ar_members['data.tar.gz']
+    # Get data.tar.gz (with or without ./ prefix)
+    data_tar = members.get('data.tar.gz') or members.get('./data.tar.gz')
     try:
         with tarfile.open(fileobj=io.BytesIO(data_tar), mode='r:gz') as tf:
             data_entries = tf.getnames()
@@ -153,12 +192,7 @@ def verify_ipk(ipk_path: str, verbose: bool = False) -> bool:
     
     log_verbose("data.tar.gz: OK", verbose)
     
-    normalized_data = set()
-    for entry in data_entries:
-        if entry.startswith('./'):
-            normalized_data.add(entry[2:])
-        else:
-            normalized_data.add(entry)
+    normalized_data = {_normalize_entry(e) for e in data_entries}
     
     required_payload = [
         'opt/bin/uvb76',
@@ -195,22 +229,21 @@ def verify_ipk(ipk_path: str, verbose: bool = False) -> bool:
         if entry.startswith('._'):
             continue
         
-        if entry.startswith('./'):
-            entry = entry[2:]
+        normalized = _normalize_entry(entry)
         
-        if entry == 'opt':
+        if normalized == 'opt':
             continue
         
         if entry.startswith('/'):
             log_fail(f"File writes outside /opt: {entry}")
             return False
         
-        parts = entry.split('/')
+        parts = normalized.split('/')
         if '..' in parts:
             log_fail(f"File writes outside /opt: {entry}")
             return False
         
-        if not entry.startswith('opt/'):
+        if not normalized.startswith('opt/'):
             log_fail(f"File writes outside /opt: {entry}")
             return False
         

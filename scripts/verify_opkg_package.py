@@ -3,7 +3,7 @@
 verify_opkg_package.py - Verify Entware/opkg package structure
 
 Validates an .ipk package against opkg package requirements:
-  - Valid ar archive with debian-binary, control.tar.gz, data.tar.gz
+  - Valid gzip tar archive with debian-binary, control.tar.gz, data.tar.gz
   - Required control fields present and valid
   - Control archive contains ./control, ./postinst, ./prerm
   - Package payload contained only under /opt

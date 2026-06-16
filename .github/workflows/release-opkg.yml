@@ -86,7 +86,16 @@ jobs:
           echo "=== Package contents ==="
           for ipk in dist/opkg/*.ipk; do
             echo "--- $ipk ---"
-            ar -t "$ipk"
+            tar -tzf "$ipk"
+            
+            tmp="$(mktemp -d)"
+            tar -xzf "$ipk" -C "$tmp"
+            echo "=== control.tar.gz contents ==="
+            tar -tzf "$tmp/control.tar.gz"
+            echo "=== data.tar.gz contents (first 50) ==="
+            tar -tzf "$tmp/data.tar.gz" | head -50
+            rm -rf "$tmp"
+            echo ""
           done
 
       - name: Verify package
