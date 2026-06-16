@@ -94,6 +94,12 @@ The running `serve` process wires BFD/BGP runtime from config into `ServeContext
 - [x] BFD/BGP convergence still deferred
 - [x] Workflow remains `workflow_dispatch` only
 
+## ACT 3 Scope
+
+Assert BGP session stability with reconnect budget assertions.
+
+See [act-3-bgp-stability-assertions.md](./act-3-bgp-stability-assertions.md) for full details.
+
 ## ACT 2 Scope
 
 Assert BFD session reaches Up between `tovarisch` and BIRD.
@@ -211,23 +217,6 @@ Manual workflow PASS means:
 ### Next Step (ACT 2.2)
 
 Diagnose tovarisch BFD receive/respond path. See [act-2-2-bfd-tovarisch-diagnosis.md](./act-2-2-bfd-tovarisch-diagnosis.md) for full scope.
-
-**Summary**: ACT 2.1 fixed BIRD multihop BFD configuration. BIRD is now sending packets to UDP/4784 but tovarisch does not respond. ACT 2.2 adds tovarisch-side diagnostics to prove the receive/respond path.
-
-**Key questions**:
-1. Is tovarisch listening on UDP/4784? (`ss -lunp`)
-2. Do packets arrive at veth-tovarisch? (tcpdump on interface)
-3. Does tovarisch log BFD receive? (log grep)
-4. Does tovarisch send BFD packets back? (tcpdump)
-
-**New files**:
-- `scripts/lab_bgp_bfd_netns_tovarisch_diag.sh` — tovarisch-side diagnostics
-
-**New artifacts**:
-- `tovarisch-socket-state.txt` — UDP socket state
-- `tcpdump-bfd-tovarisch.txt` — packets on veth-tovarisch
-- `tovarisch-bfd-logs.txt` — BFD log entries
-- `veth-stats.txt` — interface RX/TX stats
 
 ### Next Step (ACT 3)
 

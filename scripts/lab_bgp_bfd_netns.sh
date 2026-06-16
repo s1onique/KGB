@@ -45,6 +45,23 @@ check_dependencies() {
     detect_bird_version
 }
 
+# Check ACT 3 dependencies (fatal for stability assertions)
+check_stability_dependencies() {
+    local missing=()
+
+    for cmd in curl jq; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing+=("$cmd")
+        fi
+    done
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        log_error "ACT 3 stability assertions require: ${missing[*]}"
+        return 1
+    fi
+    return 0
+}
+
 # Main lab execution
 run_lab() {
     log_info "=== BGP/BFD Netns Lab ==="
@@ -172,14 +189,38 @@ run_lab() {
         exit_code=1
     fi
 
-    # 8. Attempt BGP convergence (deferred - not required for ACT 2)
+    # 8. ACT 3: Assert BGP stability with reconnect budget
     log_info ""
-    log_info "=== BGP Convergence (Deferred) ==="
+    log_info "=== ACT 3: BGP Stability Assertions ==="
+    log_info "Scope: Clean-start stability (no failure injection)"
+    log_info "Assertions:"
+    log_info "  - BGP reaches Established"
+    log_info "  - BFD reaches Up (prerequisite)"
+    log_info "  - BIRD reaches Established"
+    log_info "  - BIRD imported route count > 0"
+    log_info "  - tovarisch reconnect_count delta <= budget (<= ${RECONNECT_BUDGET:-1})"
+    log_info "  - reconnect_count does not increase during stability window"
+    log_info "  - BIRD does not return to Idle/Active/Connect"
+    log_info "  - No 'Socket: Connection closed' after stable point"
 
-    wait_bgp_convergence || log_warn "[DEFERRED] BGP convergence not achieved (ACT 2 scope is BFD only)"
+    # Check ACT 3 dependencies (fatal for stability assertions)
+    if ! check_stability_dependencies; then
+        log_error "[FAIL] ACT 3 stability assertions require curl and jq"
+        exit_code=1
+    else
+        if ! assert_bgp_stability; then
+            log_error "[FAIL] BGP stability assertions failed"
+            exit_code=1
+        fi
 
-    # Collect routes (non-fatal since BGP convergence is deferred)
-    collect_bgp_routes || log_warn "[DEFERRED] BGP route collection unavailable (BGP deferred)"
+        # Collect routes for route import proof (fatal)
+        log_info ""
+        log_info "=== Route Import Proof ==="
+        if ! collect_stability_routes; then
+            log_error "[FAIL] Route import proof failed"
+            exit_code=1
+        fi
+    fi
 
     # Print diagnostics
     print_diagnostics

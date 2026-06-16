@@ -18,6 +18,8 @@ source "${SCRIPT_DIR}/lab_bgp_bfd_netns_tovarisch_diag.sh"
 source "${SCRIPT_DIR}/lab_bgp_bfd_netns_config.sh"
 # shellcheck source=lab_bgp_bfd_netns_collect.sh
 source "${SCRIPT_DIR}/lab_bgp_bfd_netns_collect.sh"
+# shellcheck source=lab_bgp_bfd_netns_stability.sh
+source "${SCRIPT_DIR}/lab_bgp_bfd_netns_stability.sh"
 
 # Global variables (set by main script)
 declare -g LAB_DIR=""
@@ -35,6 +37,14 @@ declare -g BFD_SESSIONS_OUTPUT=""
 declare -g TCPDUMP_BFD_TOVARISCH=""
 declare -g TCPDUMP_BFD_BIRD=""
 declare -g TCPDUMP_BFD_TOVERVIEW=""
+
+# Stability checkpoint artifacts (ACT 3)
+declare -g STATUS_BEFORE_OUTPUT=""
+declare -g STATUS_FIRST_ESTABLISHED_OUTPUT=""
+declare -g STATUS_AFTER_STABILITY_OUTPUT=""
+declare -g BIRD_PROTOCOL_BEFORE_OUTPUT=""
+declare -g BIRD_PROTOCOL_FIRST_ESTABLISHED_OUTPUT=""
+declare -g BIRD_PROTOCOL_AFTER_STABILITY_OUTPUT=""
 
 log_info() { echo -e "${GREEN}[INFO]${NC} $*"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
@@ -82,6 +92,14 @@ setup_temp_dir() {
     TCPDUMP_BFD_TOVARISCH="$LAB_DIR/tcpdump-bfd-tovarisch.txt"
     TCPDUMP_BFD_BIRD="$LAB_DIR/tcpdump-bfd-bird.txt"
     TCPDUMP_BFD_TOVERVIEW="$LAB_DIR/tcpdump-bfd-overview.txt"
+
+    # Stability checkpoint artifacts (ACT 3)
+    STATUS_BEFORE_OUTPUT="$LAB_DIR/status-before.json"
+    STATUS_FIRST_ESTABLISHED_OUTPUT="$LAB_DIR/status-first-established.json"
+    STATUS_AFTER_STABILITY_OUTPUT="$LAB_DIR/status-after-stability.json"
+    BIRD_PROTOCOL_BEFORE_OUTPUT="$LAB_DIR/bird-protocol-before.txt"
+    BIRD_PROTOCOL_FIRST_ESTABLISHED_OUTPUT="$LAB_DIR/bird-protocol-first-established.txt"
+    BIRD_PROTOCOL_AFTER_STABILITY_OUTPUT="$LAB_DIR/bird-protocol-after-stability.txt"
 }
 
 make_artifacts_readable() {

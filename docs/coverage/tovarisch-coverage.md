@@ -276,6 +276,32 @@ When DWARF is incomplete, the coverage gate uses test-as-signal as honest covera
 
 See [macOS Zig 0.16/kcov DWARF Limitation](./macos-zig-kcov-dwarf.md) for full details.
 
+## BGP/BFD Netns Lab Coverage Categories
+
+The BGP/BFD netns lab tracks convergence categories:
+
+| Category | Description | Evidence |
+|----------|-------------|----------|
+| Eventual convergence | BGP eventually reaches Established | `status-first-established.json` |
+| Stable convergence | BGP remains Established throughout stability window | `bird-protocol-after-stability.txt` |
+| Reconnect recovery | reconnect_count delta within budget | `status-before.json` vs `status-first-established.json` |
+| Route import proof | BIRD shows non-zero imported routes | `bird-routes.txt` |
+
+### Coverage Mechanism
+
+- **Lab harness**: `scripts/lab_bgp_bfd_netns.sh` with ACT 3 stability assertions
+- **Verifier script**: `scripts/verify_bgp_stability.sh`
+- **Coverage signal**: Lab exits 0 + verifier passes
+
+### Reconnect Budget Assertion
+
+Production showed BIRD reporting `Idle / Socket: Connection closed` while `tovarisch` later reported `established` with `reconnect_count: 53`. The stability lab asserts:
+
+1. **Initial convergence**: reconnect_count delta <= 1 (strict) or <= 2 (with justification)
+2. **Post-Established stability**: reconnect_count does NOT increase during 15s stability window
+3. **BIRD stability**: BIRD does not return to Idle/Active/Connect during window
+4. **No recent closures**: BIRD output contains no `Socket: Connection closed` after stable point
+
 ## References
 
 - [Day-0 Code Coverage Doctrine](../doctrine/day-0-code-coverage.md)
