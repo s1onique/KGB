@@ -185,3 +185,26 @@ uvb76-build-linux-arm64:
 uvb76-test:
 	cd uvb76 && go test -v ./...
 
+# === opkg Package Targets (Entware/AsusWRT-Merlin) ===
+
+# Build opkg package for Entware/AsusWRT-Merlin
+opkg-package:
+	@mkdir -p dist/opkg
+	@bash scripts/build_opkg_package.sh
+
+# Verify opkg package structure
+# Only verifies the most recently built package (matches VERSION pattern)
+verify-opkg-package:
+	@bash scripts/verify_opkg_package.sh --self-test
+	@LATEST_IPK=$$(ls -t dist/opkg/uvb76_*.ipk 2>/dev/null | head -1); \
+	if [ -n "$$LATEST_IPK" ]; then \
+		bash scripts/verify_opkg_package.sh "$$LATEST_IPK"; \
+	else \
+		echo "No uvb76 package found in dist/opkg/"; \
+		exit 1; \
+	fi
+
+# Combined opkg gate: build, self-test, and verify all packages
+opkg-gate: opkg-package verify-opkg-package
+	@echo "=== opkg-gate passed ==="
+

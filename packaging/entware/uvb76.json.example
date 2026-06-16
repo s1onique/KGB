@@ -1,0 +1,30 @@
+{
+  "listen": {
+    "addr": ":8443",
+    "tls_cert_file": "/opt/etc/uvb76/cert.pem",
+    "tls_key_file": "/opt/etc/uvb76/key.pem"
+  },
+  "auth": {
+    "username": "admin",
+    "password_sha256": "sha256:YOUR_SALT_32CHARS_HERE:YOUR_HASH_64CHARS_HEX_HERE"
+  },
+  "scrape": {
+    "interval_seconds": 30,
+    "timeout_milliseconds": 5000
+  },
+  "latency": {
+    "enabled": true,
+    "interval_seconds": 30,
+    "timeout_milliseconds": 5000,
+    "histogram_buckets_ms": [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
+    "recent_samples_max": 100
+  },
+  "targets": [
+    {
+      "id": "tovarisch-local",
+      "name": "Local Tovarisch",
+      "base_url": "https://localhost:9080",
+      "enabled": true
+    }
+  ]
+}

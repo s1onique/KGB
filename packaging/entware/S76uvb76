@@ -1,0 +1,91 @@
+#!/bin/sh
+# Entware init script for UVB-76
+# Installs to /opt/etc/init.d/S76uvb76
+# Called by rc.unslung during system startup/shutdown
+#
+# Requirements:
+#   - ENABLED=yes to start the service (default)
+#   - Uses /opt/etc/init.d/rc.func for standard init.d behavior
+#   - Logs go to /opt/var/log/uvb76/ via stdout redirect
+
+ENABLED=yes
+PROCS=uvb76
+PROCS_ARGS=""
+PATH=/opt/bin:/opt/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+CONFIG_PATH=/opt/etc/uvb76/uvb76.json
+LOG_DIR=/opt/var/log/uvb76
+PID_FILE=/var/run/uvb76.pid
+
+# Source rc.func for standard init.d functions
+[ -f /opt/etc/init.d/rc.func ] && . /opt/etc/init.d/rc.func
+
+start_service() {
+    # Check if config exists
+    if [ ! -f "${CONFIG_PATH}" ]; then
+        if [ -f "${CONFIG_PATH}.example" ]; then
+            logger -st uvb76 "Config not found. Copying example to ${CONFIG_PATH}"
+            cp "${CONFIG_PATH}.example" "${CONFIG_PATH}"
+        else
+            logger -st uvb76 "ERROR: No config found at ${CONFIG_PATH}"
+            return 1
+        fi
+    fi
+    
+    # Ensure log directory exists
+    mkdir -p "${LOG_DIR}"
+    
+    # Start the service with stdout/stderr redirected to log
+    /opt/bin/uvb76 -config "${CONFIG_PATH}" >> "${LOG_DIR}/uvb76.log" 2>&1 &
+    echo $! > "${PID_FILE}"
+    logger -st uvb76 "UVB-76 started (PID: $(cat ${PID_FILE}))"
+}
+
+stop_service() {
+    if [ -f "${PID_FILE}" ]; then
+        local pid=$(cat "${PID_FILE}")
+        if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+            kill "${pid}" 2>/dev/null
+            # Wait for graceful shutdown
+            local attempts=0
+            while kill -0 "${pid}" 2>/dev/null && [ ${attempts} -lt 10 ]; do
+                sleep 1
+                attempts=$((attempts + 1))
+            done
+            # Force kill if still running
+            if kill -0 "${pid}" 2>/dev/null; then
+                kill -9 "${pid}" 2>/dev/null || true
+            fi
+            rm -f "${PID_FILE}"
+            logger -st uvb76 "UVB-76 stopped"
+        else
+            rm -f "${PID_FILE}"
+        fi
+    else
+        # Try to find and kill by process name as fallback
+        local pids=$(pgrep -f "/opt/bin/uvb76" 2>/dev/null || true)
+        if [ -n "${pids}" ]; then
+            echo "${pids}" | xargs kill 2>/dev/null || true
+            logger -st uvb76 "UVB-76 stopped (found by name)"
+        fi
+    fi
+}
+
+check_service() {
+    # Check if process is running
+    if [ -f "${PID_FILE}" ]; then
+        local pid=$(cat "${PID_FILE}" 2>/dev/null || true)
+        if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+            logger -st uvb76 "UVB-76 is running (PID: ${pid})"
+            return 0
+        fi
+    fi
+    
+    # Fallback: check by process name
+    if pgrep -f "/opt/bin/uvb76" > /dev/null 2>&1; then
+        logger -st uvb76 "UVB-76 is running (found by name)"
+        return 0
+    fi
+    
+    logger -st uvb76 "UVB-76 is not running"
+    return 1
+}
