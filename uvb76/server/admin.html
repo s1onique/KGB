@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UVB-76 Admin</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+        h1 { color: #e94560; margin-bottom: 1rem; }
+        h2 { color: #0f3460; margin: 1.5rem 0 1rem; }
+        .card { background: #16213e; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; }
+        .target { border-left: 4px solid #e94560; }
+        .target.reachable { border-left-color: #4ecca3; }
+        .target.unreachable { border-left-color: #e94560; }
+        .status { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.875rem; }
+        .status.ok { background: #4ecca3; color: #1a1a2e; }
+        .status.warn { background: #f9a825; color: #1a1a2e; }
+        .status.error { background: #e94560; color: #fff; }
+        .status.unknown { background: #666; color: #fff; }
+        .checks { margin-top: 1rem; }
+        .check { padding: 0.5rem; background: #0f3460; border-radius: 4px; margin-top: 0.5rem; }
+        .meta { color: #888; font-size: 0.875rem; margin-top: 0.5rem; }
+        .error { color: #e94560; }
+        #auth-form { max-width: 400px; margin: 4rem auto; text-align: center; }
+        #auth-form input { display: block; width: 100%; padding: 0.75rem; margin: 0.5rem 0; border-radius: 4px; border: 1px solid #0f3460; background: #16213e; color: #eee; }
+        #auth-form button { width: 100%; padding: 0.75rem; background: #e94560; color: #fff; border: none; border-radius: 4px; cursor: pointer; margin-top: 1rem; }
+        #auth-form button:hover { background: #ff6b6b; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>UVB-76 Control Plane</h1>
+        <div id="auth-form">
+            <h2>Authentication Required</h2>
+            <input type="text" id="username" placeholder="Username">
+            <input type="password" id="password" placeholder="Password">
+            <button onclick="login()">Sign In</button>
+            <p id="auth-error" class="error hidden">Invalid credentials</p>
+        </div>
+        <div id="dashboard" class="hidden">
+            <div class="card">
+                <h2>Targets</h2>
+                <div id="targets"></div>
+            </div>
+        </div>
+    </div>
+    <script>
+        let authToken = null;
+        async function login() {
+            const user = document.getElementById('username').value;
+            const pass = document.getElementById('password').value;
+            const creds = btoa(user + ':' + pass);
+            // Validate credentials against protected endpoint
+            const targets = await fetch('/api/v1/targets', { headers: { 'Authorization': 'Basic ' + creds } });
+            if (targets.ok) {
+                authToken = creds;
+                document.getElementById('auth-form').classList.add('hidden');
+                document.getElementById('dashboard').classList.remove('hidden');
+                loadTargets();
+            } else {
+                document.getElementById('auth-error').classList.remove('hidden');
+            }
+        }
+        async function loadTargets() {
+            const resp = await fetch('/api/v1/targets', { headers: { 'Authorization': 'Basic ' + authToken } });
+            const targets = await resp.json();
+            const container = document.getElementById('targets');
+            container.innerHTML = targets.map(t => `
+                <div class="card target" id="target-${t.id}">
+                    <strong>${t.name}</strong> (${t.id})
+                    <br><span class="meta">${t.base_url}</span>
+                    <div class="meta" id="status-${t.id}">Loading...</div>
+                </div>
+            `).join('');
+            for (const t of targets) {
+                loadSnapshot(t.id);
+            }
+        }
+        async function loadSnapshot(id) {
+            const resp = await fetch('/api/v1/targets/' + id + '/snapshot', { headers: { 'Authorization': 'Basic ' + authToken } });
+            const el = document.getElementById('status-' + id);
+            if (resp.ok) {
+                const snap = await resp.json();
+                const reachable = snap.reachable;
+                el.parentElement.classList.toggle('reachable', reachable);
+                el.parentElement.classList.toggle('unreachable', !reachable);
+                el.innerHTML = reachable 
+                    ? `<span class="status ${snap.status || 'unknown'}">${snap.status || 'unknown'}</span> Node: ${snap.node_id || 'N/A'}`
+                    : `<span class="status error">unreachable</span> ${snap.error || ''}`;
+            } else {
+                el.innerHTML = '<span class="status unknown">no data</span>';
+            }
+        }
+    </script>
+</body>
+</html>

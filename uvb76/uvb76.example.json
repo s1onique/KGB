@@ -1,0 +1,35 @@
+{
+  "listen": {
+    "addr": ":8443",
+    "tls_cert_file": "/etc/uvb76/cert.pem",
+    "tls_key_file": "/etc/uvb76/key.pem"
+  },
+  "auth": {
+    "username": "admin",
+    "password_sha256": "sha256:aabbccddeeff00112233445566778899:abc123def456789012345678901234567890123456789012345678901234"
+  },
+  "scrape": {
+    "interval_seconds": 30,
+    "timeout_milliseconds": 5000
+  },
+  "targets": [
+    {
+      "id": "home-router",
+      "name": "Home Router Tovarisch",
+      "base_url": "https://192.168.1.1:9080",
+      "enabled": true
+    },
+    {
+      "id": "vps-node",
+      "name": "VPS Tovarisch",
+      "base_url": "https://vps.example.com:9080",
+      "enabled": true
+    },
+    {
+      "id": "office-gateway",
+      "name": "Office Gateway",
+      "base_url": "https://10.0.0.1:9080",
+      "enabled": false
+    }
+  ]
+}

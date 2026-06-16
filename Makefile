@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 87
@@ -173,4 +173,15 @@ verify-git-history-safety:
 # Verify GitHub ruleset blocks force pushes (skips if not in CI)
 verify-github-ruleset:
 	@./scripts/verify_github_no_force_push_ruleset.sh
+
+# === UVB-76 Targets ===
+
+uvb76-build:
+	cd uvb76 && go build -o uvb76 .
+
+uvb76-build-linux-arm64:
+	cd uvb76 && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 GOARM64=v8.0 go build -o uvb76-linux-arm64 .
+
+uvb76-test:
+	cd uvb76 && go test -v ./...
 
