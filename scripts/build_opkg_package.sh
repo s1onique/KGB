@@ -64,28 +64,35 @@ mkdir -p "${PKGROOT}/opt/etc/init.d"
 mkdir -p "${PKGROOT}/opt/var/log/uvb76"
 mkdir -p "${PKGROOT}/CONTROL"
 
-# --- Run tests first ---
+# --- Run tests first (on CI host architecture) ---
 echo ""
 echo "=== Running tests ==="
 cd "${ROOT_DIR}/uvb76"
-if ! go test -v ./... 2>&1; then
+# Do not inherit GOOS/GOARCH here: go test executes test binaries on the CI host.
+if ! env -u GOOS -u GOARCH -u GOARM -u CGO_ENABLED go test -v ./... 2>&1; then
     echo "ERROR: Tests failed" >&2
     exit 1
 fi
 cd "${ROOT_DIR}"
 
-# --- Build static Go binary ---
+# --- Build static Go binary (for target architecture) ---
 echo ""
 echo "=== Building binary ==="
 cd "${ROOT_DIR}/uvb76"
-BUILD_CMD="CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH}"
+
+build_env=(
+    "CGO_ENABLED=0"
+    "GOOS=${GOOS}"
+    "GOARCH=${GOARCH}"
+)
 if [ -n "${GOARM}" ]; then
-    BUILD_CMD="${BUILD_CMD} GOARM=${GOARM}"
+    build_env+=("GOARM=${GOARM}")
 fi
-BUILD_CMD="${BUILD_CMD} go build -trimpath"
-BUILD_CMD="${BUILD_CMD} -ldflags \"-s -w -X main.version=${VERSION}\""
-BUILD_CMD="${BUILD_CMD} -o ${PKGROOT}/opt/bin/${PACKAGE_NAME} ."
-eval "${BUILD_CMD}"
+
+env "${build_env[@]}" go build -trimpath \
+    -ldflags "-s -w -X main.version=${VERSION}" \
+    -o "${PKGROOT}/opt/bin/${PACKAGE_NAME}" .
+
 cd "${ROOT_DIR}"
 
 # Verify binary was created
