@@ -11,7 +11,7 @@ Usage:
 """
 
 import argparse
-import datetime
+from datetime import datetime, timezone
 import hashlib
 import sys
 from pathlib import Path
@@ -42,7 +42,7 @@ def generate_manifest(
         f.write("\n")
         f.write(f"Version: {version}\n")
         f.write(f"Build: {run_number} ({github_sha[:8]})\n")
-        f.write(f"Date: {datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
+        f.write(f"Date: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
         f.write("\n")
         f.write("## Packages\n")
         f.write("\n")
