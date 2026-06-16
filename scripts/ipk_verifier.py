@@ -263,6 +263,15 @@ def verify_ipk(ipk_path: str, verbose: bool = False) -> bool:
             if re.search(r'[.\s]source\s+rc\.unslung|\.\s+.*rc\.unslung', init_content):
                 log_fail("Init script must not source rc.unslung")
                 return False
+            
+            # Verify rc.func variable contract
+            if 'ARGS="-config /opt/etc/uvb76/uvb76.json"' not in init_content:
+                log_fail("Init script must contain ARGS=\"-config /opt/etc/uvb76/uvb76.json\"")
+                return False
+            
+            if 'DESC=$PROCS' not in init_content and 'DESC=uvb76' not in init_content:
+                log_fail("Init script must contain DESC=$PROCS or DESC=uvb76")
+                return False
         except KeyError:
             pass
     

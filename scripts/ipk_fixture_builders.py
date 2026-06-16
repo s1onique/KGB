@@ -107,7 +107,17 @@ echo "removing"
         info.size = 0
         tf.addfile(info, io.BytesIO(b''))
 
-        init_content = "#!/bin/sh\necho 'init'\n"
+        # Valid rc.func contract init script
+        init_content = """#!/bin/sh
+# Test init script
+ENABLED=no
+PROCS=uvb76
+ARGS="-config /opt/etc/uvb76/uvb76.json"
+PREARGS=""
+DESC=$PROCS
+PATH=/opt/bin:/opt/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+. /opt/etc/init.d/rc.func
+"""
         info = tarfile.TarInfo(name='opt/etc/init.d/S76uvb76')
         info.size = len(init_content.encode())
         info.mode = 0o755

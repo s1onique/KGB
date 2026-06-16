@@ -6,7 +6,7 @@
   },
   "auth": {
     "username": "admin",
-    "password_sha256": "sha256:YOUR_SALT_32CHARS_HERE:YOUR_HASH_64CHARS_HEX_HERE"
+    "password_sha256": "sha256:GENERATE_WITH_GO_RUN_TOOLS_Genhash"
   },
   "scrape": {
     "interval_seconds": 30,

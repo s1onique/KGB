@@ -37,8 +37,8 @@ Copy `uvb76.example.json` to `uvb76.json` and configure:
 {
   "listen": {
     "addr": ":8443",
-    "tls_cert_file": "/etc/uvb76/cert.pem",
-    "tls_key_file": "/etc/uvb76/key.pem"
+    "tls_cert_file": "/opt/etc/uvb76/cert.pem",
+    "tls_key_file": "/opt/etc/uvb76/key.pem"
   },
   "auth": {
     "username": "admin",
@@ -58,6 +58,21 @@ Copy `uvb76.example.json` to `uvb76.json` and configure:
   ]
 }
 ```
+
+### Generate Password Hash
+
+Before starting UVB-76, you must generate a password hash:
+
+```bash
+cd uvb76
+go run ./tools/genhash
+# Enter password when prompted
+```
+
+The output will be a hash in the format `sha256:<32-char-hex-salt>:<64-char-hex-hash>`.
+Replace `sha256:GENERATED_HASH` in your config with this value.
+
+**Important**: UVB-76 will refuse to start without a valid password hash.
 
 ## API Endpoints
 
