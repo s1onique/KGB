@@ -129,12 +129,17 @@ test { std.testing.refAllDecls(@import("bfd/receive_tests.zig")); }
 
 // WireGuard tests
 test { std.testing.refAllDecls(@import("config.zig")); }
+test { std.testing.refAllDecls(@import("config_server_tests.zig")); }
+test { std.testing.refAllDecls(@import("config_vpn_masquerade_tests.zig")); }
 test { std.testing.refAllDecls(@import("wg/config.zig")); }
 test { std.testing.refAllDecls(@import("wg/generate.zig")); }
 test { std.testing.refAllDecls(@import("cli/wg_args.zig")); }
 test { std.testing.refAllDecls(@import("cli/bfd_serve.zig")); }
 test { std.testing.refAllDecls(@import("cli_serve_config_tests.zig")); }
 test { std.testing.refAllDecls(@import("bfd_serve_config_tests.zig")); }
+
+// CLI tests
+test { std.testing.refAllDecls(@import("cli/args_explicit_listen_tests.zig")); }
 
 // VPN masquerade tests (ACT: Add config-controlled VPN masquerade rule with rule watcher)
 test { std.testing.refAllDecls(@import("net/iptables.zig")); }

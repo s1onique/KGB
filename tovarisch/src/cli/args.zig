@@ -69,6 +69,9 @@ pub const ServeConfig = struct {
     http_config: http.Config,
     /// Optional path to TOML config file for BFD runtime.
     config_path: ?[]const u8 = null,
+    /// Whether --listen was explicitly provided via CLI.
+    /// When false, config file [server].listen can override the default.
+    explicit_listen: bool = false,
 };
 
 /// Parse serve command arguments without starting the daemon.
@@ -164,6 +167,7 @@ pub fn parseServeArgs(args: []const []const u8, stderr: anytype) ServeParseResul
     return .{ .ok = .{
         .http_config = http_config,
         .config_path = config_path,
+        .explicit_listen = explicit_listen_address,
     } };
 }
 
@@ -238,6 +242,7 @@ test "parseServeArgs defaults to loopback port 8317" {
     try std.testing.expectEqualStrings("127.0.0.1", parsed.ok.http_config.address);
     try std.testing.expectEqual(@as(u16, 8317), parsed.ok.http_config.port);
     try std.testing.expect(parsed.ok.config_path == null);
+    try std.testing.expect(!parsed.ok.explicit_listen);
 }
 
 test "parseServeArgs with --config sets config_path" {
@@ -245,6 +250,7 @@ test "parseServeArgs with --config sets config_path" {
     const parsed = parseServeArgs(&.{ "--config", "/etc/kgb/tovarisch.conf" }, w);
     try std.testing.expect(parsed == .ok);
     try std.testing.expectEqualStrings("/etc/kgb/tovarisch.conf", parsed.ok.config_path.?);
+    try std.testing.expect(!parsed.ok.explicit_listen);
 }
 
 test "parseServeArgs with --listen sets address and port" {
@@ -253,6 +259,7 @@ test "parseServeArgs with --listen sets address and port" {
     try std.testing.expect(parsed == .ok);
     try std.testing.expectEqualStrings("127.0.0.1", parsed.ok.http_config.address);
     try std.testing.expectEqual(@as(u16, 9999), parsed.ok.http_config.port);
+    try std.testing.expect(parsed.ok.explicit_listen);
 }
 
 test "parseServeArgs with --listen-private sets loopback" {

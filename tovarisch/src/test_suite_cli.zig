@@ -7,6 +7,7 @@ const std = @import("std");
 
 // CLI modules
 const _cli = @import("cli.zig");
+const _cli_args_explicit_listen_tests = @import("cli/args_explicit_listen_tests.zig");
 const _cli_serve_config_tests = @import("cli_serve_config_tests.zig");
 const _bfd_serve_config_tests = @import("bfd_serve_config_tests.zig");
 const _status_bgp_integration_tests = @import("status_bgp_integration_tests.zig");
@@ -23,6 +24,7 @@ const _cli_bgp_serve = @import("cli/bgp_serve.zig");
 
 // Force test discovery
 test { std.testing.refAllDecls(@import("cli.zig")); }
+test { std.testing.refAllDecls(@import("cli/args_explicit_listen_tests.zig")); }
 test { std.testing.refAllDecls(@import("cli_serve_config_tests.zig")); }
 test { std.testing.refAllDecls(@import("bfd_serve_config_tests.zig")); }
 test { std.testing.refAllDecls(@import("status_bgp_integration_tests.zig")); }

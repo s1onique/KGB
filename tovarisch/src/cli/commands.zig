@@ -2,6 +2,7 @@ const std = @import("std");
 const cli_args = @import("args.zig");
 const usage = @import("usage.zig");
 const wg_cmd = @import("wg_cmd.zig");
+const wg_args = @import("wg_args.zig");
 const status = @import("../status.zig");
 const build_info = @import("../build_info.zig");
 const http = @import("../http/server.zig");
@@ -11,6 +12,7 @@ const bfd_status = @import("../bfd/status.zig");
 const bgp_serve = @import("bgp_serve.zig");
 const bgp_status = @import("../bgp/status.zig");
 const test_helpers = @import("commands_test_helpers.zig");
+const config = @import("../config.zig");
 
 pub const ExitCode = enum(u8) {
     ok = 0,
@@ -66,12 +68,45 @@ fn printUsage(writer: anytype) void {
     usage.printUsage(writer) catch {};
 }
 
+/// Parse a listen address string like "10.149.149.1:8317" into host and port.
+/// Returns the parsed host string and port number.
+/// Does NOT validate whether the address is safe to bind.
+fn parseListenAddr(listen: []const u8) ?struct { host: []const u8, port: u16 } {
+    const colon_idx = std.mem.indexOfScalar(u8, listen, ':') orelse return null;
+    const host = listen[0..colon_idx];
+    const port_str = listen[colon_idx + 1 ..];
+    const port = std.fmt.parseInt(u16, port_str, 10) catch return null;
+    return .{ .host = host, .port = port };
+}
+
 fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype) ExitCode {
     const parsed = cli_args.parseServeArgs(serve_args, stderr);
 
     switch (parsed) {
         .usage => return .usage,
         .ok => |serve_config| {
+            // Copy http_config so we can modify it with config file values.
+            // CLI-parsed values take precedence unless --listen was not explicit.
+            var http_config = serve_config.http_config;
+
+            // Apply [server].listen from config file if present and no explicit --listen was given.
+            // This wires the bug fix: TOML [server].listen -> Config.server.listen -> HTTP bind.
+            if (!serve_config.explicit_listen and serve_config.config_path != null) {
+                read_config: {
+                    var raw = wg_args.readConfig(serve_config.config_path.?, std.heap.page_allocator) catch break :read_config;
+                    defer raw.deinit(std.heap.page_allocator);
+                    const server_cfg = config.parseServerConfig(&raw);
+                    if (server_cfg.listen) |listen_addr| {
+                        if (parseListenAddr(listen_addr)) |listen_parsed| {
+                            // Store owned copy of host string to avoid dangling pointer.
+                            const host_copy = std.heap.page_allocator.dupe(u8, listen_parsed.host) catch break :read_config;
+                            http_config.address = host_copy;
+                            http_config.port = listen_parsed.port;
+                        }
+                    }
+                }
+            }
+
             // Load BFD configuration (unchanged from previous implementation)
             const bfd_result = bfd_serve.loadConfigAndBfd(serve_config.config_path, stderr);
 
@@ -167,7 +202,7 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
             // Clean up BFD bundle on any exit
             defer if (bfd_bundle) |bundle| bfd_serve.cleanupBfdBundle(bundle);
 
-            http.serveForeverWithContext(serve_config.http_config, .{
+            http.serveForeverWithContext(http_config, .{
                 .bfd_runtime = bfd_rt,
                 .config_check = config_check,
                 .bgp_result = bgp_result,

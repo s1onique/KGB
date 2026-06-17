@@ -57,6 +57,26 @@ pub const WgConfig = struct {
     client_allowed_ips: []const u8 = "10.149.149.0/24",
 };
 
+/// ServerConfig represents the [server] section parsed from tovarisch.conf.
+/// This controls the HTTP status server bind address.
+pub const ServerConfig = struct {
+    /// Listen address and port (e.g., "127.0.0.1:8317" or "10.149.149.1:8317").
+    /// When null, the HTTP server uses its default (127.0.0.1:8317).
+    listen: ?[]const u8 = null,
+};
+
+/// Parse the [server] section from raw config into ServerConfig.
+pub fn parseServerConfig(raw: *const RawConfig) ServerConfig {
+    const section = raw.get("server") orelse return ServerConfig{};
+
+    var cfg = ServerConfig{};
+    if (getString(section, "listen")) |value| {
+        cfg.listen = value;
+    }
+
+    return cfg;
+}
+
 /// VpnMasqueradeConfig represents the [vpn_masquerade] section parsed from tovarisch.conf.
 pub const VpnMasqueradeConfig = struct {
     /// Whether VPN masquerading is enabled.
@@ -330,99 +350,3 @@ test "getString returns null for missing key" {
     try std.testing.expect(getString(&map, "missing") == null);
 }
 
-// ============================================================================
-// VPN Masquerade Config Tests
-// ============================================================================
-
-test "parseVpnMasqueradeConfig returns disabled default for missing section" {
-    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
-    defer raw.deinit(std.heap.page_allocator);
-    const cfg = try parseVpnMasqueradeConfig(&raw);
-    try std.testing.expect(!cfg.enabled);
-    try std.testing.expectEqualStrings("", cfg.vpn_cidr);
-    try std.testing.expectEqualStrings("", cfg.public_interface);
-}
-
-test "parseVpnMasqueradeConfig returns disabled for explicit false" {
-    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
-    defer raw.deinit(std.heap.page_allocator);
-    var section = std.StringArrayHashMapUnmanaged([]const u8){};
-    defer section.deinit(std.heap.page_allocator);
-    try section.put(std.heap.page_allocator, "enabled", "false");
-    try raw.put(std.heap.page_allocator, "vpn_masquerade", section);
-    const cfg = try parseVpnMasqueradeConfig(&raw);
-    try std.testing.expect(!cfg.enabled);
-}
-
-test "parseVpnMasqueradeConfig accepts enabled with valid CIDR and interface" {
-    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
-    defer raw.deinit(std.heap.page_allocator);
-    var section = std.StringArrayHashMapUnmanaged([]const u8){};
-    defer section.deinit(std.heap.page_allocator);
-    try section.put(std.heap.page_allocator, "enabled", "true");
-    try section.put(std.heap.page_allocator, "vpn_cidr", "10.0.0.0/8");
-    try section.put(std.heap.page_allocator, "public_interface", "eth0");
-    try raw.put(std.heap.page_allocator, "vpn_masquerade", section);
-    const cfg = try parseVpnMasqueradeConfig(&raw);
-    try std.testing.expect(cfg.enabled);
-    try std.testing.expectEqualStrings("10.0.0.0/8", cfg.vpn_cidr);
-    try std.testing.expectEqualStrings("eth0", cfg.public_interface);
-}
-
-test "parseVpnMasqueradeConfig fails when enabled but missing vpn_cidr" {
-    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
-    defer raw.deinit(std.heap.page_allocator);
-    var section = std.StringArrayHashMapUnmanaged([]const u8){};
-    defer section.deinit(std.heap.page_allocator);
-    try section.put(std.heap.page_allocator, "enabled", "true");
-    try section.put(std.heap.page_allocator, "public_interface", "eth0");
-    try raw.put(std.heap.page_allocator, "vpn_masquerade", section);
-    try std.testing.expectError(ConfigError.MissingKey, parseVpnMasqueradeConfig(&raw));
-}
-
-test "parseVpnMasqueradeConfig fails when enabled but missing public_interface" {
-    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
-    defer raw.deinit(std.heap.page_allocator);
-    var section = std.StringArrayHashMapUnmanaged([]const u8){};
-    defer section.deinit(std.heap.page_allocator);
-    try section.put(std.heap.page_allocator, "enabled", "true");
-    try section.put(std.heap.page_allocator, "vpn_cidr", "10.0.0.0/8");
-    try raw.put(std.heap.page_allocator, "vpn_masquerade", section);
-    try std.testing.expectError(ConfigError.MissingKey, parseVpnMasqueradeConfig(&raw));
-}
-
-test "parseVpnMasqueradeConfig fails on malformed CIDR" {
-    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
-    defer raw.deinit(std.heap.page_allocator);
-    var section = std.StringArrayHashMapUnmanaged([]const u8){};
-    defer section.deinit(std.heap.page_allocator);
-    try section.put(std.heap.page_allocator, "enabled", "true");
-    try section.put(std.heap.page_allocator, "vpn_cidr", "invalid-cidr");
-    try section.put(std.heap.page_allocator, "public_interface", "eth0");
-    try raw.put(std.heap.page_allocator, "vpn_masquerade", section);
-    try std.testing.expectError(ConfigError.InvalidCidr, parseVpnMasqueradeConfig(&raw));
-}
-
-test "parseVpnMasqueradeConfig fails on empty vpn_cidr" {
-    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
-    defer raw.deinit(std.heap.page_allocator);
-    var section = std.StringArrayHashMapUnmanaged([]const u8){};
-    defer section.deinit(std.heap.page_allocator);
-    try section.put(std.heap.page_allocator, "enabled", "true");
-    try section.put(std.heap.page_allocator, "vpn_cidr", "");
-    try section.put(std.heap.page_allocator, "public_interface", "eth0");
-    try raw.put(std.heap.page_allocator, "vpn_masquerade", section);
-    try std.testing.expectError(ConfigError.EmptyValue, parseVpnMasqueradeConfig(&raw));
-}
-
-test "parseVpnMasqueradeConfig fails on empty public_interface" {
-    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
-    defer raw.deinit(std.heap.page_allocator);
-    var section = std.StringArrayHashMapUnmanaged([]const u8){};
-    defer section.deinit(std.heap.page_allocator);
-    try section.put(std.heap.page_allocator, "enabled", "true");
-    try section.put(std.heap.page_allocator, "vpn_cidr", "10.0.0.0/8");
-    try section.put(std.heap.page_allocator, "public_interface", "");
-    try raw.put(std.heap.page_allocator, "vpn_masquerade", section);
-    try std.testing.expectError(ConfigError.EmptyValue, parseVpnMasqueradeConfig(&raw));
-}

@@ -7,6 +7,8 @@ const std = @import("std");
 
 // Core modules
 const _config = @import("config.zig");
+const _config_server_tests = @import("config_server_tests.zig");
+const _config_vpn_masquerade_tests = @import("config_vpn_masquerade_tests.zig");
 const _logging = @import("logging.zig");
 const _status = @import("status.zig");
 const _status_checks = @import("status_checks.zig");
@@ -50,6 +52,8 @@ const _status_vpn_masquerade = @import("status_vpn_masquerade.zig");
 
 // Force test discovery
 test { std.testing.refAllDecls(@import("config.zig")); }
+test { std.testing.refAllDecls(@import("config_server_tests.zig")); }
+test { std.testing.refAllDecls(@import("config_vpn_masquerade_tests.zig")); }
 test { std.testing.refAllDecls(@import("logging.zig")); }
 test { std.testing.refAllDecls(@import("status.zig")); }
 test { std.testing.refAllDecls(@import("status_checks.zig")); }
