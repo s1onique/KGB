@@ -67,6 +67,11 @@ target/
 *.proto
 '
 
+# Additional patterns for nested directories
+ADDITIONAL_IGNORES='
+*node_modules*
+'
+
 # =============================================================================
 # Helpers
 # =============================================================================
@@ -185,6 +190,11 @@ done
 
 # Build ignore list
 for pattern in $DEFAULT_IGNORES; do
+    IGNORES+=("$pattern")
+done
+
+# Add additional ignores for nested directories
+for pattern in $ADDITIONAL_IGNORES; do
     IGNORES+=("$pattern")
 done
 

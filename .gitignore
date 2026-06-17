@@ -12,3 +12,4 @@ zig-cache/
 scripts/__pycache__/
 uvb76/uvb76
 uvb76/uvb76-linux-arm64
+uvb76/web/node_modules/

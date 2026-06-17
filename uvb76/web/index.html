@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UVB-76 Control Plane</title>
+</head>
+<body>
+    <div id="app">
+        <!-- Login Form -->
+        <div id="auth-form">
+            <h2>Sign in to UVB-76</h2>
+            <p class="subtitle">Control plane access</p>
+            <input type="text" id="username" placeholder="Username" autocomplete="username">
+            <input type="password" id="password" placeholder="Password" autocomplete="current-password">
+            <button type="button" id="login-btn">Sign In</button>
+            <p id="auth-error" class="hidden"></p>
+        </div>
+        
+        <!-- Loading State -->
+        <div id="loading" class="hidden">
+            <div class="loading">
+                <div class="spinner"></div>
+                <p style="margin-top: 1rem;">Checking authentication...</p>
+            </div>
+        </div>
+        
+        <!-- Dashboard -->
+        <div id="dashboard" class="hidden">
+            <div class="header">
+                <h1>UVB-76 Control Plane</h1>
+                <button class="logout-btn" id="logout-btn">Sign Out</button>
+            </div>
+            <div class="card">
+                <h2>Targets</h2>
+                <div id="targets"></div>
+            </div>
+        </div>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

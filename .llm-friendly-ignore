@@ -24,6 +24,11 @@ target/
 vendor/
 node_modules/
 
+# npm lockfiles (auto-generated, required for reproducible builds)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
 # Ziggy TypeScript bindings (auto-generated from Zig)
 tovarisch/.ziggy/
 

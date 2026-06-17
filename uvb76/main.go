@@ -1,7 +1,9 @@
 package main
 
 import (
+	"embed"
 	"flag"
+	"io/fs"
 	"log"
 	"os"
 	"os/signal"
@@ -14,6 +16,9 @@ import (
 	"github.com/s1onique/KGB/uvb76/state"
 )
 
+//go:embed web/dist
+var webDist embed.FS
+
 var (
 	configPath = flag.String("config", "uvb76.json", "Path to configuration file")
 	devMode    = flag.Bool("dev", false, "Enable development mode (allows plain HTTP)")
@@ -24,6 +29,13 @@ func main() {
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.SetOutput(os.Stdout)
+
+	// Set the embedded web filesystem for the server
+	webContent, err := fs.Sub(webDist, "web/dist")
+	if err != nil {
+		log.Fatalf("Failed to access embedded web content: %v", err)
+	}
+	server.SetWebFS(webContent)
 
 	// Load configuration - dev mode allows missing TLS
 	opts := config.ValidationOptions{AllowMissingTLS: *devMode}

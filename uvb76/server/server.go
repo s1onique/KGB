@@ -2,11 +2,13 @@
 package server
 
 import (
-	"embed"
 	"encoding/json"
-	"html/template"
+	"io"
+	"io/fs"
 	"log"
 	"net/http"
+	"path"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/mux"
@@ -16,10 +18,14 @@ import (
 	"github.com/s1onique/KGB/uvb76/state"
 )
 
-//go:embed admin.html
-var adminFS embed.FS
+// webContent is the embedded web filesystem, set by main.go.
+var webContent fs.FS
 
-var adminTemplate = template.Must(template.ParseFS(adminFS, "admin.html"))
+// SetWebFS sets the embedded web filesystem.
+// This must be called before the server starts.
+func SetWebFS(fs fs.FS) {
+	webContent = fs
+}
 
 // Server is the main HTTP server for UVB-76.
 type Server struct {
@@ -56,7 +62,7 @@ func (s *Server) Start() error {
 
 	// Public endpoints (no auth required)
 	router.Handle("/api/v1/healthz", http.HandlerFunc(s.handleHealthz)).Methods(http.MethodGet)
-	
+
 	// Auth endpoints (public, but create/clear sessions)
 	router.Handle("/api/v1/auth/login", http.HandlerFunc(s.handleLogin)).Methods(http.MethodPost)
 	router.Handle("/api/v1/auth/logout", http.HandlerFunc(s.handleLogout)).Methods(http.MethodPost)
@@ -74,12 +80,16 @@ func (s *Server) Start() error {
 	protected.Handle("/latency", http.HandlerFunc(s.handleAllLatency)).Methods(http.MethodGet)
 	protected.Handle("/latency/series", http.HandlerFunc(s.handleTargetLatencySeries)).Methods(http.MethodGet)
 
-	// Admin UI - served without Basic Auth challenge
-	// Unauthenticated users see the login form; authenticated users see the dashboard
-	router.Handle("/", http.HandlerFunc(s.handleAdmin)).Methods(http.MethodGet)
-	router.Handle("/index.html", http.HandlerFunc(s.handleAdmin)).Methods(http.MethodGet)
-	// SPA fallback - serve admin for any other path
-	router.PathPrefix("/").HandlerFunc(s.handleAdmin).Methods(http.MethodGet)
+	// Web UI - serve from embedded filesystem
+	// Assets are served from /assets/* path
+	router.PathPrefix("/assets/").Handler(
+		http.StripPrefix("/assets/", serveWebDir("assets")),
+	)
+	// Root and index.html serve the SPA
+	router.Handle("/", serveWebFile("index.html")).Methods(http.MethodGet)
+	router.Handle("/index.html", serveWebFile("index.html")).Methods(http.MethodGet)
+	// SPA fallback for any unmatched path
+	router.PathPrefix("/").HandlerFunc(s.handleSPA)
 
 	s.server = &http.Server{
 		Addr:    s.listener.Addr,
@@ -99,6 +109,75 @@ func (s *Server) Start() error {
 	}
 
 	return nil
+}
+
+// serveWebFile returns a handler that serves a specific file from the embedded web content.
+func serveWebFile(filename string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		content, err := webContent.Open(filename)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer content.Close()
+
+		// Set content type based on file extension
+		contentType := contentTypeFor(path.Ext(filename))
+		w.Header().Set("Content-Type", contentType)
+
+		// Copy content to response - fs.File doesn't implement io.ReadSeeker
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.Copy(w, content)
+	})
+}
+
+// serveWebDir returns a handler that serves files from a subdirectory.
+// The outer route already strips /assets/, so we serve the subdir contents directly.
+func serveWebDir(subdir string) http.Handler {
+	subFS, err := fs.Sub(webContent, subdir)
+	if err != nil {
+		return http.NotFoundHandler()
+	}
+	return http.FileServerFS(subFS)
+}
+
+// handleSPA serves the SPA index.html for any unmatched routes.
+// This enables client-side routing.
+func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
+	content, err := webContent.Open("index.html")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer content.Close()
+
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, content)
+}
+
+// contentTypeFor returns the MIME type for a file extension.
+func contentTypeFor(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".html":
+		return "text/html; charset=utf-8"
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".js":
+		return "application/javascript; charset=utf-8"
+	case ".json":
+		return "application/json"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".svg":
+		return "image/svg+xml"
+	case ".ico":
+		return "image/x-icon"
+	default:
+		return "application/octet-stream"
+	}
 }
 
 // sessionAuthMw returns the session authentication middleware.
@@ -214,7 +293,7 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"authenticated": true,
-		"username":       session.Username,
+		"username":      session.Username,
 	})
 }
 
@@ -252,12 +331,4 @@ func (s *Server) handleTargetSnapshot(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(snap)
-}
-
-// handleAdmin serves the embedded admin HTML page.
-// This is the SPA entry point - it serves the app shell regardless of auth state.
-// The frontend JavaScript handles showing the login form or dashboard.
-func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html")
-	adminTemplate.Execute(w, nil)
 }

@@ -232,33 +232,3 @@ func TestAuthCheckEndpoint_Unauthenticated(t *testing.T) {
 		t.Errorf("Expected 401 for unauthenticated check, got %d", rec.Code)
 	}
 }
-
-// Admin UI endpoint tests
-
-func TestAdminEndpoint_UnauthenticatedReturns200(t *testing.T) {
-	cfg := &config.Config{
-		Listen:   config.ListenConfig{Addr: ":0"},
-		Auth:     config.AuthConfig{Username: "admin", PasswordSHA256: "sha256:aaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
-		Scrape:   config.ScrapeConfig{IntervalSeconds: 30, TimeoutMilliseconds: 5000},
-		Targets:  []config.TargetConfig{},
-	}
-	st := state.NewManager()
-	srv := NewServer(cfg, st, nil, true)
-
-	router := mux.NewRouter()
-	router.Handle("/", http.HandlerFunc(srv.handleAdmin))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	// Should return 200 HTML, not 401
-	if rec.Code != http.StatusOK {
-		t.Errorf("Expected 200 for unauthenticated admin, got %d", rec.Code)
-	}
-
-	// Should not have WWW-Authenticate header
-	if wwwAuth := rec.Header().Get("WWW-Authenticate"); wwwAuth != "" {
-		t.Errorf("Should not have WWW-Authenticate header, got '%s'", wwwAuth)
-	}
-}

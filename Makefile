@@ -176,13 +176,20 @@ verify-github-ruleset:
 
 # === UVB-76 Targets ===
 
-uvb76-build:
+uvb76-web-build:
+	cd uvb76/web && npm ci
+	cd uvb76/web && npm run build
+
+uvb76-verify-embed: uvb76-web-build
+	cd uvb76 && bash scripts/verify_web_embed.sh
+
+uvb76-build: uvb76-web-build
 	cd uvb76 && go build -o uvb76 .
 
-uvb76-build-linux-arm64:
+uvb76-build-linux-arm64: uvb76-web-build
 	cd uvb76 && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 GOARM64=v8.0 go build -o uvb76-linux-arm64 .
 
-uvb76-test:
+uvb76-test: uvb76-web-build
 	cd uvb76 && go test -v ./...
 
 # === opkg Package Targets (Entware/AsusWRT-Merlin) ===

@@ -53,6 +53,9 @@ while IFS= read -r f; do
       *.png|*.jpg|*.jpeg|*.gif|*.ico|*.pdf|*.zip|*.gz|*.tar|*.tgz|*.wasm)
         continue
         ;;
+      *node_modules*)
+        continue
+        ;;
     esac
 
     # Empty files are okay
