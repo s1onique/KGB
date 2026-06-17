@@ -23,14 +23,14 @@ var adminTemplate = template.Must(template.ParseFS(adminFS, "admin.html"))
 
 // Server is the main HTTP server for UVB-76.
 type Server struct {
-	cfg      *config.Config
-	state    *state.Manager
-	client   *scraper.Client
-	listener *config.ListenConfig
-	authMw   func(http.Handler) http.Handler
-	devMode  bool
-	server   *http.Server
-	wg       sync.WaitGroup
+	cfg        *config.Config
+	state      *state.Manager
+	client     *scraper.Client
+	listener   *config.ListenConfig
+	sessions   *auth.SessionStore
+	devMode    bool
+	server     *http.Server
+	wg         sync.WaitGroup
 }
 
 // NewServer creates a new server (HTTPS in production, HTTP in dev mode).
@@ -43,8 +43,9 @@ func NewServer(cfg *config.Config, st *state.Manager, client *scraper.Client, de
 		devMode:  devMode,
 	}
 
-	// Set up Basic Auth middleware
-	s.authMw = auth.BasicAuthMiddleware(cfg.Auth.Username, cfg.Auth.PasswordSHA256)
+	// Initialize session store with a secret key (in production, use environment variable)
+	// For now, we use a static secret - in production this should be configurable
+	s.sessions = auth.NewSessionStore("uvb76-session-secret-change-in-production")
 
 	return s
 }
@@ -53,12 +54,17 @@ func NewServer(cfg *config.Config, st *state.Manager, client *scraper.Client, de
 func (s *Server) Start() error {
 	router := mux.NewRouter()
 
-	// Public endpoints
+	// Public endpoints (no auth required)
 	router.Handle("/api/v1/healthz", http.HandlerFunc(s.handleHealthz)).Methods(http.MethodGet)
+	
+	// Auth endpoints (public, but create/clear sessions)
+	router.Handle("/api/v1/auth/login", http.HandlerFunc(s.handleLogin)).Methods(http.MethodPost)
+	router.Handle("/api/v1/auth/logout", http.HandlerFunc(s.handleLogout)).Methods(http.MethodPost)
+	router.Handle("/api/v1/auth/check", http.HandlerFunc(s.handleAuthCheck)).Methods(http.MethodGet)
 
-	// Protected API endpoints
+	// Protected API endpoints - use session auth
 	protected := router.PathPrefix("/api/v1").Subrouter()
-	protected.Use(s.authMw)
+	protected.Use(s.sessionAuthMw())
 	protected.Handle("/targets", http.HandlerFunc(s.handleTargets)).Methods(http.MethodGet)
 	protected.Handle("/targets/{id}/snapshot", http.HandlerFunc(s.handleTargetSnapshot)).Methods(http.MethodGet)
 
@@ -67,10 +73,12 @@ func (s *Server) Start() error {
 	protected.Handle("/targets/{id}/latency/samples", http.HandlerFunc(s.handleTargetLatencySamples)).Methods(http.MethodGet)
 	protected.Handle("/latency", http.HandlerFunc(s.handleAllLatency)).Methods(http.MethodGet)
 
-	// Protected admin UI
-	adminRouter := router.PathPrefix("").Subrouter()
-	adminRouter.Use(s.authMw)
-	adminRouter.Handle("/", http.HandlerFunc(s.handleAdmin)).Methods(http.MethodGet)
+	// Admin UI - served without Basic Auth challenge
+	// Unauthenticated users see the login form; authenticated users see the dashboard
+	router.Handle("/", http.HandlerFunc(s.handleAdmin)).Methods(http.MethodGet)
+	router.Handle("/index.html", http.HandlerFunc(s.handleAdmin)).Methods(http.MethodGet)
+	// SPA fallback - serve admin for any other path
+	router.PathPrefix("/").HandlerFunc(s.handleAdmin).Methods(http.MethodGet)
 
 	s.server = &http.Server{
 		Addr:    s.listener.Addr,
@@ -92,6 +100,11 @@ func (s *Server) Start() error {
 	return nil
 }
 
+// sessionAuthMw returns the session authentication middleware.
+func (s *Server) sessionAuthMw() func(http.Handler) http.Handler {
+	return auth.SessionAuthMiddleware(s.sessions)
+}
+
 // Stop gracefully shuts down the server.
 func (s *Server) Stop() {
 	if s.server != nil {
@@ -104,6 +117,103 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status": "ok",
+	})
+}
+
+// handleLogin processes login requests.
+// POST /api/v1/auth/login
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		auth.JSONError(w, "method_not_allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req auth.LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		auth.JSONError(w, "invalid_request", http.StatusBadRequest)
+		return
+	}
+
+	// Validate credentials using constant-time comparison for both username and password
+	if !auth.AuthenticateFull(req.Username, req.Password, s.cfg.Auth.Username, s.cfg.Auth.PasswordSHA256) {
+		// Return clean JSON error, no WWW-Authenticate
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(auth.LoginResponse{
+			Success: false,
+			Error:   "invalid_credentials",
+		})
+		return
+	}
+
+	// Generate session token
+	token, err := s.sessions.GenerateToken(req.Username)
+	if err != nil {
+		auth.JSONError(w, "session_creation_failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Set session cookie (Secure=true in production, false in dev mode)
+	auth.SetSessionCookie(w, token, !s.devMode)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(auth.LoginResponse{
+		Success: true,
+	})
+}
+
+// handleLogout clears the session.
+// POST /api/v1/auth/logout
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		auth.JSONError(w, "method_not_allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get and invalidate session token
+	token := auth.GetSessionToken(r)
+	if token != "" {
+		s.sessions.InvalidateToken(token)
+	}
+
+	// Clear session cookie
+	auth.ClearSessionCookie(w, !s.devMode)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// handleAuthCheck verifies if the current session is valid.
+// GET /api/v1/auth/check
+func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	token := auth.GetSessionToken(r)
+	if token == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"authenticated": false,
+		})
+		return
+	}
+
+	// Token from GetSessionToken is already base64-encoded, which is the storage key
+	session, ok := s.sessions.ValidateToken(token)
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"authenticated": false,
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"authenticated": true,
+		"username":       session.Username,
 	})
 }
 
@@ -127,13 +237,15 @@ func (s *Server) handleTargetSnapshot(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !found {
-		http.Error(w, "Target not found", http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "target_not_found"})
 		return
 	}
 
 	snap := s.state.GetSnapshot(targetID)
 	if snap == nil {
-		http.Error(w, "No snapshot available", http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "no_snapshot_available"})
 		return
 	}
 
@@ -155,7 +267,8 @@ func (s *Server) handleTargetLatency(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !found {
-		http.Error(w, "Target not found", http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "target_not_found"})
 		return
 	}
 
@@ -179,7 +292,8 @@ func (s *Server) handleTargetLatencySamples(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	if !found {
-		http.Error(w, "Target not found", http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "target_not_found"})
 		return
 	}
 
@@ -212,6 +326,8 @@ func (s *Server) handleAllLatency(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAdmin serves the embedded admin HTML page.
+// This is the SPA entry point - it serves the app shell regardless of auth state.
+// The frontend JavaScript handles showing the login form or dashboard.
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	adminTemplate.Execute(w, nil)

@@ -3,169 +3,370 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UVB-76 Admin</title>
+    <title>UVB-76 Control Plane</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
         .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
-        h1 { color: #e94560; margin-bottom: 1rem; }
-        h2 { color: #0f3460; margin: 1.5rem 0 1rem; }
-        .card { background: #16213e; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; }
-        .target { border-left: 4px solid #e94560; }
-        .target.reachable { border-left-color: #4ecca3; }
-        .target.unreachable { border-left-color: #e94560; }
-        .status { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.875rem; }
-        .status.ok { background: #4ecca3; color: #1a1a2e; }
-        .status.warn { background: #f9a825; color: #1a1a2e; }
-        .status.error { background: #e94560; color: #fff; }
-        .status.unknown { background: #666; color: #fff; }
+        h1 { color: #58a6ff; margin-bottom: 1rem; font-weight: 600; }
+        h2 { color: #8b949e; margin: 1.5rem 0 1rem; font-weight: 500; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 1.5rem; margin-bottom: 1rem; }
+        .target { border-left: 4px solid #58a6ff; }
+        .target.reachable { border-left-color: #3fb950; }
+        .target.unreachable { border-left-color: #f85149; }
+        .status { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.875rem; font-weight: 500; }
+        .status.ok { background: #238636; color: #ffffff; }
+        .status.warn { background: #9e6a03; color: #ffffff; }
+        .status.error { background: #da3633; color: #ffffff; }
+        .status.unknown { background: #484f58; color: #ffffff; }
         .checks { margin-top: 1rem; }
-        .check { padding: 0.5rem; background: #0f3460; border-radius: 4px; margin-top: 0.5rem; }
-        .meta { color: #888; font-size: 0.875rem; margin-top: 0.5rem; }
-        .error { color: #e94560; }
+        .check { padding: 0.5rem; background: #0d1117; border-radius: 4px; margin-top: 0.5rem; }
+        .meta { color: #8b949e; font-size: 0.875rem; margin-top: 0.5rem; }
+        .error-text { color: #f85149; }
+        
+        /* Login Form Styles - Cold War UVB-76 Identity with improved contrast */
         #auth-form { max-width: 400px; margin: 4rem auto; text-align: center; }
-        #auth-form input { display: block; width: 100%; padding: 0.75rem; margin: 0.5rem 0; border-radius: 4px; border: 1px solid #0f3460; background: #16213e; color: #eee; }
-        #auth-form button { width: 100%; padding: 0.75rem; background: #e94560; color: #fff; border: none; border-radius: 4px; cursor: pointer; margin-top: 1rem; }
-        #auth-form button:hover { background: #ff6b6b; }
+        #auth-form h2 { color: #c9d1d9; font-size: 1.5rem; margin-bottom: 0.5rem; }
+        #auth-form .subtitle { color: #8b949e; font-size: 0.875rem; margin-bottom: 1.5rem; }
+        #auth-form input { 
+            display: block; 
+            width: 100%; 
+            padding: 0.75rem; 
+            margin: 0.5rem 0; 
+            border-radius: 6px; 
+            border: 1px solid #30363d; 
+            background: #0d1117; 
+            color: #c9d1d9;
+            font-size: 1rem;
+        }
+        #auth-form input:focus { 
+            outline: none; 
+            border-color: #58a6ff; 
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.3);
+        }
+        #auth-form input::placeholder { color: #6e7681; }
+        #auth-form button { 
+            width: 100%; 
+            padding: 0.75rem; 
+            background: #238636; 
+            color: #ffffff; 
+            border: none; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            margin-top: 1rem;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        #auth-form button:hover { background: #2ea043; }
+        #auth-form button:disabled { 
+            background: #21262d; 
+            color: #6e7681; 
+            cursor: not-allowed; 
+        }
+        #auth-error { 
+            color: #f85149; 
+            font-size: 0.875rem; 
+            margin-top: 1rem;
+            padding: 0.5rem;
+            background: rgba(248, 81, 73, 0.1);
+            border-radius: 4px;
+        }
         .hidden { display: none; }
-        .latency-card { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #0f3460; }
+        .latency-card { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #30363d; }
         .latency-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.5rem; margin-top: 0.5rem; }
-        .stat-item { background: #0f3460; padding: 0.5rem; border-radius: 4px; text-align: center; }
-        .stat-label { font-size: 0.75rem; color: #888; }
-        .stat-value { font-size: 1rem; color: #4ecca3; }
+        .stat-item { background: #0d1117; padding: 0.75rem; border-radius: 4px; text-align: center; border: 1px solid #30363d; }
+        .stat-label { font-size: 0.75rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-value { font-size: 1.25rem; color: #3fb950; font-weight: 600; margin-top: 0.25rem; }
         .sparkline-container { margin-top: 0.5rem; }
-        .sparkline { width: 100%; height: 60px; background: #0f3460; border-radius: 4px; }
+        .sparkline { width: 100%; height: 60px; background: #0d1117; border-radius: 4px; border: 1px solid #30363d; }
         .histogram-container { margin-top: 0.5rem; }
         .histogram { display: flex; align-items: flex-end; height: 40px; gap: 2px; }
-        .histogram-bar { background: #4ecca3; flex: 1; min-width: 8px; border-radius: 2px 2px 0 0; }
-        .histogram-label { font-size: 0.625rem; color: #888; text-align: center; }
+        .histogram-bar { background: #3fb950; flex: 1; min-width: 8px; border-radius: 2px 2px 0 0; }
+        .histogram-label { font-size: 0.625rem; color: #8b949e; text-align: center; }
         .histogram-row { display: flex; gap: 2px; }
+        
+        /* Header with logout */
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+        .logout-btn {
+            padding: 0.5rem 1rem;
+            background: transparent;
+            border: 1px solid #30363d;
+            color: #8b949e;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+        }
+        .logout-btn:hover { 
+            background: #21262d; 
+            color: #c9d1d9;
+            border-color: #8b949e;
+        }
+        
+        /* Loading spinner */
+        .loading { text-align: center; padding: 2rem; color: #8b949e; }
+        .spinner {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            border: 2px solid #30363d;
+            border-top-color: #58a6ff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>UVB-76 Control Plane</h1>
+        <!-- Login Form -->
         <div id="auth-form">
-            <h2>Authentication Required</h2>
-            <input type="text" id="username" placeholder="Username">
-            <input type="password" id="password" placeholder="Password">
-            <button onclick="login()">Sign In</button>
-            <p id="auth-error" class="error hidden">Invalid credentials</p>
+            <h2>Sign in to UVB-76</h2>
+            <p class="subtitle">Control plane access</p>
+            <input type="text" id="username" placeholder="Username" autocomplete="username">
+            <input type="password" id="password" placeholder="Password" autocomplete="current-password">
+            <button type="button" id="login-btn" onclick="login()">Sign In</button>
+            <p id="auth-error" class="hidden"></p>
         </div>
+        
+        <!-- Loading State -->
+        <div id="loading" class="hidden">
+            <div class="loading">
+                <div class="spinner"></div>
+                <p style="margin-top: 1rem;">Checking authentication...</p>
+            </div>
+        </div>
+        
+        <!-- Dashboard -->
         <div id="dashboard" class="hidden">
+            <div class="header">
+                <h1>UVB-76 Control Plane</h1>
+                <button class="logout-btn" onclick="logout()">Sign Out</button>
+            </div>
             <div class="card">
                 <h2>Targets</h2>
                 <div id="targets"></div>
             </div>
         </div>
     </div>
+    
     <script>
+        // Global state
         let authToken = null;
+        let refreshInterval = null;
+        
+        // DOM Elements
+        const authForm = document.getElementById('auth-form');
+        const loadingDiv = document.getElementById('loading');
+        const dashboardDiv = document.getElementById('dashboard');
+        const loginBtn = document.getElementById('login-btn');
+        const usernameInput = document.getElementById('username');
+        const passwordInput = document.getElementById('password');
+        const authError = document.getElementById('auth-error');
+        
+        // Initialize - check auth status on page load
+        document.addEventListener('DOMContentLoaded', checkAuth);
+        
+        // Support Enter key to submit
+        passwordInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') login();
+        });
+        usernameInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                passwordInput.focus();
+            }
+        });
+        
+        async function checkAuth() {
+            showLoading();
+            try {
+                const resp = await fetch('/api/v1/auth/check');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data.authenticated) {
+                        showDashboard();
+                        loadTargets();
+                    } else {
+                        showLoginForm();
+                    }
+                } else {
+                    showLoginForm();
+                }
+            } catch (e) {
+                showLoginForm();
+            }
+        }
+        
         async function login() {
-            const user = document.getElementById('username').value;
-            const pass = document.getElementById('password').value;
-            const creds = btoa(user + ':' + pass);
-            // Validate credentials against protected endpoint
-            const targets = await fetch('/api/v1/targets', { headers: { 'Authorization': 'Basic ' + creds } });
-            if (targets.ok) {
-                authToken = creds;
-                document.getElementById('auth-form').classList.add('hidden');
-                document.getElementById('dashboard').classList.remove('hidden');
-                loadTargets();
-            } else {
-                document.getElementById('auth-error').classList.remove('hidden');
+            const user = usernameInput.value;
+            const pass = passwordInput.value;
+            
+            if (!user || !pass) {
+                showError('Please enter username and password');
+                return;
+            }
+            
+            // Disable button and show loading state
+            loginBtn.disabled = true;
+            loginBtn.textContent = 'Signing in...';
+            hideError();
+            
+            try {
+                const resp = await fetch('/api/v1/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: user, password: pass })
+                });
+                
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data.success) {
+                        hideError();
+                        showDashboard();
+                        loadTargets();
+                    } else {
+                        showError('Invalid credentials');
+                    }
+                } else {
+                    showError('Invalid credentials');
+                }
+            } catch (e) {
+                showError('Connection error. Please try again.');
+            } finally {
+                loginBtn.disabled = false;
+                loginBtn.textContent = 'Sign In';
             }
         }
+        
+        async function logout() {
+            // Clear polling interval first
+            stopRefreshInterval();
+            
+            try {
+                await fetch('/api/v1/auth/logout', { method: 'POST' });
+            } catch (e) {
+                // Ignore logout errors
+            }
+            showLoginForm();
+            // Clear form
+            usernameInput.value = '';
+            passwordInput.value = '';
+        }
+        
+        function stopRefreshInterval() {
+            if (refreshInterval !== null) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        }
+        
         async function loadTargets() {
-            const resp = await fetch('/api/v1/targets', { headers: { 'Authorization': 'Basic ' + authToken } });
-            const targets = await resp.json();
-            const container = document.getElementById('targets');
-            container.innerHTML = targets.map(t => `
-                <div class="card target" id="target-${t.id}">
-                    <strong>${t.name}</strong> (${t.id})
-                    <br><span class="meta">${t.base_url}</span>
-                    <div class="meta" id="status-${t.id}">Loading...</div>
-                    <div class="latency-card" id="latency-${t.id}">
-                        <div class="latency-stats" id="stats-${t.id}">Loading latency...</div>
-                        <div class="sparkline-container">
-                            <canvas class="sparkline" id="canvas-${t.id}" width="400" height="60"></canvas>
+            // Clear any existing refresh interval
+            stopRefreshInterval();
+            
+            try {
+                const resp = await fetch('/api/v1/targets');
+                if (resp.ok) {
+                    const targets = await resp.json();
+                    const container = document.getElementById('targets');
+                    container.innerHTML = targets.map(t => `
+                        <div class="card target" id="target-${t.id}">
+                            <strong>${t.name}</strong> (${t.id})
+                            <br><span class="meta">${t.base_url}</span>
+                            <div class="meta" id="status-${t.id}">Loading...</div>
+                            <div class="latency-card" id="latency-${t.id}">
+                                <div class="latency-stats" id="stats-${t.id}">Loading latency...</div>
+                                <div class="sparkline-container">
+                                    <canvas class="sparkline" id="canvas-${t.id}" width="400" height="60"></canvas>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                </div>
-            `).join('');
-            for (const t of targets) {
-                loadSnapshot(t.id);
-                loadLatency(t.id);
-            }
-            // Refresh latency every 30 seconds
-            setInterval(() => {
-                for (const t of targets) {
-                    loadLatency(t.id);
+                    `).join('');
+                    for (const t of targets) {
+                        loadSnapshot(t.id);
+                        loadLatency(t.id);
+                    }
+                    // Refresh latency every 30 seconds (store ID so we can clear it)
+                    refreshInterval = setInterval(() => {
+                        for (const t of targets) {
+                            loadLatency(t.id);
+                        }
+                    }, 30000);
+                } else if (resp.status === 401) {
+                    // Session expired
+                    stopRefreshInterval();
+                    showLoginForm();
                 }
-            }, 30000);
+            } catch (e) {
+                console.error('Failed to load targets:', e);
+            }
         }
+        
         async function loadSnapshot(id) {
-            const resp = await fetch('/api/v1/targets/' + id + '/snapshot', { headers: { 'Authorization': 'Basic ' + authToken } });
-            const el = document.getElementById('status-' + id);
-            if (resp.ok) {
-                const snap = await resp.json();
-                const reachable = snap.reachable;
-                el.parentElement.classList.toggle('reachable', reachable);
-                el.parentElement.classList.toggle('unreachable', !reachable);
-                el.innerHTML = reachable 
-                    ? `<span class="status ${snap.status || 'unknown'}">${snap.status || 'unknown'}</span> Node: ${snap.node_id || 'N/A'}`
-                    : `<span class="status error">unreachable</span> ${snap.error || ''}`;
-            } else {
-                el.innerHTML = '<span class="status unknown">no data</span>';
+            try {
+                const resp = await fetch('/api/v1/targets/' + id + '/snapshot');
+                const el = document.getElementById('status-' + id);
+                if (resp.ok) {
+                    const snap = await resp.json();
+                    const reachable = snap.reachable;
+                    el.parentElement.classList.toggle('reachable', reachable);
+                    el.parentElement.classList.toggle('unreachable', !reachable);
+                    el.innerHTML = reachable 
+                        ? `<span class="status ${snap.status || 'unknown'}">${snap.status || 'unknown'}</span> Node: ${snap.node_id || 'N/A'}`
+                        : `<span class="status error">unreachable</span> ${snap.error || ''}`;
+                } else {
+                    el.innerHTML = '<span class="status unknown">no data</span>';
+                }
+            } catch (e) {
+                const el = document.getElementById('status-' + id);
+                el.innerHTML = '<span class="status unknown">error</span>';
             }
         }
+        
         async function loadLatency(id) {
-            const resp = await fetch('/api/v1/targets/' + id + '/latency', { headers: { 'Authorization': 'Basic ' + authToken } });
-            const statsEl = document.getElementById('stats-' + id);
-            const canvas = document.getElementById('canvas-' + id);
-            if (resp.ok) {
-                const summary = await resp.json();
-                if (summary.sample_count === 0) {
+            try {
+                const resp = await fetch('/api/v1/targets/' + id + '/latency');
+                const statsEl = document.getElementById('stats-' + id);
+                const canvas = document.getElementById('canvas-' + id);
+                if (resp.ok) {
+                    const summary = await resp.json();
+                    if (summary.sample_count === 0) {
+                        statsEl.innerHTML = '<div class="stat-item"><span class="stat-label">No latency data</span></div>';
+                        return;
+                    }
+                    statsEl.innerHTML = `
+                        <div class="stat-item">
+                            <div class="stat-label">Samples</div>
+                            <div class="stat-value">${summary.sample_count}</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Min</div>
+                            <div class="stat-value">${summary.min_latency_ms.toFixed(1)}ms</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Avg</div>
+                            <div class="stat-value">${summary.avg_latency_ms.toFixed(1)}ms</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Median</div>
+                            <div class="stat-value">${summary.median_latency_ms.toFixed(1)}ms</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Max</div>
+                            <div class="stat-value">${summary.max_latency_ms.toFixed(1)}ms</div>
+                        </div>
+                    `;
+                    drawSparkline(canvas, summary);
+                } else {
                     statsEl.innerHTML = '<div class="stat-item"><span class="stat-label">No latency data</span></div>';
-                    return;
                 }
-                statsEl.innerHTML = `
-                    <div class="stat-item">
-                        <div class="stat-label">Samples</div>
-                        <div class="stat-value">${summary.sample_count}</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-label">Min</div>
-                        <div class="stat-value">${summary.min_latency_ms.toFixed(1)}ms</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-label">Avg</div>
-                        <div class="stat-value">${summary.avg_latency_ms.toFixed(1)}ms</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-label">Median</div>
-                        <div class="stat-value">${summary.median_latency_ms.toFixed(1)}ms</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-label">Max</div>
-                        <div class="stat-value">${summary.max_latency_ms.toFixed(1)}ms</div>
-                    </div>
-                `;
-                // Draw sparkline
-                drawSparkline(canvas, summary);
-            } else {
-                statsEl.innerHTML = '<div class="stat-item"><span class="stat-label">No latency data</span></div>';
+            } catch (e) {
+                const statsEl = document.getElementById('stats-' + id);
+                statsEl.innerHTML = '<div class="stat-item"><span class="stat-label">Error loading</span></div>';
             }
         }
-        async function loadSamplesAndDraw(id, canvas) {
-            const resp = await fetch('/api/v1/targets/' + id + '/latency/samples?limit=50', { headers: { 'Authorization': 'Basic ' + authToken } });
-            if (resp.ok) {
-                const samples = await resp.json();
-                if (samples.length > 0) {
-                    drawSparklineFromSamples(canvas, samples);
-                }
-            }
-        }
+        
         function drawSparkline(canvas, summary) {
             const ctx = canvas.getContext('2d');
             const width = canvas.width;
@@ -180,7 +381,7 @@
             const barWidth = (width - 20) / counts.length;
             
             // Draw histogram bars
-            ctx.fillStyle = '#4ecca3';
+            ctx.fillStyle = '#3fb950';
             for (let i = 0; i < counts.length; i++) {
                 const barHeight = (counts[i] / maxCount) * (height - 20);
                 const x = 10 + i * barWidth;
@@ -189,7 +390,7 @@
             }
             
             // Draw bucket labels
-            ctx.fillStyle = '#888';
+            ctx.fillStyle = '#8b949e';
             ctx.font = '8px sans-serif';
             ctx.textAlign = 'center';
             for (let i = 0; i < buckets.length; i++) {
@@ -197,46 +398,34 @@
                 ctx.fillText(buckets[i] + 'ms', x, height - 2);
             }
         }
-        function drawSparklineFromSamples(canvas, samples) {
-            const ctx = canvas.getContext('2d');
-            const width = canvas.width;
-            const height = canvas.height;
-            
-            ctx.clearRect(0, 0, width, height);
-            
-            if (samples.length < 2) return;
-            
-            // Extract latencies
-            const latencies = samples.map(s => s.latency_ms);
-            const min = Math.min(...latencies);
-            const max = Math.max(...latencies);
-            const range = max - min || 1;
-            
-            // Draw line
-            ctx.strokeStyle = '#4ecca3';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            
-            for (let i = 0; i < latencies.length; i++) {
-                const x = 10 + (i / (latencies.length - 1)) * (width - 20);
-                const y = height - 15 - ((latencies[i] - min) / range) * (height - 30);
-                if (i === 0) {
-                    ctx.moveTo(x, y);
-                } else {
-                    ctx.lineTo(x, y);
-                }
-            }
-            ctx.stroke();
-            
-            // Draw points
-            ctx.fillStyle = '#4ecca3';
-            for (let i = 0; i < latencies.length; i++) {
-                const x = 10 + (i / (latencies.length - 1)) * (width - 20);
-                const y = height - 15 - ((latencies[i] - min) / range) * (height - 30);
-                ctx.beginPath();
-                ctx.arc(x, y, 3, 0, Math.PI * 2);
-                ctx.fill();
-            }
+        
+        // UI Helpers
+        function showLoginForm() {
+            stopRefreshInterval();
+            authForm.classList.remove('hidden');
+            loadingDiv.classList.add('hidden');
+            dashboardDiv.classList.add('hidden');
+        }
+        
+        function showDashboard() {
+            authForm.classList.add('hidden');
+            loadingDiv.classList.add('hidden');
+            dashboardDiv.classList.remove('hidden');
+        }
+        
+        function showLoading() {
+            authForm.classList.add('hidden');
+            loadingDiv.classList.remove('hidden');
+            dashboardDiv.classList.add('hidden');
+        }
+        
+        function showError(msg) {
+            authError.textContent = msg;
+            authError.classList.remove('hidden');
+        }
+        
+        function hideError() {
+            authError.classList.add('hidden');
         }
     </script>
 </body>
