@@ -30,6 +30,7 @@ build-linux-arm64: web-build
 
 # Web UI build
 web-build:
+	cd $(WEB_DIR) && npm ci
 	cd $(WEB_DIR) && npm run build
 
 # Web UI dev server (watch mode)

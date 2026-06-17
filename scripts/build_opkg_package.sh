@@ -64,6 +64,13 @@ mkdir -p "${PKGROOT}/opt/etc/init.d"
 mkdir -p "${PKGROOT}/opt/var/log/uvb76"
 mkdir -p "${PKGROOT}/CONTROL"
 
+# --- Build web assets first (required for //go:embed web/dist) ---
+echo ""
+echo "=== Building web assets ==="
+cd "${ROOT_DIR}/uvb76"
+make web-build
+cd "${ROOT_DIR}"
+
 # --- Run tests first (on CI host architecture) ---
 echo ""
 echo "=== Running tests ==="
