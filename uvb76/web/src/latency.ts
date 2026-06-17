@@ -6,6 +6,18 @@ function formatMs(v: number | undefined): string {
   return v !== undefined && Number.isFinite(v) ? v.toFixed(1) + 'ms' : '—';
 }
 
+// Check if series has any finite percentile values
+function hasFinitePercentiles(points: PercentilePoint[]): boolean {
+  return points.some((p) => {
+    const v = p as Record<string, unknown>;
+    const vals = [
+      v.p50_ms, v.p90_ms, v.p95_ms, v.p99_ms,
+      v.p50_latency_ms, v.p90_latency_ms, v.p95_latency_ms, v.p99_latency_ms,
+    ];
+    return vals.some((x) => typeof x === 'number' && Number.isFinite(x as number));
+  });
+}
+
 export interface LatencyRenderer {
   loadAndRender(targetId: string): Promise<void>;
 }
@@ -15,6 +27,7 @@ function createLatencyRenderer(): LatencyRenderer {
     const metaEl = document.getElementById(`meta-${targetId}`);
     const statsEl = document.getElementById(`stats-${targetId}`);
     const chartEl = document.getElementById(`chart-${targetId}`) as HTMLCanvasElement;
+    const emptyEl = document.getElementById(`chart-empty-${targetId}`);
     const warningEl = document.getElementById(`warning-${targetId}`);
 
     if (!metaEl || !statsEl || !chartEl) return;
@@ -67,17 +80,32 @@ function createLatencyRenderer(): LatencyRenderer {
 
       // Draw chart
       if (series.points && series.points.length > 0) {
-        renderLatencyChart(chartEl, series.points);
+        // Check if we have any finite percentile values
+        if (hasFinitePercentiles(series.points)) {
+          // Show canvas, hide empty overlay
+          emptyEl?.classList.add('hidden');
+          chartEl.classList.remove('hidden');
 
-        // Show warning if sample count is low
-        const latestPoint = series.points[series.points.length - 1];
-        if (latestPoint && latestPoint.sample_count < 10) {
-          warningEl?.classList.remove('hidden');
+          renderLatencyChart(chartEl, series.points);
+
+          // Show warning if sample count is low
+          const latestPoint = series.points[series.points.length - 1];
+          if (latestPoint && latestPoint.sample_count < 10) {
+            warningEl?.classList.remove('hidden');
+          } else {
+            warningEl?.classList.add('hidden');
+          }
         } else {
+          // Summary has data but series has no finite percentile points yet
+          // Preserve canvas in DOM - use overlay approach for recovery
+          destroyChart(chartEl);
+          chartEl.classList.add('hidden');
+          emptyEl?.classList.remove('hidden');
           warningEl?.classList.add('hidden');
         }
       } else {
         destroyChart(chartEl);
+        emptyEl?.classList.add('hidden');
         warningEl?.classList.add('hidden');
       }
     } catch (e) {

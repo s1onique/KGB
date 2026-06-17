@@ -38,7 +38,13 @@ function createTargetsRenderer(container: HTMLElement): TargetsRenderer {
                           <span class="legend-item"><span class="legend-dot p99"></span>p99</span>
                       </div>
                   </div>
-                  <canvas class="latency-chart" id="chart-${escapeText(t.id)}"></canvas>
+                  <div class="latency-chart-wrap">
+                      <canvas class="latency-chart" id="chart-${escapeText(t.id)}"></canvas>
+                      <div class="latency-empty hidden" id="chart-empty-${escapeText(t.id)}">
+                          No finite latency series points yet
+                      </div>
+                  </div>
+                  <div class="graph-subtitle">Trailing 300s windows over retained range</div>
               </div>
               <div class="low-sample-warning hidden" id="warning-${escapeText(t.id)}">
                   Low sample count; tail percentiles are approximate.
