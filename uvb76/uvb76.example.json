@@ -33,6 +33,12 @@
       "enabled": true
     },
     {
+      "id": "kamatera",
+      "name": "Kamatera (London)",
+      "base_url": "http://10.149.149.1:8317",
+      "enabled": true
+    },
+    {
       "id": "office-gateway",
       "name": "Office Gateway",
       "base_url": "https://10.0.0.1:9080",

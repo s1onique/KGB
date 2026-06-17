@@ -236,3 +236,93 @@ func TestConfigValidation_DevModeAllowsMissingTLS(t *testing.T) {
 		t.Errorf("Expected no error in dev mode, got %v", err)
 	}
 }
+
+func TestValidateTargetBaseURLScheme(t *testing.T) {
+	tests := []struct {
+		baseURL string
+		wantErr bool
+		errContains string
+	}{
+		// Valid schemes
+		{"http://localhost:8080", false, ""},
+		{"https://localhost:8443", false, ""},
+		{"HTTP://localhost:8080", false, ""},
+		{"HTTPS://localhost:8443", false, ""},
+		{"http://192.168.1.1:8317", false, ""},
+		{"https://10.149.149.1:8317", false, ""},
+		{"http://example.com/path", false, ""},
+		{"https://example.com/path", false, ""},
+		// Invalid schemes
+		{"ftp://localhost", true, "unsupported scheme"},
+		{"ftp://example.com", true, "unsupported scheme"},
+		{"ws://localhost", true, "unsupported scheme"},
+		{"wss://localhost", true, "unsupported scheme"},
+		{"file:///path", true, "unsupported scheme"},
+		// Missing scheme
+		{"localhost:8080", true, "missing scheme"},
+		{"/path/to/resource", true, "missing scheme"},
+		{"", true, "empty"},
+	}
+
+	for _, tt := range tests {
+		err := ValidateTargetBaseURLScheme(tt.baseURL)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("ValidateTargetBaseURLScheme(%q) error = %v, wantErr %v", tt.baseURL, err, tt.wantErr)
+		}
+		if tt.errContains != "" && err != nil && !strings.Contains(err.Error(), tt.errContains) {
+			t.Errorf("ValidateTargetBaseURLScheme(%q) error %v does not contain %q", tt.baseURL, err, tt.errContains)
+		}
+	}
+}
+
+func TestConfigValidation_InvalidTargetBaseURLScheme(t *testing.T) {
+	cfg := &Config{
+		Listen:   ListenConfig{Addr: ":8443", TLSCertFile: "cert.pem", TLSKeyFile: "key.pem"},
+		Auth:     AuthConfig{Username: "admin", PasswordSHA256: testValidPW},
+		Scrape:   ScrapeConfig{IntervalSeconds: 30, TimeoutMilliseconds: 5000},
+		Targets: []TargetConfig{
+			{ID: "test-1", Name: "Test", BaseURL: "ftp://localhost", Enabled: true},
+		},
+	}
+	err := cfg.Validate(ValidationOptions{})
+	if err == nil {
+		t.Error("Expected error for invalid scheme, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported scheme") {
+		t.Errorf("Expected error to contain 'unsupported scheme', got %v", err)
+	}
+}
+
+func TestConfigValidation_MissingTargetBaseURLScheme(t *testing.T) {
+	cfg := &Config{
+		Listen:   ListenConfig{Addr: ":8443", TLSCertFile: "cert.pem", TLSKeyFile: "key.pem"},
+		Auth:     AuthConfig{Username: "admin", PasswordSHA256: testValidPW},
+		Scrape:   ScrapeConfig{IntervalSeconds: 30, TimeoutMilliseconds: 5000},
+		Targets: []TargetConfig{
+			{ID: "test-1", Name: "Test", BaseURL: "localhost:8080", Enabled: true},
+		},
+	}
+	err := cfg.Validate(ValidationOptions{})
+	if err == nil {
+		t.Error("Expected error for missing scheme, got nil")
+	}
+	if !strings.Contains(err.Error(), "missing scheme") {
+		t.Errorf("Expected error to contain 'missing scheme', got %v", err)
+	}
+}
+
+func TestConfigValidation_AcceptsHTTPAndHTTPS(t *testing.T) {
+	cfg := &Config{
+		Listen:   ListenConfig{Addr: ":8443", TLSCertFile: "cert.pem", TLSKeyFile: "key.pem"},
+		Auth:     AuthConfig{Username: "admin", PasswordSHA256: testValidPW},
+		Scrape:   ScrapeConfig{IntervalSeconds: 30, TimeoutMilliseconds: 5000},
+		Targets: []TargetConfig{
+			{ID: "http-target", Name: "HTTP Target", BaseURL: "http://192.168.1.1:8317", Enabled: true},
+			{ID: "https-target", Name: "HTTPS Target", BaseURL: "https://192.168.1.2:8443", Enabled: true},
+		},
+	}
+	err := cfg.Validate(ValidationOptions{})
+	if err != nil {
+		t.Errorf("Expected no error for http:// and https:// targets, got %v", err)
+	}
+}

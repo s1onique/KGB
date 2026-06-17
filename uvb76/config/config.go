@@ -131,6 +131,7 @@ var (
 	ErrEmptyTargetID          = errors.New("target.id is required")
 	ErrEmptyTargetName        = errors.New("target.name is required")
 	ErrEmptyTargetBaseURL     = errors.New("target.base_url is required")
+	ErrInvalidTargetBaseURLScheme = errors.New("target.base_url must use http:// or https:// scheme")
 	ErrDuplicateTargetID      = errors.New("duplicate target.id found")
 )
 
@@ -210,10 +211,38 @@ func (c *Config) Validate(opts ValidationOptions) error {
 		if t.BaseURL == "" {
 			return fmt.Errorf("%w: index %d", ErrEmptyTargetBaseURL, i)
 		}
+		if err := ValidateTargetBaseURLScheme(t.BaseURL); err != nil {
+			return fmt.Errorf("%w: index %d: %v", ErrInvalidTargetBaseURLScheme, i, err)
+		}
 		if seenIDs[t.ID] {
 			return fmt.Errorf("%w: %s", ErrDuplicateTargetID, t.ID)
 		}
 		seenIDs[t.ID] = true
+	}
+
+	return nil
+}
+
+// ValidateTargetBaseURLScheme validates that a target base_url uses http:// or https:// scheme.
+// Returns an error describing the issue if the scheme is invalid or missing.
+func ValidateTargetBaseURLScheme(baseURL string) error {
+	// Check for empty baseURL first (handled elsewhere, but defensive)
+	if baseURL == "" {
+		return errors.New("base_url is empty")
+	}
+
+	// Check for missing scheme (no "://" in URL)
+	if !strings.Contains(baseURL, "://") {
+		return errors.New("missing scheme (must include ://)")
+	}
+
+	// Extract scheme (everything before "://")
+	schemeEnd := strings.Index(baseURL, "://")
+	scheme := strings.ToLower(baseURL[:schemeEnd])
+
+	// Accept only http and https
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("unsupported scheme %q (must use http:// or https://)", scheme)
 	}
 
 	return nil
