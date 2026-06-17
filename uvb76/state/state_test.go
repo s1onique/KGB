@@ -283,3 +283,16 @@ func TestManager_NewManagerWithConfig(t *testing.T) {
 		t.Errorf("Expected %d buckets, got %d", len(buckets), len(m.buckets))
 	}
 }
+
+func TestManager_GetMaxSamples(t *testing.T) {
+	m := NewManager()
+	if m.GetMaxSamples() != 100 {
+		t.Errorf("Expected maxSamples 100, got %d", m.GetMaxSamples())
+	}
+	
+	m2 := NewManagerWithConfig([]int64{1, 2, 3}, 50)
+	if m2.GetMaxSamples() != 50 {
+		t.Errorf("Expected maxSamples 50, got %d", m2.GetMaxSamples())
+	}
+}
+

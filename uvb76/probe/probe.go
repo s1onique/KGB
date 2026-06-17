@@ -110,8 +110,8 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(c.cfg.TimeoutMilliseconds)*time.Millisecond)
 	defer cancel()
 
-	// Probe endpoint - use /status for availability check, but don't parse for state
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.BaseURL+"/status", nil)
+	// Probe endpoint - use the same URL construction as latency series metadata
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, config.TargetStatusURL(t.BaseURL), nil)
 	if err != nil {
 		// Record timeout-style latency for request creation failures
 		c.state.RecordLatency(t.ID, float64(c.cfg.TimeoutMilliseconds), false)
@@ -155,7 +155,7 @@ func (c *Client) ProbeTarget(t *config.TargetConfig) ProbeResult {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(c.cfg.TimeoutMilliseconds)*time.Millisecond)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.BaseURL+"/status", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, config.TargetStatusURL(t.BaseURL), nil)
 	if err != nil {
 		result.LatencyMs = float64(c.cfg.TimeoutMilliseconds)
 		result.Reachable = false

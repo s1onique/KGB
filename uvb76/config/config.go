@@ -9,6 +9,12 @@ import (
 	"strings"
 )
 
+// TargetStatusURL returns the status probe URL for a target base URL.
+// Used consistently by both the probe loop and latency series metadata.
+func TargetStatusURL(baseURL string) string {
+	return strings.TrimRight(baseURL, "/") + "/status"
+}
+
 // Config represents the full configuration for UVB-76.
 type Config struct {
 	Listen   ListenConfig    `json:"listen"`

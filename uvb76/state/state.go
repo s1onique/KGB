@@ -29,8 +29,9 @@ type CheckResult struct {
 // LatencySample represents a single latency measurement.
 type LatencySample struct {
 	Timestamp time.Time `json:"timestamp"`
-	LatencyMs float64  `json:"latency_ms"`
-	Reachable bool     `json:"reachable"`
+	LatencyMs float64   `json:"latency_ms"`
+	Reachable bool      `json:"reachable"`
+	Error     string    `json:"error,omitempty"`
 }
 
 // Histogram holds bounded histogram data for latency measurements.
@@ -43,179 +44,43 @@ type Histogram struct {
 type LatencySummary struct {
 	TargetID        string    `json:"target_id"`
 	SampleCount     int       `json:"sample_count"`
+	ErrorCount      int       `json:"error_count"`
 	MinLatencyMs    float64   `json:"min_latency_ms"`
 	MaxLatencyMs    float64   `json:"max_latency_ms"`
 	AvgLatencyMs    float64   `json:"avg_latency_ms"`
 	MedianLatencyMs float64   `json:"median_latency_ms"`
+	P50LatencyMs    *float64  `json:"p50_latency_ms,omitempty"`
+	P90LatencyMs    *float64  `json:"p90_latency_ms,omitempty"`
+	P95LatencyMs    *float64  `json:"p95_latency_ms,omitempty"`
+	P99LatencyMs    *float64  `json:"p99_latency_ms,omitempty"`
 	Histogram       Histogram `json:"histogram"`
 }
 
-// LatencyTracker tracks latency data for a single target.
-// Memory is bounded: only stores maxSamples samples in ring buffer.
-// Stats are derived from the current ring buffer contents only.
-type LatencyTracker struct {
-	mu            sync.Mutex
-	buckets       []int64         // sorted bucket boundaries in ms
-	recentSamples []LatencySample // ring buffer
-	maxSamples   int              // max capacity (must be > 0)
-	head          int              // next write position
-	count         int              // total samples currently stored
-	sum           float64          // sum of current samples in buffer
+// PercentilePoint represents a single time-series data point with percentiles.
+// Uses null values (not omitted) to indicate missing percentiles in empty windows.
+type PercentilePoint struct {
+	Timestamp   time.Time `json:"ts"`
+	SampleCount int      `json:"sample_count"`
+	ErrorCount  int      `json:"error_count"`
+	P50Ms       *float64 `json:"p50_ms"`
+	P90Ms       *float64 `json:"p90_ms"`
+	P95Ms       *float64 `json:"p95_ms"`
+	P99Ms       *float64 `json:"p99_ms"`
 }
 
-// NewLatencyTracker creates a new latency tracker with given buckets and max samples.
-// Panics if buckets are empty or maxSamples is <= 0.
-func NewLatencyTracker(buckets []int64, maxSamples int) *LatencyTracker {
-	if maxSamples <= 0 {
-		panic("maxSamples must be > 0")
-	}
-	if len(buckets) == 0 {
-		panic("buckets cannot be empty")
-	}
-	// Ensure buckets are sorted
-	sortedBuckets := make([]int64, len(buckets))
-	copy(sortedBuckets, buckets)
-	for i := 1; i < len(sortedBuckets); i++ {
-		for j := 0; j < len(sortedBuckets)-i; j++ {
-			if sortedBuckets[j] > sortedBuckets[j+1] {
-				sortedBuckets[j], sortedBuckets[j+1] = sortedBuckets[j+1], sortedBuckets[j]
-			}
-		}
-	}
-
-	return &LatencyTracker{
-		buckets:       sortedBuckets,
-		recentSamples: make([]LatencySample, maxSamples),
-		maxSamples:   maxSamples,
-	}
+// LatencySeries represents a time-series of latency percentiles for a target.
+type LatencySeries struct {
+	TargetID             string            `json:"target_id"`
+	ProbeKind            string            `json:"probe_kind"`
+	ProbeURL             string            `json:"probe_url"`
+	IntervalSeconds      int               `json:"interval_seconds"`
+	RangeSeconds         int               `json:"range_seconds"`
+	StepSeconds          int               `json:"step_seconds"`
+	WindowSeconds        int               `json:"window_seconds"`
+	RetainedRangeSeconds int               `json:"retained_range_seconds"`
+	Points               []PercentilePoint `json:"points"`
 }
 
-// Record adds a latency sample to the tracker.
-func (lt *LatencyTracker) Record(latencyMs float64, reachable bool) {
-	lt.mu.Lock()
-	defer lt.mu.Unlock()
-
-	// Store in ring buffer
-	sample := LatencySample{
-		Timestamp: time.Now().UTC(),
-		LatencyMs: latencyMs,
-		Reachable: reachable,
-	}
-
-	// If we're at capacity, subtract the value being overwritten from sum
-	if lt.count == lt.maxSamples {
-		oldSample := lt.recentSamples[lt.head]
-		lt.sum -= oldSample.LatencyMs
-	}
-
-	lt.recentSamples[lt.head] = sample
-	lt.head = (lt.head + 1) % lt.maxSamples
-	if lt.count < lt.maxSamples {
-		lt.count++
-	}
-
-	// Update sum
-	lt.sum += latencyMs
-}
-
-// GetSummary returns a latency summary for graph display.
-// Stats are derived from the current ring buffer contents only (bounded).
-func (lt *LatencyTracker) GetSummary(targetID string) LatencySummary {
-	lt.mu.Lock()
-	defer lt.mu.Unlock()
-
-	summary := LatencySummary{
-		TargetID:  targetID,
-		Histogram: Histogram{Buckets: lt.buckets, Counts: make([]int64, len(lt.buckets))},
-	}
-
-	if lt.count == 0 {
-		return summary
-	}
-
-	summary.SampleCount = lt.count
-
-	// Extract current samples from ring buffer for sorting
-	currentSamples := make([]float64, lt.count)
-	for i := 0; i < lt.count; i++ {
-		idx := (lt.head - lt.count + i + lt.maxSamples) % lt.maxSamples
-		currentSamples[i] = lt.recentSamples[idx].LatencyMs
-	}
-
-	// Calculate stats from current samples
-	summary.MinLatencyMs = currentSamples[0]
-	summary.MaxLatencyMs = currentSamples[0]
-
-	// Simple sort for min/max/median
-	for i := 1; i < len(currentSamples); i++ {
-		if currentSamples[i] < summary.MinLatencyMs {
-			summary.MinLatencyMs = currentSamples[i]
-		}
-		if currentSamples[i] > summary.MaxLatencyMs {
-			summary.MaxLatencyMs = currentSamples[i]
-		}
-		// Insertion sort for median
-		j := i
-		for j > 0 && currentSamples[j-1] > currentSamples[j] {
-			currentSamples[j-1], currentSamples[j] = currentSamples[j], currentSamples[j-1]
-			j--
-		}
-	}
-
-	// Average
-	summary.AvgLatencyMs = lt.sum / float64(lt.count)
-
-	// Median
-	mid := lt.count / 2
-	if lt.count%2 == 0 {
-		summary.MedianLatencyMs = (currentSamples[mid-1] + currentSamples[mid]) / 2
-	} else {
-		summary.MedianLatencyMs = currentSamples[mid]
-	}
-
-	// Histogram counts
-	for _, val := range currentSamples {
-		placed := false
-		for i, bucket := range lt.buckets {
-			if val <= float64(bucket) {
-				summary.Histogram.Counts[i]++
-				placed = true
-				break
-			}
-		}
-		// If value exceeds last bucket, put in last bucket
-		if !placed {
-			summary.Histogram.Counts[len(lt.buckets)-1]++
-		}
-	}
-
-	return summary
-}
-
-// GetRecentSamples returns the recent latency samples in chronological order.
-func (lt *LatencyTracker) GetRecentSamples(limit int) []LatencySample {
-	lt.mu.Lock()
-	defer lt.mu.Unlock()
-
-	if limit <= 0 || limit > lt.count {
-		limit = lt.count
-	}
-
-	samples := make([]LatencySample, limit)
-	start := lt.head - limit
-	if start < 0 {
-		start += lt.maxSamples
-	}
-
-	for i := 0; i < limit; i++ {
-		idx := (start + i) % lt.maxSamples
-		samples[i] = lt.recentSamples[idx]
-	}
-
-	return samples
-}
-
-// Manager manages the bounded state for all targets.
 type Manager struct {
 	mu              sync.RWMutex
 	snapshots        map[string]*TargetSnapshot       // keyed by target ID
@@ -371,4 +236,41 @@ func (m *Manager) GetLatencyBuckets() []int64 {
 	buckets := make([]int64, len(m.buckets))
 	copy(buckets, m.buckets)
 	return buckets
+}
+
+// GetMaxSamples returns the configured max samples per target.
+func (m *Manager) GetMaxSamples() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.maxSamples
+}
+
+// CalculatePercentiles computes percentiles from a sorted slice of samples.
+// Returns nil for any percentile if no valid (successful) samples exist.
+func CalculatePercentiles(sortedSamples []float64, percentiles []float64) map[float64]*float64 {
+	result := make(map[float64]*float64)
+	n := len(sortedSamples)
+	if n == 0 {
+		for _, p := range percentiles {
+			result[p] = nil
+		}
+		return result
+	}
+
+	for _, percentile := range percentiles {
+		// Linear interpolation method (same as NIST recommended)
+		rank := percentile/100.0*float64(n-1) + 1.0
+		k := int(rank)
+		d := rank - float64(k)
+
+		if k <= 0 {
+			result[percentile] = &sortedSamples[0]
+		} else if k >= n {
+			result[percentile] = &sortedSamples[n-1]
+		} else {
+			value := sortedSamples[k-1] + d*(sortedSamples[k]-sortedSamples[k-1])
+			result[percentile] = &value
+		}
+	}
+	return result
 }
