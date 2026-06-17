@@ -138,7 +138,7 @@ func serveWebDir(subdir string) http.Handler {
 	if err != nil {
 		return http.NotFoundHandler()
 	}
-	return http.FileServerFS(subFS)
+	return http.FileServer(http.FS(subFS))
 }
 
 // handleSPA serves the SPA index.html for any unmatched routes.
