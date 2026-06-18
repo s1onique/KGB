@@ -11,6 +11,39 @@ function escapeText(s: string): string {
 // Whitelist of allowed CSS classes for status to prevent XSS
 const statusClasses = new Set(['up', 'down', 'unknown', 'error', 'degraded', 'warning']);
 
+// Latency section HTML template
+function latencySectionHTML(targetId: string, kind: 'http' | 'icmp', title: string): string {
+  const kindId = kind;
+  return `
+      <div class="latency-section" id="latency-${kindId}-${escapeText(targetId)}">
+          <div class="latency-meta" id="meta-${kindId}-${escapeText(targetId)}">Loading ${title}...</div>
+          <div class="percentile-stats" id="stats-${kindId}-${escapeText(targetId)}"></div>
+          <div class="graph-container" id="graph-container-${kindId}-${escapeText(targetId)}">
+              <div class="graph-header">
+                  <span class="graph-title">${escapeText(title)} (ms)</span>
+                  <div class="graph-legend">
+                      <span class="legend-item"><span class="legend-dot p50"></span>p50</span>
+                      <span class="legend-item"><span class="legend-dot p90"></span>p90</span>
+                      <span class="legend-item"><span class="legend-dot p95"></span>p95</span>
+                      <span class="legend-item"><span class="legend-dot p99"></span>p99</span>
+                  </div>
+              </div>
+              <div class="latency-chart-wrap">
+                  <canvas class="latency-chart" id="chart-${kindId}-${escapeText(targetId)}"></canvas>
+                  <div class="latency-empty hidden" id="chart-empty-${kindId}-${escapeText(targetId)}">
+                      No finite latency series points yet
+                  </div>
+              </div>
+              <div class="graph-subtitle">Trailing windows over retained range</div>
+              <div class="sample-count" id="samples-${kindId}-${escapeText(targetId)}"></div>
+          </div>
+          <div class="low-sample-warning hidden" id="warning-${kindId}-${escapeText(targetId)}">
+              Low sample count; tail percentiles are approximate.
+          </div>
+      </div>
+  `;
+}
+
 export interface TargetsRenderer {
   render(targets: Target[]): void;
   updateSnapshot(targetId: string): Promise<void>;
@@ -26,29 +59,8 @@ function createTargetsRenderer(container: HTMLElement): TargetsRenderer {
           <br><span class="meta">${escapeText(t.base_url)}</span>
           <div class="meta" id="status-${escapeText(t.id)}">Loading...</div>
           <div class="latency-card" id="latency-${escapeText(t.id)}">
-              <div class="latency-meta" id="meta-${escapeText(t.id)}">Loading latency...</div>
-              <div class="percentile-stats" id="stats-${escapeText(t.id)}"></div>
-              <div class="graph-container" id="graph-container-${escapeText(t.id)}">
-                  <div class="graph-header">
-                      <span class="graph-title">HTTP Status Probe Latency (ms)</span>
-                      <div class="graph-legend">
-                          <span class="legend-item"><span class="legend-dot p50"></span>p50</span>
-                          <span class="legend-item"><span class="legend-dot p90"></span>p90</span>
-                          <span class="legend-item"><span class="legend-dot p95"></span>p95</span>
-                          <span class="legend-item"><span class="legend-dot p99"></span>p99</span>
-                      </div>
-                  </div>
-                  <div class="latency-chart-wrap">
-                      <canvas class="latency-chart" id="chart-${escapeText(t.id)}"></canvas>
-                      <div class="latency-empty hidden" id="chart-empty-${escapeText(t.id)}">
-                          No finite latency series points yet
-                      </div>
-                  </div>
-                  <div class="graph-subtitle">Trailing 300s windows over retained range</div>
-              </div>
-              <div class="low-sample-warning hidden" id="warning-${escapeText(t.id)}">
-                  Low sample count; tail percentiles are approximate.
-              </div>
+              ${latencySectionHTML(t.id, 'http', 'HTTP Status Probe Latency')}
+              ${latencySectionHTML(t.id, 'icmp', 'ICMP Ping Latency')}
           </div>
       </div>
     `

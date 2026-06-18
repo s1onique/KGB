@@ -13,11 +13,24 @@
     "timeout_milliseconds": 5000
   },
   "latency": {
-    "enabled": true,
-    "interval_seconds": 30,
-    "timeout_milliseconds": 5000,
-    "histogram_buckets_ms": [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
-    "recent_samples_max": 100
+    "http": {
+      "enabled": true,
+      "interval_seconds": 15,
+      "timeout_milliseconds": 10000,
+      "window_seconds": 300,
+      "retained_range_seconds": 3000,
+      "histogram_buckets_ms": [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
+      "recent_samples_max": 100
+    },
+    "icmp": {
+      "enabled": true,
+      "interval_seconds": 1,
+      "timeout_seconds": 3,
+      "window_seconds": 300,
+      "retained_range_seconds": 3000,
+      "histogram_buckets_ms": [1, 5, 10, 25, 50, 100, 250, 500, 1000],
+      "recent_samples_max": 300
+    }
   },
   "targets": [
     {

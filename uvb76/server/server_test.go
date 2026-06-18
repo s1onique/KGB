@@ -12,6 +12,11 @@ import (
 	"github.com/s1onique/KGB/uvb76/state"
 )
 
+// Helper function to create a pointer to a bool
+func boolPtr(b bool) *bool {
+	return &b
+}
+
 func TestHealthzEndpoint(t *testing.T) {
 	cfg := &config.Config{
 		Listen:   config.ListenConfig{Addr: ":0"},
@@ -148,15 +153,36 @@ func TestHandleTargetLatency_ReturnsSummary(t *testing.T) {
 	salt := []byte("1234567890abcdef")
 	hash, _ := config.HashPassword("correct-password", salt)
 
+	// Enable HTTP latency in config
+	httpCfg := config.HTTPProbeConfig{
+		Enabled:             boolPtr(true),
+		IntervalSeconds:     15,
+		TimeoutMilliseconds: 10000,
+		WindowSeconds:       300,
+		RetainedRangeSeconds: 3000,
+		RecentSamplesMax:    100,
+		HistogramBucketsMS:  config.DefaultHistogramBuckets(),
+	}
+	icmpCfg := config.ICMPProbeConfig{
+		Enabled:              boolPtr(true),
+		IntervalSeconds:      1,
+		TimeoutSeconds:       3,
+		WindowSeconds:        300,
+		RetainedRangeSeconds: 3000,
+		RecentSamplesMax:     100,
+		HistogramBucketsMS:   config.DefaultHistogramBuckets(),
+	}
+
 	cfg := &config.Config{
 		Listen:   config.ListenConfig{Addr: ":0"},
 		Auth:     config.AuthConfig{Username: "admin", PasswordSHA256: hash},
 		Scrape:   config.ScrapeConfig{IntervalSeconds: 30, TimeoutMilliseconds: 5000},
+		Latency:  config.LatencyConfig{HTTP: httpCfg, ICMP: icmpCfg},
 		Targets:  []config.TargetConfig{{ID: "test-1", Name: "Test", BaseURL: "http://localhost", Enabled: true}},
 	}
 	st := state.NewManager()
 	
-	// Add some latency data
+	// Add some latency data (HTTP samples)
 	st.RecordLatency("test-1", 10.0, true)
 	st.RecordLatency("test-1", 20.0, true)
 	st.RecordLatency("test-1", 30.0, true)
@@ -178,16 +204,28 @@ func TestHandleTargetLatency_ReturnsSummary(t *testing.T) {
 		t.Errorf("Expected 200, got %d", rec.Code)
 	}
 
-	var summary state.LatencySummary
-	json.NewDecoder(rec.Body).Decode(&summary)
-	if summary.SampleCount != 3 {
-		t.Errorf("Expected 3 samples, got %d", summary.SampleCount)
+	// Response is now TargetLatencyResponse with HTTP and ICMP fields
+	var resp struct {
+		TargetID string           `json:"target_id"`
+		HTTP     *state.LatencySummary `json:"http,omitempty"`
+		ICMP     *state.LatencySummary `json:"icmp,omitempty"`
 	}
-	if summary.MinLatencyMs != 10.0 {
-		t.Errorf("Expected min 10.0, got %f", summary.MinLatencyMs)
+	json.NewDecoder(rec.Body).Decode(&resp)
+	
+	if resp.TargetID != "test-1" {
+		t.Errorf("Expected target_id 'test-1', got %q", resp.TargetID)
 	}
-	if summary.MaxLatencyMs != 30.0 {
-		t.Errorf("Expected max 30.0, got %f", summary.MaxLatencyMs)
+	if resp.HTTP == nil {
+		t.Fatal("Expected HTTP latency summary, got nil")
+	}
+	if resp.HTTP.SampleCount != 3 {
+		t.Errorf("Expected 3 samples, got %d", resp.HTTP.SampleCount)
+	}
+	if resp.HTTP.MinLatencyMs != 10.0 {
+		t.Errorf("Expected min 10.0, got %f", resp.HTTP.MinLatencyMs)
+	}
+	if resp.HTTP.MaxLatencyMs != 30.0 {
+		t.Errorf("Expected max 30.0, got %f", resp.HTTP.MaxLatencyMs)
 	}
 }
 

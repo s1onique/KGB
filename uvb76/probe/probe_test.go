@@ -25,7 +25,7 @@ func TestProbeClient_RecordsLatencyOnSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	latencyCfg := &config.LatencyConfig{
+	httpCfg := &config.HTTPProbeConfig{
 		IntervalSeconds:     60,
 		TimeoutMilliseconds: 5000,
 	}
@@ -35,7 +35,7 @@ func TestProbeClient_RecordsLatencyOnSuccess(t *testing.T) {
 	}
 
 	st := state.NewManager()
-	client := NewClient(latencyCfg, st, targets)
+	client := NewClient(httpCfg, st, targets)
 
 	// Probe
 	client.probeTarget(targets[0])
@@ -60,7 +60,7 @@ func TestProbeClient_RecordsLatencyOnFailure(t *testing.T) {
 	}))
 	server.Close()
 
-	latencyCfg := &config.LatencyConfig{
+	httpCfg := &config.HTTPProbeConfig{
 		IntervalSeconds:     60,
 		TimeoutMilliseconds: 5000,
 	}
@@ -70,7 +70,7 @@ func TestProbeClient_RecordsLatencyOnFailure(t *testing.T) {
 	}
 
 	st := state.NewManager()
-	client := NewClient(latencyCfg, st, targets)
+	client := NewClient(httpCfg, st, targets)
 
 	// Probe (will fail)
 	client.probeTarget(targets[0])
@@ -99,7 +99,7 @@ func TestProbeClient_LatencySummary(t *testing.T) {
 	}))
 	defer server.Close()
 
-	latencyCfg := &config.LatencyConfig{
+	httpCfg := &config.HTTPProbeConfig{
 		IntervalSeconds:     60,
 		TimeoutMilliseconds: 5000,
 	}
@@ -109,7 +109,7 @@ func TestProbeClient_LatencySummary(t *testing.T) {
 	}
 
 	st := state.NewManager()
-	client := NewClient(latencyCfg, st, targets)
+	client := NewClient(httpCfg, st, targets)
 
 	// Probe multiple times
 	client.probeTarget(targets[0])
@@ -158,7 +158,7 @@ func TestProbeClient_LatencyIndependentPerTarget(t *testing.T) {
 	defer server1.Close()
 	defer server2.Close()
 
-	latencyCfg := &config.LatencyConfig{
+	httpCfg := &config.HTTPProbeConfig{
 		IntervalSeconds:     60,
 		TimeoutMilliseconds: 5000,
 	}
@@ -169,7 +169,7 @@ func TestProbeClient_LatencyIndependentPerTarget(t *testing.T) {
 	}
 
 	st := state.NewManager()
-	client := NewClient(latencyCfg, st, targets)
+	client := NewClient(httpCfg, st, targets)
 
 	// Probe both
 	client.probeTarget(targets[0])
@@ -202,7 +202,7 @@ func TestProbeClient_LatencyRecordedOnTimeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	latencyCfg := &config.LatencyConfig{
+	httpCfg := &config.HTTPProbeConfig{
 		IntervalSeconds:     60,
 		TimeoutMilliseconds: 100, // Very short timeout
 	}
@@ -212,7 +212,7 @@ func TestProbeClient_LatencyRecordedOnTimeout(t *testing.T) {
 	}
 
 	st := state.NewManager()
-	client := NewClient(latencyCfg, st, targets)
+	client := NewClient(httpCfg, st, targets)
 
 	// Probe (will timeout)
 	client.probeTarget(targets[0])
@@ -235,7 +235,7 @@ func TestProbeClient_DisabledDoesNotProbe(t *testing.T) {
 	defer server.Close()
 
 	enabled := false
-	latencyCfg := &config.LatencyConfig{
+	httpCfg := &config.HTTPProbeConfig{
 		Enabled:             &enabled,
 		IntervalSeconds:     60,
 		TimeoutMilliseconds: 5000,
@@ -246,7 +246,7 @@ func TestProbeClient_DisabledDoesNotProbe(t *testing.T) {
 	}
 
 	st := state.NewManager()
-	client := NewClient(latencyCfg, st, targets)
+	client := NewClient(httpCfg, st, targets)
 
 	// Should not probe since disabled
 	client.probeAll()
@@ -260,7 +260,7 @@ func TestProbeClient_DisabledDoesNotProbe(t *testing.T) {
 
 func TestProbeClient_IsEnabled(t *testing.T) {
 	// Test with enabled = nil (default)
-	latencyCfg1 := &config.LatencyConfig{
+	httpCfg1 := &config.HTTPProbeConfig{
 		IntervalSeconds:     60,
 		TimeoutMilliseconds: 5000,
 	}
@@ -268,31 +268,31 @@ func TestProbeClient_IsEnabled(t *testing.T) {
 		{ID: "test-1", Name: "Test", BaseURL: "http://localhost:8080", Enabled: true},
 	}
 	st := state.NewManager()
-	client1 := NewClient(latencyCfg1, st, targets)
+	client1 := NewClient(httpCfg1, st, targets)
 	if !client1.IsEnabled() {
 		t.Error("Expected enabled when Enabled is nil")
 	}
 
 	// Test with enabled = true
 	enabled := true
-	latencyCfg2 := &config.LatencyConfig{
+	httpCfg2 := &config.HTTPProbeConfig{
 		Enabled:             &enabled,
 		IntervalSeconds:     60,
 		TimeoutMilliseconds: 5000,
 	}
-	client2 := NewClient(latencyCfg2, st, targets)
+	client2 := NewClient(httpCfg2, st, targets)
 	if !client2.IsEnabled() {
 		t.Error("Expected enabled when Enabled is true")
 	}
 
 	// Test with enabled = false
 	disabled := false
-	latencyCfg3 := &config.LatencyConfig{
+	httpCfg3 := &config.HTTPProbeConfig{
 		Enabled:             &disabled,
 		IntervalSeconds:     60,
 		TimeoutMilliseconds: 5000,
 	}
-	client3 := NewClient(latencyCfg3, st, targets)
+	client3 := NewClient(httpCfg3, st, targets)
 	if client3.IsEnabled() {
 		t.Error("Expected disabled when Enabled is false")
 	}
@@ -307,7 +307,7 @@ func TestProbeClient_ProbeTargetReturnsDetailedResult(t *testing.T) {
 	}))
 	defer server.Close()
 
-	latencyCfg := &config.LatencyConfig{
+	httpCfg := &config.HTTPProbeConfig{
 		IntervalSeconds:     60,
 		TimeoutMilliseconds: 5000,
 	}
@@ -317,7 +317,7 @@ func TestProbeClient_ProbeTargetReturnsDetailedResult(t *testing.T) {
 	}
 
 	st := state.NewManager()
-	client := NewClient(latencyCfg, st, targets)
+	client := NewClient(httpCfg, st, targets)
 
 	result := client.ProbeTarget(targets[0])
 
@@ -347,7 +347,7 @@ func TestProbeClient_ProbeTargetHandlesError(t *testing.T) {
 	}))
 	server.Close()
 
-	latencyCfg := &config.LatencyConfig{
+	httpCfg := &config.HTTPProbeConfig{
 		IntervalSeconds:     60,
 		TimeoutMilliseconds: 5000,
 	}
@@ -357,7 +357,7 @@ func TestProbeClient_ProbeTargetHandlesError(t *testing.T) {
 	}
 
 	st := state.NewManager()
-	client := NewClient(latencyCfg, st, targets)
+	client := NewClient(httpCfg, st, targets)
 
 	result := client.ProbeTarget(targets[0])
 
@@ -383,7 +383,7 @@ func TestProbeClient_SkipsDisabledTargets(t *testing.T) {
 	}))
 	defer server.Close()
 
-	latencyCfg := &config.LatencyConfig{
+	httpCfg := &config.HTTPProbeConfig{
 		IntervalSeconds:     60,
 		TimeoutMilliseconds: 5000,
 	}
@@ -393,7 +393,7 @@ func TestProbeClient_SkipsDisabledTargets(t *testing.T) {
 	}
 
 	st := state.NewManager()
-	client := NewClient(latencyCfg, st, targets)
+	client := NewClient(httpCfg, st, targets)
 
 	// Probe all (only disabled targets)
 	client.probeAll()
@@ -417,7 +417,7 @@ func TestProbeClient_DoesNotUpdateSnapshots(t *testing.T) {
 	}))
 	defer server.Close()
 
-	latencyCfg := &config.LatencyConfig{
+	httpCfg := &config.HTTPProbeConfig{
 		IntervalSeconds:     60,
 		TimeoutMilliseconds: 5000,
 	}
@@ -427,7 +427,7 @@ func TestProbeClient_DoesNotUpdateSnapshots(t *testing.T) {
 	}
 
 	st := state.NewManager()
-	client := NewClient(latencyCfg, st, targets)
+	client := NewClient(httpCfg, st, targets)
 
 	// Probe
 	client.probeTarget(targets[0])

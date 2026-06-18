@@ -12,7 +12,14 @@ import (
 	"github.com/s1onique/KGB/uvb76/state"
 )
 
-// handleTargetLatency returns the latency summary for a specific target.
+// TargetLatencyResponse represents the latency response for a single target.
+type TargetLatencyResponse struct {
+	TargetID string              `json:"target_id"`
+	HTTP     *state.LatencySummary `json:"http,omitempty"`
+	ICMP     *state.LatencySummary `json:"icmp,omitempty"`
+}
+
+// handleTargetLatency returns the latency summary for a specific target (both HTTP and ICMP).
 func (s *Server) handleTargetLatency(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	targetID := vars["id"]
@@ -31,10 +38,24 @@ func (s *Server) handleTargetLatency(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	summary := s.state.GetLatencySummary(targetID)
+	response := TargetLatencyResponse{
+		TargetID: targetID,
+	}
+
+	// Get HTTP latency if enabled
+	if s.cfg.Latency.HTTP.IsEnabled() {
+		httpSummary := s.state.GetLatencySummary(targetID)
+		response.HTTP = &httpSummary
+	}
+
+	// Get ICMP latency if enabled
+	if s.cfg.Latency.ICMP.IsEnabled() {
+		icmpSummary := s.state.GetICMPLatencySummary(targetID)
+		response.ICMP = &icmpSummary
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(summary)
+	json.NewEncoder(w).Encode(response)
 }
 
 // handleTargetLatencySamples returns recent latency samples for a specific target.
@@ -92,6 +113,19 @@ func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Parse probe_kind (defaults to http)
+	probeKind := r.URL.Query().Get("probe_kind")
+	if probeKind == "" {
+		probeKind = "http"
+	}
+
+	// Validate probe_kind
+	if probeKind != "http" && probeKind != "icmp" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "probe_kind must be 'http' or 'icmp'"})
+		return
+	}
+
 	// Find target in config
 	var targetCfg *config.TargetConfig
 	for _, t := range s.cfg.Targets {
@@ -128,39 +162,69 @@ func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	// Get samples
-	samples := s.state.GetRecentLatencySamples(targetID, s.state.GetMaxSamples())
+	// Get samples based on probe_kind
+	var samples []state.LatencySample
+	var intervalSeconds int
+	var windowSec int
+	var retainedRange int
+	var probeURL string
+
+	if probeKind == "http" {
+		samples = s.state.GetRecentLatencySamples(targetID, s.state.GetMaxSamples())
+		intervalSeconds = s.cfg.Latency.HTTP.IntervalSeconds
+		windowSec = s.cfg.Latency.HTTP.WindowSeconds
+		retainedRange = s.cfg.Latency.HTTP.RetainedRangeSeconds
+		probeURL = config.TargetStatusURL(targetCfg.BaseURL)
+	} else {
+		samples = s.state.GetRecentICMPLatencySamples(targetID, s.state.GetICMPMaxSamples())
+		intervalSeconds = s.cfg.Latency.ICMP.IntervalSeconds
+		windowSec = s.cfg.Latency.ICMP.WindowSeconds
+		retainedRange = s.cfg.Latency.ICMP.RetainedRangeSeconds
+		// ICMP pings the hostname from base_url without port/path
+		probeURL = targetCfg.BaseURL // for reference only
+	}
+
+	// Override window if provided in query
+	if windowSeconds <= 0 {
+		windowSeconds = windowSec
+	}
 
 	// Calculate time bounds - use trailing windows anchored to now
 	now := time.Now().UTC()
-	
+
 	// RetainedRangeSeconds = min(rangeSeconds, max samples duration)
 	// We can only show data up to the age of our oldest sample
-	retainedRange := rangeSeconds
-	if s.state.GetMaxSamples() > 0 {
+	maxRetained := retainedRange
+	var maxSamples int
+	if probeKind == "http" {
+		maxSamples = s.state.GetMaxSamples()
+	} else {
+		maxSamples = s.state.GetICMPMaxSamples()
+	}
+	if maxSamples > 0 && intervalSeconds > 0 {
 		// Each sample is at most IntervalSeconds old
-		maxSampleAge := s.cfg.Latency.IntervalSeconds * s.state.GetMaxSamples()
-		if maxSampleAge < retainedRange {
-			retainedRange = maxSampleAge
+		maxSampleAge := intervalSeconds * maxSamples
+		if maxSampleAge < maxRetained {
+			maxRetained = maxSampleAge
 		}
 	}
-	
+
 	// Clamp effective range to retained capacity
 	effectiveRange := rangeSeconds
-	if retainedRange < effectiveRange {
-		effectiveRange = retainedRange
+	if maxRetained < effectiveRange {
+		effectiveRange = maxRetained
 	}
 
 	// Build time series
 	series := state.LatencySeries{
 		TargetID:             targetID,
-		ProbeKind:           "http_status",
-		ProbeURL:            config.TargetStatusURL(targetCfg.BaseURL),
-		IntervalSeconds:     s.cfg.Latency.IntervalSeconds,
-		RangeSeconds:        effectiveRange, // clamped to retained capacity
+		ProbeKind:           probeKind,
+		ProbeURL:            probeURL,
+		IntervalSeconds:     intervalSeconds,
+		RangeSeconds:        effectiveRange,
 		StepSeconds:         stepSeconds,
 		WindowSeconds:       windowSeconds,
-		RetainedRangeSeconds: retainedRange,
+		RetainedRangeSeconds: maxRetained,
 		Points:              []state.PercentilePoint{},
 	}
 
@@ -169,7 +233,7 @@ func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Reques
 	if numSteps < 1 {
 		numSteps = 1
 	}
-	
+
 	for i := 0; i < numSteps; i++ {
 		// i=0 is oldest, i=numSteps-1 is newest
 		// stepsFromNow: how many steps back from now

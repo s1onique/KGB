@@ -1,5 +1,5 @@
-// Latency rendering module
-import { api, type LatencySummary, type LatencySeries, type PercentilePoint } from './api';
+// Latency rendering module for HTTP and ICMP latency graphs
+import { api, type LatencySummary, type LatencySeries, type PercentilePoint, type TargetLatencyResponse } from './api';
 import { renderLatencyChart, destroyChart } from './chart';
 
 function formatMs(v: number | undefined): string {
@@ -18,100 +18,163 @@ function hasFinitePercentiles(points: PercentilePoint[]): boolean {
   });
 }
 
+// Render stats for a latency section
+function renderStats(statsEl: HTMLElement, summary: LatencySummary | undefined): void {
+  if (!summary || summary.sample_count === 0) {
+    statsEl.innerHTML = '<div class="percentile-stat"><div class="label">No data</div></div>';
+    return;
+  }
+
+  statsEl.innerHTML = `
+    <div class="percentile-stat">
+        <div class="label">Latest p50</div>
+        <div class="value p50">${formatMs(summary.p50_latency_ms)}</div>
+    </div>
+    <div class="percentile-stat">
+        <div class="label">Latest p90</div>
+        <div class="value p90">${formatMs(summary.p90_latency_ms)}</div>
+    </div>
+    <div class="percentile-stat">
+        <div class="label">Latest p95</div>
+        <div class="value p95">${formatMs(summary.p95_latency_ms)}</div>
+    </div>
+    <div class="percentile-stat">
+        <div class="label">Latest p99</div>
+        <div class="value p99">${formatMs(summary.p99_latency_ms)}</div>
+    </div>
+  `;
+}
+
+// Render metadata for a latency section
+function renderMeta(metaEl: HTMLElement, series: LatencySeries | undefined, probeLabel: string): void {
+  if (!series) {
+    metaEl.innerHTML = '<span>No data</span>';
+    return;
+  }
+
+  const retainedSec = series.retained_range_seconds;
+  const retainedLabel = Number.isFinite(retainedSec) ? `${Math.round(retainedSec / 60)}m retained` : 'retention unknown';
+  metaEl.innerHTML = `
+    <span><span class="label">Probe:</span> ${probeLabel}</span>
+    <span><span class="label">Interval:</span> every ${series.interval_seconds}s</span>
+    <span><span class="label">Window:</span> ${series.window_seconds}s trailing</span>
+    <span><span class="label">Retained:</span> ${retainedLabel}</span>
+  `;
+}
+
+// Render a single latency section (HTTP or ICMP)
+async function renderLatencySection(
+  targetId: string,
+  kind: 'http' | 'icmp',
+  metaEl: HTMLElement,
+  statsEl: HTMLElement,
+  chartEl: HTMLCanvasElement,
+  emptyEl: HTMLElement,
+  warningEl: HTMLElement,
+  samplesEl: HTMLElement,
+  probeLabel: string
+): Promise<void> {
+  try {
+    // Fetch both summary and series data
+    const [latency, series] = await Promise.all([
+      api.getTargetLatency(targetId),
+      kind === 'http' ? api.getHTTPLatencySeries(targetId) : api.getICMPLatencySeries(targetId),
+    ]);
+
+    const summary = kind === 'http' ? latency.http : latency.icmp;
+    const sectionSeries = series.probe_kind === kind ? series : undefined;
+
+    if (!summary || summary.sample_count === 0) {
+      metaEl.innerHTML = `<span>${probeLabel}: No latency data</span>`;
+      statsEl.innerHTML = '<div class="percentile-stat"><div class="label">No data</div></div>';
+      destroyChart(chartEl);
+      warningEl?.classList.add('hidden');
+      samplesEl.textContent = '';
+      return;
+    }
+
+    // Update metadata
+    renderMeta(metaEl, sectionSeries, probeLabel);
+
+    // Update sample count
+    samplesEl.textContent = `Samples: ${summary.sample_count}`;
+
+    // Update percentile stats
+    renderStats(statsEl, summary);
+
+    // Draw chart
+    if (sectionSeries?.points && sectionSeries.points.length > 0) {
+      // Check if we have any finite percentile values
+      if (hasFinitePercentiles(sectionSeries.points)) {
+        // Show canvas, hide empty overlay
+        emptyEl?.classList.add('hidden');
+        chartEl.classList.remove('hidden');
+
+        renderLatencyChart(chartEl, sectionSeries.points);
+
+        // Show warning if sample count is low
+        const latestPoint = sectionSeries.points[sectionSeries.points.length - 1];
+        if (latestPoint && latestPoint.sample_count < 10) {
+          warningEl?.classList.remove('hidden');
+        } else {
+          warningEl?.classList.add('hidden');
+        }
+      } else {
+        // Summary has data but series has no finite percentile points yet
+        // Preserve canvas in DOM - use overlay approach for recovery
+        destroyChart(chartEl);
+        chartEl.classList.add('hidden');
+        emptyEl?.classList.remove('hidden');
+        warningEl?.classList.add('hidden');
+      }
+    } else {
+      destroyChart(chartEl);
+      emptyEl?.classList.add('hidden');
+      warningEl?.classList.add('hidden');
+    }
+  } catch (e) {
+    console.error(`Failed to load ${kind} latency for`, targetId, e);
+    metaEl.innerHTML = `<span>Error loading ${kind}</span>`;
+  }
+}
+
 export interface LatencyRenderer {
   loadAndRender(targetId: string): Promise<void>;
 }
 
 function createLatencyRenderer(): LatencyRenderer {
   async function loadAndRender(targetId: string): Promise<void> {
-    const metaEl = document.getElementById(`meta-${targetId}`);
-    const statsEl = document.getElementById(`stats-${targetId}`);
-    const chartEl = document.getElementById(`chart-${targetId}`) as HTMLCanvasElement;
-    const emptyEl = document.getElementById(`chart-empty-${targetId}`);
-    const warningEl = document.getElementById(`warning-${targetId}`);
+    // HTTP section elements
+    const httpMetaEl = document.getElementById(`meta-http-${targetId}`);
+    const httpStatsEl = document.getElementById(`stats-http-${targetId}`);
+    const httpChartEl = document.getElementById(`chart-http-${targetId}`) as HTMLCanvasElement;
+    const httpEmptyEl = document.getElementById(`chart-empty-http-${targetId}`);
+    const httpWarningEl = document.getElementById(`warning-http-${targetId}`);
+    const httpSamplesEl = document.getElementById(`samples-http-${targetId}`);
 
-    if (!metaEl || !statsEl || !chartEl) return;
+    // ICMP section elements
+    const icmpMetaEl = document.getElementById(`meta-icmp-${targetId}`);
+    const icmpStatsEl = document.getElementById(`stats-icmp-${targetId}`);
+    const icmpChartEl = document.getElementById(`chart-icmp-${targetId}`) as HTMLCanvasElement;
+    const icmpEmptyEl = document.getElementById(`chart-empty-icmp-${targetId}`);
+    const icmpWarningEl = document.getElementById(`warning-icmp-${targetId}`);
+    const icmpSamplesEl = document.getElementById(`samples-icmp-${targetId}`);
 
-    try {
-      // Fetch both summary and series data
-      const [summary, series] = await Promise.all([
-        api.getTargetLatency(targetId),
-        api.getLatencySeries(targetId),
-      ]);
+    if (!httpMetaEl || !httpStatsEl || !httpChartEl) return;
 
-      if (summary.sample_count === 0) {
-        metaEl.innerHTML = '<span>No latency data</span>';
-        statsEl.innerHTML = '<div class="percentile-stat"><div class="label">No data</div></div>';
-        destroyChart(chartEl);
-        warningEl?.classList.add('hidden');
-        return;
-      }
-
-      // Update metadata
-      const retainedSec = series.retained_range_seconds;
-      const retainedLabel = Number.isFinite(retainedSec) ? `${Math.round(retainedSec / 60)}m retained` : 'retention unknown';
-      metaEl.innerHTML = `
-        <span><span class="label">Probe:</span> HTTP status probe</span>
-        <span><span class="label">Interval:</span> every ${series.interval_seconds}s</span>
-        <span><span class="label">Window:</span> ${series.window_seconds}s trailing</span>
-        <span><span class="label">Retained:</span> ${retainedLabel}</span>
-        <span><span class="label">Samples:</span> ${summary.sample_count}</span>
-      `;
-
-      // Update percentile stats
-      statsEl.innerHTML = `
-        <div class="percentile-stat">
-            <div class="label">Latest p50</div>
-            <div class="value p50">${formatMs(summary.p50_latency_ms)}</div>
-        </div>
-        <div class="percentile-stat">
-            <div class="label">Latest p90</div>
-            <div class="value p90">${formatMs(summary.p90_latency_ms)}</div>
-        </div>
-        <div class="percentile-stat">
-            <div class="label">Latest p95</div>
-            <div class="value p95">${formatMs(summary.p95_latency_ms)}</div>
-        </div>
-        <div class="percentile-stat">
-            <div class="label">Latest p99</div>
-            <div class="value p99">${formatMs(summary.p99_latency_ms)}</div>
-        </div>
-      `;
-
-      // Draw chart
-      if (series.points && series.points.length > 0) {
-        // Check if we have any finite percentile values
-        if (hasFinitePercentiles(series.points)) {
-          // Show canvas, hide empty overlay
-          emptyEl?.classList.add('hidden');
-          chartEl.classList.remove('hidden');
-
-          renderLatencyChart(chartEl, series.points);
-
-          // Show warning if sample count is low
-          const latestPoint = series.points[series.points.length - 1];
-          if (latestPoint && latestPoint.sample_count < 10) {
-            warningEl?.classList.remove('hidden');
-          } else {
-            warningEl?.classList.add('hidden');
-          }
-        } else {
-          // Summary has data but series has no finite percentile points yet
-          // Preserve canvas in DOM - use overlay approach for recovery
-          destroyChart(chartEl);
-          chartEl.classList.add('hidden');
-          emptyEl?.classList.remove('hidden');
-          warningEl?.classList.add('hidden');
-        }
-      } else {
-        destroyChart(chartEl);
-        emptyEl?.classList.add('hidden');
-        warningEl?.classList.add('hidden');
-      }
-    } catch (e) {
-      console.error('Failed to load latency for', targetId, e);
-      metaEl.innerHTML = '<span>Error loading</span>';
-    }
+    // Render both sections
+    await Promise.all([
+      renderLatencySection(
+        targetId, 'http',
+        httpMetaEl, httpStatsEl, httpChartEl, httpEmptyEl!, httpWarningEl!, httpSamplesEl!,
+        'HTTP status probe'
+      ),
+      renderLatencySection(
+        targetId, 'icmp',
+        icmpMetaEl!, icmpStatsEl!, icmpChartEl, icmpEmptyEl!, icmpWarningEl!, icmpSamplesEl!,
+        'ICMP ping'
+      ),
+    ]);
   }
 
   return { loadAndRender };

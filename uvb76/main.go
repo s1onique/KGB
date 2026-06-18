@@ -55,8 +55,10 @@ func main() {
 		log.Fatalf("Invalid latency config: %v", err)
 	}
 
-	// Initialize state manager with latency configuration
-	stateManager := state.NewManagerWithConfig(latencyCfg.HistogramBucketsMS, latencyCfg.RecentSamplesMax)
+	// Initialize state manager with HTTP latency configuration
+	stateManager := state.NewManagerWithConfig(latencyCfg.HTTP.HistogramBucketsMS, latencyCfg.HTTP.RecentSamplesMax)
+	// Configure ICMP with its own histogram buckets and max samples
+	stateManager.ConfigureICMP(latencyCfg.ICMP.HistogramBucketsMS, latencyCfg.ICMP.RecentSamplesMax)
 
 	// Create target configs slice
 	targets := make([]*config.TargetConfig, 0, len(cfg.Targets))
@@ -68,15 +70,25 @@ func main() {
 	client := scraper.NewClient(&cfg.Scrape, stateManager, targets)
 	client.Start()
 
-	// Initialize probe client (independent latency probing)
-	probeClient := probe.NewClient(&latencyCfg, stateManager, targets)
-	if probeClient.IsEnabled() {
-		log.Printf("Latency probing enabled (interval: %ds, timeout: %dms)",
-			latencyCfg.IntervalSeconds, latencyCfg.TimeoutMilliseconds)
+	// Initialize HTTP probe client (independent latency probing)
+	httpProbeClient := probe.NewClient(&latencyCfg.HTTP, stateManager, targets)
+	if httpProbeClient.IsEnabled() {
+		log.Printf("HTTP status probe enabled (interval: %ds, timeout: %dms)",
+			latencyCfg.HTTP.IntervalSeconds, latencyCfg.HTTP.TimeoutMilliseconds)
 	} else {
-		log.Println("Latency probing disabled")
+		log.Println("HTTP status probe disabled")
 	}
-	probeClient.Start()
+	httpProbeClient.Start()
+
+	// Initialize ICMP probe client (independent ICMP ping probing)
+	icmpProbeClient := probe.NewICMPClient(&latencyCfg.ICMP, stateManager, targets)
+	if icmpProbeClient.IsEnabled() {
+		log.Printf("ICMP ping probe enabled (interval: %ds, timeout: %ds)",
+			latencyCfg.ICMP.IntervalSeconds, latencyCfg.ICMP.TimeoutSeconds)
+	} else {
+		log.Println("ICMP ping probe disabled")
+	}
+	icmpProbeClient.Start()
 
 	// Initialize server (HTTPS in production, HTTP in dev mode)
 	srv := server.NewServer(cfg, stateManager, client, *devMode)
@@ -96,7 +108,8 @@ func main() {
 	<-sigCh
 	log.Println("Shutting down...")
 	client.Stop()
-	probeClient.Stop()
+	httpProbeClient.Stop()
+	icmpProbeClient.Stop()
 	srv.Stop()
 	log.Println("Shutdown complete.")
 }

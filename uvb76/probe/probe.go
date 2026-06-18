@@ -13,10 +13,10 @@ import (
 	"github.com/s1onique/KGB/uvb76/state"
 )
 
-// Client performs independent latency probes against tovarisch targets.
+// Client performs independent HTTP latency probes against tovarisch targets.
 type Client struct {
 	httpClient *http.Client
-	cfg        *config.LatencyConfig
+	cfg        *config.HTTPProbeConfig
 	state      *state.Manager
 	targets    map[string]*config.TargetConfig // keyed by ID, immutable after creation
 	mu         sync.RWMutex
@@ -25,17 +25,17 @@ type Client struct {
 	enabled    bool
 }
 
-// NewClient creates a new probe client.
-func NewClient(latencyCfg *config.LatencyConfig, st *state.Manager, targets []*config.TargetConfig) *Client {
+// NewClient creates a new HTTP probe client.
+func NewClient(httpCfg *config.HTTPProbeConfig, st *state.Manager, targets []*config.TargetConfig) *Client {
 	client := &Client{
 		httpClient: &http.Client{
-			Timeout: time.Duration(latencyCfg.TimeoutMilliseconds) * time.Millisecond,
+			Timeout: time.Duration(httpCfg.TimeoutMilliseconds) * time.Millisecond,
 		},
-		cfg:     latencyCfg,
+		cfg:     httpCfg,
 		state:   st,
 		targets: make(map[string]*config.TargetConfig),
 		stopCh:  make(chan struct{}),
-		enabled: latencyCfg.IsEnabled(),
+		enabled: httpCfg.IsEnabled(),
 	}
 
 	for _, t := range targets {

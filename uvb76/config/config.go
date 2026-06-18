@@ -17,23 +17,23 @@ func TargetStatusURL(baseURL string) string {
 
 // Config represents the full configuration for UVB-76.
 type Config struct {
-	Listen   ListenConfig    `json:"listen"`
-	Auth     AuthConfig      `json:"auth"`
-	Scrape   ScrapeConfig    `json:"scrape"`
-	Latency  LatencyConfig   `json:"latency"`
-	Targets  []TargetConfig  `json:"targets"`
+	Listen  ListenConfig   `json:"listen"`
+	Auth    AuthConfig     `json:"auth"`
+	Scrape  ScrapeConfig   `json:"scrape"`
+	Latency LatencyConfig  `json:"latency"`
+	Targets []TargetConfig `json:"targets"`
 }
 
 // ListenConfig holds HTTP server settings.
 type ListenConfig struct {
-	Addr         string `json:"addr"`
-	TLSCertFile  string `json:"tls_cert_file"`
-	TLSKeyFile   string `json:"tls_key_file"`
+	Addr        string `json:"addr"`
+	TLSCertFile string `json:"tls_cert_file"`
+	TLSKeyFile  string `json:"tls_key_file"`
 }
 
 // AuthConfig holds authentication credentials.
 type AuthConfig struct {
-	Username     string `json:"username"`
+	Username      string `json:"username"`
 	PasswordSHA256 string `json:"password_sha256"`
 }
 
@@ -43,102 +43,34 @@ type ScrapeConfig struct {
 	TimeoutMilliseconds int `json:"timeout_milliseconds"`
 }
 
-// LatencyConfig holds latency measurement settings.
-type LatencyConfig struct {
-	Enabled            *bool   `json:"enabled"` // pointer so we can distinguish unset from false
-	IntervalSeconds    int     `json:"interval_seconds"`
-	TimeoutMilliseconds int    `json:"timeout_milliseconds"`
-	HistogramBucketsMS []int64 `json:"histogram_buckets_ms"`
-	RecentSamplesMax   int     `json:"recent_samples_max"`
-}
-
-// DefaultHistogramBuckets returns standard histogram bucket boundaries in ms.
-func DefaultHistogramBuckets() []int64 {
-	return []int64{5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000}
-}
-
-// DefaultLatencyIntervalSeconds is the default interval for latency probing.
-const DefaultLatencyIntervalSeconds = 30
-
-// DefaultLatencyTimeoutMilliseconds is the default timeout for latency probes.
-const DefaultLatencyTimeoutMilliseconds = 5000
-
-// DefaultRecentSamplesMax is the default max number of recent latency samples to keep.
-const DefaultRecentSamplesMax = 100
-
-// ApplyDefaults applies sensible defaults to latency config when values are missing.
-// Does NOT overwrite an explicit enabled=false.
-func (c *LatencyConfig) ApplyDefaults() {
-	// Only set enabled to true if not explicitly set to false
-	if c.Enabled == nil {
-		enabled := true
-		c.Enabled = &enabled
-	}
-	if c.HistogramBucketsMS == nil || len(c.HistogramBucketsMS) == 0 {
-		c.HistogramBucketsMS = DefaultHistogramBuckets()
-	}
-	if c.RecentSamplesMax <= 0 {
-		c.RecentSamplesMax = DefaultRecentSamplesMax
-	}
-	if c.IntervalSeconds <= 0 {
-		c.IntervalSeconds = DefaultLatencyIntervalSeconds
-	}
-	if c.TimeoutMilliseconds <= 0 {
-		c.TimeoutMilliseconds = DefaultLatencyTimeoutMilliseconds
-	}
-}
-
-// IsEnabled returns whether latency measurement is enabled.
-// Returns true if Enabled is nil (default) or true, false only if explicitly set to false.
-func (c *LatencyConfig) IsEnabled() bool {
-	return c.Enabled == nil || *c.Enabled
-}
-
-// ValidateLatencyConfig validates the latency configuration.
-func ValidateLatencyConfig(c LatencyConfig) error {
-	if c.RecentSamplesMax <= 0 {
-		return errors.New("latency.recent_samples_max must be > 0")
-	}
-	if len(c.HistogramBucketsMS) == 0 {
-		return errors.New("latency.histogram_buckets_ms cannot be empty")
-	}
-	// Check for non-positive bucket values
-	for _, bucket := range c.HistogramBucketsMS {
-		if bucket <= 0 {
-			return errors.New("latency.histogram_buckets_ms values must be > 0")
-		}
-	}
-	return nil
-}
-
 // TargetConfig represents a single tovarisch target.
 type TargetConfig struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	BaseURL  string `json:"base_url"`
-	Enabled  bool   `json:"enabled"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	BaseURL string `json:"base_url"`
+	Enabled bool   `json:"enabled"`
 }
 
 // Validation errors.
 var (
-	ErrEmptyListenAddr        = errors.New("listen.addr is required")
-	ErrEmptyTLSCert           = errors.New("listen.tls_cert_file is required")
-	ErrEmptyTLSKey            = errors.New("listen.tls_key_file is required")
-	ErrEmptyUsername          = errors.New("auth.username is required")
-	ErrEmptyPasswordSHA256    = errors.New("auth.password_sha256 is required")
-	ErrEmptyPasswordFormat    = errors.New("auth.password_sha256 must be in format sha256:<salt>:<hex>")
-	ErrInvalidPasswordFormat  = errors.New("auth.password_sha256 format must be sha256:<salt>:<hex>")
-	ErrInvalidSaltLength      = errors.New("auth.password_sha256 salt must be 16 bytes (32 hex chars)")
-	ErrInvalidHashLength      = errors.New("auth.password_sha256 hash must be 32 bytes (64 hex chars)")
-	ErrInvalidSaltHex         = errors.New("auth.password_sha256 salt must be valid hex")
-	ErrInvalidHashHex         = errors.New("auth.password_sha256 hash must be valid hex")
-	ErrInvalidInterval        = errors.New("scrape.interval_seconds must be > 0")
-	ErrInvalidTimeout         = errors.New("scrape.timeout_milliseconds must be > 0")
-	ErrEmptyTargetID          = errors.New("target.id is required")
-	ErrEmptyTargetName        = errors.New("target.name is required")
-	ErrEmptyTargetBaseURL     = errors.New("target.base_url is required")
+	ErrEmptyListenAddr            = errors.New("listen.addr is required")
+	ErrEmptyTLSCert               = errors.New("listen.tls_cert_file is required")
+	ErrEmptyTLSKey                = errors.New("listen.tls_key_file is required")
+	ErrEmptyUsername              = errors.New("auth.username is required")
+	ErrEmptyPasswordSHA256        = errors.New("auth.password_sha256 is required")
+	ErrEmptyPasswordFormat        = errors.New("auth.password_sha256 must be in format sha256:<salt>:<hex>")
+	ErrInvalidPasswordFormat      = errors.New("auth.password_sha256 format must be sha256:<salt>:<hex>")
+	ErrInvalidSaltLength          = errors.New("auth.password_sha256 salt must be 16 bytes (32 hex chars)")
+	ErrInvalidHashLength          = errors.New("auth.password_sha256 hash must be 32 bytes (64 hex chars)")
+	ErrInvalidSaltHex             = errors.New("auth.password_sha256 salt must be valid hex")
+	ErrInvalidHashHex             = errors.New("auth.password_sha256 hash must be valid hex")
+	ErrInvalidInterval            = errors.New("scrape.interval_seconds must be > 0")
+	ErrInvalidTimeout             = errors.New("scrape.timeout_milliseconds must be > 0")
+	ErrEmptyTargetID              = errors.New("target.id is required")
+	ErrEmptyTargetName            = errors.New("target.name is required")
+	ErrEmptyTargetBaseURL         = errors.New("target.base_url is required")
 	ErrInvalidTargetBaseURLScheme = errors.New("target.base_url must use http:// or https:// scheme")
-	ErrDuplicateTargetID      = errors.New("duplicate target.id found")
+	ErrDuplicateTargetID          = errors.New("duplicate target.id found")
 )
 
 // ValidationOptions controls validation behavior.

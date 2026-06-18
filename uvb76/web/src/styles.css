@@ -151,6 +151,25 @@ h2 { color: #8b949e; margin: 1.5rem 0 1rem; font-weight: 500; }
     margin-top: 0.5rem;
 }
 
+/* Latency section container */
+.latency-section {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px dashed #30363d;
+}
+.latency-section:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+/* Sample count */
+.sample-count {
+    font-size: 0.75rem;
+    color: #8b949e;
+    margin-top: 0.25rem;
+}
+
 /* Loading spinner */
 .loading { text-align: center; padding: 2rem; color: #8b949e; }
 .spinner {

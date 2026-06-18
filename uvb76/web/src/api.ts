@@ -37,6 +37,13 @@ export interface LatencySummary {
   p99_latency_ms?: number;
 }
 
+// TargetLatencyResponse includes both HTTP and ICMP latency for a target
+export interface TargetLatencyResponse {
+  target_id: string;
+  http?: LatencySummary;
+  icmp?: LatencySummary;
+}
+
 export interface LatencySeries {
   target_id: string;
   probe_kind: string;
@@ -118,8 +125,8 @@ class ApiClient {
     return this.fetch<TargetSnapshot>(`/api/v1/targets/${targetId}/snapshot`);
   }
 
-  async getTargetLatency(targetId: string): Promise<LatencySummary> {
-    return this.fetch<LatencySummary>(`/api/v1/targets/${targetId}/latency`);
+  async getTargetLatency(targetId: string): Promise<TargetLatencyResponse> {
+    return this.fetch<TargetLatencyResponse>(`/api/v1/targets/${targetId}/latency`);
   }
 
   async getLatencySeries(
@@ -130,6 +137,28 @@ class ApiClient {
   ): Promise<LatencySeries> {
     return this.fetch<LatencySeries>(
       `/api/v1/latency/series?target_id=${targetId}&range_seconds=${rangeSeconds}&step_seconds=${stepSeconds}&window_seconds=${windowSeconds}`
+    );
+  }
+
+  async getHTTPLatencySeries(
+    targetId: string,
+    rangeSeconds: number = 3600,
+    stepSeconds: number = 60,
+    windowSeconds: number = 300
+  ): Promise<LatencySeries> {
+    return this.fetch<LatencySeries>(
+      `/api/v1/latency/series?target_id=${targetId}&probe_kind=http&range_seconds=${rangeSeconds}&step_seconds=${stepSeconds}&window_seconds=${windowSeconds}`
+    );
+  }
+
+  async getICMPLatencySeries(
+    targetId: string,
+    rangeSeconds: number = 3600,
+    stepSeconds: number = 60,
+    windowSeconds: number = 300
+  ): Promise<LatencySeries> {
+    return this.fetch<LatencySeries>(
+      `/api/v1/latency/series?target_id=${targetId}&probe_kind=icmp&range_seconds=${rangeSeconds}&step_seconds=${stepSeconds}&window_seconds=${windowSeconds}`
     );
   }
 }

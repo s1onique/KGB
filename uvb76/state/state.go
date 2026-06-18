@@ -84,22 +84,27 @@ type LatencySeries struct {
 type Manager struct {
 	mu              sync.RWMutex
 	snapshots        map[string]*TargetSnapshot       // keyed by target ID
-	latencyTrackers map[string]*LatencyTracker      // keyed by target ID
-	buckets         []int64                          // histogram bucket boundaries
-	maxSamples      int                             // max recent samples per target
+	httpTrackers    map[string]*LatencyTracker      // keyed by target ID - HTTP samples only
+	icmpTrackers    map[string]*LatencyTracker      // keyed by target ID - ICMP samples only
+	buckets         []int64                          // histogram bucket boundaries for HTTP
+	maxSamples      int                             // max recent samples per target for HTTP
+	icmpBuckets     []int64                          // histogram bucket boundaries for ICMP
+	icmpMaxSamples  int                             // max recent samples per target for ICMP
 }
 
 // NewManager creates a new state manager with bounded capacity.
 func NewManager() *Manager {
 	return &Manager{
-		snapshots:        make(map[string]*TargetSnapshot),
-		latencyTrackers: make(map[string]*LatencyTracker),
-		buckets:         []int64{5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000},
-		maxSamples:      100,
+		snapshots:     make(map[string]*TargetSnapshot),
+		httpTrackers:  make(map[string]*LatencyTracker),
+		icmpTrackers:  make(map[string]*LatencyTracker),
+		buckets:       []int64{5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000},
+		maxSamples:    100,
 	}
 }
 
-// NewManagerWithConfig creates a new state manager with custom latency config.
+// NewManagerWithConfig creates a new state manager with custom latency config for HTTP.
+// ICMP uses the same defaults until configured separately.
 func NewManagerWithConfig(buckets []int64, maxSamples int) *Manager {
 	if maxSamples <= 0 {
 		maxSamples = 100
@@ -110,7 +115,23 @@ func NewManagerWithConfig(buckets []int64, maxSamples int) *Manager {
 	m := NewManager()
 	m.buckets = buckets
 	m.maxSamples = maxSamples
+	m.icmpBuckets = buckets  // ICMP starts with same buckets
+	m.icmpMaxSamples = maxSamples  // ICMP starts with same max samples
 	return m
+}
+
+// ConfigureICMP sets the ICMP-specific histogram buckets and max samples.
+func (m *Manager) ConfigureICMP(buckets []int64, maxSamples int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(buckets) == 0 {
+		buckets = m.buckets  // fallback to HTTP buckets
+	}
+	if maxSamples <= 0 {
+		maxSamples = m.maxSamples  // fallback to HTTP max samples
+	}
+	m.icmpBuckets = buckets
+	m.icmpMaxSamples = maxSamples
 }
 
 // UpdateSnapshot stores the latest snapshot for a target.
@@ -145,37 +166,62 @@ func (m *Manager) GetSnapshotCount() int {
 	return len(m.snapshots)
 }
 
-// RecordLatency records a latency measurement for a target.
+// RecordLatency records an HTTP latency measurement for a target.
 func (m *Manager) RecordLatency(targetID string, latencyMs float64, reachable bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	tracker, exists := m.latencyTrackers[targetID]
+	tracker, exists := m.httpTrackers[targetID]
 	if !exists {
 		tracker = NewLatencyTracker(m.buckets, m.maxSamples)
-		m.latencyTrackers[targetID] = tracker
+		m.httpTrackers[targetID] = tracker
 	}
 	tracker.Record(latencyMs, reachable)
 }
 
-// GetLatencySummary returns the latency summary for a target.
+// RecordICMPLatency records an ICMP latency measurement for a target.
+func (m *Manager) RecordICMPLatency(targetID string, latencyMs float64, reachable bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tracker, exists := m.icmpTrackers[targetID]
+	if !exists {
+		tracker = NewLatencyTracker(m.icmpBuckets, m.icmpMaxSamples)
+		m.icmpTrackers[targetID] = tracker
+	}
+	tracker.Record(latencyMs, reachable)
+}
+
+// GetLatencySummary returns the HTTP latency summary for a target.
 func (m *Manager) GetLatencySummary(targetID string) LatencySummary {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	tracker := m.latencyTrackers[targetID]
+	tracker := m.httpTrackers[targetID]
 	if tracker == nil {
 		return LatencySummary{TargetID: targetID, Histogram: Histogram{Buckets: m.buckets}}
 	}
 	return tracker.GetSummary(targetID)
 }
 
-// GetRecentLatencySamples returns the recent latency samples for a target.
+// GetICMPLatencySummary returns the ICMP latency summary for a target.
+func (m *Manager) GetICMPLatencySummary(targetID string) LatencySummary {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	tracker := m.icmpTrackers[targetID]
+	if tracker == nil {
+		return LatencySummary{TargetID: targetID, Histogram: Histogram{Buckets: m.icmpBuckets}}
+	}
+	return tracker.GetSummary(targetID)
+}
+
+// GetRecentLatencySamples returns the recent HTTP latency samples for a target.
 func (m *Manager) GetRecentLatencySamples(targetID string, limit int) []LatencySample {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	tracker := m.latencyTrackers[targetID]
+	tracker := m.httpTrackers[targetID]
 	if tracker == nil {
 		return []LatencySample{}
 	}
@@ -188,19 +234,49 @@ func (m *Manager) GetRecentLatencySamples(targetID string, limit int) []LatencyS
 	return tracker.GetRecentSamples(limit)
 }
 
-// GetAllLatencySummaries returns latency summaries for all tracked targets.
+// GetRecentICMPLatencySamples returns the recent ICMP latency samples for a target.
+func (m *Manager) GetRecentICMPLatencySamples(targetID string, limit int) []LatencySample {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	tracker := m.icmpTrackers[targetID]
+	if tracker == nil {
+		return []LatencySample{}
+	}
+	// Clamp limit to valid range
+	if limit <= 0 {
+		limit = m.icmpMaxSamples
+	} else if limit > m.icmpMaxSamples {
+		limit = m.icmpMaxSamples
+	}
+	return tracker.GetRecentSamples(limit)
+}
+
+// GetAllLatencySummaries returns HTTP latency summaries for all tracked targets.
 func (m *Manager) GetAllLatencySummaries() map[string]LatencySummary {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	result := make(map[string]LatencySummary)
-	for targetID, tracker := range m.latencyTrackers {
+	for targetID, tracker := range m.httpTrackers {
 		result[targetID] = tracker.GetSummary(targetID)
 	}
 	return result
 }
 
-// GetAllTargetSummaries returns latency summaries for all configured targets.
+// GetAllICMPLatencySummaries returns ICMP latency summaries for all tracked targets.
+func (m *Manager) GetAllICMPLatencySummaries() map[string]LatencySummary {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	result := make(map[string]LatencySummary)
+	for targetID, tracker := range m.icmpTrackers {
+		result[targetID] = tracker.GetSummary(targetID)
+	}
+	return result
+}
+
+// GetAllTargetSummaries returns HTTP latency summaries for all configured targets.
 // Includes targets with zero samples (stable API shape on fresh boot).
 func (m *Manager) GetAllTargetSummaries(targetIDs []string) map[string]LatencySummary {
 	m.mu.RLock()
@@ -211,7 +287,7 @@ func (m *Manager) GetAllTargetSummaries(targetIDs []string) map[string]LatencySu
 	copy(buckets, m.buckets)
 
 	for _, targetID := range targetIDs {
-		tracker := m.latencyTrackers[targetID]
+		tracker := m.httpTrackers[targetID]
 		if tracker != nil {
 			result[targetID] = tracker.GetSummary(targetID)
 		} else {
@@ -238,11 +314,18 @@ func (m *Manager) GetLatencyBuckets() []int64 {
 	return buckets
 }
 
-// GetMaxSamples returns the configured max samples per target.
+// GetMaxSamples returns the configured max samples per target (HTTP).
 func (m *Manager) GetMaxSamples() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.maxSamples
+}
+
+// GetICMPMaxSamples returns the configured max samples per target for ICMP.
+func (m *Manager) GetICMPMaxSamples() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.icmpMaxSamples
 }
 
 // CalculatePercentiles computes percentiles from a sorted slice of samples.

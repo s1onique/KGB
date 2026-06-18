@@ -16,7 +16,7 @@ func TestProbeClient_StartStopCleanLifecycle(t *testing.T) {
 	}))
 	defer server.Close()
 
-	latencyCfg := &config.LatencyConfig{
+	httpCfg := &config.HTTPProbeConfig{
 		IntervalSeconds:     1, // Fast interval for testing
 		TimeoutMilliseconds: 5000,
 	}
@@ -26,7 +26,7 @@ func TestProbeClient_StartStopCleanLifecycle(t *testing.T) {
 	}
 
 	st := state.NewManager()
-	client := NewClient(latencyCfg, st, targets)
+	client := NewClient(httpCfg, st, targets)
 
 	// Start
 	client.Start()
@@ -46,7 +46,7 @@ func TestProbeClient_StartStopCleanLifecycle(t *testing.T) {
 
 func TestProbeClient_StartDoesNothingWhenDisabled(t *testing.T) {
 	enabled := false
-	latencyCfg := &config.LatencyConfig{
+	httpCfg := &config.HTTPProbeConfig{
 		Enabled:             &enabled,
 		IntervalSeconds:     1,
 		TimeoutMilliseconds: 5000,
@@ -57,7 +57,7 @@ func TestProbeClient_StartDoesNothingWhenDisabled(t *testing.T) {
 	}
 
 	st := state.NewManager()
-	client := NewClient(latencyCfg, st, targets)
+	client := NewClient(httpCfg, st, targets)
 
 	// Start should not do anything when disabled
 	client.Start()
