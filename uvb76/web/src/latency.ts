@@ -107,10 +107,18 @@ async function renderLatencySection(
     // Update metadata
     renderMeta(metaEl, sectionSeries, probeLabel);
 
-    // Update sample count - show both total retained and visible
-    if (sectionSeries?.sample_count && sectionSeries?.points) {
-      const visibleCount = sectionSeries.points.length;
-      samplesEl.textContent = `Samples: ${sectionSeries.sample_count} retained / ${visibleCount} visible`;
+    // Update sample count - show retained, visible, and capacity
+    // Use new fields: retained_sample_count, returned_point_count, retained_sample_capacity
+    const retainedCount = sectionSeries?.retained_sample_count ?? sectionSeries?.sample_count ?? summary.sample_count;
+    const capacity = sectionSeries?.retained_sample_capacity ?? 0;
+    const visibleCount = sectionSeries?.points?.length ?? 0;
+    
+    if (sectionSeries) {
+      if (capacity > 0) {
+        samplesEl.textContent = `Samples: ${retainedCount} retained / ${visibleCount} visible / ${capacity} capacity`;
+      } else {
+        samplesEl.textContent = `Samples: ${retainedCount} retained / ${visibleCount} visible`;
+      }
     } else {
       samplesEl.textContent = `Samples: ${summary.sample_count}`;
     }

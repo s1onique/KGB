@@ -53,7 +53,10 @@ export interface LatencySeries {
   step_seconds: number;
   window_seconds: number;
   retained_range_seconds: number;
-  sample_count: number;
+  sample_count: number;             // DEPRECATED: use retained_sample_count
+  retained_sample_count: number;    // actual samples currently in buffer
+  retained_sample_capacity: number; // max samples buffer can hold
+  returned_point_count: number;     // number of chart points returned
   oldest_sample_ts?: string;
   newest_sample_ts?: string;
   points: PercentilePoint[];

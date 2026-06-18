@@ -70,18 +70,21 @@ type PercentilePoint struct {
 
 // LatencySeries represents a time-series of latency percentiles for a target.
 type LatencySeries struct {
-	TargetID             string            `json:"target_id"`
-	ProbeKind            string            `json:"probe_kind"`
-	ProbeURL             string            `json:"probe_url"`
-	IntervalSeconds      int               `json:"interval_seconds"`
-	RangeSeconds         int               `json:"range_seconds"`
-	StepSeconds          int               `json:"step_seconds"`
-	WindowSeconds        int               `json:"window_seconds"`
-	RetainedRangeSeconds int               `json:"retained_range_seconds"`
-	SampleCount          int               `json:"sample_count"`           // total samples in buffer
-	OldestSampleTs       *time.Time        `json:"oldest_sample_ts,omitempty"` // oldest sample timestamp
-	NewestSampleTs       *time.Time        `json:"newest_sample_ts,omitempty"` // newest sample timestamp
-	Points               []PercentilePoint `json:"points"`
+	TargetID               string            `json:"target_id"`
+	ProbeKind              string            `json:"probe_kind"`
+	ProbeURL               string            `json:"probe_url"`
+	IntervalSeconds        int               `json:"interval_seconds"`
+	RangeSeconds           int               `json:"range_seconds"`
+	StepSeconds            int               `json:"step_seconds"`
+	WindowSeconds          int               `json:"window_seconds"`
+	RetainedRangeSeconds   int               `json:"retained_range_seconds"`
+	SampleCount            int               `json:"sample_count"`           // DEPRECATED: use RetainedSampleCount
+	RetainedSampleCount    int               `json:"retained_sample_count"`  // actual samples currently in buffer
+	RetainedSampleCapacity int               `json:"retained_sample_capacity"` // max samples buffer can hold
+	ReturnedPointCount     int               `json:"returned_point_count"`   // number of chart points returned
+	OldestSampleTs         *time.Time        `json:"oldest_sample_ts,omitempty"` // oldest sample timestamp
+	NewestSampleTs         *time.Time        `json:"newest_sample_ts,omitempty"` // newest sample timestamp
+	Points                 []PercentilePoint `json:"points"`
 }
 
 type Manager struct {

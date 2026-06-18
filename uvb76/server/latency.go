@@ -225,20 +225,23 @@ func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Reques
 		effectiveRange = maxRetained
 	}
 
-	// Build time series
+	// Build time series with explicit retention metadata
 	series := state.LatencySeries{
-		TargetID:             targetID,
-		ProbeKind:           probeKind,
-		ProbeURL:            probeURL,
-		IntervalSeconds:     intervalSeconds,
-		RangeSeconds:        effectiveRange,
-		StepSeconds:         stepSeconds,
-		WindowSeconds:       windowSeconds,
-		RetainedRangeSeconds: maxRetained,
-		SampleCount:         sampleCount,
-		OldestSampleTs:      oldestTs,
-		NewestSampleTs:      newestTs,
-		Points:              []state.PercentilePoint{},
+		TargetID:               targetID,
+		ProbeKind:              probeKind,
+		ProbeURL:               probeURL,
+		IntervalSeconds:        intervalSeconds,
+		RangeSeconds:           effectiveRange,
+		StepSeconds:            stepSeconds,
+		WindowSeconds:          windowSeconds,
+		RetainedRangeSeconds:   maxRetained,
+		SampleCount:            sampleCount,           // DEPRECATED: for backward compat
+		RetainedSampleCount:    sampleCount,           // actual samples in buffer
+		RetainedSampleCapacity: maxSamples,            // buffer capacity
+		ReturnedPointCount:     0,                      // filled after building points
+		OldestSampleTs:         oldestTs,
+		NewestSampleTs:         newestTs,
+		Points:                 []state.PercentilePoint{},
 	}
 
 	// Build series points: oldest first (left-to-right on graph)
@@ -296,6 +299,9 @@ func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Reques
 
 		series.Points = append(series.Points, point)
 	}
+
+	// Update returned point count after building all points
+	series.ReturnedPointCount = len(series.Points)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(series)
