@@ -272,7 +272,7 @@ fn parseSocketLine(allocator: std.mem.Allocator, line: []const u8, config: Parse
 }
 
 /// Parse TCP state string to enum.
-fn parseTcpState(state_str: []const u8) TcpState {
+pub fn parseTcpState(state_str: []const u8) TcpState {
     const upper = std.mem.trim(u8, state_str, " \t\r\n");
     inline for (@typeInfo(TcpState).@"enum".fields) |field| {
         if (std.mem.eql(u8, upper, field.name)) {
@@ -283,7 +283,7 @@ fn parseTcpState(state_str: []const u8) TcpState {
 }
 
 /// Extract port from an address:port string.
-fn extractPort(addr: []const u8) u16 {
+pub fn extractPort(addr: []const u8) u16 {
     const colon_idx = std.mem.indexOfScalar(u8, addr, ':');
     if (colon_idx == null) return 0;
     const port_str = std.mem.trim(u8, addr[colon_idx.? + 1 ..], " \t");
@@ -292,7 +292,7 @@ fn extractPort(addr: []const u8) u16 {
 
 /// Redact an address, keeping only the port.
 /// Returns an allocator-owned string that caller may retain.
-fn redactAddress(allocator: std.mem.Allocator, addr: []const u8) ![]const u8 {
+pub fn redactAddress(allocator: std.mem.Allocator, addr: []const u8) ![]const u8 {
     const colon_idx = std.mem.indexOfScalar(u8, addr, ':');
     if (colon_idx == null) {
         return try allocator.dupe(u8, "redacted");
@@ -302,7 +302,7 @@ fn redactAddress(allocator: std.mem.Allocator, addr: []const u8) ![]const u8 {
 }
 
 /// Extract process name from ss output.
-fn extractProcessName(field: []const u8) ?[]const u8 {
+pub fn extractProcessName(field: []const u8) ?[]const u8 {
     // Format: (("processname",pid=1234,fd=5))
     const open_idx = std.mem.indexOf(u8, field, "((");
     const close_idx = std.mem.indexOf(u8, field, "))");
@@ -312,7 +312,7 @@ fn extractProcessName(field: []const u8) ?[]const u8 {
 }
 
 /// Parse rtt metric: rtt:49.2/8.1
-fn parseRttMetric(section: []const u8) ?f64 {
+pub fn parseRttMetric(section: []const u8) ?f64 {
     const colon_idx = std.mem.indexOfScalar(u8, section, ':');
     if (colon_idx == null) return null;
 
@@ -358,7 +358,7 @@ fn parseRtoMetric(section: []const u8) ?u64 {
 }
 
 /// Parse cwnd metric: cwnd:10
-fn parseCwndMetric(section: []const u8) ?u32 {
+pub fn parseCwndMetric(section: []const u8) ?u32 {
     const colon_idx = std.mem.indexOfScalar(u8, section, ':');
     if (colon_idx == null) return null;
 
@@ -367,7 +367,7 @@ fn parseCwndMetric(section: []const u8) ?u32 {
 }
 
 /// Parse retrans metric: retrans:0/123
-fn parseRetransMetric(section: []const u8) ?u64 {
+pub fn parseRetransMetric(section: []const u8) ?u64 {
     const colon_idx = std.mem.indexOfScalar(u8, section, ':');
     if (colon_idx == null) return null;
 
@@ -384,7 +384,7 @@ fn parseRetransMetric(section: []const u8) ?u64 {
 }
 
 /// Parse unacked metric: unacked:3
-fn parseUnackedMetric(section: []const u8) ?u64 {
+pub fn parseUnackedMetric(section: []const u8) ?u64 {
     const colon_idx = std.mem.indexOfScalar(u8, section, ':');
     if (colon_idx == null) return null;
 
@@ -393,65 +393,11 @@ fn parseUnackedMetric(section: []const u8) ?u64 {
 }
 
 /// Free TCP sockets and all nested allocations.
-pub fn freeTcpSockets(allocator: std.mem.Allocator, sockets: []TcpSocket) void {
+pub fn freeTcpSockets(allocator: std.mem.Allocator, sockets: []const TcpSocket) void {
     for (sockets) |socket| {
         if (socket.local) |l| allocator.free(l);
         if (socket.remote) |r| allocator.free(r);
         if (socket.process_name) |p| allocator.free(p);
     }
     allocator.free(sockets);
-}
-
-// ============================================================================
-// Tests
-// ============================================================================
-
-test "parseTcpState returns correct states" {
-    try std.testing.expectEqual(TcpState.ESTAB, parseTcpState("ESTAB"));
-    try std.testing.expectEqual(TcpState.LISTEN, parseTcpState("LISTEN"));
-    try std.testing.expectEqual(TcpState.UNKNOWN, parseTcpState("INVALID"));
-}
-
-test "extractPort parses port correctly" {
-    try std.testing.expectEqual(@as(u16, 443), extractPort("192.0.2.1:443"));
-    try std.testing.expectEqual(@as(u16, 12345), extractPort("10.0.0.1:12345"));
-    try std.testing.expectEqual(@as(u16, 0), extractPort("invalid"));
-}
-
-test "redactAddress keeps port" {
-    const allocator = std.testing.allocator;
-    const redacted = try redactAddress(allocator, "192.0.2.1:443");
-    defer allocator.free(redacted);
-    try std.testing.expectEqualStrings("redacted:443", redacted);
-}
-
-test "extractProcessName parses correctly" {
-    // The actual format in ss output is: users:(("processname",pid=1234,fd=5))
-    const result = extractProcessName("((\"xray\",pid=1234,fd=5))");
-    try std.testing.expect(result != null);
-    try std.testing.expectEqualStrings("\"xray\",pid=1234,fd=5", result.?);
-}
-
-test "parseRttMetric extracts rtt" {
-    const result = parseRttMetric("rtt:49.2/8.1  other");
-    try std.testing.expect(result != null);
-    try std.testing.expect(result.? > 49.0 and result.? < 50.0);
-}
-
-test "parseCwndMetric extracts cwnd" {
-    const result = parseCwndMetric("cwnd:10");
-    try std.testing.expect(result != null);
-    try std.testing.expectEqual(@as(u32, 10), result.?);
-}
-
-test "parseRetransMetric extracts retransmit count" {
-    const result = parseRetransMetric("retrans:0/123");
-    try std.testing.expect(result != null);
-    try std.testing.expectEqual(@as(u64, 123), result.?);
-}
-
-test "parseUnackedMetric extracts unacked" {
-    const result = parseUnackedMetric("unacked:3");
-    try std.testing.expect(result != null);
-    try std.testing.expectEqual(@as(u64, 3), result.?);
 }

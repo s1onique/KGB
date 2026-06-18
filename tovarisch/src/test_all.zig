@@ -251,6 +251,7 @@ test { std.testing.refAllDecls(@import("net/safe_command.zig")); }
 
 // TCP underlay (ss) parser
 test { std.testing.refAllDecls(@import("net/ss_parser.zig")); }
+test { std.testing.refAllDecls(@import("net/ss_parser_tests.zig")); }
 
 // Route diagnostics
 test { std.testing.refAllDecls(@import("net/route_diag.zig")); }
@@ -263,3 +264,4 @@ test { std.testing.refAllDecls(@import("net/wg_dump_collector.zig")); }
 
 // Status network diagnostics integration
 test { std.testing.refAllDecls(@import("status_network_diag.zig")); }
+test { std.testing.refAllDecls(@import("status_network_diag_tests.zig")); }
