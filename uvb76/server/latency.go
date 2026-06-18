@@ -110,7 +110,14 @@ type SpikeResponse struct {
 	Count  int                `json:"count"`
 }
 
+// SpikeResponseWithCaptures represents the API response for spike events with diagnostic captures.
+type SpikeResponseWithCaptures struct {
+	Spikes []state.SpikeEventWithCaptures `json:"spikes"`
+	Count  int                           `json:"count"`
+}
+
 // handleTargetLatencySpikes returns recent spike events for a target.
+// Supports optional query parameter: include_captures=true to include diagnostic captures.
 func (s *Server) handleTargetLatencySpikes(w http.ResponseWriter, r *http.Request) {
 	targetID := r.URL.Query().Get("target_id")
 	if targetID == "" {
@@ -156,13 +163,32 @@ func (s *Server) handleTargetLatencySpikes(w http.ResponseWriter, r *http.Reques
 		limit = 100
 	}
 
+	// Check if captures should be included
+	includeCaptures := r.URL.Query().Get("include_captures") == "true"
+
 	spikes := s.state.GetSpikes(targetID, kind, limit)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(SpikeResponse{
-		Spikes: spikes,
-		Count:  len(spikes),
-	})
+	if includeCaptures {
+		// Return spikes with diagnostic captures
+		captures := s.state.GetCaptureStore()
+		spikesWithCaptures := make([]state.SpikeEventWithCaptures, len(spikes))
+		for i, spike := range spikes {
+			spikesWithCaptures[i] = state.SpikeEventWithCaptures{
+				SpikeEvent: spike,
+				Captures:   captures.GetCaptures(spike.EventID),
+			}
+		}
+		json.NewEncoder(w).Encode(SpikeResponseWithCaptures{
+			Spikes: spikesWithCaptures,
+			Count:  len(spikesWithCaptures),
+		})
+	} else {
+		json.NewEncoder(w).Encode(SpikeResponse{
+			Spikes: spikes,
+			Count:  len(spikes),
+		})
+	}
 }
 
 // handleTargetLatencySeries returns percentile time-series data for a target.

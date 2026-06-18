@@ -98,6 +98,7 @@ type Manager struct {
 	icmpBuckets     []int64                          // histogram bucket boundaries for ICMP
 	icmpMaxSamples  int                             // max recent samples per target for ICMP
 	spikeDetector   *SpikeDetector                  // spike detection and event recording
+	captureStore    *CaptureStore                    // diagnostic captures for spike events
 }
 
 // NewManager creates a new state manager with bounded capacity.
@@ -109,6 +110,7 @@ func NewManager() *Manager {
 		buckets:       []int64{5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000},
 		maxSamples:    100,
 		spikeDetector: NewSpikeDetector(),
+		captureStore:  NewCaptureStore(),
 	}
 }
 
@@ -432,4 +434,11 @@ func (m *Manager) DetectAndRecordSpike(
 		targetID, kind, latencyMs, sampleTs, reachable,
 		schedulerDelayMs, httpStatus, probeError, previousSamples,
 	)
+}
+
+// GetCaptureStore returns the diagnostic capture store.
+func (m *Manager) GetCaptureStore() *CaptureStore {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.captureStore
 }

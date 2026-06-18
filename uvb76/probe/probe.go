@@ -10,19 +10,21 @@ import (
 	"time"
 
 	"github.com/s1onique/KGB/uvb76/config"
+	"github.com/s1onique/KGB/uvb76/diag"
 	"github.com/s1onique/KGB/uvb76/state"
 )
 
 // Client performs independent HTTP latency probes against tovarisch targets.
 type Client struct {
-	httpClient *http.Client
-	cfg        *config.HTTPProbeConfig
-	state      *state.Manager
-	targets    map[string]*config.TargetConfig // keyed by ID, immutable after creation
-	mu         sync.RWMutex
-	stopCh     chan struct{}
-	wg         sync.WaitGroup
-	enabled    bool
+	httpClient     *http.Client
+	cfg            *config.HTTPProbeConfig
+	state          *state.Manager
+	targets        map[string]*config.TargetConfig // keyed by ID, immutable after creation
+	diagCapture    *diag.CaptureService // optional diagnostic capture service
+	mu             sync.RWMutex
+	stopCh         chan struct{}
+	wg             sync.WaitGroup
+	enabled        bool
 }
 
 // NewClient creates a new HTTP probe client.
@@ -43,6 +45,13 @@ func NewClient(httpCfg *config.HTTPProbeConfig, st *state.Manager, targets []*co
 	}
 
 	return client
+}
+
+// SetDiagCapture sets the diagnostic capture service for spike-triggered captures.
+func (c *Client) SetDiagCapture(diagCapture *diag.CaptureService) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.diagCapture = diagCapture
 }
 
 // IsEnabled returns whether probing is enabled.
@@ -106,6 +115,7 @@ func (c *Client) probeAll() {
 
 // probeTarget performs a single latency probe against a target.
 // It does NOT update snapshots - only records latency measurements.
+// Triggers diagnostic capture asynchronously if spike is detected.
 func (c *Client) probeTarget(t *config.TargetConfig) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(c.cfg.TimeoutMilliseconds)*time.Millisecond)
 	defer cancel()
@@ -126,7 +136,9 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 		c.state.RecordLatency(t.ID, float64(c.cfg.TimeoutMilliseconds), false)
 		// Spike detection for failed request
 		var errStr string = fmt.Sprintf("request creation failed: %v", err)
-		c.state.DetectAndRecordSpike(t.ID, "http", float64(c.cfg.TimeoutMilliseconds), sampleTs, false, nil, nil, &errStr, previousSamples)
+		if spike := c.state.DetectAndRecordSpike(t.ID, "http", float64(c.cfg.TimeoutMilliseconds), sampleTs, false, nil, nil, &errStr, previousSamples); spike != nil {
+			c.triggerDiagCapture(spike.EventID, t.ID)
+		}
 		return
 	}
 
@@ -141,7 +153,9 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 		c.state.RecordLatency(t.ID, latencyMs, false)
 		// Spike detection for failed request
 		errStr := fmt.Sprintf("request failed: %v", err)
-		c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, false, nil, nil, &errStr, previousSamples)
+		if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, false, nil, nil, &errStr, previousSamples); spike != nil {
+			c.triggerDiagCapture(spike.EventID, t.ID)
+		}
 		return
 	}
 	defer resp.Body.Close()
@@ -154,7 +168,20 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 	if resp != nil {
 		httpStatus = &resp.StatusCode
 	}
-	c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, true, nil, httpStatus, nil, previousSamples)
+	if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, true, nil, httpStatus, nil, previousSamples); spike != nil {
+		c.triggerDiagCapture(spike.EventID, t.ID)
+	}
+}
+
+// triggerDiagCapture triggers async diagnostic capture if diagCapture is configured.
+// This does not block the probe loop.
+func (c *Client) triggerDiagCapture(eventID, targetID string) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.diagCapture != nil {
+		c.diagCapture.TriggerCapture(eventID, targetID)
+	}
 }
 
 // ProbeResult contains detailed probe results for diagnostics.

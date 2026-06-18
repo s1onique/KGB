@@ -32,6 +32,19 @@
       "recent_samples_max": 300
     }
   },
+  "diagnostics": {
+    "enabled": true,
+    "capture_on_spike": true,
+    "timeout_ms": 1500,
+    "cooldown_seconds": 90,
+    "peers": [
+      {
+        "name": "tovarisch-home",
+        "base_url": "http://10.77.0.1:8080",
+        "targets": ["kamatera"]
+      }
+    ]
+  },
   "targets": [
     {
       "id": "home-router",

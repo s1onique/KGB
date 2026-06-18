@@ -17,11 +17,12 @@ func TargetStatusURL(baseURL string) string {
 
 // Config represents the full configuration for UVB-76.
 type Config struct {
-	Listen  ListenConfig   `json:"listen"`
-	Auth    AuthConfig     `json:"auth"`
-	Scrape  ScrapeConfig   `json:"scrape"`
-	Latency LatencyConfig  `json:"latency"`
-	Targets []TargetConfig `json:"targets"`
+	Listen       ListenConfig        `json:"listen"`
+	Auth         AuthConfig         `json:"auth"`
+	Scrape       ScrapeConfig       `json:"scrape"`
+	Latency      LatencyConfig      `json:"latency"`
+	Targets      []TargetConfig     `json:"targets"`
+	Diagnostics  DiagnosticsConfig   `json:"diagnostics"`
 }
 
 // ListenConfig holds HTTP server settings.
@@ -156,6 +157,12 @@ func (c *Config) Validate(opts ValidationOptions) error {
 			return fmt.Errorf("%w: %s", ErrDuplicateTargetID, t.ID)
 		}
 		seenIDs[t.ID] = true
+	}
+
+	// Apply diagnostics defaults and validate
+	c.Diagnostics.ApplyDefaults()
+	if err := c.Diagnostics.Validate(); err != nil {
+		return fmt.Errorf("diagnostics validation failed: %w", err)
 	}
 
 	return nil

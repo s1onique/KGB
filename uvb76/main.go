@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/s1onique/KGB/uvb76/config"
+	"github.com/s1onique/KGB/uvb76/diag"
 	"github.com/s1onique/KGB/uvb76/probe"
 	"github.com/s1onique/KGB/uvb76/scraper"
 	"github.com/s1onique/KGB/uvb76/server"
@@ -49,8 +50,6 @@ func main() {
 	}
 
 	// Apply latency config defaults and validate.
-	// CRITICAL: Write back to cfg.Latency so the server receives defaulted values.
-	// The server reads latency config via s.cfg.Latency.* for series metadata.
 	cfg.Latency.ApplyDefaults()
 	if err := config.ValidateLatencyConfig(cfg.Latency); err != nil {
 		log.Fatalf("Invalid latency config: %v", err)
@@ -90,6 +89,21 @@ func main() {
 		log.Println("ICMP ping probe disabled")
 	}
 	icmpProbeClient.Start()
+
+	// Initialize diagnostic capture service if enabled
+	var diagCaptureService *diag.CaptureService
+	if cfg.Diagnostics.Enabled {
+		captureStore := stateManager.GetCaptureStore()
+		diagCaptureService = diag.NewCaptureService(&cfg.Diagnostics, captureStore)
+		log.Printf("Diagnostic capture enabled (timeout: %dms, cooldown: %ds)",
+			cfg.Diagnostics.TimeoutMs, cfg.Diagnostics.CooldownSeconds)
+	}
+
+	// Wire diagnostic capture service into HTTP and ICMP probe clients
+	if diagCaptureService != nil {
+		httpProbeClient.SetDiagCapture(diagCaptureService)
+		icmpProbeClient.SetDiagCapture(diagCaptureService)
+	}
 
 	// Initialize server (HTTPS in production, HTTP in dev mode)
 	srv := server.NewServer(cfg, stateManager, client, *devMode)
