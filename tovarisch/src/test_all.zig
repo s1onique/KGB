@@ -232,3 +232,34 @@ test { std.testing.refAllDecls(@import("bgp/same_as_regression_tests.zig")); }
 
 // Session config builder tests
 test { std.testing.refAllDecls(@import("bgp/session_config_builder.zig")); }
+
+// ============================================================================
+// Network Diagnostics (ACT: Add tovarisch WireGuard and XRay TCP underlay diagnostics)
+// ============================================================================
+
+// Network diagnostics config
+test { std.testing.refAllDecls(@import("net/network_diag_config.zig")); }
+
+// WireGuard dump parser
+test { std.testing.refAllDecls(@import("net/wg_dump_parser.zig")); }
+
+// Diagnostic event ring
+test { std.testing.refAllDecls(@import("net/diag_event_ring.zig")); }
+
+// Safe command runner
+test { std.testing.refAllDecls(@import("net/safe_command.zig")); }
+
+// TCP underlay (ss) parser
+test { std.testing.refAllDecls(@import("net/ss_parser.zig")); }
+
+// Route diagnostics
+test { std.testing.refAllDecls(@import("net/route_diag.zig")); }
+
+// Extended interface stats
+test { std.testing.refAllDecls(@import("net/extended_interface_stats.zig")); }
+
+// WireGuard dump collector
+test { std.testing.refAllDecls(@import("net/wg_dump_collector.zig")); }
+
+// Status network diagnostics integration
+test { std.testing.refAllDecls(@import("status_network_diag.zig")); }

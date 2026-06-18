@@ -81,7 +81,7 @@ pub fn fileExists(path: []const u8) bool {
     return std.c.access(c_path, std.c.F_OK) == 0;
 }
 
-fn openForRead(path: []const u8) ReadError!usize {
+pub fn openForRead(path: []const u8) ReadError!usize {
     var path_buf: [4096]u8 = undefined;
     const c_path = toCString(path, &path_buf) catch return error.StatFileUnreadable;
 
@@ -121,7 +121,8 @@ fn openForWrite(path: []const u8) ReadError!usize {
     return error.StatFileUnreadable;
 }
 
-fn closeFile(fd: usize) void {
+/// Close a file descriptor.
+pub fn closeFile(fd: usize) void {
     if (@import("builtin").os.tag == .linux) {
         _ = std.c.close(@as(c_int, @intCast(fd)));
     } else {
@@ -130,7 +131,7 @@ fn closeFile(fd: usize) void {
     }
 }
 
-fn readFromFd(fd: usize, buf: []u8) !usize {
+pub fn readFromFd(fd: usize, buf: []u8) !usize {
     if (@import("builtin").os.tag == .linux) {
         const n = std.c.read(@as(c_int, @intCast(fd)), buf.ptr, buf.len);
         if (n < 0) return error.StatFileUnreadable;
@@ -151,7 +152,7 @@ fn writeToFd(fd: usize, contents: []const u8) !void {
     }
 }
 
-fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+pub fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     const fd = try openForRead(path);
     defer closeFile(fd);
 

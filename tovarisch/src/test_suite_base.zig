@@ -50,6 +50,17 @@ const _net_private_interface_stats_tests = @import("net/private_interface_stats_
 const _net_iptables = @import("net/iptables.zig");
 const _status_vpn_masquerade = @import("status_vpn_masquerade.zig");
 
+// Network diagnostics (ACT: Add tovarisch WireGuard and XRay TCP underlay diagnostics)
+const _net_network_diag_config = @import("net/network_diag_config.zig");
+const _net_wg_dump_parser = @import("net/wg_dump_parser.zig");
+const _net_diag_event_ring = @import("net/diag_event_ring.zig");
+const _net_safe_command = @import("net/safe_command.zig");
+const _net_ss_parser = @import("net/ss_parser.zig");
+const _net_route_diag = @import("net/route_diag.zig");
+const _net_extended_interface_stats = @import("net/extended_interface_stats.zig");
+const _net_wg_dump_collector = @import("net/wg_dump_collector.zig");
+const _status_network_diag = @import("status_network_diag.zig");
+
 // Force test discovery
 test { std.testing.refAllDecls(@import("config.zig")); }
 test { std.testing.refAllDecls(@import("config_server_tests.zig")); }
@@ -90,3 +101,12 @@ test { std.testing.refAllDecls(@import("net/private_interface_stats.zig")); }
 test { std.testing.refAllDecls(@import("net/private_interface_stats_tests.zig")); }
 test { std.testing.refAllDecls(@import("net/iptables.zig")); }
 test { std.testing.refAllDecls(@import("status_vpn_masquerade.zig")); }
+test { std.testing.refAllDecls(@import("net/network_diag_config.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_dump_parser.zig")); }
+test { std.testing.refAllDecls(@import("net/diag_event_ring.zig")); }
+test { std.testing.refAllDecls(@import("net/safe_command.zig")); }
+test { std.testing.refAllDecls(@import("net/ss_parser.zig")); }
+test { std.testing.refAllDecls(@import("net/route_diag.zig")); }
+test { std.testing.refAllDecls(@import("net/extended_interface_stats.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_dump_collector.zig")); }
+test { std.testing.refAllDecls(@import("status_network_diag.zig")); }
