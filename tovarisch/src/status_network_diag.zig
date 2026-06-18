@@ -213,7 +213,7 @@ pub fn collectNetworkDiag(
                 .filter_remote_port = if (cfg.underlay_tcp.remote_ports.len > 0)
                     cfg.underlay_tcp.remote_ports[0] else 0,
             };
-            const sockets = ss_parser.parseSsTinOutput(cmd_result.stdout, ss_cfg) catch &.{};
+            const sockets = ss_parser.parseSsTinOutput(allocator, cmd_result.stdout, ss_cfg) catch &.{};
             for (sockets) |socket| {
                 try underlay_tcp.append(allocator, .{
                     .name = socket.process_name orelse "unknown",

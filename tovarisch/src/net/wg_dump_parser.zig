@@ -99,44 +99,40 @@ pub const WgDumpResult = struct {
 // ============================================================================
 
 /// Redact a public key, showing only the prefix.
-/// Returns a slice that is valid as long as the input key is valid.
-/// Note: For persistent storage, caller must duplicate the result.
-pub fn redactPublicKey(key: []const u8, mode: RedactMode) []const u8 {
+/// Returns an allocator-owned string that caller may retain.
+pub fn redactPublicKey(allocator: std.mem.Allocator, key: []const u8, mode: RedactMode) ![]const u8 {
     if (!mode.redact_public_keys or key.len <= mode.redact_prefix_len + mode.redact_replacement.len) {
-        return key;
+        return try allocator.dupe(u8, key);
     }
     // Return format: "abcd…1234" (prefix + redact_replacement + suffix)
-    // Uses stack buffer - valid until function returns
     const prefix_end = mode.redact_prefix_len;
     const suffix_start = key.len - mode.redact_prefix_len;
-    var buf: [64]u8 = undefined;
-    const result = std.fmt.bufPrint(&buf, "{s}{s}{s}", .{
+    return std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
         key[0..prefix_end],
         mode.redact_replacement,
         key[suffix_start..],
-    }) catch key;
-    return result;
+    });
 }
 
 /// Redact an endpoint address (host portion only).
-/// Returns a slice that is valid as long as the input endpoint is valid.
-/// Note: For persistent storage, caller must duplicate the result.
-pub fn redactEndpoint(endpoint: []const u8, mode: RedactMode) []const u8 {
-    if (!mode.redact_endpoints) return endpoint;
+/// Returns an allocator-owned string that caller may retain.
+pub fn redactEndpoint(allocator: std.mem.Allocator, endpoint: []const u8, mode: RedactMode) ![]const u8 {
+    if (!mode.redact_endpoints) {
+        return try allocator.dupe(u8, endpoint);
+    }
 
     // Find the colon that separates host:port
     const colon_idx = std.mem.indexOfScalar(u8, endpoint, ':');
-    if (colon_idx == null) return "redacted";
+    if (colon_idx == null) {
+        return try allocator.dupe(u8, "redacted");
+    }
 
     const host = endpoint[0..colon_idx.?];
     const port = endpoint[colon_idx.?..];
 
-    if (host.len <= 4) return endpoint; // Too short to redact meaningfully
+    if (host.len <= 4) return try allocator.dupe(u8, endpoint); // Too short to redact meaningfully
 
-    // Uses stack buffer - valid until function returns
-    var buf: [64]u8 = undefined;
-    const result = std.fmt.bufPrint(&buf, "redacted{s}", .{port}) catch endpoint;
-    return result;
+    return std.fmt.allocPrint(allocator, "redacted{s}", .{port});
 }
 
 // ============================================================================
@@ -182,7 +178,7 @@ pub fn parseWgDumpOutput(allocator: std.mem.Allocator, input: []const u8, config
         const trimmed = std.mem.trim(u8, line, " \t\r\n");
         if (trimmed.len == 0) continue;
 
-        const peer = parsePeerLine(trimmed, config) catch continue;
+        const peer = parsePeerLine(allocator, trimmed, config) catch continue;
         peers.append(allocator, peer) catch continue;
     }
 
@@ -212,7 +208,7 @@ fn parseInterfaceName(line: []const u8) ParseError![]const u8 {
 
 /// Parse a peer line from `wg show dump`.
 /// Format: <public_key>  <endpoint>  <persistent_keepalive>  <allowed_ips>  <latest_handshake>  <rx_bytes>  <tx_bytes>
-fn parsePeerLine(line: []const u8, config: ParseConfig) ParseError!WgPeer {
+fn parsePeerLine(allocator: std.mem.Allocator, line: []const u8, config: ParseConfig) ParseError!WgPeer {
     var fields = std.mem.splitScalar(u8, line, '\t');
 
     const public_key = fields.next() orelse return error.MalformedOutput;
@@ -234,9 +230,13 @@ fn parsePeerLine(line: []const u8, config: ParseConfig) ParseError!WgPeer {
     // Determine peer status
     const status = determinePeerStatus(latest_handshake, config.stale_handshake_seconds);
 
+    // Redact sensitive data with allocator-owned results
+    const redacted_key = redactPublicKey(allocator, public_key, config.redact) catch "";
+    const redacted_endpoint = redactEndpoint(allocator, endpoint, config.redact) catch "";
+
     return WgPeer{
-        .public_key = redactPublicKey(public_key, config.redact),
-        .endpoint = redactEndpoint(endpoint, config.redact),
+        .public_key = redacted_key,
+        .endpoint = redacted_endpoint,
         .allowed_ips = allowed_ips,
         .persistent_keepalive_seconds = persistent_keepalive,
         .latest_handshake_unix = latest_handshake,
@@ -281,6 +281,11 @@ test "parseWgDumpOutput parses valid dump output" {
     const dump_output = "pk\twg0\npeer\t1.2.3.4:5\t0\t10/0\t0\t0\t0";
 
     const result = try parseWgDumpOutput(std.testing.allocator, dump_output, .{});
+    // Free redacted strings in each peer
+    for (result.peers) |peer| {
+        std.testing.allocator.free(peer.public_key);
+        std.testing.allocator.free(peer.endpoint);
+    }
     std.testing.allocator.free(result.peers);
     try std.testing.expectEqualStrings("wg0", result.interface_name);
 }
@@ -308,30 +313,40 @@ test "parseWgDumpOutput handles malformed line" {
 }
 
 test "redactPublicKey truncates long keys" {
+    const allocator = std.testing.allocator;
     const mode = RedactMode{ .redact_public_keys = true };
     const key = "abcdefghij1234567890abcdefghij1234567890abcdefghij1234567890";
-    const redacted = redactPublicKey(key, mode);
+    const redacted = try redactPublicKey(allocator, key, mode);
+    defer allocator.free(redacted);
     try std.testing.expect(redacted.len < key.len);
+    // Should contain the redaction marker
+    try std.testing.expect(std.mem.indexOf(u8, redacted, "…") != null);
 }
 
 test "redactPublicKey keeps short keys unchanged when redaction disabled" {
+    const allocator = std.testing.allocator;
     const mode = RedactMode{ .redact_public_keys = false };
     const key = "abcd1234";
-    const result = redactPublicKey(key, mode);
+    const result = try redactPublicKey(allocator, key, mode);
+    defer allocator.free(result);
     try std.testing.expectEqualStrings("abcd1234", result);
 }
 
 test "redactEndpoint hides host portion" {
+    const allocator = std.testing.allocator;
     const mode = RedactMode{ .redact_endpoints = true };
     const endpoint = "192.0.2.1:443";
-    const redacted = redactEndpoint(endpoint, mode);
+    const redacted = try redactEndpoint(allocator, endpoint, mode);
+    defer allocator.free(redacted);
     // Should be redacted with port preserved
-    try std.testing.expect(redacted.len > 0);
+    try std.testing.expectEqualStrings("redacted:443", redacted);
 }
 
 test "redactEndpoint keeps short endpoints unchanged" {
+    const allocator = std.testing.allocator;
     const mode = RedactMode{ .redact_endpoints = true };
     const endpoint = "ab:443";
-    const result = redactEndpoint(endpoint, mode);
+    const result = try redactEndpoint(allocator, endpoint, mode);
+    defer allocator.free(result);
     try std.testing.expectEqualStrings("ab:443", result);
 }

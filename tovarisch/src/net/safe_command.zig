@@ -118,8 +118,8 @@ pub fn runCommand(
         _ = std.c.dup2(stdout_pipe[1], 1);
         _ = std.c.close(stdout_pipe[1]);
 
-        _ = std.c.dup2(stderr_pipe[0], 2);
-        _ = std.c.close(stderr_pipe[0]);
+        _ = std.c.dup2(stderr_pipe[1], 2);
+        _ = std.c.close(stderr_pipe[1]);
 
         var argv = std.ArrayListUnmanaged([*:0]const u8){ .items = &.{}, .capacity = 0 };
         errdefer argv.deinit(allocator);
@@ -200,7 +200,8 @@ pub fn runWgShow(
     iface: []const u8,
     config: CommandConfig,
 ) CommandError!CommandResult {
-    const iface_arg: [*:0]const u8 = @ptrCast(iface);
+    const iface_arg = try allocator.dupeZ(u8, iface);
+    defer allocator.free(iface_arg);
     return runCommand(allocator, .wg_show, &.{iface_arg}, config);
 }
 
@@ -210,7 +211,8 @@ pub fn runWgShowDump(
     iface: []const u8,
     config: CommandConfig,
 ) CommandError!CommandResult {
-    const iface_arg: [*:0]const u8 = @ptrCast(iface);
+    const iface_arg = try allocator.dupeZ(u8, iface);
+    defer allocator.free(iface_arg);
     return runCommand(allocator, .wg_show_dump, &.{ iface_arg, "dump" }, config);
 }
 
@@ -220,7 +222,8 @@ pub fn runIpRouteGet(
     target: []const u8,
     config: CommandConfig,
 ) CommandError!CommandResult {
-    const target_arg: [*:0]const u8 = @ptrCast(target);
+    const target_arg = try allocator.dupeZ(u8, target);
+    defer allocator.free(target_arg);
     return runCommand(allocator, .ip_route_get, &.{ "route", "get", target_arg }, config);
 }
 

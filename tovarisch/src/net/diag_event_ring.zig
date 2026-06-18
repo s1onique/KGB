@@ -110,19 +110,26 @@ pub const EventRing = struct {
     }
 
     /// Get all events in chronological order (oldest first).
-    /// Returns a slice that caller must not modify.
-    pub fn getEvents(self: *const EventRing) []const DiagEvent {
-        const count = @min(self.total_written, self.config.max_events);
-        if (count == 0) return &.{};
+    /// Caller must provide a buffer and receives up to `buffer.len` events.
+    /// Returns the number of events written to the buffer.
+    pub fn getEvents(self: *const EventRing, buffer: []DiagEvent) usize {
+        const count = @min(self.total_written, @min(self.config.max_events, buffer.len));
+        if (count == 0) return 0;
 
         // Events are stored newest-to-oldest wrapped around the ring.
         // To return chronological order, we need to calculate the start.
         if (self.total_written >= self.config.max_events) {
             // Ring is full, oldest event is at write_index
-            return self.events[self.write_index..][0..count];
+            for (0..count) |i| {
+                buffer[i] = self.events[(self.write_index + i) % self.config.max_events];
+            }
+        } else {
+            // Ring is not full, events are at the beginning
+            for (0..count) |i| {
+                buffer[i] = self.events[i];
+            }
         }
-        // Ring is not full, oldest event is at 0
-        return self.events[0..count];
+        return count;
     }
 
     /// Get events newest first.
