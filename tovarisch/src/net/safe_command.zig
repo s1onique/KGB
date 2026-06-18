@@ -37,8 +37,6 @@ pub const CommandConfig = struct {
     max_stdout_size: usize = 8192,
     /// Maximum stderr buffer size in bytes.
     max_stderr_size: usize = 1024,
-    /// Command timeout in milliseconds.
-    timeout_ms: u32 = 5000,
 };
 
 /// Result of running a command.
@@ -53,8 +51,6 @@ pub const CommandResult = struct {
     stdout_truncated: bool = false,
     /// Whether stderr was truncated.
     stderr_truncated: bool = false,
-    /// Whether command timed out.
-    timed_out: bool = false,
 };
 
 /// Command runner errors.
@@ -67,8 +63,6 @@ pub const CommandError = error{
     ForkFailed,
     /// Failed to execute command.
     ExecFailed,
-    /// Command timed out.
-    Timeout,
     /// Memory allocation failed.
     OutOfMemory,
 };
@@ -189,7 +183,6 @@ pub fn runCommand(
         .stderr = stderr_buf[0..stderr_len],
         .stdout_truncated = stdout_truncated,
         .stderr_truncated = stderr_truncated,
-        .timed_out = false,
     };
 }
 
@@ -241,7 +234,7 @@ pub fn runSsTin(
 test "CommandConfig has sensible defaults" {
     const cfg = CommandConfig{};
     try std.testing.expectEqual(@as(usize, 8192), cfg.max_stdout_size);
-    try std.testing.expectEqual(@as(u32, 5000), cfg.timeout_ms);
+    try std.testing.expectEqual(@as(usize, 1024), cfg.max_stderr_size);
 }
 
 test "CommandResult can be constructed" {
@@ -260,6 +253,5 @@ test "CommandResult can be constructed" {
         .stderr = stderr_buf,
     };
     try std.testing.expectEqual(@as(c_int, 0), result.exit_code);
-    try std.testing.expect(!result.timed_out);
     try std.testing.expectEqualStrings("test output", result.stdout);
 }

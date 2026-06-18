@@ -27,8 +27,6 @@ pub const CollectError = error{
     ForkFailed,
     /// Failed to execute `wg` binary.
     ExecFailed,
-    /// Command timed out.
-    Timeout,
     /// Output exceeded buffer size.
     OutputTruncated,
     /// Parser returned an error (malformed output).
@@ -53,9 +51,8 @@ pub const WgDumpOwned = struct {
         }
         // Free the peers slice
         allocator.free(self.result.peers);
-        // Free the stdout buffer
+        // Free the stdout buffer (also frees interface_name which borrows from it)
         allocator.free(self.stdout_buf);
-        allocator.free(self.result.interface_name);
         self.* = undefined;
     }
 };
@@ -129,7 +126,6 @@ fn mapCommandError(err: safe_command.CommandError) CollectError {
         error.PipeFailed => return error.PipeFailed,
         error.ForkFailed => return error.ForkFailed,
         error.ExecFailed => return error.ExecFailed,
-        error.Timeout => return error.Timeout,
         error.OutOfMemory => return error.OutOfMemory,
     }
 }

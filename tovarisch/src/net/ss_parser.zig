@@ -380,6 +380,16 @@ fn parseUnackedMetric(section: []const u8) ?u64 {
     return std.fmt.parseInt(u64, value_part, 10) catch null;
 }
 
+/// Free TCP sockets and all nested allocations.
+pub fn freeTcpSockets(allocator: std.mem.Allocator, sockets: []TcpSocket) void {
+    for (sockets) |socket| {
+        if (socket.local) |l| allocator.free(l);
+        if (socket.remote) |r| allocator.free(r);
+        if (socket.process_name) |p| allocator.free(p);
+    }
+    allocator.free(sockets);
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
