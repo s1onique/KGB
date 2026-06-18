@@ -185,7 +185,7 @@ fn wallClockMs() i64 {
     if (comptime @import("builtin").os.tag == .linux and @hasDecl(std.os.linux, "clock_gettime")) {
         var ts: std.os.linux.timespec = undefined;
         if (std.os.linux.clock_gettime(@enumFromInt(0), &ts) < 0) return 0;
-        return ts.tv_sec * 1000 + @divTrunc(ts.tv_nsec, 1_000_000);
+        return ts.sec * 1000 + @divTrunc(ts.nsec, 1_000_000);
     }
     return 1718700000000;
 }
