@@ -10,6 +10,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/s1onique/KGB/uvb76/auth"
@@ -37,16 +38,18 @@ type Server struct {
 	devMode    bool
 	server     *http.Server
 	wg         sync.WaitGroup
+	startedAt  time.Time // captured once at construction
 }
 
 // NewServer creates a new server (HTTPS in production, HTTP in dev mode).
 func NewServer(cfg *config.Config, st *state.Manager, client *scraper.Client, devMode bool) *Server {
 	s := &Server{
-		cfg:      cfg,
-		state:    st,
-		client:   client,
-		listener: &cfg.Listen,
-		devMode:  devMode,
+		cfg:       cfg,
+		state:     st,
+		client:    client,
+		listener:  &cfg.Listen,
+		devMode:   devMode,
+		startedAt: time.Now().UTC(), // captured once at construction
 	}
 
 	// Initialize session store with a secret key (in production, use environment variable)
@@ -71,6 +74,7 @@ func (s *Server) Start() error {
 	// Protected API endpoints - use session auth
 	protected := router.PathPrefix("/api/v1").Subrouter()
 	protected.Use(s.sessionAuthMw())
+	protected.Handle("/status", http.HandlerFunc(s.handleStatus)).Methods(http.MethodGet)
 	protected.Handle("/targets", http.HandlerFunc(s.handleTargets)).Methods(http.MethodGet)
 	protected.Handle("/targets/{id}/snapshot", http.HandlerFunc(s.handleTargetSnapshot)).Methods(http.MethodGet)
 
@@ -301,6 +305,19 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(s.cfg.Targets)
+}
+
+// ServerStatus represents the runtime status of the UVB-76 server.
+type ServerStatus struct {
+	StartedAt string `json:"started_at"`
+}
+
+// handleStatus returns server runtime status including start time.
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ServerStatus{
+		StartedAt: s.startedAt.Format(time.RFC3339),
+	})
 }
 
 // handleTargetSnapshot returns the latest snapshot for a specific target.

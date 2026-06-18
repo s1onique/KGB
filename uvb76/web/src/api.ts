@@ -87,6 +87,11 @@ export interface LoginResponse {
   error?: string;
 }
 
+// ServerStatus represents runtime status of the UVB-76 server.
+export interface ServerStatus {
+  started_at: string; // RFC3339 timestamp
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -166,6 +171,10 @@ class ApiClient {
     return this.fetch<LatencySeries>(
       `/api/v1/latency/series?target_id=${targetId}&probe_kind=icmp&range_seconds=${rangeSeconds}&step_seconds=${stepSeconds}&window_seconds=${windowSeconds}`
     );
+  }
+
+  async getStatus(): Promise<ServerStatus> {
+    return this.fetch<ServerStatus>('/api/v1/status');
   }
 }
 

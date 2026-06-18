@@ -17,3 +17,40 @@ export function formatLatencyMs(value: number | null | undefined): string {
 
   return `${value.toFixed(1)} ms`;
 }
+
+/**
+ * Format a server start timestamp for display.
+ *
+ * Renders RFC3339 timestamp in local browser timezone as "dd.mm HH:MM:SS".
+ * Returns "—" if the timestamp is missing or invalid.
+ */
+export function formatStartTime(rfc3339Timestamp: string | null | undefined): string {
+  if (!rfc3339Timestamp) {
+    return "—";
+  }
+
+  const date = new Date(rfc3339Timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
+  // Use Intl.DateTimeFormat for locale-aware formatting
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  // Format and replace separators to get "dd.mm HH:MM:SS"
+  const parts = formatter.formatToParts(date);
+  const day = parts.find((p) => p.type === "day")?.value ?? "??";
+  const month = parts.find((p) => p.type === "month")?.value ?? "??";
+  const hour = parts.find((p) => p.type === "hour")?.value ?? "??";
+  const minute = parts.find((p) => p.type === "minute")?.value ?? "??";
+  const second = parts.find((p) => p.type === "second")?.value ?? "??";
+
+  return `${day}.${month} ${hour}:${minute}:${second}`;
+}

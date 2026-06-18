@@ -3,6 +3,7 @@ import { auth } from './auth';
 import { api } from './api';
 import { initTargets, setupGraphControls } from './targets';
 import { loadLatencyForTarget } from './latency';
+import { formatStartTime } from './format';
 
 // DOM Elements
 const authForm = document.getElementById('auth-form');
@@ -60,6 +61,9 @@ async function loadDashboard(): Promise<void> {
     targetsInstance = initTargets('targets');
   }
 
+  // Load server status for start time display
+  loadStartTime();
+
   await targetsInstance.loadTargets();
 
   // Load latency for all targets
@@ -83,6 +87,21 @@ async function loadDashboard(): Promise<void> {
     }, 30000);
   } catch (e) {
     console.error('Failed to load dashboard:', e);
+  }
+}
+
+// Render server start time in header
+async function loadStartTime(): Promise<void> {
+  const startTimeEl = document.getElementById('start-time');
+  if (!startTimeEl) return;
+
+  try {
+    const status = await api.getStatus();
+    const formatted = formatStartTime(status.started_at);
+    startTimeEl.textContent = `started ${formatted}`;
+  } catch (e) {
+    console.error('Failed to load server status:', e);
+    startTimeEl.textContent = '';
   }
 }
 

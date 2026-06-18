@@ -46,14 +46,20 @@ func NewLatencyTracker(buckets []int64, maxSamples int) *LatencyTracker {
 	}
 }
 
-// Record adds a latency sample to the tracker.
+// Record adds a latency sample to the tracker with the current timestamp.
 func (lt *LatencyTracker) Record(latencyMs float64, reachable bool) {
+	lt.RecordAt(latencyMs, reachable, time.Now().UTC())
+}
+
+// RecordAt adds a latency sample with a specific timestamp.
+// This is intended for deterministic testing; prefer Record in production.
+func (lt *LatencyTracker) RecordAt(latencyMs float64, reachable bool, timestamp time.Time) {
 	lt.mu.Lock()
 	defer lt.mu.Unlock()
 
 	// Store in ring buffer
 	sample := LatencySample{
-		Timestamp: time.Now().UTC(),
+		Timestamp: timestamp,
 		LatencyMs: latencyMs,
 		Reachable: reachable,
 	}

@@ -185,6 +185,15 @@ h2 { color: #8b949e; margin: 1.5rem 0 1rem; font-weight: 500; }
 
 /* Header with logout */
 .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+
+/* Server start time - small and muted in header */
+.start-time {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: #6e7681;
+    margin-left: 0.5rem;
+}
+
 .logout-btn {
     padding: 0.5rem 1rem;
     background: transparent;

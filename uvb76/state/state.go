@@ -198,6 +198,20 @@ func (m *Manager) RecordICMPLatency(targetID string, latencyMs float64, reachabl
 	tracker.Record(latencyMs, reachable)
 }
 
+// RecordICMPLatencyAt records an ICMP latency measurement with a specific timestamp.
+// This is intended for deterministic testing; prefer RecordICMPLatency in production.
+func (m *Manager) RecordICMPLatencyAt(targetID string, latencyMs float64, reachable bool, timestamp time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tracker, exists := m.icmpTrackers[targetID]
+	if !exists {
+		tracker = NewLatencyTracker(m.icmpBuckets, m.icmpMaxSamples)
+		m.icmpTrackers[targetID] = tracker
+	}
+	tracker.RecordAt(latencyMs, reachable, timestamp)
+}
+
 // GetLatencySummary returns the HTTP latency summary for a target.
 func (m *Manager) GetLatencySummary(targetID string) LatencySummary {
 	m.mu.RLock()
