@@ -64,6 +64,7 @@ pub const ParseConfig = struct {
 ///   10.77.0.2 via 192.0.2.1 dev eth0 src 10.0.0.1 uid 0
 ///   10.77.0.2 dev wg-kgb0 src 10.77.0.1 uid 0
 pub fn parseRouteGetOutput(
+    allocator: std.mem.Allocator,
     target: []const u8,
     input: []const u8,
     config: ParseConfig,
@@ -84,7 +85,7 @@ pub fn parseRouteGetOutput(
         if (std.mem.eql(u8, f, "via")) {
             // Gateway follows
             if (fields.next()) |gw| {
-                gateway = if (config.redact_gateway) redactGateway(gw) else std.mem.trim(u8, gw, " \t");
+                gateway = if (config.redact_gateway) (redactGateway(allocator, gw) catch null) else std.mem.trim(u8, gw, " \t");
             }
         } else if (std.mem.eql(u8, f, "dev")) {
             // Interface follows
@@ -118,8 +119,8 @@ fn redactInterface(_: []const u8) []const u8 {
     return "redacted";
 }
 
-/// Redact gateway address.
-fn redactGateway(gw: []const u8) []const u8 {
+/// Redact gateway address - returns allocator-owned string.
+fn redactGateway(allocator: std.mem.Allocator, gw: []const u8) ![]const u8 {
     // Find the gateway address and redact it
     // Format could be: 192.0.2.1
     const colon_idx = std.mem.indexOfScalar(u8, gw, ':');
@@ -128,13 +129,11 @@ fn redactGateway(gw: []const u8) []const u8 {
         const port_idx = std.mem.lastIndexOfScalar(u8, gw, ':');
         if (port_idx != null and port_idx.? > colon_idx.?) {
             // IPv6 with port: [::1]:443
-            var buf: [64]u8 = undefined;
-            return std.fmt.bufPrint(&buf, "[redacted]:{s}", .{gw[port_idx.? + 1 ..]}) catch "redacted";
+            return std.fmt.allocPrint(allocator, "[redacted]:{s}", .{gw[port_idx.? + 1 ..]});
         }
-        var buf: [64]u8 = undefined;
-        return std.fmt.bufPrint(&buf, "[redacted]{s}", .{gw[colon_idx.?..]}) catch "redacted";
+        return std.fmt.allocPrint(allocator, "[redacted]{s}", .{gw[colon_idx.?..]});
     }
-    return "redacted";
+    return try allocator.dupe(u8, "redacted");
 }
 
 /// Validate that a target address is safe to use in command execution.
@@ -186,27 +185,29 @@ pub fn validateTargetAddress(target: []const u8) bool {
 // ============================================================================
 
 test "parseRouteGetOutput parses direct route" {
+    const allocator = std.testing.allocator;
     const input = "10.77.0.2 dev wg-kgb0 src 10.77.0.1 uid 0";
-    const result = try parseRouteGetOutput("10.77.0.2", input, .{});
+    const result = try parseRouteGetOutput(allocator, "10.77.0.2", input, .{});
     try std.testing.expectEqualStrings("wg-kgb0", result.interface);
     try std.testing.expectEqualStrings("10.77.0.1", result.source);
     try std.testing.expect(result.gateway == null);
 }
 
 test "parseRouteGetOutput parses routed via gateway" {
+    const allocator = std.testing.allocator;
     const input = "10.77.0.2 via 192.0.2.1 dev eth0 src 10.0.0.1 uid 0";
-    const result = try parseRouteGetOutput("10.77.0.2", input, .{});
+    const result = try parseRouteGetOutput(allocator, "10.77.0.2", input, .{});
     try std.testing.expectEqualStrings("eth0", result.interface);
     try std.testing.expect(result.gateway != null);
     try std.testing.expectEqualStrings("192.0.2.1", result.gateway.?);
 }
 
 test "parseRouteGetOutput returns error for empty input" {
-    try std.testing.expectError(error.NoData, parseRouteGetOutput("10.0.0.1", "", .{}));
+    try std.testing.expectError(error.NoData, parseRouteGetOutput(std.testing.allocator, "10.0.0.1", "", .{}));
 }
 
 test "parseRouteGetOutput returns error when interface missing" {
-    try std.testing.expectError(error.MalformedOutput, parseRouteGetOutput("10.0.0.1", "10.0.0.1 via 192.0.2.1", .{}));
+    try std.testing.expectError(error.MalformedOutput, parseRouteGetOutput(std.testing.allocator, "10.0.0.1", "10.0.0.1 via 192.0.2.1", .{}));
 }
 
 test "redactInterface returns redacted" {

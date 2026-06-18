@@ -44,9 +44,18 @@ pub const WgDumpOwned = struct {
     /// Owned stdout buffer (backing result data).
     stdout_buf: []u8,
 
-    /// Release memory.
+    /// Release all memory including nested allocations.
     pub fn deinit(self: *WgDumpOwned, allocator: std.mem.Allocator) void {
+        // Free each peer's allocated strings
+        for (self.result.peers) |peer| {
+            allocator.free(peer.public_key);
+            allocator.free(peer.endpoint);
+        }
+        // Free the peers slice
+        allocator.free(self.result.peers);
+        // Free the stdout buffer
         allocator.free(self.stdout_buf);
+        allocator.free(self.result.interface_name);
         self.* = undefined;
     }
 };
@@ -74,30 +83,39 @@ pub fn collectWgDumpOwned(
     const cmd_result = safe_command.runWgShowDump(allocator, iface, .{}) catch |err| {
         return mapCommandError(err);
     };
-    defer allocator.free(cmd_result.stdout);
-    defer allocator.free(cmd_result.stderr);
+    // Don't defer free stdout here - we transfer ownership to WgDumpOwned
+    errdefer allocator.free(cmd_result.stdout);
+    errdefer allocator.free(cmd_result.stderr);
 
     // Check exit code
     if (cmd_result.exit_code == 127) {
+        allocator.free(cmd_result.stdout);
+        allocator.free(cmd_result.stderr);
         return error.CommandNotFound;
     }
     if (cmd_result.exit_code != 0) {
+        allocator.free(cmd_result.stdout);
+        allocator.free(cmd_result.stderr);
         return error.CommandFailed;
     }
 
     // Check truncation
     if (cmd_result.stdout_truncated) {
+        allocator.free(cmd_result.stdout);
+        allocator.free(cmd_result.stderr);
         return error.OutputTruncated;
     }
 
     // Parse the output
     const result = wg_dump_parser.parseWgDumpOutput(allocator, cmd_result.stdout, parse_cfg) catch |err| {
+        allocator.free(cmd_result.stdout);
+        allocator.free(cmd_result.stderr);
         switch (err) {
             error.NoData, error.MalformedOutput, error.InvalidNumber, error.MissingPrivateKey => return error.MalformedOutput,
         }
     };
 
-    // Transfer ownership of stdout_buf
+    // Transfer ownership of stdout_buf (don't free - caller owns it now)
     return WgDumpOwned{
         .result = result,
         .stdout_buf = cmd_result.stdout,

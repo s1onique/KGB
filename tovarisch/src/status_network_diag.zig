@@ -138,8 +138,9 @@ pub fn collectNetworkDiag(
 ) !NetworkDiag {
     // If diagnostics disabled, return minimal structure
     if (!cfg.enabled) {
+        const started_at = formatTimestamp(allocator, wallClockMs()) catch "0";
         return NetworkDiag{
-            .started_at = formatTimestamp(wallClockMs()),
+            .started_at = started_at,
             .status = .disabled,
             .wireguard = null,
             .interfaces = &.{},
@@ -190,8 +191,9 @@ pub fn collectNetworkDiag(
             // Command unavailable - continue with empty underlay_tcp
             underlay_available = false;
             overall_status = .unavailable;
+            const started_at = formatTimestamp(allocator, wallClockMs()) catch "0";
             return NetworkDiag{
-                .started_at = formatTimestamp(wallClockMs()),
+                .started_at = started_at,
                 .status = .unavailable,
                 .wireguard = null,
                 .interfaces = try interfaces.toOwnedSlice(allocator),
@@ -242,8 +244,9 @@ pub fn collectNetworkDiag(
         overall_status = .unavailable;
     }
 
+    const started_at = formatTimestamp(allocator, wallClockMs()) catch "0";
     return NetworkDiag{
-        .started_at = formatTimestamp(wallClockMs()),
+        .started_at = started_at,
         .status = overall_status,
         .wireguard = null, // WireGuard detailed output requires more complex state
         .interfaces = try interfaces.toOwnedSlice(allocator),
@@ -253,12 +256,10 @@ pub fn collectNetworkDiag(
     };
 }
 
-/// Format timestamp as ISO 8601 (simplified).
-fn formatTimestamp(ts: i64) []const u8 {
+/// Format timestamp as ISO 8601 (simplified) - returns allocator-owned string.
+fn formatTimestamp(allocator: std.mem.Allocator, ts: i64) ![]const u8 {
     // Simplified: return Unix timestamp in milliseconds
-    var buf: [32]u8 = undefined;
-    const len = std.fmt.bufPrint(&buf, "{d}", .{ts}) catch "0";
-    return len;
+    return std.fmt.allocPrint(allocator, "{d}", .{ts});
 }
 
 // ============================================================================

@@ -1,12 +1,11 @@
 // safe_command.zig — Bounded safe command runner for network diagnostics
 //
 // ACT: Add tovarisch WireGuard and XRay TCP underlay diagnostics
-// Safe command execution without shell, with bounded output and timeout.
+// Safe command execution without shell, with bounded output.
 //
 // Safety properties:
 // - Fixed argv only, no shell interpolation
 // - Bounded stdout/stderr capture
-// - Timeout enforcement
 // - Explicit command allowlist
 // - No user-controlled paths
 
