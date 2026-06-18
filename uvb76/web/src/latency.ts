@@ -2,7 +2,8 @@
 import { api, type LatencySummary, type LatencySeries, type PercentilePoint, type TargetLatencyResponse } from './api';
 import { renderLatencyChart, destroyChart, renderLatencyChartWithViewport } from './chart';
 import { formatLatencyMs } from './format';
-import { getOrCreateViewport, clampToRetained } from './viewport';
+import { getOrCreateViewport, getViewport, clampToRetained } from './viewport';
+import { applyStoredScalePreset } from './targets';
 
 // Check if series has any finite percentile values
 function hasFinitePercentiles(points: PercentilePoint[]): boolean {
@@ -125,9 +126,17 @@ async function renderLatencySection(
         emptyEl?.classList.add('hidden');
         chartEl.classList.remove('hidden');
 
-        // Get or create viewport for this target/kind
+        // Get retained range for this probe kind
         const retainedRange = sectionSeries.retained_range_seconds || 
           (kind === 'icmp' ? 3600 : 14400);
+        
+        // Apply stored scale preset only if no viewport exists yet (first render)
+        // This prevents overwriting user's pan/zoom on auto-refresh
+        if (!getViewport(targetId, kind)) {
+          applyStoredScalePreset(targetId, kind, retainedRange);
+        }
+        
+        // Get or create viewport for this target/kind
         const viewport = getOrCreateViewport(targetId, kind);
         
         // Clamp viewport to retained range

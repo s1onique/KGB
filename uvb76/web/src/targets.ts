@@ -7,6 +7,7 @@ import {
   type PresetWindow,
   createPresetViewport,
   createFullViewport,
+  createViewportFromPreset,
   panLeft,
   panRight,
   zoomIn,
@@ -19,6 +20,12 @@ import {
   getRetainedRangeForKind,
 } from './viewport';
 import { updateChartViewport } from './chart';
+import {
+  readLatencyScalePreset,
+  writeLatencyScalePreset,
+  presetToSeconds,
+  type LatencyScalePreset,
+} from './graphScaleStorage';
 
 // HTML escape helper for XSS protection - uses textContent pattern to safely escape all HTML
 function escapeText(s: string): string {
@@ -110,6 +117,8 @@ function handleGraphControl(targetId: string, kind: string, action: string, reta
       break;
     case 'full':
       newViewport = createFullViewport(retainedRangeSeconds);
+      // Persist 'full' selection
+      writeLatencyScalePreset(targetId, kind, 'full');
       break;
     default:
       return;
@@ -130,9 +139,48 @@ function handlePresetSelection(targetId: string, kind: string, presetSeconds: nu
   const clampedViewport = clampToRetained(viewport, retainedRangeSeconds);
   setViewport(targetId, kind, clampedViewport);
 
+  // Persist the scale selection - derive label from seconds
+  const storedPreset = derivePresetLabel(presetSeconds, kind);
+  if (storedPreset) {
+    writeLatencyScalePreset(targetId, kind, storedPreset);
+  }
+
   const canvas = document.getElementById(`chart-${kind}-${targetId}`) as HTMLCanvasElement;
   if (canvas) {
     updateChartViewport(canvas, clampedViewport);
+  }
+}
+
+// Derive a storage preset label from seconds and kind
+function derivePresetLabel(seconds: number, kind: string): LatencyScalePreset | null {
+  const mapping: Record<string, LatencyScalePreset> = {
+    '60': '1m',
+    '300': '5m',
+    '900': kind === 'icmp' ? '15m' : '15m',
+    '3600': kind === 'icmp' ? '60m' : '1h',
+    '7200': '2h',
+    '14400': '4h',
+  };
+  return mapping[String(seconds)] || null;
+}
+
+// Apply stored scale preset to initialize viewport correctly
+export function applyStoredScalePreset(targetId: string, kind: string, retainedRangeSeconds: number): void {
+  const storedPreset = readLatencyScalePreset(targetId, kind);
+  if (!storedPreset) return;
+
+  // Full is special - handled separately
+  if (storedPreset === 'full') {
+    const viewport = createFullViewport(retainedRangeSeconds);
+    setViewport(targetId, kind, viewport);
+    return;
+  }
+
+  // Convert stored preset to seconds
+  const seconds = presetToSeconds(storedPreset);
+  if (seconds > 0) {
+    const viewport = createViewportFromPreset(seconds, retainedRangeSeconds);
+    setViewport(targetId, kind, viewport);
   }
 }
 

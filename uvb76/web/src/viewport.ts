@@ -276,3 +276,19 @@ export function getViewport(targetId: string, kind: string): TimeViewport | unde
   const key = getViewportKey(targetId, kind);
   return viewportState.get(key);
 }
+
+// Create viewport from preset seconds
+export function createViewportFromPreset(presetSeconds: number, retainedRangeSeconds: number): TimeViewport {
+  const now = Date.now();
+  const windowMs = presetSeconds * 1000;
+  const retainedMs = retainedRangeSeconds * 1000;
+  
+  // Use the preset window, but cap at retained range
+  const effectiveWindow = Math.min(windowMs, retainedMs);
+  
+  return {
+    startMs: now - effectiveWindow,
+    endMs: now,
+    followNow: true,
+  };
+}
