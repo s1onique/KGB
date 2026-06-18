@@ -74,7 +74,8 @@ type LatencySeries struct {
 	ProbeKind              string            `json:"probe_kind"`
 	ProbeURL               string            `json:"probe_url"`
 	IntervalSeconds        int               `json:"interval_seconds"`
-	RangeSeconds           int               `json:"range_seconds"`
+	QueryRangeSeconds      int               `json:"query_range_seconds"`    // requested range in API call
+	RangeSeconds           int               `json:"range_seconds"`          // effective range (clamped to retained)
 	StepSeconds            int               `json:"step_seconds"`
 	WindowSeconds          int               `json:"window_seconds"`
 	RetainedRangeSeconds   int               `json:"retained_range_seconds"`

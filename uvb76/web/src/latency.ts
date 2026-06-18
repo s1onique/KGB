@@ -85,11 +85,13 @@ async function renderLatencySection(
 ): Promise<void> {
   try {
     // Fetch both summary and series data
+    // ICMP: 3600s range (1 hour), 5s step, 60s window to match retained capacity
+    // HTTP: 14400s range (4 hours), 60s step, 300s window to match retained capacity
     const [latency, series] = await Promise.all([
       api.getTargetLatency(targetId),
       kind === 'http'
-        ? api.getHTTPLatencySeries(targetId)
-        : api.getICMPLatencySeries(targetId, 300, 5, 60),
+        ? api.getHTTPLatencySeries(targetId, 14400, 60, 300)
+        : api.getICMPLatencySeries(targetId, 3600, 5, 60),
     ]);
 
     const summary = kind === 'http' ? latency.http : latency.icmp;
@@ -107,20 +109,31 @@ async function renderLatencySection(
     // Update metadata
     renderMeta(metaEl, sectionSeries, probeLabel);
 
-    // Update sample count - show retained, visible, and capacity
-    // Use new fields: retained_sample_count, returned_point_count, retained_sample_capacity
-    const retainedCount = sectionSeries?.retained_sample_count ?? sectionSeries?.sample_count ?? summary.sample_count;
-    const capacity = sectionSeries?.retained_sample_capacity ?? 0;
-    const visibleCount = sectionSeries?.points?.length ?? 0;
+    // Update sample count display
+    // Concepts:
+    // - buffered: samples in the backend ring buffer
+    // - points: chart points returned (aggregated time windows)
+    // - cap: maximum ring buffer capacity
+    const bufferCount = sectionSeries.retained_sample_count;
+    const capacity = sectionSeries.retained_sample_capacity;
+    const visibleCount = sectionSeries.returned_point_count;
+    const queryRange = sectionSeries.query_range_seconds;
+    const effectiveRange = sectionSeries.range_seconds;
     
     if (sectionSeries) {
+      
       if (capacity > 0) {
-        samplesEl.textContent = `Samples: ${retainedCount} retained / ${visibleCount} visible / ${capacity} capacity`;
+        // Show query range info if it differs from effective range (clamped)
+        if (queryRange !== effectiveRange && queryRange > 0) {
+          samplesEl.textContent = `${bufferCount} buffered / ${visibleCount} points / ${capacity} cap (${effectiveRange}s of ${queryRange}s)`;
+        } else {
+          samplesEl.textContent = `${bufferCount} buffered / ${visibleCount} points / ${capacity} cap`;
+        }
       } else {
-        samplesEl.textContent = `Samples: ${retainedCount} retained / ${visibleCount} visible`;
+        samplesEl.textContent = `${bufferCount} buffered / ${visibleCount} points`;
       }
     } else {
-      samplesEl.textContent = `Samples: ${summary.sample_count}`;
+      samplesEl.textContent = `${summary.sample_count} samples`;
     }
 
     // Update percentile stats

@@ -292,14 +292,15 @@ func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Reques
 		ProbeKind:              probeKind,
 		ProbeURL:               probeURL,
 		IntervalSeconds:        intervalSeconds,
-		RangeSeconds:           effectiveRange,
+		QueryRangeSeconds:      rangeSeconds,           // what the client requested
+		RangeSeconds:           effectiveRange,          // what we actually returned (clamped)
 		StepSeconds:            stepSeconds,
 		WindowSeconds:          windowSeconds,
 		RetainedRangeSeconds:   maxRetained,
-		SampleCount:            sampleCount,           // DEPRECATED: for backward compat
-		RetainedSampleCount:    sampleCount,           // actual samples in buffer
-		RetainedSampleCapacity: maxSamples,            // buffer capacity
-		ReturnedPointCount:     0,                      // filled after building points
+		SampleCount:            sampleCount,             // DEPRECATED: for backward compat
+		RetainedSampleCount:    sampleCount,             // actual samples in buffer
+		RetainedSampleCapacity: maxSamples,               // buffer capacity
+		ReturnedPointCount:     0,                       // filled after building points
 		OldestSampleTs:         oldestTs,
 		NewestSampleTs:         newestTs,
 		Points:                 []state.PercentilePoint{},

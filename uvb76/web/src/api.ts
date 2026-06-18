@@ -49,7 +49,8 @@ export interface LatencySeries {
   probe_kind: string;
   probe_url: string;
   interval_seconds: number;
-  range_seconds: number;
+  query_range_seconds: number;       // requested range in API call
+  range_seconds: number;            // effective range (clamped to retained)
   step_seconds: number;
   window_seconds: number;
   retained_range_seconds: number;
