@@ -78,7 +78,9 @@ async function renderLatencySection(
     // Fetch both summary and series data
     const [latency, series] = await Promise.all([
       api.getTargetLatency(targetId),
-      kind === 'http' ? api.getHTTPLatencySeries(targetId) : api.getICMPLatencySeries(targetId),
+      kind === 'http'
+        ? api.getHTTPLatencySeries(targetId)
+        : api.getICMPLatencySeries(targetId, 300, 5, 60),
     ]);
 
     const summary = kind === 'http' ? latency.http : latency.icmp;

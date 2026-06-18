@@ -123,7 +123,7 @@ func TestValidateICMPProbeConfig(t *testing.T) {
 		TimeoutSeconds:       3,
 		WindowSeconds:        300,
 		RetainedRangeSeconds: 3000,
-		RecentSamplesMax:     100,
+		RecentSamplesMax:     300, // must satisfy: 300 * 1 >= 300
 		HistogramBucketsMS:   DefaultHistogramBuckets(),
 	}
 
@@ -188,5 +188,78 @@ func TestICMPProbeConfig_RetainedClampedToWindow(t *testing.T) {
 	// Should be clamped to window_seconds
 	if cfg.RetainedRangeSeconds != cfg.WindowSeconds {
 		t.Errorf("expected retained clamped to window %d, got %d", cfg.WindowSeconds, cfg.RetainedRangeSeconds)
+	}
+}
+
+func TestICMPProbeConfig_DefaultRecentSamplesMax(t *testing.T) {
+	cfg := &ICMPProbeConfig{}
+	cfg.ApplyDefaults()
+
+	if cfg.RecentSamplesMax != DefaultICMPRecentSamplesMax {
+		t.Errorf("expected recent_samples_max %d, got %d", DefaultICMPRecentSamplesMax, cfg.RecentSamplesMax)
+	}
+}
+
+func TestICMPProbeConfig_RecentSamplesMaxClampedToWindow(t *testing.T) {
+	// recent_samples_max=10, interval=1, window=60 should be clamped to 60
+	cfg := &ICMPProbeConfig{
+		RecentSamplesMax: 10,
+		IntervalSeconds:  1,
+		WindowSeconds:   60,
+	}
+	cfg.ApplyDefaults()
+
+	// Should be clamped: minSamples = ceil(60/1) = 60
+	if cfg.RecentSamplesMax != 60 {
+		t.Errorf("expected recent_samples_max clamped to 60, got %d", cfg.RecentSamplesMax)
+	}
+}
+
+func TestHTTPProbeConfig_RecentSamplesMaxClampedToWindow(t *testing.T) {
+	// recent_samples_max=10, interval=15, window=300 should be clamped to 20
+	cfg := &HTTPProbeConfig{
+		RecentSamplesMax: 10,
+		IntervalSeconds: 15,
+		WindowSeconds:   300,
+	}
+	cfg.ApplyDefaults()
+
+	// Should be clamped: minSamples = ceil(300/15) = 20
+	if cfg.RecentSamplesMax != 20 {
+		t.Errorf("expected recent_samples_max clamped to 20, got %d", cfg.RecentSamplesMax)
+	}
+}
+
+func TestValidateICMPProbeConfig_InvariantViolation(t *testing.T) {
+	// recent_samples_max=10, interval=1, window=60 violates invariant: 10*1 < 60
+	cfg := ICMPProbeConfig{
+		IntervalSeconds:      1,
+		TimeoutSeconds:       3,
+		WindowSeconds:        60,
+		RetainedRangeSeconds: 60,
+		RecentSamplesMax:     10,
+		HistogramBucketsMS:   DefaultHistogramBuckets(),
+	}
+
+	err := ValidateICMPProbeConfig(cfg)
+	if err == nil {
+		t.Error("expected error when recent_samples_max * interval < window")
+	}
+}
+
+func TestValidateHTTPProbeConfig_InvariantViolation(t *testing.T) {
+	// recent_samples_max=10, interval=15, window=300 violates invariant: 10*15 < 300
+	cfg := HTTPProbeConfig{
+		IntervalSeconds:     15,
+		TimeoutMilliseconds: 10000,
+		WindowSeconds:       300,
+		RetainedRangeSeconds: 300,
+		RecentSamplesMax:    10,
+		HistogramBucketsMS:  DefaultHistogramBuckets(),
+	}
+
+	err := ValidateHTTPProbeConfig(cfg)
+	if err == nil {
+		t.Error("expected error when recent_samples_max * interval < window")
 	}
 }

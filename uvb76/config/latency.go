@@ -63,6 +63,9 @@ const (
 	DefaultICMPWindowSeconds = 300
 	// DefaultICMPRetainedRangeSeconds is the default retained range for ICMP latency.
 	DefaultICMPRetainedRangeSeconds = 3000
+	// DefaultICMPRecentSamplesMax is the default max number of recent ICMP latency samples to keep.
+	// Must be large enough to cover the window_seconds (window / interval = 300 / 1 = 300).
+	DefaultICMPRecentSamplesMax = 300
 )
 
 // ApplyDefaults applies sensible defaults to latency config when values are missing.
@@ -103,6 +106,11 @@ func (c *HTTPProbeConfig) ApplyDefaults() {
 	if c.RetainedRangeSeconds < c.WindowSeconds {
 		c.RetainedRangeSeconds = c.WindowSeconds
 	}
+	// Auto-clamp recent_samples_max to ensure window can be covered
+	minSamples := (c.WindowSeconds + c.IntervalSeconds - 1) / c.IntervalSeconds
+	if c.RecentSamplesMax < minSamples {
+		c.RecentSamplesMax = minSamples
+	}
 }
 
 // IsHTTPEnabled returns whether HTTP latency measurement is enabled.
@@ -123,7 +131,7 @@ func (c *ICMPProbeConfig) ApplyDefaults() {
 		c.HistogramBucketsMS = DefaultHistogramBuckets()
 	}
 	if c.RecentSamplesMax <= 0 {
-		c.RecentSamplesMax = DefaultRecentSamplesMax
+		c.RecentSamplesMax = DefaultICMPRecentSamplesMax
 	}
 	if c.IntervalSeconds <= 0 {
 		c.IntervalSeconds = DefaultICMPIntervalSeconds
@@ -140,6 +148,11 @@ func (c *ICMPProbeConfig) ApplyDefaults() {
 	// Clamp retained_range to at least window_seconds
 	if c.RetainedRangeSeconds < c.WindowSeconds {
 		c.RetainedRangeSeconds = c.WindowSeconds
+	}
+	// Auto-clamp recent_samples_max to ensure window can be covered
+	minSamples := (c.WindowSeconds + c.IntervalSeconds - 1) / c.IntervalSeconds
+	if c.RecentSamplesMax < minSamples {
+		c.RecentSamplesMax = minSamples
 	}
 }
 
@@ -186,6 +199,10 @@ func ValidateHTTPProbeConfig(c HTTPProbeConfig) error {
 	if c.RetainedRangeSeconds < c.WindowSeconds {
 		return errors.New("latency.http.retained_range_seconds must be >= window_seconds")
 	}
+	// Enforce invariant: recent_samples_max * interval must cover window
+	if c.RecentSamplesMax*c.IntervalSeconds < c.WindowSeconds {
+		return errors.New("latency.http.recent_samples_max * interval_seconds must be >= window_seconds")
+	}
 	return nil
 }
 
@@ -214,6 +231,10 @@ func ValidateICMPProbeConfig(c ICMPProbeConfig) error {
 	}
 	if c.RetainedRangeSeconds < c.WindowSeconds {
 		return errors.New("latency.icmp.retained_range_seconds must be >= window_seconds")
+	}
+	// Enforce invariant: recent_samples_max * interval must cover window
+	if c.RecentSamplesMax*c.IntervalSeconds < c.WindowSeconds {
+		return errors.New("latency.icmp.recent_samples_max * interval_seconds must be >= window_seconds")
 	}
 	return nil
 }

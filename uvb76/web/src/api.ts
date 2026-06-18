@@ -153,9 +153,9 @@ class ApiClient {
 
   async getICMPLatencySeries(
     targetId: string,
-    rangeSeconds: number = 3600,
-    stepSeconds: number = 60,
-    windowSeconds: number = 300
+    rangeSeconds: number = 300,
+    stepSeconds: number = 5,
+    windowSeconds: number = 60
   ): Promise<LatencySeries> {
     return this.fetch<LatencySeries>(
       `/api/v1/latency/series?target_id=${targetId}&probe_kind=icmp&range_seconds=${rangeSeconds}&step_seconds=${stepSeconds}&window_seconds=${windowSeconds}`
