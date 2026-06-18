@@ -173,20 +173,32 @@ fn parseSocketLine(allocator: std.mem.Allocator, line: []const u8, config: Parse
 
         // Check if this looks like an address:port
         if (std.mem.containsAtLeast(u8, trimmed_field, 1, ":") and !found_local) {
-            local = if (config.redact_addresses) (redactAddress(allocator, trimmed_field) catch null) else trimmed_field;
+            // Always duplicate - even non-redacted addresses may be returned
+            if (config.redact_addresses) {
+                local = redactAddress(allocator, trimmed_field) catch null;
+            } else {
+                local = allocator.dupe(u8, trimmed_field) catch null;
+            }
             found_local = true;
         } else if (found_local and !found_remote) {
             if (std.mem.containsAtLeast(u8, trimmed_field, 1, ":") or
                 std.mem.containsAtLeast(u8, trimmed_field, 1, "("))
             {
-                remote = if (config.redact_addresses) (redactAddress(allocator, trimmed_field) catch null) else trimmed_field;
+                if (config.redact_addresses) {
+                    remote = redactAddress(allocator, trimmed_field) catch null;
+                } else {
+                    remote = allocator.dupe(u8, trimmed_field) catch null;
+                }
                 found_remote = true;
             }
         }
 
-        // Check for process info
+        // Check for process info - duplicate to make owned
         if (std.mem.containsAtLeast(u8, trimmed_field, 1, "(")) {
-            process_name = extractProcessName(trimmed_field);
+            const name = extractProcessName(trimmed_field);
+            if (name) |n| {
+                process_name = allocator.dupe(u8, n) catch null;
+            }
         }
     }
 
