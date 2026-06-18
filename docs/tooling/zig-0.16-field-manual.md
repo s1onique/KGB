@@ -1,8 +1,6 @@
 # Zig 0.16.x Field Manual
 
-This document captures the current Zig API patterns used in KGB's `tovarisch` service.
-
-**Target:** Zig 0.16.x — Do not downgrade Zig to match stale examples.
+This document captures current Zig API patterns used in KGB's `tovarisch` service. **Target:** Zig 0.16.x — do not downgrade Zig to match stale examples.
 
 ## Known-Good Patterns
 
@@ -393,7 +391,10 @@ For threading patterns, detached heartbeat implementation, blocking sleep, and c
 
 For page_allocator leak lessons, request/status rendering memory ownership patterns, and production soak test guidance, see [`zig-0.16-field-manual-rss-leak.md`](./zig-0.16-field-manual-rss-leak.md).
 
-## TCP Socket Testing in Zig Tests
+## Network Diagnostics Ownership
+
+For network diagnostics ownership rules, memory patterns, and confirmed edge cases from recent Zig 0.16 work, see [`zig-0.16-network-diagnostics-ownership.md`](./zig-0.16-network-diagnostics-ownership.md). Covers: one explicit owner (deinit), mixed ownership avoidance, fallback literal traps, explicit nullable/error paths, and confirmed edge cases (JSON streaming, escaped enums, encoder byte counts, copyForwards).
+
+### TCP Socket Testing
 
 For TCP socket testing patterns that prevent CI hangs, see [`zig-0.16-tcp-socket-tests.md`](./zig-0.16-tcp-socket-tests.md). This companion doc covers: no raw blocking `accept()`/`recv()`, bounded `poll()` before socket receive, and compile/run split for CI observability.
-
