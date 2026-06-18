@@ -72,6 +72,44 @@ export interface PercentilePoint {
   p99_ms?: number;
 }
 
+// SpikeSample represents a single latency sample captured around a spike event.
+export interface SpikeSample {
+  ts: string;
+  latency_ms: number;
+  ok: boolean;
+}
+
+// SpikeThresholds documents which thresholds were configured when spike was detected.
+export interface SpikeThresholds {
+  warning_ms: number;
+  critical_ms: number;
+  relative_multiplier: number;
+}
+
+// SpikeEvent represents a detected latency spike event for evidence collection.
+export interface SpikeEvent {
+  event_id: string;
+  target_id: string;
+  kind: string;              // "http" or "icmp"
+  severity: string;          // "warning" or "critical"
+  sample_ts: string;         // timestamp of the spike sample
+  latency_ms: number;        // the spike latency value
+  rolling_median_ms: number; // median before spike
+  reasons: string[];         // why this was flagged as spike
+  thresholds: SpikeThresholds;
+  previous_samples: SpikeSample[];
+  scheduler_delay_ms?: number;
+  http_status?: number;
+  probe_error?: string;
+  collected_at: string;      // when spike was recorded
+}
+
+// SpikeResponse represents the API response for spike events.
+export interface SpikeResponse {
+  spikes: SpikeEvent[];
+  count: number;
+}
+
 export interface AuthCheckResponse {
   authenticated: boolean;
   username?: string;
@@ -175,6 +213,16 @@ class ApiClient {
 
   async getStatus(): Promise<ServerStatus> {
     return this.fetch<ServerStatus>('/api/v1/status');
+  }
+
+  async getLatencySpikes(
+    targetId: string,
+    kind: 'http' | 'icmp' = 'http',
+    limit: number = 20
+  ): Promise<SpikeResponse> {
+    return this.fetch<SpikeResponse>(
+      `/api/v1/latency/spikes?target_id=${encodeURIComponent(targetId)}&kind=${kind}&limit=${limit}`
+    );
   }
 }
 

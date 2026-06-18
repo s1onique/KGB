@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/s1onique/KGB/uvb76/config"
+	"github.com/s1onique/KGB/uvb76/state"
 )
 
 // ICMPSample represents a single ICMP ping latency measurement.
@@ -25,9 +26,11 @@ const ICMPSampleKind = "icmp"
 // ICMPSampleKindHTTP is the probe kind identifier for HTTP samples.
 const ICMPSampleKindHTTP = "http"
 
-// ICMPSampleRecorder is the interface for recording ICMP samples.
+// ICMPSampleRecorder is the interface for recording ICMP samples and detecting spikes.
 type ICMPSampleRecorder interface {
 	RecordICMPLatency(targetID string, latencyMs float64, reachable bool)
+	GetRecentICMPLatencySamples(targetID string, limit int) []state.LatencySample
+	DetectAndRecordSpike(targetID, kind string, latencyMs float64, sampleTs time.Time, reachable bool, schedulerDelayMs *float64, httpStatus *int, probeError *string, previousSamples []state.LatencySample) *state.SpikeEvent
 }
 
 // ICMPClient performs independent ICMP ping probes against tovarisch targets.
@@ -144,10 +147,21 @@ func (c *ICMPClient) probeTarget(targetID string) {
 		return
 	}
 
+	// Get previous samples BEFORE recording (for spike detection)
+	// Use RecentSamplesMax from config, with a sensible minimum for spike detection
+	maxSamples := c.cfg.RecentSamplesMax
+	if maxSamples < 30 {
+		maxSamples = 30
+	}
+	previousSamples := c.state.GetRecentICMPLatencySamples(t.ID, maxSamples)
+
 	// Extract hostname from base URL
 	host := extractHost(t.BaseURL)
 	if host == "" {
+		sampleTs := time.Now().UTC()
 		c.state.RecordICMPLatency(t.ID, float64(c.cfg.TimeoutSeconds*1000), false)
+		errStr := "failed to extract host from base_url"
+		c.state.DetectAndRecordSpike(t.ID, "icmp", float64(c.cfg.TimeoutSeconds*1000), sampleTs, false, nil, nil, &errStr, previousSamples)
 		return
 	}
 
@@ -158,15 +172,21 @@ func (c *ICMPClient) probeTarget(targetID string) {
 	latency, err := c.backend.Ping(ctx, host, timeout)
 	// Use float division to preserve sub-millisecond precision
 	latencyMs := float64(latency) / float64(time.Millisecond)
+	sampleTs := time.Now().UTC()
 
 	if err != nil {
 		// Record failure - timeout or unreachable
 		c.state.RecordICMPLatency(t.ID, latencyMs, false)
+		errStr := fmt.Sprintf("ping failed: %v", err)
+		c.state.DetectAndRecordSpike(t.ID, "icmp", latencyMs, sampleTs, false, nil, nil, &errStr, previousSamples)
 		return
 	}
 
 	// Record successful latency measurement
 	c.state.RecordICMPLatency(t.ID, latencyMs, true)
+
+	// Spike detection for successful ICMP
+	c.state.DetectAndRecordSpike(t.ID, "icmp", latencyMs, sampleTs, true, nil, nil, nil, previousSamples)
 }
 
 // ICMPProbeResult contains detailed probe results for diagnostics.

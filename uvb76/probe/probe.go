@@ -110,11 +110,23 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(c.cfg.TimeoutMilliseconds)*time.Millisecond)
 	defer cancel()
 
+	// Get previous samples BEFORE recording (for spike detection)
+	// Use RecentSamplesMax from config, with a sensible minimum for spike detection
+	maxSamples := c.cfg.RecentSamplesMax
+	if maxSamples < 30 {
+		maxSamples = 30
+	}
+	previousSamples := c.state.GetRecentLatencySamples(t.ID, maxSamples)
+
 	// Probe endpoint - use the same URL construction as latency series metadata
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, config.TargetStatusURL(t.BaseURL), nil)
 	if err != nil {
 		// Record timeout-style latency for request creation failures
+		sampleTs := time.Now().UTC()
 		c.state.RecordLatency(t.ID, float64(c.cfg.TimeoutMilliseconds), false)
+		// Spike detection for failed request
+		var errStr string = fmt.Sprintf("request creation failed: %v", err)
+		c.state.DetectAndRecordSpike(t.ID, "http", float64(c.cfg.TimeoutMilliseconds), sampleTs, false, nil, nil, &errStr, previousSamples)
 		return
 	}
 
@@ -122,16 +134,27 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 	start := time.Now()
 	resp, err := c.httpClient.Do(req)
 	latencyMs := float64(time.Since(start).Milliseconds())
+	sampleTs := time.Now().UTC()
 
 	if err != nil {
 		// Record latency for failed request (still useful for timeout monitoring)
 		c.state.RecordLatency(t.ID, latencyMs, false)
+		// Spike detection for failed request
+		errStr := fmt.Sprintf("request failed: %v", err)
+		c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, false, nil, nil, &errStr, previousSamples)
 		return
 	}
 	defer resp.Body.Close()
 
 	// Record successful latency measurement
 	c.state.RecordLatency(t.ID, latencyMs, true)
+
+	// Spike detection for successful request
+	var httpStatus *int
+	if resp != nil {
+		httpStatus = &resp.StatusCode
+	}
+	c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, true, nil, httpStatus, nil, previousSamples)
 }
 
 // ProbeResult contains detailed probe results for diagnostics.

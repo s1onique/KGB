@@ -104,6 +104,67 @@ func (s *Server) handleAllLatency(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(summaries)
 }
 
+// SpikeResponse represents the API response for spike events.
+type SpikeResponse struct {
+	Spikes []state.SpikeEvent `json:"spikes"`
+	Count  int                `json:"count"`
+}
+
+// handleTargetLatencySpikes returns recent spike events for a target.
+func (s *Server) handleTargetLatencySpikes(w http.ResponseWriter, r *http.Request) {
+	targetID := r.URL.Query().Get("target_id")
+	if targetID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "target_id is required"})
+		return
+	}
+
+	// Validate target exists
+	var found bool
+	for _, t := range s.cfg.Targets {
+		if t.ID == targetID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "target_not_found"})
+		return
+	}
+
+	// Parse probe_kind (defaults to http)
+	kind := r.URL.Query().Get("kind")
+	if kind == "" {
+		kind = "http"
+	}
+	if kind != "http" && kind != "icmp" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "kind must be 'http' or 'icmp'"})
+		return
+	}
+
+	// Parse limit (default 20, max 100)
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	// Clamp to safe maximum
+	if limit > 100 {
+		limit = 100
+	}
+
+	spikes := s.state.GetSpikes(targetID, kind, limit)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(SpikeResponse{
+		Spikes: spikes,
+		Count:  len(spikes),
+	})
+}
+
 // handleTargetLatencySeries returns percentile time-series data for a target.
 func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Request) {
 	targetID := r.URL.Query().Get("target_id")

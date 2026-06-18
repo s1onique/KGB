@@ -54,3 +54,60 @@ export function formatStartTime(rfc3339Timestamp: string | null | undefined): st
 
   return `${day}.${month} ${hour}:${minute}:${second}`;
 }
+
+/**
+ * Format a spike timestamp for compact display.
+ *
+ * Renders RFC3339 timestamp in local timezone as "HH:MM:SS".
+ * Returns "—" if the timestamp is missing or invalid.
+ */
+export function formatSpikeTime(rfc3339Timestamp: string | null | undefined): string {
+  if (!rfc3339Timestamp) {
+    return "—";
+  }
+
+  const date = new Date(rfc3339Timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
+  // Format as HH:MM:SS
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  return formatter.format(date);
+}
+
+/**
+ * Format a spike severity for display with safe text.
+ *
+ * Renders severity as uppercase with appropriate styling hint.
+ */
+export function formatSpikeSeverity(severity: string): string {
+  switch (severity.toLowerCase()) {
+    case 'critical':
+      return 'CRITICAL';
+    case 'warning':
+      return 'warning';
+    default:
+      return severity.toUpperCase();
+  }
+}
+
+/**
+ * Format a spike reason for display with safe text.
+ *
+ * Converts snake_case reason to readable format.
+ */
+export function formatSpikeReason(reason: string): string {
+  // Convert snake_case to readable format
+  return reason
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+    .replace('10X', '10x');
+}

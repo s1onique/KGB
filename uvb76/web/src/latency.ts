@@ -1,5 +1,5 @@
 // Latency rendering module for HTTP and ICMP latency graphs
-import { api, type LatencySummary, type LatencySeries, type PercentilePoint, type TargetLatencyResponse } from './api';
+import { api, type LatencySummary, type LatencySeries, type PercentilePoint, type TargetLatencyResponse, type SpikeResponse } from './api';
 import { renderLatencyChart, destroyChart, renderLatencyChartWithViewport } from './chart';
 import { formatLatencyMs } from './format';
 import { getOrCreateViewport, getViewport, clampToRetained } from './viewport';

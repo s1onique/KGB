@@ -83,6 +83,7 @@ func (s *Server) Start() error {
 	protected.Handle("/targets/{id}/latency/samples", http.HandlerFunc(s.handleTargetLatencySamples)).Methods(http.MethodGet)
 	protected.Handle("/latency", http.HandlerFunc(s.handleAllLatency)).Methods(http.MethodGet)
 	protected.Handle("/latency/series", http.HandlerFunc(s.handleTargetLatencySeries)).Methods(http.MethodGet)
+	protected.Handle("/latency/spikes", http.HandlerFunc(s.handleTargetLatencySpikes)).Methods(http.MethodGet)
 
 	// Web UI - serve from embedded filesystem
 	// Assets are served from /assets/* path
