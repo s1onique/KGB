@@ -1,7 +1,8 @@
 // Latency rendering module for HTTP and ICMP latency graphs
 import { api, type LatencySummary, type LatencySeries, type PercentilePoint, type TargetLatencyResponse } from './api';
-import { renderLatencyChart, destroyChart } from './chart';
+import { renderLatencyChart, destroyChart, renderLatencyChartWithViewport } from './chart';
 import { formatLatencyMs } from './format';
+import { getOrCreateViewport, clampToRetained } from './viewport';
 
 // Check if series has any finite percentile values
 function hasFinitePercentiles(points: PercentilePoint[]): boolean {
@@ -42,6 +43,16 @@ function renderStats(statsEl: HTMLElement, summary: LatencySummary | undefined):
   `;
 }
 
+// Format retained range for display
+function formatRetainedRange(seconds: number): string {
+  if (seconds >= 3600) {
+    const hours = seconds / 3600;
+    return hours === Math.floor(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
+  } else {
+    return `${Math.round(seconds / 60)}m`;
+  }
+}
+
 // Render metadata for a latency section
 function renderMeta(metaEl: HTMLElement, series: LatencySeries | undefined, probeLabel: string): void {
   if (!series) {
@@ -50,7 +61,7 @@ function renderMeta(metaEl: HTMLElement, series: LatencySeries | undefined, prob
   }
 
   const retainedSec = series.retained_range_seconds;
-  const retainedLabel = Number.isFinite(retainedSec) ? `${Math.round(retainedSec / 60)}m retained` : 'retention unknown';
+  const retainedLabel = Number.isFinite(retainedSec) ? `${formatRetainedRange(retainedSec)} retained` : 'retention unknown';
   metaEl.innerHTML = `
     <span><span class="label">Probe:</span> ${probeLabel}</span>
     <span><span class="label">Interval:</span> every ${series.interval_seconds}s</span>
@@ -95,13 +106,18 @@ async function renderLatencySection(
     // Update metadata
     renderMeta(metaEl, sectionSeries, probeLabel);
 
-    // Update sample count
-    samplesEl.textContent = `Samples: ${summary.sample_count}`;
+    // Update sample count - show both total retained and visible
+    if (sectionSeries?.sample_count && sectionSeries?.points) {
+      const visibleCount = sectionSeries.points.length;
+      samplesEl.textContent = `Samples: ${sectionSeries.sample_count} retained / ${visibleCount} visible`;
+    } else {
+      samplesEl.textContent = `Samples: ${summary.sample_count}`;
+    }
 
     // Update percentile stats
     renderStats(statsEl, summary);
 
-    // Draw chart
+    // Draw chart using viewport-aware renderer
     if (sectionSeries?.points && sectionSeries.points.length > 0) {
       // Check if we have any finite percentile values
       if (hasFinitePercentiles(sectionSeries.points)) {
@@ -109,7 +125,16 @@ async function renderLatencySection(
         emptyEl?.classList.add('hidden');
         chartEl.classList.remove('hidden');
 
-        renderLatencyChart(chartEl, sectionSeries.points);
+        // Get or create viewport for this target/kind
+        const retainedRange = sectionSeries.retained_range_seconds || 
+          (kind === 'icmp' ? 3600 : 14400);
+        const viewport = getOrCreateViewport(targetId, kind);
+        
+        // Clamp viewport to retained range
+        const clampedViewport = clampToRetained(viewport, retainedRange);
+        
+        // Render chart with viewport bounds
+        renderLatencyChartWithViewport(chartEl, sectionSeries.points, clampedViewport);
 
         // Show warning if sample count is low
         const latestPoint = sectionSeries.points[sectionSeries.points.length - 1];

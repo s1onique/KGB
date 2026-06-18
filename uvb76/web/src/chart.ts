@@ -11,6 +11,8 @@ import {
   Filler,
 } from 'chart.js';
 import type { PercentilePoint } from './api';
+import type { TimeViewport } from './viewport';
+import { isInViewport } from './viewport';
 
 // Register Chart.js components
 Chart.register(
@@ -27,6 +29,7 @@ Chart.register(
 interface ChartInstance {
   chart: Chart | null;
   canvas: HTMLCanvasElement;
+  fullPoints: PercentilePoint[];  // Store full retained dataset for viewport navigation
 }
 
 const charts = new Map<HTMLCanvasElement, ChartInstance>();
@@ -277,4 +280,174 @@ export function destroyChart(canvas: HTMLCanvasElement): void {
     instance.chart.destroy();
     charts.delete(canvas);
   }
+}
+
+// Render chart with viewport bounds (x-axis min/max)
+export function renderLatencyChartWithViewport(
+  canvas: HTMLCanvasElement,
+  points: PercentilePoint[],
+  viewport: TimeViewport
+): void {
+  // Destroy existing chart if any
+  destroyChart(canvas);
+
+  if (!points || points.length === 0) {
+    return;
+  }
+
+  // Parse data points
+  const parsedPoints = points.map(parsePoint);
+
+  // Filter points to viewport for y-axis scaling
+  const visiblePoints = parsedPoints.filter(p => isInViewport(p.ts, viewport));
+
+  // Build datasets from finite points
+  const datasets = buildPercentileDatasets(visiblePoints);
+
+  // Compute y-axis scale from VISIBLE points only (not hidden retained data)
+  const allY = datasets.flatMap((d) => d.data.map((p) => p.y));
+  const maxY = allY.length > 0 ? Math.max(...allY) : 0;
+
+  // Determine if we have any data to show
+  if (allY.length === 0) {
+    if (DEBUG_CHART) {
+      console.warn('[chart] No finite latency series points found in viewport');
+    }
+    return;
+  }
+
+  // Determine point radius based on sample count
+  const latestVisiblePoint = visiblePoints[visiblePoints.length - 1];
+  const pointRadius = latestVisiblePoint && latestVisiblePoint.sampleCount < 10 ? 2 : 0;
+  const pointHoverRadius = 4;
+
+  // Add point styling to all datasets
+  for (const dataset of datasets) {
+    dataset.pointRadius = pointRadius;
+    dataset.pointHoverRadius = pointHoverRadius;
+  }
+
+  // Create chart with viewport bounds on x-axis
+  const chart = new Chart(canvas, {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: {
+        mode: 'index',
+        intersect: false,
+      },
+      plugins: {
+        legend: {
+          display: false,
+        },
+        tooltip: {
+          enabled: true,
+          backgroundColor: '#161b22',
+          titleColor: '#c9d1d9',
+          bodyColor: '#c9d1d9',
+          borderColor: '#30363d',
+          borderWidth: 1,
+          padding: 10,
+          displayColors: true,
+          callbacks: {
+            title: (items) => {
+              const x = items[0]?.parsed.x;
+              return Number.isFinite(x)
+                ? new Date(x).toLocaleString()
+                : '';
+            },
+            label: (context) => {
+              const value = context.parsed.y;
+              return Number.isFinite(value)
+                ? `${context.dataset.label}: ${formatMs(value)}`
+                : `${context.dataset.label}: —`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          // Apply viewport bounds
+          min: viewport.startMs,
+          max: viewport.endMs,
+          ticks: {
+            color: colors.text,
+            maxTicksLimit: 8,
+            callback: (value) => {
+              const date = new Date(value as number);
+              return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+            },
+          },
+          grid: {
+            color: colors.grid,
+          },
+        },
+        y: {
+          beginAtZero: true,
+          suggestedMax: niceLatencyMax(maxY),
+          ticks: {
+            color: colors.text,
+            callback: (value) => formatMs(Number(value)),
+          },
+          grid: {
+            color: colors.grid,
+          },
+        },
+      },
+    },
+  });
+
+  // Store full points for viewport navigation
+  charts.set(canvas, { chart, canvas, fullPoints: points });
+}
+
+// Update chart viewport bounds and recompute visible data (for navigation controls)
+export function updateChartViewport(canvas: HTMLCanvasElement, viewport: TimeViewport): void {
+  const instance = charts.get(canvas);
+  if (!instance?.chart || !instance.fullPoints) {
+    return;
+  }
+
+  const chart = instance.chart;
+  const xScale = chart.scales['x'];
+  const yScale = chart.scales['y'];
+  
+  // Parse full points and filter to new viewport
+  const parsedPoints = instance.fullPoints.map(parsePoint);
+  const visiblePoints = parsedPoints.filter(p => isInViewport(p.ts, viewport));
+  
+  // Rebuild datasets for visible points
+  const datasets = buildPercentileDatasets(visiblePoints);
+  
+  // Compute y-axis scale from VISIBLE points only
+  const allY = datasets.flatMap((d) => d.data.map((p) => p.y));
+  const maxY = allY.length > 0 ? Math.max(...allY) : 0;
+  
+  // Determine point radius
+  const latestVisiblePoint = visiblePoints[visiblePoints.length - 1];
+  const pointRadius = latestVisiblePoint && latestVisiblePoint.sampleCount < 10 ? 2 : 0;
+  
+  // Update datasets
+  chart.data.datasets = datasets;
+  for (const dataset of chart.data.datasets) {
+    dataset.pointRadius = pointRadius;
+    dataset.pointHoverRadius = 4;
+  }
+  
+  // Update x-axis bounds
+  if (xScale) {
+    xScale.options.min = viewport.startMs;
+    xScale.options.max = viewport.endMs;
+  }
+  
+  // Update y-axis scale from visible data
+  if (yScale) {
+    yScale.options.suggestedMax = niceLatencyMax(maxY);
+  }
+  
+  chart.update('none'); // No animation for instant response
 }

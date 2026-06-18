@@ -78,6 +78,9 @@ type LatencySeries struct {
 	StepSeconds          int               `json:"step_seconds"`
 	WindowSeconds        int               `json:"window_seconds"`
 	RetainedRangeSeconds int               `json:"retained_range_seconds"`
+	SampleCount          int               `json:"sample_count"`           // total samples in buffer
+	OldestSampleTs       *time.Time        `json:"oldest_sample_ts,omitempty"` // oldest sample timestamp
+	NewestSampleTs       *time.Time        `json:"newest_sample_ts,omitempty"` // newest sample timestamp
 	Points               []PercentilePoint `json:"points"`
 }
 
@@ -326,6 +329,30 @@ func (m *Manager) GetICMPMaxSamples() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.icmpMaxSamples
+}
+
+// GetLatencySampleTimestamps returns oldest and newest timestamps for HTTP latency samples.
+func (m *Manager) GetLatencySampleTimestamps(targetID string) (oldest, newest *time.Time) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	tracker := m.httpTrackers[targetID]
+	if tracker == nil {
+		return nil, nil
+	}
+	return tracker.GetSampleTimestamps()
+}
+
+// GetICMPLatencySampleTimestamps returns oldest and newest timestamps for ICMP latency samples.
+func (m *Manager) GetICMPLatencySampleTimestamps(targetID string) (oldest, newest *time.Time) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	tracker := m.icmpTrackers[targetID]
+	if tracker == nil {
+		return nil, nil
+	}
+	return tracker.GetSampleTimestamps()
 }
 
 // CalculatePercentiles computes percentiles from a sorted slice of samples.

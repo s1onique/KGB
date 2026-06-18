@@ -168,20 +168,30 @@ func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Reques
 	var windowSec int
 	var retainedRange int
 	var probeURL string
+	var oldestTs, newestTs *time.Time
+	var sampleCount int
 
 	if probeKind == "http" {
-		samples = s.state.GetRecentLatencySamples(targetID, s.state.GetMaxSamples())
+		maxSamples := s.state.GetMaxSamples()
+		samples = s.state.GetRecentLatencySamples(targetID, maxSamples)
 		intervalSeconds = s.cfg.Latency.HTTP.IntervalSeconds
 		windowSec = s.cfg.Latency.HTTP.WindowSeconds
 		retainedRange = s.cfg.Latency.HTTP.RetainedRangeSeconds
 		probeURL = config.TargetStatusURL(targetCfg.BaseURL)
+		oldestTs, newestTs = s.state.GetLatencySampleTimestamps(targetID)
+		// Use actual sample count from the samples returned
+		sampleCount = len(samples)
 	} else {
-		samples = s.state.GetRecentICMPLatencySamples(targetID, s.state.GetICMPMaxSamples())
+		maxSamples := s.state.GetICMPMaxSamples()
+		samples = s.state.GetRecentICMPLatencySamples(targetID, maxSamples)
 		intervalSeconds = s.cfg.Latency.ICMP.IntervalSeconds
 		windowSec = s.cfg.Latency.ICMP.WindowSeconds
 		retainedRange = s.cfg.Latency.ICMP.RetainedRangeSeconds
 		// ICMP pings the hostname from base_url without port/path
 		probeURL = targetCfg.BaseURL // for reference only
+		oldestTs, newestTs = s.state.GetICMPLatencySampleTimestamps(targetID)
+		// Use actual sample count from the samples returned
+		sampleCount = len(samples)
 	}
 
 	// Override window if provided in query
@@ -225,6 +235,9 @@ func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Reques
 		StepSeconds:         stepSeconds,
 		WindowSeconds:       windowSeconds,
 		RetainedRangeSeconds: maxRetained,
+		SampleCount:         sampleCount,
+		OldestSampleTs:      oldestTs,
+		NewestSampleTs:      newestTs,
 		Points:              []state.PercentilePoint{},
 	}
 

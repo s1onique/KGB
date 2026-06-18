@@ -200,3 +200,66 @@ h2 { color: #8b949e; margin: 1.5rem 0 1rem; font-weight: 500; }
     color: #c9d1d9;
     border-color: #8b949e;
 }
+
+/* Graph controls */
+.graph-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-bottom: 0.5rem;
+    padding: 0.5rem;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    align-items: center;
+}
+
+.graph-control-btn {
+    padding: 0.25rem 0.5rem;
+    background: #21262d;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.625rem;
+    font-weight: 500;
+    transition: all 0.15s;
+    min-width: 28px;
+    text-align: center;
+}
+
+.graph-control-btn:hover {
+    background: #30363d;
+    color: #c9d1d9;
+    border-color: #8b949e;
+}
+
+.graph-control-btn:active {
+    background: #161b22;
+    transform: translateY(1px);
+}
+
+.graph-control-btn.preset-btn {
+    min-width: 36px;
+    padding: 0.25rem 0.4rem;
+}
+
+.graph-control-btn.nav-btn {
+    font-size: 0.75rem;
+    min-width: 24px;
+}
+
+.graph-control-btn.zoom-btn {
+    font-weight: 700;
+}
+
+.graph-control-btn.action-btn {
+    background: #238636;
+    border-color: #238636;
+    color: #ffffff;
+}
+
+.graph-control-btn.action-btn:hover {
+    background: #2ea043;
+    border-color: #2ea043;
+}

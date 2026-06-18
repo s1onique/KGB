@@ -1,5 +1,24 @@
 // Targets rendering module
 import { api, type Target, type TargetSnapshot } from './api';
+import {
+  ICMP_PRESETS,
+  HTTP_PRESETS,
+  type TimeViewport,
+  type PresetWindow,
+  createPresetViewport,
+  createFullViewport,
+  panLeft,
+  panRight,
+  zoomIn,
+  zoomOut,
+  jumpToNow,
+  clampToRetained,
+  getViewportKey,
+  getOrCreateViewport,
+  setViewport,
+  getRetainedRangeForKind,
+} from './viewport';
+import { updateChartViewport } from './chart';
 
 // HTML escape helper for XSS protection - uses textContent pattern to safely escape all HTML
 function escapeText(s: string): string {
@@ -11,7 +30,27 @@ function escapeText(s: string): string {
 // Whitelist of allowed CSS classes for status to prevent XSS
 const statusClasses = new Set(['up', 'down', 'unknown', 'error', 'degraded', 'warning']);
 
-// Latency section HTML template
+// Graph controls HTML for a latency section
+function graphControlsHTML(targetId: string, kind: 'http' | 'icmp'): string {
+  const presets = kind === 'icmp' ? ICMP_PRESETS : HTTP_PRESETS;
+  const presetsHTML = presets.map(p => 
+    `<button class="graph-control-btn preset-btn" data-target="${escapeText(targetId)}" data-kind="${kind}" data-preset="${p.seconds}">${escapeText(p.label)}</button>`
+  ).join('');
+  
+  return `
+    <div class="graph-controls" id="controls-${kind}-${escapeText(targetId)}">
+      <button class="graph-control-btn nav-btn" data-target="${escapeText(targetId)}" data-kind="${kind}" data-action="pan-left" title="Pan left">&#9664;</button>
+      <button class="graph-control-btn zoom-btn" data-target="${escapeText(targetId)}" data-kind="${kind}" data-action="zoom-out" title="Zoom out">-</button>
+      ${presetsHTML}
+      <button class="graph-control-btn zoom-btn" data-target="${escapeText(targetId)}" data-kind="${kind}" data-action="zoom-in" title="Zoom in">+</button>
+      <button class="graph-control-btn nav-btn" data-target="${escapeText(targetId)}" data-kind="${kind}" data-action="pan-right" title="Pan right">&#9654;</button>
+      <button class="graph-control-btn action-btn" data-target="${escapeText(targetId)}" data-kind="${kind}" data-action="now" title="Jump to now">Now</button>
+      <button class="graph-control-btn action-btn" data-target="${escapeText(targetId)}" data-kind="${kind}" data-action="full" title="Show full retained range">Full</button>
+    </div>
+  `;
+}
+
+// Latency section HTML template with graph controls
 function latencySectionHTML(targetId: string, kind: 'http' | 'icmp', title: string): string {
   const kindId = kind;
   return `
@@ -28,6 +67,7 @@ function latencySectionHTML(targetId: string, kind: 'http' | 'icmp', title: stri
                       <span class="legend-item"><span class="legend-dot p99"></span>p99</span>
                   </div>
               </div>
+              ${graphControlsHTML(targetId, kind)}
               <div class="latency-chart-wrap">
                   <canvas class="latency-chart" id="chart-${kindId}-${escapeText(targetId)}"></canvas>
                   <div class="latency-empty hidden" id="chart-empty-${kindId}-${escapeText(targetId)}">
@@ -42,6 +82,82 @@ function latencySectionHTML(targetId: string, kind: 'http' | 'icmp', title: stri
           </div>
       </div>
   `;
+}
+
+// Handle graph control action
+function handleGraphControl(targetId: string, kind: string, action: string, retainedRangeSeconds: number): void {
+  const viewport = getOrCreateViewport(targetId, kind);
+  const canvas = document.getElementById(`chart-${kind}-${targetId}`) as HTMLCanvasElement;
+  if (!canvas) return;
+
+  let newViewport: TimeViewport;
+
+  switch (action) {
+    case 'pan-left':
+      newViewport = panLeft(viewport);
+      break;
+    case 'pan-right':
+      newViewport = panRight(viewport);
+      break;
+    case 'zoom-in':
+      newViewport = zoomIn(viewport);
+      break;
+    case 'zoom-out':
+      newViewport = zoomOut(viewport);
+      break;
+    case 'now':
+      newViewport = jumpToNow(viewport);
+      break;
+    case 'full':
+      newViewport = createFullViewport(retainedRangeSeconds);
+      break;
+    default:
+      return;
+  }
+
+  // Clamp to retained range and save
+  newViewport = clampToRetained(newViewport, retainedRangeSeconds);
+  setViewport(targetId, kind, newViewport);
+
+  // Update chart viewport
+  updateChartViewport(canvas, newViewport);
+}
+
+// Handle preset selection
+function handlePresetSelection(targetId: string, kind: string, presetSeconds: number, retainedRangeSeconds: number): void {
+  const preset: PresetWindow = { label: '', seconds: presetSeconds };
+  const viewport = createPresetViewport(preset, true);
+  const clampedViewport = clampToRetained(viewport, retainedRangeSeconds);
+  setViewport(targetId, kind, clampedViewport);
+
+  const canvas = document.getElementById(`chart-${kind}-${targetId}`) as HTMLCanvasElement;
+  if (canvas) {
+    updateChartViewport(canvas, clampedViewport);
+  }
+}
+
+// Setup graph control event listeners
+export function setupGraphControls(): void {
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    if (!target.classList.contains('graph-control-btn')) return;
+
+    const targetId = target.dataset.target;
+    const kind = target.dataset.kind as 'http' | 'icmp';
+    const action = target.dataset.action;
+    const preset = target.dataset.preset;
+
+    if (!targetId || !kind) return;
+
+    // Default retained ranges
+    const retainedRangeSeconds = kind === 'icmp' ? 3600 : 14400;
+
+    if (preset) {
+      handlePresetSelection(targetId, kind, parseInt(preset, 10), retainedRangeSeconds);
+    } else if (action) {
+      handleGraphControl(targetId, kind, action, retainedRangeSeconds);
+    }
+  });
 }
 
 export interface TargetsRenderer {

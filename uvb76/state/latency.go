@@ -238,3 +238,26 @@ func (lt *LatencyTracker) GetRecentSamples(limit int) []LatencySample {
 
 	return samples
 }
+
+// GetSampleTimestamps returns the oldest and newest sample timestamps.
+// Returns copies to avoid returning pointers into mutable ring buffer storage.
+func (lt *LatencyTracker) GetSampleTimestamps() (oldest, newest *time.Time) {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+
+	if lt.count == 0 {
+		return nil, nil
+	}
+
+	// Oldest sample is at position (head - count) mod maxSamples
+	oldestIdx := (lt.head - lt.count + lt.maxSamples) % lt.maxSamples
+	oldestValue := lt.recentSamples[oldestIdx].Timestamp
+	oldest = &oldestValue
+
+	// Newest sample is at position (head - 1) mod maxSamples
+	newestIdx := (lt.head - 1 + lt.maxSamples) % lt.maxSamples
+	newestValue := lt.recentSamples[newestIdx].Timestamp
+	newest = &newestValue
+
+	return oldest, newest
+}

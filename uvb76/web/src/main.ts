@@ -1,7 +1,7 @@
 import './styles.css';
 import { auth } from './auth';
 import { api } from './api';
-import { initTargets } from './targets';
+import { initTargets, setupGraphControls } from './targets';
 import { loadLatencyForTarget } from './latency';
 
 // DOM Elements
@@ -130,6 +130,9 @@ async function handleLogout(): Promise<void> {
 
 // Initialize
 function init(): void {
+  // Setup graph controls event listeners
+  setupGraphControls();
+
   // Subscribe to auth state changes
   auth.subscribe((state) => {
     if (state.isAuthenticated) {

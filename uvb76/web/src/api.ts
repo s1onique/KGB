@@ -53,6 +53,9 @@ export interface LatencySeries {
   step_seconds: number;
   window_seconds: number;
   retained_range_seconds: number;
+  sample_count: number;
+  oldest_sample_ts?: string;
+  newest_sample_ts?: string;
   points: PercentilePoint[];
 }
 

@@ -107,7 +107,7 @@ func TestValidateHTTPProbeConfig(t *testing.T) {
 		TimeoutMilliseconds: 10000,
 		WindowSeconds:       300,
 		RetainedRangeSeconds: 3000,
-		RecentSamplesMax:    100,
+		RecentSamplesMax:    200, // must satisfy: 200 * 15 = 3000 >= 3000
 		HistogramBucketsMS:  DefaultHistogramBuckets(),
 	}
 
@@ -123,7 +123,7 @@ func TestValidateICMPProbeConfig(t *testing.T) {
 		TimeoutSeconds:       3,
 		WindowSeconds:        300,
 		RetainedRangeSeconds: 3000,
-		RecentSamplesMax:     300, // must satisfy: 300 * 1 >= 300
+		RecentSamplesMax:     3000, // must satisfy: 3000 * 1 >= 3000
 		HistogramBucketsMS:   DefaultHistogramBuckets(),
 	}
 
@@ -195,36 +195,39 @@ func TestICMPProbeConfig_DefaultRecentSamplesMax(t *testing.T) {
 	cfg := &ICMPProbeConfig{}
 	cfg.ApplyDefaults()
 
-	if cfg.RecentSamplesMax != DefaultICMPRecentSamplesMax {
-		t.Errorf("expected recent_samples_max %d, got %d", DefaultICMPRecentSamplesMax, cfg.RecentSamplesMax)
+	// DefaultICMPRecentSamplesMax is now 0 (auto-compute)
+	// ApplyDefaults computes it based on retained_range / interval
+	// Expected: ceil(3600 / 1) = 3600
+	if cfg.RecentSamplesMax != 3600 {
+		t.Errorf("expected recent_samples_max 3600 (auto-computed for 60m retention), got %d", cfg.RecentSamplesMax)
 	}
 }
 
-func TestICMPProbeConfig_RecentSamplesMaxClampedToWindow(t *testing.T) {
-	// recent_samples_max=10, interval=1, window=60 should be clamped to 60
+func TestICMPProbeConfig_RecentSamplesMaxClampedToRetention(t *testing.T) {
+	// recent_samples_max=10, interval=1, retained=60 should be clamped to 60
 	cfg := &ICMPProbeConfig{
 		RecentSamplesMax: 10,
 		IntervalSeconds:  1,
-		WindowSeconds:   60,
+		RetainedRangeSeconds: 60,
 	}
 	cfg.ApplyDefaults()
 
-	// Should be clamped: minSamples = ceil(60/1) = 60
+	// Should be clamped to cover retention: minSamples = ceil(60/1) = 60
 	if cfg.RecentSamplesMax != 60 {
 		t.Errorf("expected recent_samples_max clamped to 60, got %d", cfg.RecentSamplesMax)
 	}
 }
 
-func TestHTTPProbeConfig_RecentSamplesMaxClampedToWindow(t *testing.T) {
-	// recent_samples_max=10, interval=15, window=300 should be clamped to 20
+func TestHTTPProbeConfig_RecentSamplesMaxClampedToRetention(t *testing.T) {
+	// recent_samples_max=10, interval=15, retained=300 should be clamped to 20
 	cfg := &HTTPProbeConfig{
 		RecentSamplesMax: 10,
 		IntervalSeconds: 15,
-		WindowSeconds:   300,
+		RetainedRangeSeconds: 300,
 	}
 	cfg.ApplyDefaults()
 
-	// Should be clamped: minSamples = ceil(300/15) = 20
+	// Should be clamped to cover retention: minSamples = ceil(300/15) = 20
 	if cfg.RecentSamplesMax != 20 {
 		t.Errorf("expected recent_samples_max clamped to 20, got %d", cfg.RecentSamplesMax)
 	}
