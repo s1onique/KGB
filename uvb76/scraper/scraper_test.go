@@ -59,6 +59,83 @@ func TestScraper_StoresSuccessfulSnapshot(t *testing.T) {
 	}
 }
 
+func TestScraper_StoresPeerVersion(t *testing.T) {
+	// Create a test server that returns tovarisch status with version
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"service": "tovarisch",
+			"version": "0.1.23",
+			"node_id": "local-dev",
+			"status":  "warn",
+			"checks":  []interface{}{},
+			"runtime": map[string]interface{}{
+				"pid":     1234,
+				"rss_kib": 1024,
+			},
+		})
+	}))
+	defer server.Close()
+
+	cfg := &config.ScrapeConfig{
+		IntervalSeconds:     60,
+		TimeoutMilliseconds: 5000,
+	}
+
+	targets := []*config.TargetConfig{
+		{ID: "test-peer-version", Name: "Test Peer", BaseURL: server.URL, Enabled: true},
+	}
+
+	st := state.NewManager()
+	client := NewClient(cfg, st, targets)
+
+	client.scrapeTarget(targets[0])
+
+	snap := st.GetSnapshot("test-peer-version")
+	if snap == nil {
+		t.Fatal("Expected snapshot to be stored")
+	}
+	if snap.PeerVersion != "0.1.23" {
+		t.Errorf("Expected peer_version '0.1.23', got '%s'", snap.PeerVersion)
+	}
+}
+
+func TestScraper_PeerVersionEmptyOnMalformedResponse(t *testing.T) {
+	// Server returns JSON without version field
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"service": "tovarisch",
+			"node_id": "no-version-node",
+			"status":  "ok",
+			"checks":  []interface{}{},
+		})
+	}))
+	defer server.Close()
+
+	cfg := &config.ScrapeConfig{
+		IntervalSeconds:     60,
+		TimeoutMilliseconds: 5000,
+	}
+
+	targets := []*config.TargetConfig{
+		{ID: "test-no-version", Name: "Test No Version", BaseURL: server.URL, Enabled: true},
+	}
+
+	st := state.NewManager()
+	client := NewClient(cfg, st, targets)
+
+	client.scrapeTarget(targets[0])
+
+	snap := st.GetSnapshot("test-no-version")
+	if snap == nil {
+		t.Fatal("Expected snapshot to be stored")
+	}
+	if snap.PeerVersion != "" {
+		t.Errorf("Expected empty peer_version for malformed response, got '%s'", snap.PeerVersion)
+	}
+}
+
 func TestScraper_RecordsUnreachableTarget(t *testing.T) {
 	// Create a test server that returns an error
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

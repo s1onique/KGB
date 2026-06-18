@@ -249,7 +249,14 @@ function createTargetsRenderer(container: HTMLElement): TargetsRenderer {
         const safeStatus = snap.status || 'unknown';
         const safeStatusClass = statusClasses.has(safeStatus) ? safeStatus : 'unknown';
         const safeNodeId = escapeText(snap.node_id || 'N/A');
-        el.innerHTML = `<span class="status ${safeStatusClass}">${escapeText(safeStatus)}</span> Node: ${safeNodeId}`;
+        // Peer version: sanitize, cap at 64 chars, show "unknown" fallback
+        const rawVersion = snap.peer_version || '';
+        const trimmedVersion = rawVersion.trim();
+        const safeVersion = trimmedVersion.length > 64 
+          ? trimmedVersion.substring(0, 64) + '…' 
+          : trimmedVersion;
+        const displayVersion = safeVersion || 'unknown';
+        el.innerHTML = `<span class="status ${safeStatusClass}">${escapeText(safeStatus)}</span> Node: ${safeNodeId} <span class="peer-version" data-testid="target-peer-version">Peer: tovarisch ${escapeText(displayVersion)}</span>`;
       } else {
         const safeError = escapeText(snap.error || '');
         el.innerHTML = `<span class="status error">unreachable</span> ${safeError}`;

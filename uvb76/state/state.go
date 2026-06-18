@@ -12,7 +12,7 @@ type TargetSnapshot struct {
 	ScrapedAt   time.Time         `json:"scraped_at"`
 	Reachable   bool              `json:"reachable"`
 	Status      string            `json:"status,omitempty"`
-	Version     string            `json:"version,omitempty"`
+	PeerVersion string            `json:"peer_version,omitempty"`
 	NodeID      string            `json:"node_id,omitempty"`
 	Checks      []CheckResult     `json:"checks,omitempty"`
 	Error       string            `json:"error,omitempty"`

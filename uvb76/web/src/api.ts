@@ -11,7 +11,7 @@ export interface TargetSnapshot {
   scraped_at: string;
   reachable: boolean;
   status?: string;
-  version?: string;
+  peer_version?: string;
   node_id?: string;
   checks?: CheckResult[];
   error?: string;

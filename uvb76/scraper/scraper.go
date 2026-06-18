@@ -156,7 +156,7 @@ func (c *Client) scrapeTarget(t *config.TargetConfig) {
 	}
 
 	snap.Status = status.Status
-	snap.Version = status.Version
+	snap.PeerVersion = status.Version
 	snap.NodeID = status.NodeID
 
 	for _, check := range status.Checks {
