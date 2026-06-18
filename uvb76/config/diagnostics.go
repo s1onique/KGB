@@ -88,11 +88,35 @@ func ValidateDiagPeerBaseURL(baseURL string) error {
 		return fmt.Errorf("userinfo (username/password) is not allowed")
 	}
 
+	// Reject query strings (base_url must be origin/base path only)
+	if u.RawQuery != "" {
+		return fmt.Errorf("query string is not allowed in base_url (include=network_diag is added automatically)")
+	}
+
+	// Reject fragments
+	if u.Fragment != "" {
+		return fmt.Errorf("fragment is not allowed in base_url")
+	}
+
 	return nil
 }
 
+const DiagPeerStatusInclude = "network_diag"
+
+// DiagPeerStatusURL constructs the full status URL with include=network_diag query param.
+// baseURL must be origin/base path only (no query strings or userinfo).
+// Returns URL like "http://host:8317/status?include=network_diag".
 func DiagPeerStatusURL(baseURL string) string {
-	return strings.TrimSuffix(baseURL, "/") + "/status"
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		// Fallback: append /status and query directly (should not happen if validation passed)
+		return strings.TrimSuffix(baseURL, "/") + "/status?include=" + DiagPeerStatusInclude
+	}
+
+	// Ensure we have a clean path
+	u.Path = strings.TrimSuffix(u.Path, "/") + "/status"
+	u.RawQuery = "include=" + DiagPeerStatusInclude
+	return u.String()
 }
 
 func (d *DiagnosticsConfig) TargetToDiagPeers() map[string]*DiagPeerConfig {

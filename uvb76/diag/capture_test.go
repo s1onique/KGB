@@ -50,6 +50,9 @@ func TestTriggerCapture_SuccessfulCapture(t *testing.T) {
 		if r.URL.Path != "/status" {
 			t.Errorf("expected /status, got %s", r.URL.Path)
 		}
+		if r.URL.Query().Get("include") != "network_diag" {
+			t.Errorf("expected include=network_diag, got %s", r.URL.RawQuery)
+		}
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"network_diag":{"started_at":"2024-01-01T00:00:00Z","status":"ok","interfaces":[],"routes":[],"underlay_tcp":[],"events":[]}}`))
 	}))

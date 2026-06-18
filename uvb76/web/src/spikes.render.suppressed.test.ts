@@ -37,13 +37,15 @@ describe('spikes DOM renderer: suppressed capture rendering', () => {
     expect(container.textContent).toContain('suppressed by cooldown');
   });
 
-  it('does not render network_diag content for suppressed capture', async () => {
+  it('shows suppressed status for network_diag on suppressed captures', async () => {
     const response = spikeResponseWithSuppressedCapture();
     mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
     await loadSpikeDiagnostics('test-target');
-    // Network diag should NOT appear for suppressed captures
-    expect(container.textContent).not.toContain('Network diag:');
+    // Network diag should show "suppressed" status for suppressed captures
+    expect(container.textContent).toContain('Network diag:');
+    expect(container.textContent).toContain('suppressed');
+    // But should NOT show the actual network_diag content as if it was successfully captured
     expect(container.textContent).not.toContain('xray');
-    expect(container.textContent).not.toContain('RTT');
+    expect(container.textContent).not.toContain('RTT:');
   });
 });
