@@ -272,3 +272,204 @@ h2 { color: #8b949e; margin: 1.5rem 0 1rem; font-weight: 500; }
     background: #2ea043;
     border-color: #2ea043;
 }
+
+/* Spike diagnostics panel */
+.spike-diag-card {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid #30363d;
+}
+
+.spike-diag-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.spike-diag-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.spike-diag-empty {
+    font-size: 0.75rem;
+    color: #6e7681;
+    padding: 0.5rem 0;
+}
+
+.spike-diag-loading {
+    font-size: 0.75rem;
+    color: #6e7681;
+    padding: 0.5rem 0;
+}
+
+.spike-diag-error {
+    font-size: 0.75rem;
+    color: #9e6a03;
+    padding: 0.5rem 0;
+    background: rgba(158, 106, 3, 0.1);
+    border-radius: 4px;
+    padding: 0.5rem;
+}
+
+.spike-row {
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: 4px;
+    padding: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.spike-row:last-child {
+    margin-bottom: 0;
+}
+
+.spike-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    font-size: 0.75rem;
+    margin-bottom: 0.25rem;
+}
+
+.spike-time {
+    color: #8b949e;
+    font-family: monospace;
+}
+
+.spike-kind {
+    color: #58a6ff;
+    font-weight: 500;
+}
+
+.spike-severity {
+    padding: 0.125rem 0.375rem;
+    border-radius: 3px;
+    font-size: 0.625rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.spike-severity.critical {
+    background: rgba(248, 81, 73, 0.2);
+    color: #f85149;
+}
+
+.spike-severity.warning {
+    background: rgba(210, 153, 34, 0.2);
+    color: #d29922;
+}
+
+.spike-latency {
+    color: #f0883e;
+    font-weight: 600;
+}
+
+.spike-reasons {
+    color: #6e7681;
+    font-size: 0.625rem;
+}
+
+.spike-captures {
+    margin-top: 0.25rem;
+    padding-top: 0.25rem;
+    border-top: 1px dashed #21262d;
+}
+
+.captures-empty {
+    font-size: 0.625rem;
+    color: #484f58;
+    font-style: italic;
+}
+
+.capture-row {
+    padding: 0.25rem 0;
+    border-bottom: 1px dashed #21262d;
+}
+
+.capture-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.capture-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.6875rem;
+}
+
+.capture-source {
+    color: #8b949e;
+}
+
+.capture-status {
+    padding: 0.125rem 0.375rem;
+    border-radius: 3px;
+    font-size: 0.5625rem;
+    font-weight: 600;
+}
+
+.capture-status.status-ok {
+    background: rgba(63, 185, 80, 0.2);
+    color: #3fb950;
+}
+
+.capture-status.status-error {
+    background: rgba(248, 81, 73, 0.2);
+    color: #f85149;
+}
+
+.capture-status.status-muted {
+    background: rgba(110, 118, 129, 0.2);
+    color: #6e7681;
+}
+
+.capture-status.status-suppressed {
+    background: rgba(163, 113, 247, 0.2);
+    color: #a371f7;
+}
+
+.capture-status.status-warn {
+    background: rgba(210, 153, 34, 0.2);
+    color: #d29922;
+}
+
+.capture-status.status-unknown {
+    background: rgba(110, 118, 129, 0.2);
+    color: #8b949e;
+}
+
+.capture-error {
+    font-size: 0.625rem;
+    color: #f85149;
+    margin-top: 0.125rem;
+}
+
+.diag-row {
+    font-size: 0.625rem;
+    margin-top: 0.125rem;
+    padding-left: 0.5rem;
+}
+
+.diag-label {
+    color: #6e7681;
+}
+
+.tcp-summary {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+.tcp-text {
+    color: #8b949e;
+    font-family: monospace;
+    font-size: 0.5625rem;
+}

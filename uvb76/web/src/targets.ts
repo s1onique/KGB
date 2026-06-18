@@ -226,6 +226,9 @@ function createTargetsRenderer(container: HTMLElement): TargetsRenderer {
               ${latencySectionHTML(t.id, 'http', 'HTTP Status Probe Latency')}
               ${latencySectionHTML(t.id, 'icmp', 'ICMP Ping Latency')}
           </div>
+          <div class="spike-diag-card" id="spike-diag-${escapeText(t.id)}">
+              <div class="spike-diag-loading">Loading spike diagnostics...</div>
+          </div>
       </div>
     `
       )

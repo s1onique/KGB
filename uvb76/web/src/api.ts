@@ -111,6 +111,101 @@ export interface SpikeResponse {
   count: number;
 }
 
+// DiagCaptureStatus represents the status of a diagnostic capture.
+export type DiagCaptureStatus = 'ok' | 'unavailable' | 'timeout' | 'error' | 'disabled' | 'no_peer_mapping';
+
+// TcpSocketDiagData represents TCP socket diagnostic data from tovarisch.
+export interface TcpSocketDiagData {
+  name: string;
+  state: string;
+  local: string;
+  remote: string;
+  rtt_ms?: number;
+  rttvar_ms?: number;
+  rto_ms?: number;
+  retransmits?: number;
+  unacked?: number;
+  cwnd?: number;
+  send_queue_bytes?: number;
+  recv_queue_bytes?: number;
+  status: string;
+}
+
+// NetworkDiagData represents network diagnostic data from tovarisch.
+export interface NetworkDiagData {
+  started_at: string;
+  status: string;
+  wireguard?: {
+    status: string;
+    interfaces: Array<{
+      name: string;
+      status: string;
+      peers: Array<{
+        public_key: string;
+        endpoint: string;
+        allowed_ips: string;
+        latest_handshake_at?: string;
+        latest_handshake_age_seconds?: number;
+        transfer_rx_bytes: number;
+        transfer_tx_bytes: number;
+      }>;
+    }>;
+  };
+  interfaces?: Array<{
+    name: string;
+    operstate: string;
+    carrier?: boolean;
+    rx_bytes: number;
+    tx_bytes: number;
+    rx_packets: number;
+    tx_packets: number;
+    rx_errors: number;
+    tx_errors: number;
+    rx_dropped: number;
+    tx_dropped: number;
+  }>;
+  routes?: Array<{
+    target: string;
+    interface: string;
+    source: string;
+    gateway?: string;
+    status: string;
+  }>;
+  underlay_tcp: TcpSocketDiagData[];
+  events?: Array<{
+    ts: string;
+    severity: string;
+    source: string;
+    message: string;
+    fields?: string;
+  }>;
+}
+
+// DiagCapture represents a diagnostic capture attached to a spike event.
+export interface DiagCapture {
+  source: string;
+  base_url: string;
+  capture_started_at: string;
+  capture_finished_at?: string;
+  duration_ms?: number;
+  status: DiagCaptureStatus;
+  error?: string;
+  network_diag?: NetworkDiagData;
+  suppressed_by_cooldown?: boolean;
+  referenced_capture_id?: string;
+}
+
+// SpikeEventWithCaptures represents a spike event with diagnostic captures.
+export interface SpikeEventWithCaptures extends SpikeEvent {
+  captures?: DiagCapture[];
+}
+
+// SpikeResponseWithCaptures represents the API response for spike events with diagnostic captures.
+export interface SpikeResponseWithCaptures {
+  spikes: SpikeEventWithCaptures[];
+  count: number;
+}
+
 export interface AuthCheckResponse {
   authenticated: boolean;
   username?: string;
@@ -223,6 +318,15 @@ class ApiClient {
   ): Promise<SpikeResponse> {
     return this.fetch<SpikeResponse>(
       `/api/v1/latency/spikes?target_id=${encodeURIComponent(targetId)}&kind=${kind}&limit=${limit}`
+    );
+  }
+
+  async getLatencySpikesWithCaptures(
+    targetId: string,
+    limit: number = 10
+  ): Promise<SpikeResponseWithCaptures> {
+    return this.fetch<SpikeResponseWithCaptures>(
+      `/api/v1/latency/spikes?target_id=${encodeURIComponent(targetId)}&include_captures=true&limit=${limit}`
     );
   }
 }

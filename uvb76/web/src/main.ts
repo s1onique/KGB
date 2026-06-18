@@ -3,6 +3,7 @@ import { auth } from './auth';
 import { api } from './api';
 import { initTargets, setupGraphControls } from './targets';
 import { loadLatencyForTarget } from './latency';
+import { loadSpikeDiagnostics } from './spikes';
 import { formatStartTime } from './format';
 
 // DOM Elements
@@ -71,6 +72,7 @@ async function loadDashboard(): Promise<void> {
     const targets = await api.getTargets();
     for (const t of targets) {
       await loadLatencyForTarget(t.id);
+      await loadSpikeDiagnostics(t.id);
     }
 
     // Set up auto-refresh every 30 seconds
@@ -80,6 +82,7 @@ async function loadDashboard(): Promise<void> {
         const currentTargets = await api.getTargets();
         for (const t of currentTargets) {
           await loadLatencyForTarget(t.id);
+          await loadSpikeDiagnostics(t.id);
         }
       } catch (e) {
         console.error('Auto-refresh failed:', e);
