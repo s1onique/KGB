@@ -1,10 +1,7 @@
 // Latency rendering module for HTTP and ICMP latency graphs
 import { api, type LatencySummary, type LatencySeries, type PercentilePoint, type TargetLatencyResponse } from './api';
 import { renderLatencyChart, destroyChart } from './chart';
-
-function formatMs(v: number | undefined): string {
-  return v !== undefined && Number.isFinite(v) ? v.toFixed(1) + 'ms' : '—';
-}
+import { formatLatencyMs } from './format';
 
 // Check if series has any finite percentile values
 function hasFinitePercentiles(points: PercentilePoint[]): boolean {
@@ -28,19 +25,19 @@ function renderStats(statsEl: HTMLElement, summary: LatencySummary | undefined):
   statsEl.innerHTML = `
     <div class="percentile-stat">
         <div class="label">Latest p50</div>
-        <div class="value p50">${formatMs(summary.p50_latency_ms)}</div>
+        <div class="value p50">${formatLatencyMs(summary.p50_latency_ms)}</div>
     </div>
     <div class="percentile-stat">
         <div class="label">Latest p90</div>
-        <div class="value p90">${formatMs(summary.p90_latency_ms)}</div>
+        <div class="value p90">${formatLatencyMs(summary.p90_latency_ms)}</div>
     </div>
     <div class="percentile-stat">
         <div class="label">Latest p95</div>
-        <div class="value p95">${formatMs(summary.p95_latency_ms)}</div>
+        <div class="value p95">${formatLatencyMs(summary.p95_latency_ms)}</div>
     </div>
     <div class="percentile-stat">
         <div class="label">Latest p99</div>
-        <div class="value p99">${formatMs(summary.p99_latency_ms)}</div>
+        <div class="value p99">${formatLatencyMs(summary.p99_latency_ms)}</div>
     </div>
   `;
 }

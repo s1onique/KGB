@@ -94,9 +94,9 @@ export function niceLatencyMax(max: number): number {
 }
 
 function formatMs(v: number): string {
-  if (v < 1) return '<1ms';
-  if (v < 1000) return v.toFixed(0) + 'ms';
-  return (v / 1000).toFixed(2) + 's';
+  if (v < 1) return '<1 ms';
+  if (v < 1000) return v.toFixed(0) + ' ms';
+  return (v / 1000).toFixed(2) + ' s';
 }
 
 // Extract finite {x, y} points for a given percentile key, sorted by timestamp
