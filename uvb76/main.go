@@ -48,17 +48,18 @@ func main() {
 		log.Println("WARNING: Dev mode enabled - TLS not required")
 	}
 
-	// Apply latency config defaults and validate
-	latencyCfg := cfg.Latency
-	latencyCfg.ApplyDefaults()
-	if err := config.ValidateLatencyConfig(latencyCfg); err != nil {
+	// Apply latency config defaults and validate.
+	// CRITICAL: Write back to cfg.Latency so the server receives defaulted values.
+	// The server reads latency config via s.cfg.Latency.* for series metadata.
+	cfg.Latency.ApplyDefaults()
+	if err := config.ValidateLatencyConfig(cfg.Latency); err != nil {
 		log.Fatalf("Invalid latency config: %v", err)
 	}
 
 	// Initialize state manager with HTTP latency configuration
-	stateManager := state.NewManagerWithConfig(latencyCfg.HTTP.HistogramBucketsMS, latencyCfg.HTTP.RecentSamplesMax)
+	stateManager := state.NewManagerWithConfig(cfg.Latency.HTTP.HistogramBucketsMS, cfg.Latency.HTTP.RecentSamplesMax)
 	// Configure ICMP with its own histogram buckets and max samples
-	stateManager.ConfigureICMP(latencyCfg.ICMP.HistogramBucketsMS, latencyCfg.ICMP.RecentSamplesMax)
+	stateManager.ConfigureICMP(cfg.Latency.ICMP.HistogramBucketsMS, cfg.Latency.ICMP.RecentSamplesMax)
 
 	// Create target configs slice
 	targets := make([]*config.TargetConfig, 0, len(cfg.Targets))
@@ -71,20 +72,20 @@ func main() {
 	client.Start()
 
 	// Initialize HTTP probe client (independent latency probing)
-	httpProbeClient := probe.NewClient(&latencyCfg.HTTP, stateManager, targets)
+	httpProbeClient := probe.NewClient(&cfg.Latency.HTTP, stateManager, targets)
 	if httpProbeClient.IsEnabled() {
 		log.Printf("HTTP status probe enabled (interval: %ds, timeout: %dms)",
-			latencyCfg.HTTP.IntervalSeconds, latencyCfg.HTTP.TimeoutMilliseconds)
+			cfg.Latency.HTTP.IntervalSeconds, cfg.Latency.HTTP.TimeoutMilliseconds)
 	} else {
 		log.Println("HTTP status probe disabled")
 	}
 	httpProbeClient.Start()
 
 	// Initialize ICMP probe client (independent ICMP ping probing)
-	icmpProbeClient := probe.NewICMPClient(&latencyCfg.ICMP, stateManager, targets)
+	icmpProbeClient := probe.NewICMPClient(&cfg.Latency.ICMP, stateManager, targets)
 	if icmpProbeClient.IsEnabled() {
 		log.Printf("ICMP ping probe enabled (interval: %ds, timeout: %ds)",
-			latencyCfg.ICMP.IntervalSeconds, latencyCfg.ICMP.TimeoutSeconds)
+			cfg.Latency.ICMP.IntervalSeconds, cfg.Latency.ICMP.TimeoutSeconds)
 	} else {
 		log.Println("ICMP ping probe disabled")
 	}
