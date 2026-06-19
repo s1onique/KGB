@@ -93,11 +93,11 @@ set_phase_cursor() {
             PHASE_BASELINE_CURSOR="$cursor"
             log_info "Set baseline cursor: $PHASE_BASELINE_CURSOR"
             ;;
-        defect)
+        defect|during-defect)
             PHASE_DEFECT_CURSOR="$cursor"
             log_info "Set defect cursor: $PHASE_DEFECT_CURSOR"
             ;;
-        recovery)
+        recovery|after-recovery)
             PHASE_RECOVERY_CURSOR="$cursor"
             log_info "Set recovery cursor: $PHASE_RECOVERY_CURSOR"
             ;;
@@ -110,6 +110,17 @@ set_phase_cursor() {
 # Get ISO timestamp in UTC
 get_iso_timestamp() {
     date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
+# Get the cursor for a phase by explicit mapping (avoids variable name issues)
+get_phase_cursor() {
+    local phase="$1"
+    case "$phase" in
+        baseline) echo "$PHASE_BASELINE_CURSOR" ;;
+        defect|during-defect) echo "$PHASE_DEFECT_CURSOR" ;;
+        recovery|after-recovery) echo "$PHASE_RECOVERY_CURSOR" ;;
+        *) echo "" ;;
+    esac
 }
 
 # Check if a capture timestamp is after the given cursor
@@ -130,8 +141,9 @@ extract_latest_capture() {
     local spikes_file="$1"
     local output_file="$2"
     local phase="${3:-unknown}"
-    local cursor_var="PHASE_${phase}_CURSOR"
-    local cursor="${!cursor_var:-}"
+    # Use explicit mapping to avoid variable name issues with hyphens
+    local cursor
+    cursor="$(get_phase_cursor "$phase")"
 
     log_info "Extracting latest capture for phase: $phase (cursor: ${cursor:-none})"
 
@@ -229,6 +241,7 @@ extract_latest_capture() {
     fi
 
     # Extract fields from the capture - ALWAYS preserve all fields
+    # Use --arg to safely pass strings to jq (handles quotes, backslashes, etc.)
     local capture_status
     capture_status=$(echo "$latest_capture" | jq -r '.status // "unknown"')
     
@@ -241,6 +254,7 @@ extract_latest_capture() {
     local duration_ms
     duration_ms=$(echo "$latest_capture" | jq -r '.duration_ms')
     
+    # Use --arg for safe string handling
     local error_msg
     error_msg=$(echo "$latest_capture" | jq -r '.error')
     
@@ -262,24 +276,8 @@ extract_latest_capture() {
     local latency_ms
     latency_ms=$(echo "$latest_spike" | jq -r '.latency_ms // 0')
 
-    # Build output JSON with ALL fields preserved in all branches
-    # duration_ms and requested_path and error are ALWAYS included
-    local duration_ms_json="null"
-    local error_json="null"
-    local requested_path_json="null"
-    
-    if [[ "$duration_ms" != "null" && "$duration_ms" != "" ]]; then
-        duration_ms_json="$duration_ms"
-    fi
-    
-    if [[ "$error_msg" != "null" && "$error_msg" != "" ]]; then
-        error_json="\"$error_msg\""
-    fi
-    
-    if [[ "$requested_path" != "null" && "$requested_path" != "" ]]; then
-        requested_path_json="\"$requested_path\""
-    fi
-
+    # Build output JSON with ALL fields preserved using --arg for safe string handling
+    # jq will convert empty strings to null when used with if (.), so we just pass the values
     jq -n \
         --arg phase "$phase" \
         --arg status "$capture_status" \
@@ -291,6 +289,9 @@ extract_latest_capture() {
         --argjson latency_ms "$latency_ms" \
         --argjson has_network_diag "$has_network_diag" \
         --arg capture_timestamp "${capture_timestamp:-null}" \
+        --arg error_val "$error_msg" \
+        --arg path_val "$requested_path" \
+        --argjson duration_val "${duration_ms:-null}" \
         '{
             phase: $phase,
             timestamp: (now | strftime("%Y-%m-%dT%H:%M:%SZ")),
@@ -301,9 +302,9 @@ extract_latest_capture() {
             event_id: $event_id,
             spike_severity: $spike_status,
             latency_ms: $latency_ms,
-            duration_ms: '"$duration_ms_json"',
-            error: '"$error_json"',
-            requested_path: '"$requested_path_json"',
+            duration_ms: (if $duration_val == null then null elif $duration_val == "" then null else $duration_val end),
+            error: (if $error_val == "" then null else $error_val end),
+            requested_path: (if $path_val == "" then null else $path_val end),
             has_network_diag: $has_network_diag,
             capture_timestamp: $capture_timestamp
         }' > "$output_file"

@@ -209,11 +209,11 @@ run_lab() {
     log_info ""
     log_info "=== PHASE 3: Recovery ==="
 
+    # Clear the defect FIRST
+    clear_defect
+
     # Set recovery cursor AFTER clearing defect - captures after this are post-recovery
     set_phase_cursor "recovery"
-
-    # Clear the defect
-    clear_defect
 
     # Wait for connectivity to restore
     log_info "Waiting for connectivity to restore..."
