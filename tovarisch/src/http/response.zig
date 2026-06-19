@@ -78,6 +78,7 @@ pub const Errors = struct {
     pub const not_found = "{\"error\":\"not_found\"}";
     pub const method_not_allowed = "{\"error\":\"method_not_allowed\"}";
     pub const internal_error = "{\"error\":\"internal_error\"}";
+    pub const lab_probe_failing = "{\"status\":\"failing\"}";
     pub const ok = "{\"status\":\"ok\"}";
 };
 
@@ -88,6 +89,7 @@ pub fn writeSimpleJsonFd(fd: i32, status_code: u16, body: []const u8) !void {
         404 => "Not Found",
         405 => "Method Not Allowed",
         500 => "Internal Server Error",
+        503 => "Service Unavailable",
         else => "Unknown",
     };
 

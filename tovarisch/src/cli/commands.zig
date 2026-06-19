@@ -150,23 +150,15 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
                 }
             }
 
-            // Load BGP configuration (ACT 4: BGP wiring)
-            // CRITICAL: When BGP is disabled, this creates ZERO sockets.
-
-            // Log BGP load start for observability
+            // Load BGP config and log results.
             var bgp_log_buf = logging.BufferedWriter.init();
             logging.logBgpLoadStarted(&bgp_log_buf) catch {};
             stderr.writeAll(bgp_log_buf.slice()) catch {};
-
             const bgp_result = bgp_serve.loadConfigAndBgp(serve_config.config_path, stderr);
-
-            // Log BGP load result for observability
             bgp_log_buf.reset();
             const result_tag: []const u8 = switch (bgp_result) {
-                .configured => "configured",
-                .disabled => "disabled",
-                .no_config => "no_config",
-                .not_configured => "not_configured",
+                .configured => "configured", .disabled => "disabled",
+                .no_config => "no_config", .not_configured => "not_configured",
                 .failed => |load_err| load_err.message,
             };
             logging.logBgpLoadResult(&bgp_log_buf, result_tag, "") catch {};
@@ -199,14 +191,28 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
             else
                 .no_config;
 
+            // Parse lab config if provided.
+            var lab_cfg: config.LabConfig = .{};
+            if (serve_config.config_path) |path| {
+                var raw = wg_args.readConfig(path, std.heap.page_allocator) catch |e| {
+                    stderr.print("error: failed to read config for [lab]: {s}\n", .{@errorName(e)}) catch {};
+                    return .serve_error;
+                };
+                defer raw.deinit(std.heap.page_allocator);
+                lab_cfg = config.parseLabConfig(&raw) catch |e| {
+                    stderr.print("error: failed to parse [lab]: {s}\n", .{@errorName(e)}) catch {};
+                    return .serve_error;
+                };
+            }
+
             // Clean up BFD bundle on any exit
             defer if (bfd_bundle) |bundle| bfd_serve.cleanupBfdBundle(bundle);
 
-            http.serveForeverWithContext(http_config, .{
+            http.serveForeverWithContextAndLab(http_config, .{
                 .bfd_runtime = bfd_rt,
                 .config_check = config_check,
                 .bgp_result = bgp_result,
-            }, stdout) catch |err| {
+            }, lab_cfg, stdout) catch |err| {
                 var log_buf = logging.BufferedWriter.init();
                 logging.emit(.server_error, &log_buf, &.{
                     .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(err) } },

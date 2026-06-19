@@ -266,6 +266,37 @@ fn isValidInterfaceName(name: []const u8) bool {
     return true;
 }
 
+/// LabConfig represents the [lab] section parsed from tovarisch.conf.
+/// This enables the /lab/probe endpoint for KGB netns lab testing.
+/// When lab_mode is false/absent, /lab/probe returns 404 (not a production control surface).
+pub const LabConfig = struct {
+    /// Whether lab mode is enabled. When false, /lab/probe returns 404.
+    lab_mode: bool = false,
+    /// Path to the failure file. When this file exists, /lab/probe returns 503.
+    /// Required when lab_mode is true.
+    lab_probe_failure_file: []const u8 = "",
+};
+
+/// Parse the [lab] section from raw config into LabConfig.
+pub fn parseLabConfig(raw: *const RawConfig) ConfigError!LabConfig {
+    const section = raw.get("lab") orelse return LabConfig{};
+
+    var cfg = LabConfig{};
+    if (getString(section, "lab_mode")) |value| {
+        cfg.lab_mode = try parseBool(value);
+    }
+
+    // If lab_mode is enabled, failure_file is required
+    if (cfg.lab_mode) {
+        if (getString(section, "lab_probe_failure_file")) |value| {
+            try requireNonEmpty(value);
+            cfg.lab_probe_failure_file = value;
+        } else return ConfigError.MissingKey;
+    }
+
+    return cfg;
+}
+
 // --- Tests ---
 
 test "parseBool accepts true variants" {
@@ -348,5 +379,57 @@ test "getString returns null for missing key" {
     var map = std.StringArrayHashMapUnmanaged([]const u8){};
     defer map.deinit(std.heap.page_allocator);
     try std.testing.expect(getString(&map, "missing") == null);
+}
+
+// --- LabConfig tests ---
+
+test "parseLabConfig absent section returns defaults" {
+    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
+    defer raw.deinit(std.heap.page_allocator);
+    const cfg = try parseLabConfig(&raw);
+    try std.testing.expect(!cfg.lab_mode);
+    try std.testing.expect(cfg.lab_probe_failure_file.len == 0);
+}
+
+test "parseLabConfig lab_mode=false" {
+    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
+    defer raw.deinit(std.heap.page_allocator);
+    try raw.put(std.heap.page_allocator, "lab", std.StringArrayHashMapUnmanaged([]const u8){});
+    var lab_section = std.StringArrayHashMapUnmanaged([]const u8){};
+    try lab_section.put(std.heap.page_allocator, "lab_mode", "false");
+    try raw.put(std.heap.page_allocator, "lab", lab_section);
+    const cfg = try parseLabConfig(&raw);
+    try std.testing.expect(!cfg.lab_mode);
+}
+
+test "parseLabConfig lab_mode=true requires lab_probe_failure_file" {
+    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
+    defer raw.deinit(std.heap.page_allocator);
+    var lab_section = std.StringArrayHashMapUnmanaged([]const u8){};
+    try lab_section.put(std.heap.page_allocator, "lab_mode", "true");
+    try raw.put(std.heap.page_allocator, "lab", lab_section);
+    try std.testing.expectError(ConfigError.MissingKey, parseLabConfig(&raw));
+}
+
+test "parseLabConfig lab_mode=true with file path" {
+    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
+    defer raw.deinit(std.heap.page_allocator);
+    var lab_section = std.StringArrayHashMapUnmanaged([]const u8){};
+    try lab_section.put(std.heap.page_allocator, "lab_mode", "true");
+    try lab_section.put(std.heap.page_allocator, "lab_probe_failure_file", "/tmp/probe-failing");
+    try raw.put(std.heap.page_allocator, "lab", lab_section);
+    const cfg = try parseLabConfig(&raw);
+    try std.testing.expect(cfg.lab_mode);
+    try std.testing.expectEqualStrings("/tmp/probe-failing", cfg.lab_probe_failure_file);
+}
+
+test "parseLabConfig lab_mode=true rejects empty failure file" {
+    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
+    defer raw.deinit(std.heap.page_allocator);
+    var lab_section = std.StringArrayHashMapUnmanaged([]const u8){};
+    try lab_section.put(std.heap.page_allocator, "lab_mode", "true");
+    try lab_section.put(std.heap.page_allocator, "lab_probe_failure_file", "   ");
+    try raw.put(std.heap.page_allocator, "lab", lab_section);
+    try std.testing.expectError(ConfigError.EmptyValue, parseLabConfig(&raw));
 }
 

@@ -222,18 +222,35 @@ cleanup() {
 
 setup_trap() { trap cleanup EXIT; }
 
+# Artifact name for the lab probe failure file
+ARTIFACT_LAB_PROBE_FAILURE_FILE="tovarisch-lab-probe-failing"
+
 generate_tovarisch_config() {
     log_info "Generating tovarisch config..."
+    
+    # Generate lab probe failure file path (inside LAB_DIR)
+    local lab_probe_failure_file="${LAB_DIR}/${ARTIFACT_LAB_PROBE_FAILURE_FILE}"
+    
     cat > "$TOVARISCH_CONFIG" <<EOF
 [server]
 listen = "0.0.0.0:${TOVARISCH_PORT}"
+
+[lab]
+lab_mode = true
+lab_probe_failure_file = "${lab_probe_failure_file}"
 EOF
     log_info "tovarisch config: $TOVARISCH_CONFIG"
+    log_info "Lab probe failure file: $lab_probe_failure_file"
 }
 
 generate_uvb76_config() {
     log_info "Generating UVB-76 config..."
     # Lab: 2s probes, 1s timeout, 5s cooldown
+    # IMPORTANT: base_url points to /lab/probe for the target (probe)
+    # but diagnostics still use /status for capture
+    local probe_url="http://${IP_TOVARISCH}:${TOVARISCH_PORT}/lab/probe"
+    local diag_url="http://${IP_TOVARISCH}:${TOVARISCH_PORT}/status"
+    
     cat > "$UVB76_CONFIG" <<EOF
 {
   "listen": {"addr": ":${UVB76_PORT}", "tls_cert_file": "", "tls_key_file": ""},
@@ -243,11 +260,13 @@ generate_uvb76_config() {
     "http": {"enabled": true, "interval_seconds": 2, "timeout_milliseconds": 1000, "window_seconds": 60, "retained_range_seconds": 120, "histogram_buckets_ms": [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000], "recent_samples_max": 120},
     "icmp": {"enabled": false, "interval_seconds": 1, "timeout_seconds": 3, "window_seconds": 60, "retained_range_seconds": 300, "histogram_buckets_ms": [1, 5, 10, 25, 50, 100, 250, 500, 1000], "recent_samples_max": 300}
   },
-  "diagnostics": {"enabled": true, "capture_on_spike": true, "timeout_ms": 2000, "cooldown_seconds": 5, "max_uncaptured_spikes": 50, "peers": [{"name": "tovarisch-lab", "base_url": "${DIAG_PEER_BASE_URL}", "targets": ["lab-tovarisch"]}]},
-  "targets": [{"id": "lab-tovarisch", "name": "Lab Tovarisch", "base_url": "${DIAG_PEER_BASE_URL}", "enabled": true}]
+  "diagnostics": {"enabled": true, "capture_on_spike": true, "timeout_ms": 2000, "cooldown_seconds": 5, "max_uncaptured_spikes": 50, "peers": [{"name": "tovarisch-lab", "base_url": "${diag_url}", "targets": ["lab-tovarisch"]}]},
+  "targets": [{"id": "lab-tovarisch", "name": "Lab Tovarisch", "base_url": "${probe_url}", "enabled": true}]
 }
 EOF
     log_info "UVB-76 config: $UVB76_CONFIG"
+    log_info "  Probe target: $probe_url"
+    log_info "  Diagnostic base: $diag_url"
 }
 
 start_tovarisch() {

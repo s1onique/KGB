@@ -8,6 +8,7 @@ const statonly = @import("statonly.zig");
 const bfd_status = @import("../bfd/status.zig");
 const status = @import("../status.zig");
 const serve_context = @import("serve_context.zig");
+const tovarisch_config = @import("../config.zig");
 
 // Re-export ServeContext for external use
 pub const ServeContext = serve_context.ServeContext;
@@ -286,10 +287,22 @@ pub fn serveForeverWithContext(
     inputs: status.RuntimeStatusInputs,
     out_writer: anytype,
 ) !void {
+    try serveForeverWithContextAndLab(config, inputs, .{}, out_writer);
+}
+
+/// Daemon-style serve loop with full runtime inputs and lab config.
+///
+/// When lab_config.lab_mode is true, the /lab/probe endpoint is enabled.
+pub fn serveForeverWithContextAndLab(
+    config: Config,
+    inputs: status.RuntimeStatusInputs,
+    lab_config: tovarisch_config.LabConfig,
+    out_writer: anytype,
+) !void {
     var server = Server.init(config);
     defer server.deinit();
 
-    // Initialize serve context with full runtime inputs (BFD + config check + BGP bundle).
+    // Initialize serve context with full runtime inputs (BFD + config check + BGP bundle + lab config).
     // MemoryOwnership: Startup-only one-time allocation at daemon init.
     // The ServeContext allocator is used once at serve startup, not per-request.
     // This is a single allocation that persists for daemon lifetime (acceptable).
@@ -298,6 +311,7 @@ pub fn serveForeverWithContext(
         inputs.bfd_runtime,
         inputs.config_check,
         inputs.bgp_result,
+        lab_config,
     );
     defer serve_ctx.deinit();
 

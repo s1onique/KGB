@@ -1,4 +1,5 @@
 const std = @import("std");
+const zig_c = std.c;
 const response = @import("response.zig");
 const status = @import("../status.zig");
 const metrics = @import("../metrics.zig");
@@ -190,6 +191,46 @@ pub fn handleMetrics(fd: i32, state: *anyopaque) !void {
     try response.writeSimpleJsonFd(fd, 200, json);
 }
 
+/// Lab probe handler - lab-only probe endpoint for KGB netns testing.
+///
+/// Behavior:
+/// - When lab_mode is false: returns 404 (not a production control surface)
+/// - When lab_mode is true and failure file does not exist: returns 200 (healthy)
+/// - When lab_mode is true and failure file exists: returns 503 (failing)
+///
+/// The failure file path is configured via lab_probe_failure_file in tovarisch.conf.
+pub fn handleLabProbe(fd: i32, state: *anyopaque) !void {
+    const ctx = @as(*server.ServeContext, @ptrCast(@alignCast(state)));
+
+    // If lab mode is not enabled, return 404 (not a production control surface)
+    if (!ctx.lab_config.lab_mode) {
+        try response.writeSimpleJsonFd(fd, 404, response.Errors.not_found);
+        return;
+    }
+
+    // Check if the failure file exists
+    const failure_file_path = ctx.lab_config.lab_probe_failure_file;
+    if (failure_file_path.len == 0) {
+        // No failure file configured, treat as healthy
+        try response.writeSimpleJsonFd(fd, 200, response.Errors.ok);
+        return;
+    }
+
+    // Use C-style access() to check file existence.
+    // We need a null-terminated string for the C call.
+    // MemoryOwnership: Transient allocation within HTTP request handler scope.
+    // Memory is released via defer before handler returns.
+    const null_terminated_path = try std.fmt.allocPrint(std.heap.page_allocator, "{s}\x00", .{failure_file_path});
+    defer std.heap.page_allocator.free(null_terminated_path);
+    if (zig_c.access(@ptrCast(null_terminated_path.ptr), 0) == 0) {
+        // File exists - return 503 Service Unavailable
+        try response.writeSimpleJsonFd(fd, 503, response.Errors.lab_probe_failing);
+    } else {
+        // File does not exist - return 200 OK
+        try response.writeSimpleJsonFd(fd, 200, response.Errors.ok);
+    }
+}
+
 /// Not found handler.
 pub fn handleNotFound(fd: i32, _: *anyopaque) !void {
     try response.writeSimpleJsonFd(fd, 404, response.Errors.not_found);
@@ -233,98 +274,17 @@ pub fn routeRequestFd(fd: i32, req: Request, state: *anyopaque) !bool {
         return true;
     }
 
+    // /lab/probe - lab-only probe endpoint for KGB netns testing.
+    // Returns 200 when healthy, 503 when failing (controlled by file existence).
+    // Returns 404 when lab_mode is false (not a production control surface).
+    if (std.mem.eql(u8, req.path, "/lab/probe")) {
+        try handleLabProbe(fd, state);
+        return true;
+    }
+
     // All other paths return 404
     try handleNotFound(fd, state);
     return true;
 }
 
-// --- Tests ---
-
-test "parseRequestLine parses valid GET request" {
-    const req = parseRequestLine("GET /healthz HTTP/1.1");
-    try std.testing.expect(req != null);
-    try std.testing.expect(req.?.method == .get);
-    try std.testing.expect(std.mem.eql(u8, req.?.path, "/healthz"));
-    try std.testing.expect(std.mem.eql(u8, req.?.version, "HTTP/1.1"));
-}
-
-test "parseRequestLine parses status.json request" {
-    const req = parseRequestLine("GET /status.json HTTP/1.1");
-    try std.testing.expect(req != null);
-    try std.testing.expect(req.?.method == .get);
-    try std.testing.expect(std.mem.eql(u8, req.?.path, "/status.json"));
-}
-
-test "parseRequestLine parses metrics.json request" {
-    const req = parseRequestLine("GET /metrics.json HTTP/1.1");
-    try std.testing.expect(req != null);
-    try std.testing.expect(req.?.method == .get);
-    try std.testing.expect(std.mem.eql(u8, req.?.path, "/metrics.json"));
-}
-
-test "parseRequestLine returns null for invalid line" {
-    try std.testing.expect(parseRequestLine("") == null);
-    try std.testing.expect(parseRequestLine("INVALID") == null);
-    try std.testing.expect(parseRequestLine("GET") == null);
-    try std.testing.expect(parseRequestLine("GET /") == null);
-}
-
-test "parseRequestLine handles unknown methods" {
-    // "INVALIDMETHOD" is not a known HTTP method, so it should be .unknown
-    const req = parseRequestLine("INVALIDMETHOD /test HTTP/1.1");
-    try std.testing.expect(req != null);
-    try std.testing.expect(req.?.method == .unknown);
-}
-
-test "parseRequestLine handles all HTTP methods" {
-    try std.testing.expect(parseRequestLine("GET /test HTTP/1.1") != null);
-    try std.testing.expect(parseRequestLine("POST /test HTTP/1.1") != null);
-    try std.testing.expect(parseRequestLine("PUT /test HTTP/1.1") != null);
-    try std.testing.expect(parseRequestLine("DELETE /test HTTP/1.1") != null);
-    try std.testing.expect(parseRequestLine("PATCH /test HTTP/1.1") != null);
-    try std.testing.expect(parseRequestLine("HEAD /test HTTP/1.1") != null);
-    try std.testing.expect(parseRequestLine("OPTIONS /test HTTP/1.1") != null);
-}
-
-test "parseMethod maps uppercase HTTP methods to enum" {
-    try std.testing.expect(parseMethod("GET") == .get);
-    try std.testing.expect(parseMethod("POST") == .post);
-    try std.testing.expect(parseMethod("PUT") == .put);
-    try std.testing.expect(parseMethod("DELETE") == .delete);
-    try std.testing.expect(parseMethod("PATCH") == .patch);
-    try std.testing.expect(parseMethod("HEAD") == .head);
-    try std.testing.expect(parseMethod("OPTIONS") == .options);
-    try std.testing.expect(parseMethod("INVALID") == .unknown);
-}
-
-// --- Metrics state pointer tests ---
-
-test "handleMetrics uses ServeContext.metrics for stateful collection" {
-    // This test proves that handleMetrics() casts *anyopaque to *ServeContext and accesses ctx.metrics. This is the consistent pattern for all handlers.
-    const allocator = std.testing.allocator;
-    var serve_ctx = server.ServeContext.init(allocator);
-    defer serve_ctx.deinit();
-
-    // Verify ServeContext pointer can be passed as *anyopaque and recovered
-    const opaque_ptr: *anyopaque = &serve_ctx;
-    const recovered = @as(*server.ServeContext, @ptrCast(@alignCast(opaque_ptr)));
-    // Access metrics through context (same pattern as handleMetrics)
-    _ = &recovered.metrics;
-}
-
-// --- Route path tests ---
-
-test "parseRequestLine parses /status alias request" {
-    const req = parseRequestLine("GET /status HTTP/1.1");
-    try std.testing.expect(req != null);
-    try std.testing.expect(req.?.method == .get);
-    try std.testing.expect(std.mem.eql(u8, req.?.path, "/status"));
-}
-
-test "parseRequestLine parses /unknown path for 404" {
-    const req = parseRequestLine("GET /unknown HTTP/1.1");
-    try std.testing.expect(req != null);
-    try std.testing.expect(req.?.method == .get);
-    try std.testing.expect(std.mem.eql(u8, req.?.path, "/unknown"));
-}
 

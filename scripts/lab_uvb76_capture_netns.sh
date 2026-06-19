@@ -104,7 +104,7 @@ run_lab() {
     PHASE1_CAPTURED=false; PHASE1_EVENT_ID=""; PHASE1_REASONS=""
     set_phase_cursor "phase1"
 
-    if wait_and_fetch_capture_with_defect_clear 1 "phase1" "PHASE1_EVENT_ID" "PHASE1_REASONS" "$PHASE_PHASE1_CURSOR" 30 15 "$DEFECT_MODE_CLEAR_BEFORE_FETCH"; then
+    if wait_and_fetch_capture_with_defect_clear 1 "phase1" "PHASE1_EVENT_ID" "PHASE1_REASONS" "$PHASE_PHASE1_CURSOR" 30 15 "$DEFECT_MODE_LAB_PROBE"; then
         CONTRACT_PHASE1_CAPTURE_OK=true; CONTRACT_PHASE1_PACKET_OK=true
     fi
 
@@ -124,14 +124,25 @@ run_lab() {
         log_info "Proceeding to Phase 3..."; CONTRACT_PHASE2_COOLDOWN_OK=false
     elif [[ "$CONTRACT_PHASE1_CAPTURE_OK" == "true" && "$CONTRACT_PHASE1_PACKET_OK" == "true" ]]; then
         set_phase_cursor "phase2"
-        log_info "Reinjecting defect before cooldown expires..."
-        inject_netem_defect "$DEFECT_MODE_CLEAR_BEFORE_FETCH"
+        log_info "Reinjecting lab probe defect before cooldown expires..."
+        inject_netem_defect "$DEFECT_MODE_LAB_PROBE"
 
-        if ip netns exec "$NS_UVB76" ping -c 1 -W 2 "$IP_TOVARISCH" > /dev/null 2>&1; then
-            log_error "[FAIL] Defect not working"
-        else
-            log_info "[PASS] Defect verified"
-            if wait_for_spike_event_after_cursor "phase2" "$PHASE_PHASE2_CURSOR" "http_probe_timeout|http_probe_failure|http_probe_connection_refused" 15 "$LAB_DIR/spikes-phase2-poll.json"; then
+        if ip netns exec "$NS_UVB76" curl -s -o /dev/null -w "%{http_code}" \
+            "http://${IP_TOVARISCH}:${TOVARISCH_PORT}/lab/probe" 2>/dev/null | grep -q "503"; then
+            log_info "[PASS] Lab probe defect verified - /lab/probe returns 503"
+            
+            # Verify /status remains healthy during defect (same as Phase 1/3)
+            local status_status
+            status_status=$(ip netns exec "$NS_UVB76" curl -s -o /dev/null -w "%{http_code}" \
+                "http://${IP_TOVARISCH}:${TOVARISCH_PORT}/status" 2>/dev/null)
+            if [[ "$status_status" != "200" ]]; then
+                log_error "[FAIL] /status should remain healthy - returned $status_status, expected 200"
+                CONTRACT_PHASE2_COOLDOWN_OK=false
+            else
+                log_info "[PASS] /status remains healthy during Phase 2 defect - returns 200"
+            fi
+            # Only proceed with spike detection if /status is healthy
+            if [[ "$status_status" == "200" ]] && wait_for_spike_event_after_cursor "phase2" "$PHASE_PHASE2_CURSOR" "http_probe_timeout|http_probe_failure|http_probe_connection_refused|http_probe_503" 15 "$LAB_DIR/spikes-phase2-poll.json"; then
                 PHASE2_EVENT_ID="$MATCHED_EVENT_ID"; PHASE2_REASONS="$MATCHED_REASONS"
                 log_info "[PASS] Phase 2 spike event found: event_id=$PHASE2_EVENT_ID"
                 query_spikes_api "$LAB_DIR/spikes-phase2.json" "lab-tovarisch" "true"
@@ -159,7 +170,7 @@ run_lab() {
     # Set cursor BEFORE helper injection (helper owns defect injection, verification, capture wait, clear, fetch)
     set_phase_cursor "phase3"
     
-    if wait_and_fetch_capture_with_defect_clear 3 "phase3" "PHASE3_EVENT_ID" "PHASE3_REASONS" "$PHASE_PHASE3_CURSOR" 30 15 "$DEFECT_MODE_CLEAR_BEFORE_FETCH"; then
+    if wait_and_fetch_capture_with_defect_clear 3 "phase3" "PHASE3_EVENT_ID" "PHASE3_REASONS" "$PHASE_PHASE3_CURSOR" 30 15 "$DEFECT_MODE_LAB_PROBE"; then
         CONTRACT_PHASE3_CAPTURE_OK=true; CONTRACT_PHASE3_PACKET_OK=true
     fi
 

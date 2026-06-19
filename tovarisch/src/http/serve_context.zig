@@ -13,6 +13,7 @@ const bfd_status = @import("../bfd/status.zig");
 const bgp_serve = @import("../cli/bgp_serve.zig");
 const bgp_status = @import("../bgp/status.zig");
 const status = @import("../status.zig");
+const config = @import("../config.zig");
 
 /// Context passed to HTTP route handlers.
 ///
@@ -45,6 +46,10 @@ pub const ServeContext = struct {
     /// that would be lost if we only stored ?*BgpServeBundle.
     bgp_result: bgp_serve.BgpLoadResult,
 
+    /// Lab config for /lab/probe endpoint.
+    /// When lab_mode is false, /lab/probe returns 404 (not a production control surface).
+    lab_config: config.LabConfig = .{},
+
     /// Initialize serve context with allocator.
     /// Uses default no_config state since no config path is available.
     pub fn init(allocator: std.mem.Allocator) Self {
@@ -74,12 +79,14 @@ pub const ServeContext = struct {
         bfd_runtime: ?*const bfd_status.BfdRuntime,
         config_check: status.ConfigCheckState,
         bgp_result: bgp_serve.BgpLoadResult,
+        lab_config: config.LabConfig,
     ) Self {
         return .{
             .metrics = metrics_state.MetricsState.init(allocator),
             .bfd_runtime = bfd_runtime,
             .config_check = config_check,
             .bgp_result = bgp_result,
+            .lab_config = lab_config,
         };
     }
 
