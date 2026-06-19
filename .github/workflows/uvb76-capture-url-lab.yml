@@ -1,0 +1,51 @@
+name: UVB-76 Capture URL Lab
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/uvb76-capture-url-lab.yml"
+      - "Makefile"
+      - "scripts/verify_uvb76_capture_url_lab.sh"
+      - "uvb76/config/**"
+      - "uvb76/diag/**"
+      - "uvb76/server/**"
+      - "uvb76/state/**"
+      - "uvb76/go.mod"
+      - "uvb76/go.sum"
+      - "uvb76/web/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/uvb76-capture-url-lab.yml"
+      - "Makefile"
+      - "scripts/verify_uvb76_capture_url_lab.sh"
+      - "uvb76/config/**"
+      - "uvb76/diag/**"
+      - "uvb76/server/**"
+      - "uvb76/state/**"
+      - "uvb76/go.mod"
+      - "uvb76/go.sum"
+      - "uvb76/web/**"
+
+permissions:
+  contents: read
+
+jobs:
+  uvb76-capture-url-lab:
+    name: UVB-76 capture URL lab
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: uvb76/go.mod
+
+      - name: Run UVB-76 capture URL lab
+        run: make lab-uvb76-capture-url
