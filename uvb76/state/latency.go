@@ -222,23 +222,33 @@ func (lt *LatencyTracker) GetSummary(targetID string) LatencySummary {
 	return summary
 }
 
-// GetRecentSamples returns the recent latency samples in chronological order.
+// GetRecentSamples returns the most recent `limit` latency samples in chronological order.
+// Thread-safe: acquires lock, clamps limit, and returns a defensive copy.
+// Never returns internal backing storage.
 func (lt *LatencyTracker) GetRecentSamples(limit int) []LatencySample {
 	lt.mu.Lock()
 	defer lt.mu.Unlock()
 
-	if limit <= 0 || limit > lt.count {
+	// Clamp limit: must be positive and not exceed available samples
+	if limit <= 0 {
+		limit = lt.count
+	} else if limit > lt.count {
 		limit = lt.count
 	}
 
-	samples := make([]LatencySample, limit)
-	start := lt.head - limit
-	if start < 0 {
-		start += lt.maxSamples
+	// Handle empty buffer
+	if limit == 0 {
+		return []LatencySample{}
 	}
 
+	// Calculate start position for the most recent `limit` samples
+	// Start from (head - limit) to get the limit most recent samples
+	startIdx := (lt.head - limit + lt.maxSamples) % lt.maxSamples
+
+	// Build result slice with explicit copy
+	samples := make([]LatencySample, limit)
 	for i := 0; i < limit; i++ {
-		idx := (start + i) % lt.maxSamples
+		idx := (startIdx + i) % lt.maxSamples
 		samples[i] = lt.recentSamples[idx]
 	}
 
