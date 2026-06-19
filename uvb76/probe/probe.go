@@ -14,6 +14,62 @@ import (
 	"github.com/s1onique/KGB/uvb76/state"
 )
 
+// ProbeClassifyResult represents the classification of an HTTP probe result.
+type ProbeClassifyResult struct {
+	Reachable bool   // true if probe is considered successful
+	Reason    string // spike reason string (empty if reachable)
+}
+
+// ClassifyHTTPProbeStatus classifies an HTTP response status code for probe purposes.
+// Returns ProbeClassifyResult indicating whether the probe is healthy or unhealthy.
+//
+// HTTP probe semantics:
+//   - 2xx/3xx = healthy (reachable=true, no spike reason)
+//   - 4xx/5xx = HTTP-unhealthy (reachable=false, spike reason issued)
+//     These indicate the server responded but the health endpoint is not satisfying its contract.
+//     4xx is client error (e.g., 404 = probe endpoint missing), 5xx is server error
+//     (e.g., 503 = server not ready). These are "reachable-but-unhealthy" per HTTP semantics,
+//     distinct from transport/network failures below.
+//   - timeout/refused/DNS/reset = transport/network failure (reachable=false)
+//
+// Note: "reachable" in latency tracking means "received a valid HTTP response" vs
+// "transport failed entirely". Both are recorded as Reachable=false for spike detection,
+// but the spike reason string preserves the distinction.
+func ClassifyHTTPProbeStatus(statusCode int) ProbeClassifyResult {
+	// 2xx and 3xx are successful responses
+	if statusCode >= 200 && statusCode < 400 {
+		return ProbeClassifyResult{Reachable: true, Reason: ""}
+	}
+
+	// 5xx are server errors - these are unhealthy probe results
+	if statusCode >= 500 {
+		switch statusCode {
+		case 503:
+			return ProbeClassifyResult{Reachable: false, Reason: "http_probe_503"}
+		case 502:
+			return ProbeClassifyResult{Reachable: false, Reason: "http_probe_502"}
+		case 504:
+			return ProbeClassifyResult{Reachable: false, Reason: "http_probe_504"}
+		default:
+			return ProbeClassifyResult{Reachable: false, Reason: "http_probe_5xx"}
+		}
+	}
+
+	// 4xx are client errors - these indicate the server is reachable but returned an error
+	// Treat as unhealthy since the probe target is not functioning correctly
+	if statusCode >= 400 {
+		switch statusCode {
+		case 404:
+			return ProbeClassifyResult{Reachable: false, Reason: "http_probe_404"}
+		default:
+			return ProbeClassifyResult{Reachable: false, Reason: "http_probe_4xx"}
+		}
+	}
+
+	// Fallback for unexpected status codes (1xx, etc.)
+	return ProbeClassifyResult{Reachable: false, Reason: fmt.Sprintf("http_probe_unexpected_status_%d", statusCode)}
+}
+
 // Client performs independent HTTP latency probes against tovarisch targets.
 type Client struct {
 	httpClient     *http.Client
@@ -170,30 +226,44 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 	}
 	defer resp.Body.Close()
 
-	// Get HTTP status code for recording
-	var httpStatus *int
-	if resp != nil {
-		httpStatus = &resp.StatusCode
-	}
+	// Classify HTTP response status code
+	httpStatus := resp.StatusCode
+	classification := ClassifyHTTPProbeStatus(httpStatus)
 
 	// Check for recovery: was previously unreachable, now succeeding
 	c.mu.Lock()
 	wasUnreachable := c.lastReachability[t.ID] == state.ReachabilityUnreachable
-	c.lastReachability[t.ID] = state.ReachabilityReachable
+	if classification.Reachable {
+		c.lastReachability[t.ID] = state.ReachabilityReachable
+	} else {
+		c.lastReachability[t.ID] = state.ReachabilityUnreachable
+	}
 	c.mu.Unlock()
 
-	// Record successful latency measurement
-	c.state.RecordLatency(t.ID, latencyMs, true)
+	// Record latency measurement with proper reachability based on HTTP status classification
+	c.state.RecordLatency(t.ID, latencyMs, classification.Reachable)
+
+	if !classification.Reachable {
+		// HTTP 5xx or other unhealthy status - treat as probe failure
+		// Include canonical reason in error string for spike detector to recognize
+		errStr := fmt.Sprintf("%s: HTTP %d", classification.Reason, httpStatus)
+		
+		// Spike detection for unhealthy HTTP response
+		if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, false, nil, &httpStatus, &errStr, previousSamples); spike != nil {
+			c.triggerDiagCapture(spike.EventID, t.ID)
+		}
+		return
+	}
 
 	// Spike detection for successful request (latency spikes)
-	if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, true, nil, httpStatus, nil, previousSamples); spike != nil {
+	if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, true, nil, &httpStatus, nil, previousSamples); spike != nil {
 		c.triggerDiagCapture(spike.EventID, t.ID)
 	}
 	
 	// Recovery detection: if we were unreachable and now succeeded, trigger a recovery capture
 	// Use dedicated RecordRecoveryEvent() instead of fake error injection
 	if wasUnreachable {
-		if recoverySpike := c.state.RecordRecoveryEvent(t.ID, "http", latencyMs, sampleTs, httpStatus, previousSamples); recoverySpike != nil {
+		if recoverySpike := c.state.RecordRecoveryEvent(t.ID, "http", latencyMs, sampleTs, &httpStatus, previousSamples); recoverySpike != nil {
 			c.triggerDiagCapture(recoverySpike.EventID, t.ID)
 		}
 	}
@@ -252,13 +322,16 @@ func (c *Client) ProbeTarget(t *config.TargetConfig) ProbeResult {
 	}
 	defer resp.Body.Close()
 
-	result.Reachable = true
 	result.StatusCode = resp.StatusCode
+	
+	// Classify HTTP response status code
+	classification := ClassifyHTTPProbeStatus(resp.StatusCode)
+	result.Reachable = classification.Reachable
 
-	if resp.StatusCode != http.StatusOK {
-		result.Error = fmt.Sprintf("unexpected status code: %d", resp.StatusCode)
+	if !classification.Reachable {
+		result.Error = fmt.Sprintf("unhealthy HTTP status: %d", resp.StatusCode)
 	}
 
-	c.state.RecordLatency(t.ID, result.LatencyMs, true)
+	c.state.RecordLatency(t.ID, result.LatencyMs, result.Reachable)
 	return result
 }

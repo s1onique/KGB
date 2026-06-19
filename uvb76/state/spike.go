@@ -139,7 +139,7 @@ func (sd *SpikeDetector) getTracker(targetID, kind string) *spikeTracker {
 //
 // HTTP probe failures (reachable=false) are treated as first-class failure events,
 // not just latency anomalies. This ensures diagnostic captures are triggered
-// for hard failures like timeouts, connection refused, etc.
+// for hard failures like timeouts, connection refused, HTTP 5xx errors, etc.
 func (sd *SpikeDetector) DetectAndRecord(
 	targetID, kind string,
 	latencyMs float64,
@@ -180,9 +180,23 @@ func (sd *SpikeDetector) DetectAndRecord(
 		if probeError != nil {
 			errStr := *probeError
 			if len(errStr) > 0 {
-				// Case-insensitive check for error type
+				// First, check for explicit http_probe_* reasons embedded in the error string
+				// This handles HTTP 5xx/4xx classification from probe.go
 				errLower := strings.ToLower(errStr)
-				if strings.Contains(errLower, "timeout") || strings.Contains(errLower, "deadline") {
+				
+				// Check 5xx specific codes (most specific first)
+				if strings.Contains(errLower, "http_probe_503") {
+					reasons = append(reasons, "http_probe_503")
+				} else if strings.Contains(errLower, "http_probe_502") {
+					reasons = append(reasons, "http_probe_502")
+				} else if strings.Contains(errLower, "http_probe_504") {
+					reasons = append(reasons, "http_probe_504")
+				} else if strings.Contains(errLower, "http_probe_5xx") {
+					reasons = append(reasons, "http_probe_5xx")
+				} else if strings.Contains(errLower, "http_probe_timeout") {
+					reasons = append(reasons, "http_probe_timeout")
+				} else if strings.Contains(errLower, "timeout") || strings.Contains(errLower, "deadline") {
+					// Generic timeout patterns (context deadline exceeded, etc.)
 					reasons = append(reasons, "http_probe_timeout")
 				} else if strings.Contains(errLower, "connection refused") {
 					reasons = append(reasons, "http_probe_connection_refused")
@@ -190,6 +204,10 @@ func (sd *SpikeDetector) DetectAndRecord(
 					reasons = append(reasons, "http_probe_dns_failure")
 				} else if strings.Contains(errLower, "connection reset") {
 					reasons = append(reasons, "http_probe_connection_reset")
+				} else if strings.Contains(errLower, "http_probe_404") {
+					reasons = append(reasons, "http_probe_404")
+				} else if strings.Contains(errLower, "http_probe_4xx") {
+					reasons = append(reasons, "http_probe_4xx")
 				} else {
 					reasons = append(reasons, "http_probe_failure")
 				}
