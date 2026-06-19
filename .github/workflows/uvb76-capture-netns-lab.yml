@@ -88,12 +88,55 @@ jobs:
         if: always()
         run: sudo chmod -R a+rX /tmp/kgb-uvb76-capture-netns-lab-* 2>/dev/null || true
 
-      - name: Upload lab logs
+      - name: Run contract verifier self-test
+        run: |
+          ./scripts/verify_uvb76_diag_packet_contract.sh --self-test
+
+      - name: Run contract verification on artifacts
+        run: |
+          ARTIFACT_DIR=$(find /tmp/kgb-uvb76-capture-netns-lab-* -type d 2>/dev/null | sort -r | head -1)
+          if [[ -z "$ARTIFACT_DIR" ]]; then
+            echo "ERROR: No artifact directory found"
+            exit 1
+          fi
+          echo "Verifying artifacts in: $ARTIFACT_DIR"
+          
+          # Run contract verification - MUST pass for workflow to succeed
+          ./scripts/verify_uvb76_diag_packet_contract.sh --dir "$ARTIFACT_DIR"
+          
+          # Generate contract summaries for each phase (best-effort)
+          for phase_row in "$ARTIFACT_DIR"/phase*-spike-row.json; do
+            [[ -f "$phase_row" ]] || continue
+            PHASE=$(basename "$phase_row" .json)
+            echo "Generating contract summary for: $PHASE"
+            
+            SPIKE_ROW="$phase_row"
+            PACKET_FILE="${phase_row/spike-row/capture-packet}"
+            OUTPUT_FILE="${phase_row/spike-row/capture-contract}.json"
+            
+            if [[ -f "$PACKET_FILE" ]]; then
+              ./scripts/verify_uvb76_diag_packet_contract.sh \
+                --row "$SPIKE_ROW" \
+                --capture "$PACKET_FILE" \
+                --phase "$PHASE" \
+                --output "$OUTPUT_FILE" || true
+            else
+              ./scripts/verify_uvb76_diag_packet_contract.sh \
+                --row "$SPIKE_ROW" \
+                --phase "$PHASE" \
+                --output "$OUTPUT_FILE" || true
+            fi
+          done
+
+      - name: Upload lab logs and artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: uvb76-capture-netns-lab-logs
           path: |
             /tmp/kgb-uvb76-capture-netns-lab-*/**
-          retention-days: 7
+            /tmp/kgb-uvb76-capture-netns-lab-*/*.json
+            /tmp/kgb-uvb76-capture-netns-lab-*/*.txt
+            /tmp/kgb-uvb76-capture-netns-lab-*/*.log
+          retention-days: 14
 

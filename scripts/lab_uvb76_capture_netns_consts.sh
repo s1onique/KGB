@@ -68,3 +68,27 @@ ARTIFACT_UVB76_LOG="uvb76.log"
 ARTIFACT_TOVARISCH_LOG="tovarisch.log"
 ARTIFACT_UVB76_CONFIG="uvb76.json"
 ARTIFACT_TOVARISCH_CONFIG="tovarisch.conf"
+
+# Phase-separated artifact names (for diagnostic packet contract verification)
+# Phase 0: Baseline probe readiness
+ARTIFACT_PHASE0_STATUS="phase0-status.json"
+
+# Phase 1: First eligible spike (fresh-start capture)
+ARTIFACT_PHASE1_SPIKE_EVENT="phase1-spike-event.json"
+ARTIFACT_PHASE1_SPIKE_ROW="phase1-spike-row.json"
+ARTIFACT_PHASE1_CAPTURE_PACKET="phase1-capture-packet.json"
+ARTIFACT_PHASE1_CAPTURE_CONTRACT="phase1-capture-contract.json"
+
+# Phase 2: Inside-cooldown spike (skipped_cooldown expected)
+ARTIFACT_PHASE2_SPIKE_EVENT="phase2-spike-event.json"
+ARTIFACT_PHASE2_SPIKE_ROW="phase2-spike-row.json"
+ARTIFACT_PHASE2_CAPTURE_CONTRACT="phase2-capture-contract.json"
+
+# Phase 3: Post-cooldown spike (re-capture expected)
+ARTIFACT_PHASE3_SPIKE_EVENT="phase3-spike-event.json"
+ARTIFACT_PHASE3_SPIKE_ROW="phase3-spike-row.json"
+ARTIFACT_PHASE3_CAPTURE_PACKET="phase3-capture-packet.json"
+ARTIFACT_PHASE3_CAPTURE_CONTRACT="phase3-capture-contract.json"
+
+# Contract verification output
+ARTIFACT_CONTRACT_VERIFIER_OUTPUT="contract-verifier-output.txt"

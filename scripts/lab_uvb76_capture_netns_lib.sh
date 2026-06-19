@@ -19,6 +19,8 @@ source "${SCRIPT_DIR}/lab_uvb76_capture_netns_poll.sh"
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_result.sh"
 # shellcheck source=lab_uvb76_capture_netns_tovarisch.sh
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_tovarisch.sh"
+# shellcheck source=lab_uvb76_capture_netns_contract.sh
+source "${SCRIPT_DIR}/lab_uvb76_capture_netns_contract.sh"
 
 # Global variables (set by main script)
 declare -g LAB_DIR=""
@@ -54,6 +56,21 @@ declare -g RESULT_FILE=""
 declare -g BASELINE_PROBE_READY_FILE=""
 declare -g SPIKES_DURING_DEFECT_POLL_FILE=""
 declare -g SPIKES_AFTER_RECOVERY_POLL_FILE=""
+
+# Phase-separated artifact paths (for diagnostic packet contract verification)
+declare -g PHASE0_STATUS_FILE=""
+declare -g PHASE1_SPIKE_EVENT_FILE=""
+declare -g PHASE1_SPIKE_ROW_FILE=""
+declare -g PHASE1_CAPTURE_PACKET_FILE=""
+declare -g PHASE1_CAPTURE_CONTRACT_FILE=""
+declare -g PHASE2_SPIKE_EVENT_FILE=""
+declare -g PHASE2_SPIKE_ROW_FILE=""
+declare -g PHASE2_CAPTURE_CONTRACT_FILE=""
+declare -g PHASE3_SPIKE_EVENT_FILE=""
+declare -g PHASE3_SPIKE_ROW_FILE=""
+declare -g PHASE3_CAPTURE_PACKET_FILE=""
+declare -g PHASE3_CAPTURE_CONTRACT_FILE=""
+declare -g CONTRACT_VERIFIER_OUTPUT_FILE=""
 
 # Lab result tracking
 declare -g PROBE_READY=false
@@ -141,6 +158,21 @@ setup_temp_dir() {
     BASELINE_PROBE_READY_FILE="$LAB_DIR/${ARTIFACT_BASELINE_PROBE_READY}"
     SPIKES_DURING_DEFECT_POLL_FILE="$LAB_DIR/${ARTIFACT_SPIKES_DURING_DEFECT_POLL}"
     SPIKES_AFTER_RECOVERY_POLL_FILE="$LAB_DIR/${ARTIFACT_SPIKES_AFTER_RECOVERY_POLL}"
+    
+    # Phase-separated artifact paths (for diagnostic packet contract verification)
+    PHASE0_STATUS_FILE="$LAB_DIR/${ARTIFACT_PHASE0_STATUS}"
+    PHASE1_SPIKE_EVENT_FILE="$LAB_DIR/${ARTIFACT_PHASE1_SPIKE_EVENT}"
+    PHASE1_SPIKE_ROW_FILE="$LAB_DIR/${ARTIFACT_PHASE1_SPIKE_ROW}"
+    PHASE1_CAPTURE_PACKET_FILE="$LAB_DIR/${ARTIFACT_PHASE1_CAPTURE_PACKET}"
+    PHASE1_CAPTURE_CONTRACT_FILE="$LAB_DIR/${ARTIFACT_PHASE1_CAPTURE_CONTRACT}"
+    PHASE2_SPIKE_EVENT_FILE="$LAB_DIR/${ARTIFACT_PHASE2_SPIKE_EVENT}"
+    PHASE2_SPIKE_ROW_FILE="$LAB_DIR/${ARTIFACT_PHASE2_SPIKE_ROW}"
+    PHASE2_CAPTURE_CONTRACT_FILE="$LAB_DIR/${ARTIFACT_PHASE2_CAPTURE_CONTRACT}"
+    PHASE3_SPIKE_EVENT_FILE="$LAB_DIR/${ARTIFACT_PHASE3_SPIKE_EVENT}"
+    PHASE3_SPIKE_ROW_FILE="$LAB_DIR/${ARTIFACT_PHASE3_SPIKE_ROW}"
+    PHASE3_CAPTURE_PACKET_FILE="$LAB_DIR/${ARTIFACT_PHASE3_CAPTURE_PACKET}"
+    PHASE3_CAPTURE_CONTRACT_FILE="$LAB_DIR/${ARTIFACT_PHASE3_CAPTURE_CONTRACT}"
+    CONTRACT_VERIFIER_OUTPUT_FILE="$LAB_DIR/${ARTIFACT_CONTRACT_VERIFIER_OUTPUT}"
 }
 
 make_artifacts_readable() {
