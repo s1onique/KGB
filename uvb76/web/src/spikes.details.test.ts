@@ -119,7 +119,7 @@ describe('spikes DOM renderer: View details expand/collapse', () => {
     await clickViewDetails();
     
     expect(container.textContent).toContain('Status:');
-    expect(container.textContent).toContain('ok');
+    expect(container.textContent).toContain('ready');
   });
 
   it('renders Duration in details', async () => {

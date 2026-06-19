@@ -54,7 +54,8 @@ describe('spikes DOM renderer: successful capture rendering', () => {
     const response = spikeResponseWithOkCapture();
     mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
     await loadSpikeDiagnostics('test-target');
-    expect(container.textContent).toContain('warning');
+    // Severity is displayed as uppercase badge in table
+    expect(container.textContent).toContain('WARNING');
   });
 
   it('renders formatted latency', async () => {
@@ -65,14 +66,15 @@ describe('spikes DOM renderer: successful capture rendering', () => {
     expect(container.textContent).toContain('1.23 s');
   });
 
-  it('renders "Capture: ok" for successful capture', async () => {
+  it('renders "Capture: ready" for successful capture', async () => {
     const response = spikeResponseWithOkCapture({
       source: 'tovarisch-peer',
       duration_ms: 123,
     });
     mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
     await loadSpikeDiagnostics('test-target');
-    expect(container.textContent).toContain('Capture: ok');
+    // Capture status is "ready" for status='ok'
+    expect(container.textContent).toContain('Capture: ready');
   });
 
   it('renders source peer name', async () => {

@@ -60,14 +60,16 @@ describe('spikes DOM renderer: network diagnostics missing warning', () => {
     expect(container.textContent).toContain('missing');
   });
 
-  it('renders incomplete evidence warning for ok capture without network_diag', async () => {
+  it('renders missing network diag status for ok capture without network_diag', async () => {
     const response = createSpikeResponse(createSpike({
       captures: [createOkCapture({ source: 'peer-1', network_diag: undefined })],
     }));
     mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
     await loadSpikeDiagnostics('test-target');
     
-    expect(container.textContent).toContain('Capture succeeded, but network diagnostics were not included in the tovarisch response.');
+    // In table view, shows "Network diag: missing" in expanded details
+    expect(container.textContent).toContain('Network diag:');
+    expect(container.textContent).toContain('missing');
   });
 
   it('does not render incomplete warning for suppressed capture', async () => {

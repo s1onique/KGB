@@ -93,14 +93,34 @@ func newSpikeTracker(kind string, config SpikeConfig) *spikeTracker {
 }
 
 // recordSpike records a spike event, evicting oldest if at capacity.
-func (st *spikeTracker) recordSpike(event SpikeEvent) {
+// EVICTION POLICY: Capture-aware spike retention
+// - Protected spikes (with captures or in-flight) are NEVER evicted
+// - Only purge-eligible spikes count against the uncaptured cap
+// - maxEvents limits total storage, but protected spikes don't count toward it
+func (st *spikeTracker) recordSpike(event SpikeEvent, getProtectionInfo func(eventID string) (isProtected bool, hasArtifact bool)) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 
-	// Evict oldest if at capacity
-	if len(st.events) >= st.maxEvents {
-		// Remove oldest (first element)
-		st.events = st.events[1:]
+	// Count purge-eligible (uncaptured) spikes
+	purgeableCount := 0
+	for _, ev := range st.events {
+		isProtected, _ := getProtectionInfo(ev.EventID)
+		if !isProtected {
+			purgeableCount++
+		}
+	}
+
+	// Evict oldest purge-eligible spike if we're at the uncaptured cap
+	if purgeableCount >= st.config.MaxEventsPerTracker {
+		// Find and remove oldest purge-eligible spike
+		for i := 0; i < len(st.events); i++ {
+			isProtected, _ := getProtectionInfo(st.events[i].EventID)
+			if !isProtected {
+				// Remove this purge-eligible spike
+				st.events = append(st.events[:i], st.events[i+1:]...)
+				break
+			}
+		}
 	}
 
 	st.events = append(st.events, event)
@@ -132,25 +152,36 @@ func (st *spikeTracker) count() int {
 
 // SpikeDetector handles spike detection and event recording.
 type SpikeDetector struct {
-	mu       sync.RWMutex
-	config   SpikeConfig
-	trackers map[string]*spikeTracker // keyed by "targetID:kind"
+	mu              sync.RWMutex
+	config          SpikeConfig
+	trackers        map[string]*spikeTracker // keyed by "targetID:kind"
+	captureInfoFunc func(eventID string) (isProtected bool, hasCapture bool)
 }
 
 // NewSpikeDetector creates a new spike detector with default configuration.
 func NewSpikeDetector() *SpikeDetector {
 	return &SpikeDetector{
-		config:   DefaultSpikeConfig(),
-		trackers: make(map[string]*spikeTracker),
+		config:          DefaultSpikeConfig(),
+		trackers:       make(map[string]*spikeTracker),
+		captureInfoFunc: nil, // No capture-aware eviction by default
 	}
 }
 
 // NewSpikeDetectorWithConfig creates a new spike detector with custom configuration.
 func NewSpikeDetectorWithConfig(config SpikeConfig) *SpikeDetector {
 	return &SpikeDetector{
-		config:   config,
-		trackers: make(map[string]*spikeTracker),
+		config:          config,
+		trackers:       make(map[string]*spikeTracker),
+		captureInfoFunc: nil,
 	}
+}
+
+// SetCaptureInfoFunc sets the function used to determine if a spike is protected by captures.
+// This enables capture-aware eviction when the spike detector is used with a capture store.
+func (sd *SpikeDetector) SetCaptureInfoFunc(f func(eventID string) (isProtected bool, hasCapture bool)) {
+	sd.mu.Lock()
+	defer sd.mu.Unlock()
+	sd.captureInfoFunc = f
 }
 
 // getTracker returns or creates a spike tracker for a target/kind combination.
@@ -271,7 +302,19 @@ func (sd *SpikeDetector) DetectAndRecord(
 		CollectedAt:       time.Now().UTC(),
 	}
 
-	tracker.recordSpike(event)
+	// Use capture-aware eviction if configured
+	sd.mu.RLock()
+	captureFunc := sd.captureInfoFunc
+	sd.mu.RUnlock()
+	
+	if captureFunc != nil {
+		tracker.recordSpike(event, captureFunc)
+	} else {
+		// Fallback: use simple eviction function that always allows eviction
+		tracker.recordSpike(event, func(eventID string) (isProtected bool, hasCapture bool) {
+			return false, false
+		})
+	}
 	return &event
 }
 

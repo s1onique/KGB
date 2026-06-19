@@ -7,17 +7,21 @@ import (
 )
 
 const (
-	DefaultDiagTimeoutMs     = 1500
+	DefaultDiagTimeoutMs       = 1500
 	DefaultDiagCooldownSeconds = 90
-	DefaultDiagMaxCaptures    = 10
+	DefaultDiagMaxCaptures     = 10
+	// DefaultMaxUncapturedSpikes is the default cap for uncaptured spikes.
+	// Spikes with existing captures are never counted against this cap.
+	DefaultMaxUncapturedSpikes = 200
 )
 
 type DiagnosticsConfig struct {
-	Enabled         bool           `json:"enabled"`
-	CaptureOnSpike  bool           `json:"capture_on_spike"`
-	TimeoutMs       int            `json:"timeout_ms"`
-	CooldownSeconds int            `json:"cooldown_seconds"`
-	Peers           []DiagPeerConfig `json:"peers"`
+	Enabled              bool             `json:"enabled"`
+	CaptureOnSpike       bool             `json:"capture_on_spike"`
+	TimeoutMs            int              `json:"timeout_ms"`
+	CooldownSeconds      int              `json:"cooldown_seconds"`
+	MaxUncapturedSpikes  int              `json:"max_uncaptured_spikes"`  // cap for purge-eligible spikes
+	Peers                []DiagPeerConfig `json:"peers"`
 }
 
 type DiagPeerConfig struct {
@@ -32,6 +36,9 @@ func (d *DiagnosticsConfig) ApplyDefaults() {
 	}
 	if d.CooldownSeconds <= 0 {
 		d.CooldownSeconds = DefaultDiagCooldownSeconds
+	}
+	if d.MaxUncapturedSpikes <= 0 {
+		d.MaxUncapturedSpikes = DefaultMaxUncapturedSpikes
 	}
 }
 

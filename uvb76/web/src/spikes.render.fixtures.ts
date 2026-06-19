@@ -4,7 +4,16 @@
 // NOTE: Mock setup must be done in each .test.ts file before importing loadSpikeDiagnostics.
 // See spikes.render.empty.test.ts for the correct pattern.
 
-import type { SpikeResponseWithCaptures, DiagCapture, TcpSocketDiagData, NetworkDiagData } from './api';
+import type { SpikeResponseWithCaptures, DiagCapture, TcpSocketDiagData, NetworkDiagData, SpikeRetentionStats } from './api';
+
+// Default retention stats for tests
+export const defaultRetention: SpikeRetentionStats = {
+  retained_spike_count: 1,
+  visible_spike_count: 1,
+  protected_capture_count: 1,
+  purge_eligible_count: 0,
+  max_uncaptured_spikes: 200,
+};
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
@@ -36,8 +45,12 @@ export function createSpike(overrides: Partial<{
 }
 
 /** Create a spike response with a single spike */
-export function createSpikeResponse(spike: ReturnType<typeof createSpike>): SpikeResponseWithCaptures {
-  return { spikes: [spike], count: 1 };
+export function createSpikeResponse(spike: ReturnType<typeof createSpike>, retention?: Partial<SpikeRetentionStats>): SpikeResponseWithCaptures {
+  return {
+    spikes: [spike],
+    count: 1,
+    retention: { ...defaultRetention, ...retention },
+  };
 }
 
 /** Create an ok capture with the given overrides */

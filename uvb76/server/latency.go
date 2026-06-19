@@ -114,6 +114,8 @@ type SpikeResponse struct {
 type SpikeResponseWithCaptures struct {
 	Spikes []state.SpikeEventWithCaptures `json:"spikes"`
 	Count  int                           `json:"count"`
+	// Retention metadata
+	Retention state.SpikeRetentionStats `json:"retention"`
 }
 
 // handleTargetLatencySpikes returns recent spike events for a target.
@@ -166,27 +168,55 @@ func (s *Server) handleTargetLatencySpikes(w http.ResponseWriter, r *http.Reques
 	// Check if captures should be included
 	includeCaptures := r.URL.Query().Get("include_captures") == "true"
 
-	spikes := s.state.GetSpikes(targetID, kind, limit)
+	// Get all retained spikes for this target/kind (not limited by limit for retention calc)
+	allRetainedSpikes := s.state.GetSpikes(targetID, kind, 0)
+	// Get the limited view for display
+	displaySpikes := s.state.GetSpikes(targetID, kind, limit)
+	captureStore := s.state.GetCaptureStore()
+
+	// Calculate retention stats
+	retainedCount := len(allRetainedSpikes)
+	visibleCount := len(displaySpikes)
+	protectedCount := 0
+	purgeEligibleCount := 0
+	maxUncaptured := s.cfg.Diagnostics.MaxUncapturedSpikes
+
+	for _, spike := range allRetainedSpikes {
+		isProtected, _ := captureStore.GetProtectionInfo(spike.EventID)
+		if isProtected {
+			protectedCount++
+		} else {
+			purgeEligibleCount++
+		}
+	}
+
+	retention := state.SpikeRetentionStats{
+		RetainedSpikeCount:    retainedCount,
+		VisibleSpikeCount:     visibleCount,
+		ProtectedCaptureCount: protectedCount,
+		PurgeEligibleCount:   purgeEligibleCount,
+		MaxUncapturedSpikes:  maxUncaptured,
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if includeCaptures {
 		// Return spikes with diagnostic captures
-		captures := s.state.GetCaptureStore()
-		spikesWithCaptures := make([]state.SpikeEventWithCaptures, len(spikes))
-		for i, spike := range spikes {
+		spikesWithCaptures := make([]state.SpikeEventWithCaptures, len(displaySpikes))
+		for i, spike := range displaySpikes {
 			spikesWithCaptures[i] = state.SpikeEventWithCaptures{
 				SpikeEvent: spike,
-				Captures:   captures.GetCaptures(spike.EventID),
+				Captures:   captureStore.GetCaptures(spike.EventID),
 			}
 		}
 		json.NewEncoder(w).Encode(SpikeResponseWithCaptures{
-			Spikes: spikesWithCaptures,
-			Count:  len(spikesWithCaptures),
+			Spikes:    spikesWithCaptures,
+			Count:     len(spikesWithCaptures),
+			Retention: retention,
 		})
 	} else {
 		json.NewEncoder(w).Encode(SpikeResponse{
-			Spikes: spikes,
-			Count:  len(spikes),
+			Spikes: displaySpikes,
+			Count:  len(displaySpikes),
 		})
 	}
 }

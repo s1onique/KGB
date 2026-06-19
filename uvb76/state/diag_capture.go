@@ -226,6 +226,157 @@ func (cs *CaptureStore) Clear() {
 	cs.inFlight = make(map[string]bool)
 }
 
+// SpikeRetentionStats holds spike retention metadata for UI display.
+type SpikeRetentionStats struct {
+	RetainedSpikeCount      int `json:"retained_spike_count"`
+	VisibleSpikeCount       int `json:"visible_spike_count"`
+	ProtectedCaptureCount   int `json:"protected_capture_count"`
+	PurgeEligibleCount      int `json:"purge_eligible_count"`
+	MaxUncapturedSpikes     int `json:"max_uncaptured_spikes"`
+}
+
+// CaptureStatus represents the derived capture protection status for a spike.
+type CaptureStatus string
+
+const (
+	CaptureStatusReady             CaptureStatus = "ready"              // capture exists and can be accessed
+	CaptureStatusInProgress        CaptureStatus = "in_progress"         // capture creation in flight
+	CaptureStatusTimeout           CaptureStatus = "timeout"            // timeout error
+	CaptureStatusError             CaptureStatus = "error"              // capture error
+	CaptureStatusSuppressed        CaptureStatus = "suppressed_by_cooldown" // suppressed by cooldown
+	CaptureStatusMissing           CaptureStatus = "missing"            // metadata refers to missing artifact
+	CaptureStatusNone              CaptureStatus = "none"               // no capture attempted
+)
+
+// SpikeCaptureInfo holds capture-derived protection info for a spike.
+type SpikeCaptureInfo struct {
+	CaptureStatus  CaptureStatus `json:"capture_status"`
+	CaptureExists bool          `json:"capture_exists"`  // true if artifact exists
+	IsProtected   bool          `json:"is_protected"`    // true if spike must not be purged
+}
+
+// GetCaptureInfo returns derived capture protection info for a spike.
+// A spike is protected if it has a capture artifact that exists or capture is in progress.
+func (cs *CaptureStore) GetCaptureInfo(eventID string, isInFlight bool) SpikeCaptureInfo {
+	// Check in-flight first - this takes precedence
+	if isInFlight {
+		return SpikeCaptureInfo{
+			CaptureStatus: CaptureStatusInProgress,
+			CaptureExists: false,
+			IsProtected:   true, // Don't race cleanup against in-flight captures
+		}
+	}
+
+	captures := cs.GetCaptures(eventID)
+	if len(captures) == 0 {
+		return SpikeCaptureInfo{
+			CaptureStatus: CaptureStatusNone,
+			CaptureExists: false,
+			IsProtected:   false,
+		}
+	}
+
+	// Take the most recent capture
+	capture := captures[len(captures)-1]
+
+	// Check suppressed by cooldown
+	if capture.SuppressedByCooldown {
+		return SpikeCaptureInfo{
+			CaptureStatus: CaptureStatusSuppressed,
+			CaptureExists: false,
+			IsProtected:   false, // Suppressed captures are purge-eligible
+		}
+	}
+
+	// Check capture status
+	switch capture.Status {
+	case DiagCaptureStatusOK:
+		// ok status with no artifact means partial/success without data
+		// Still protected if status is ok (capture was attempted)
+		return SpikeCaptureInfo{
+			CaptureStatus: CaptureStatusReady,
+			CaptureExists: capture.NetworkDiag != nil,
+			IsProtected:   true,
+		}
+	case DiagCaptureStatusTimeout:
+		// Timeout with artifact is protected, without is purge-eligible
+		return SpikeCaptureInfo{
+			CaptureStatus: CaptureStatusTimeout,
+			CaptureExists: capture.NetworkDiag != nil,
+			IsProtected:   capture.NetworkDiag != nil,
+		}
+	case DiagCaptureStatusError:
+		// Error with artifact is protected, without is purge-eligible
+		return SpikeCaptureInfo{
+			CaptureStatus: CaptureStatusError,
+			CaptureExists: capture.NetworkDiag != nil,
+			IsProtected:   capture.NetworkDiag != nil,
+		}
+	case DiagCaptureStatusDisabled:
+		return SpikeCaptureInfo{
+			CaptureStatus: CaptureStatusNone,
+			CaptureExists: false,
+			IsProtected:   false,
+		}
+	case DiagCaptureStatusNoPeerMapping:
+		return SpikeCaptureInfo{
+			CaptureStatus: CaptureStatusNone,
+			CaptureExists: false,
+			IsProtected:   false,
+		}
+	default:
+		return SpikeCaptureInfo{
+			CaptureStatus: CaptureStatusNone,
+			CaptureExists: false,
+			IsProtected:   false,
+		}
+	}
+}
+
+// GetProtectionInfo returns protection info for a spike event.
+// This method checks in-flight captures internally.
+func (cs *CaptureStore) GetProtectionInfo(eventID string) (isProtected bool, hasArtifact bool) {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+
+	// Check in-flight first - in-flight spikes are protected
+	if cs.inFlight[eventID] {
+		return true, false
+	}
+
+	captures := cs.captures[eventID]
+	if len(captures) == 0 {
+		return false, false
+	}
+
+	// Take the most recent capture
+	capture := captures[len(captures)-1]
+
+	// Check suppressed by cooldown - purge eligible
+	// hasCapture=false because suppression means this capture didn't complete;
+	// any artifact present was from a previous capture, not this suppressed attempt
+	if capture.SuppressedByCooldown {
+		return false, false
+	}
+
+	// Check capture status
+	switch capture.Status {
+	case DiagCaptureStatusOK:
+		// ok status means capture was attempted - protected
+		return true, capture.NetworkDiag != nil
+	case DiagCaptureStatusTimeout:
+		// Timeout with artifact is protected, without is purge-eligible
+		return capture.NetworkDiag != nil, capture.NetworkDiag != nil
+	case DiagCaptureStatusError:
+		// Error with artifact is protected, without is purge-eligible
+		return capture.NetworkDiag != nil, capture.NetworkDiag != nil
+	case DiagCaptureStatusDisabled, DiagCaptureStatusNoPeerMapping:
+		return false, capture.NetworkDiag != nil
+	default:
+		return false, capture.NetworkDiag != nil
+	}
+}
+
 func (cs *CaptureStore) Count() int {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()

@@ -200,10 +200,20 @@ export interface SpikeEventWithCaptures extends SpikeEvent {
   captures?: DiagCapture[];
 }
 
+// SpikeRetentionStats holds spike retention metadata for UI display.
+export interface SpikeRetentionStats {
+  retained_spike_count: number;
+  visible_spike_count: number;
+  protected_capture_count: number;
+  purge_eligible_count: number;
+  max_uncaptured_spikes: number;
+}
+
 // SpikeResponseWithCaptures represents the API response for spike events with diagnostic captures.
 export interface SpikeResponseWithCaptures {
   spikes: SpikeEventWithCaptures[];
   count: number;
+  retention: SpikeRetentionStats;
 }
 
 export interface AuthCheckResponse {

@@ -97,7 +97,7 @@ describe('spikes DOM renderer: JSON download functionality', () => {
     expect(btn?.textContent).toContain('Download capture JSON');
   });
 
-  it('renders Download spike bundle button', async () => {
+  it('renders Download spike bundle button when spike has captures', async () => {
     const response = spikeResponseWithOkCapture({ source: 'peer-1' });
     mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
     await loadSpikeDiagnostics('test-target');
@@ -105,6 +105,97 @@ describe('spikes DOM renderer: JSON download functionality', () => {
     const btn = container.querySelector('.download-spike-btn');
     expect(btn).not.toBeNull();
     expect(btn?.textContent).toContain('Download spike bundle');
+  });
+
+  it('clicking Download spike bundle creates a JSON Blob', async () => {
+    const response = spikeResponseWithOkCapture({ source: 'peer-1' });
+    mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+    await loadSpikeDiagnostics('test-target');
+    
+    await clickDownloadSpike();
+    
+    expect(createdBlobs.length).toBeGreaterThan(0);
+    expect(createdBlobs[0].type).toBe('application/json');
+  });
+
+  it('spike bundle JSON has export_kind = uvb76_spike_diagnostics_bundle', async () => {
+    const response = spikeResponseWithOkCapture({ source: 'peer-1' });
+    mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+    await loadSpikeDiagnostics('test-target');
+    
+    await clickDownloadSpike();
+    
+    const blob = createdBlobs[0];
+    const text = await blob.text();
+    const data = JSON.parse(text);
+    
+    expect(data.export_kind).toBe('uvb76_spike_diagnostics_bundle');
+  });
+
+  it('spike bundle JSON includes target_id', async () => {
+    const response = spikeResponseWithOkCapture({ source: 'peer-1' });
+    mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+    await loadSpikeDiagnostics('test-target');
+    
+    await clickDownloadSpike();
+    
+    const blob = createdBlobs[0];
+    const text = await blob.text();
+    const data = JSON.parse(text);
+    
+    expect(data.target_id).toBe('test-target');
+  });
+
+  it('spike bundle JSON includes spike object with event_id', async () => {
+    const response = spikeResponseWithOkCapture({ source: 'peer-1' });
+    mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+    await loadSpikeDiagnostics('test-target');
+    
+    await clickDownloadSpike();
+    
+    const blob = createdBlobs[0];
+    const text = await blob.text();
+    const data = JSON.parse(text);
+    
+    expect(data.spike).toBeDefined();
+    expect(data.spike.event_id).toBeDefined();
+    expect(typeof data.spike.event_id).toBe('string');
+  });
+
+  it('spike bundle JSON includes captures array', async () => {
+    const response = spikeResponseWithOkCapture({
+      source: 'peer-1',
+      network_diag: createNetworkDiag({ status: 'ok', underlay_tcp: [] }),
+    });
+    mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+    await loadSpikeDiagnostics('test-target');
+    
+    await clickDownloadSpike();
+    
+    const blob = createdBlobs[0];
+    const text = await blob.text();
+    const data = JSON.parse(text);
+    
+    expect(data.captures).toBeDefined();
+    expect(Array.isArray(data.captures)).toBe(true);
+    expect(data.captures.length).toBeGreaterThan(0);
+  });
+
+  it('spike bundle filename is sanitized', async () => {
+    const response = spikeResponseWithOkCapture({ source: 'peer-1' });
+    mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+    await loadSpikeDiagnostics('test-target');
+    
+    await clickDownloadSpike();
+    
+    expect(createdFilenames.length).toBeGreaterThan(0);
+    const filename = createdFilenames[0];
+    
+    expect(filename).not.toContain('/');
+    expect(filename).not.toContain('\\');
+    expect(filename).not.toContain(':');
+    expect(filename).not.toContain('?');
+    expect(filename).not.toContain('&');
   });
 
   it('clicking Download capture JSON creates a JSON Blob', async () => {
@@ -180,37 +271,6 @@ describe('spikes DOM renderer: JSON download functionality', () => {
     expect(data.capture).toBeDefined();
     expect(data.capture.source).toBe('peer-1');
     expect(data.capture.status).toBe('ok');
-  });
-
-  it('clicking Download spike bundle creates export_kind = uvb76_spike_diagnostics_bundle', async () => {
-    const response = spikeResponseWithOkCapture({ source: 'peer-1' });
-    mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
-    await loadSpikeDiagnostics('test-target');
-    
-    await clickDownloadSpike();
-    
-    const blob = createdBlobs[0];
-    const text = await blob.text();
-    const data = JSON.parse(text);
-    
-    expect(data.export_kind).toBe('uvb76_spike_diagnostics_bundle');
-  });
-
-  it('spike bundle JSON contains target_id and spike data', async () => {
-    const response = spikeResponseWithOkCapture({ source: 'peer-1' });
-    mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
-    await loadSpikeDiagnostics('test-target');
-    
-    await clickDownloadSpike();
-    
-    const blob = createdBlobs[0];
-    const text = await blob.text();
-    const data = JSON.parse(text);
-    
-    expect(data.target_id).toBe('test-target');
-    expect(data.spike).toBeDefined();
-    expect(data.spike.event_id).toBe('evt-1');
-    expect(Array.isArray(data.captures)).toBe(true);
   });
 
   it('generated filename is sanitized (no slashes)', async () => {

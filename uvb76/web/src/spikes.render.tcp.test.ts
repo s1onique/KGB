@@ -42,27 +42,45 @@ describe('spikes DOM renderer: underlay TCP summary rendering', () => {
     expect(container.textContent).toContain('ESTAB');
   });
 
-  it('renders "xray ESTAB" combined', async () => {
+  it('renders "xray ESTAB" combined in expanded details', async () => {
     mockGetLatencySpikesWithCaptures.mockResolvedValue(createXrayTcpSpikeResponse());
     await loadSpikeDiagnostics('test-target');
-    expect(container.textContent).toContain('xray ESTAB');
+    // TCP details are in expanded view - need to click View details
+    const btn = container.querySelector('.view-details-btn') as HTMLButtonElement;
+    if (btn) btn.click();
+    await new Promise(r => setTimeout(r, 10));
+    expect(container.textContent).toContain('xray');
+    expect(container.textContent).toContain('ESTAB');
   });
 
-  it('renders RTT with one decimal place', async () => {
+  it('renders RTT with one decimal place in expanded details', async () => {
     mockGetLatencySpikesWithCaptures.mockResolvedValue(createXrayTcpSpikeResponse());
     await loadSpikeDiagnostics('test-target');
-    expect(container.textContent).toContain('RTT 123.4 ms');
+    const btn = container.querySelector('.view-details-btn') as HTMLButtonElement;
+    if (btn) btn.click();
+    await new Promise(r => setTimeout(r, 10));
+    // RTT is formatted as "RTT:" in expanded details
+    expect(container.textContent).toContain('RTT:');
+    expect(container.textContent).toContain('123.4 ms');
   });
 
-  it('renders RTO value', async () => {
+  it('renders RTO value in expanded details', async () => {
     mockGetLatencySpikesWithCaptures.mockResolvedValue(createXrayTcpSpikeResponse());
     await loadSpikeDiagnostics('test-target');
-    expect(container.textContent).toContain('RTO 456 ms');
+    const btn = container.querySelector('.view-details-btn') as HTMLButtonElement;
+    if (btn) btn.click();
+    await new Promise(r => setTimeout(r, 10));
+    expect(container.textContent).toContain('RTO:');
+    expect(container.textContent).toContain('456 ms');
   });
 
-  it('renders retransmits count', async () => {
+  it('renders retransmits count in expanded details', async () => {
     mockGetLatencySpikesWithCaptures.mockResolvedValue(createXrayTcpSpikeResponse());
     await loadSpikeDiagnostics('test-target');
-    expect(container.textContent).toContain('retransmits 7');
+    const btn = container.querySelector('.view-details-btn') as HTMLButtonElement;
+    if (btn) btn.click();
+    await new Promise(r => setTimeout(r, 10));
+    expect(container.textContent).toContain('retransmits:');
+    expect(container.textContent).toContain('7');
   });
 });

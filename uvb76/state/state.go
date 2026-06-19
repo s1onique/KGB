@@ -357,7 +357,6 @@ func (m *Manager) GetICMPMaxSamples() int {
 func (m *Manager) GetLatencySampleTimestamps(targetID string) (oldest, newest *time.Time) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
 	tracker := m.httpTrackers[targetID]
 	if tracker == nil {
 		return nil, nil
@@ -369,7 +368,6 @@ func (m *Manager) GetLatencySampleTimestamps(targetID string) (oldest, newest *t
 func (m *Manager) GetICMPLatencySampleTimestamps(targetID string) (oldest, newest *time.Time) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
 	tracker := m.icmpTrackers[targetID]
 	if tracker == nil {
 		return nil, nil
@@ -441,4 +439,11 @@ func (m *Manager) GetCaptureStore() *CaptureStore {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.captureStore
+}
+
+// EnableCaptureAwareSpikeRetention wires up the spike detector to use capture-aware eviction.
+func (m *Manager) EnableCaptureAwareSpikeRetention() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.spikeDetector.SetCaptureInfoFunc(m.captureStore.GetProtectionInfo)
 }

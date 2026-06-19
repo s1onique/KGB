@@ -95,8 +95,10 @@ func main() {
 	if cfg.Diagnostics.Enabled {
 		captureStore := stateManager.GetCaptureStore()
 		diagCaptureService = diag.NewCaptureService(&cfg.Diagnostics, captureStore)
-		log.Printf("Diagnostic capture enabled (timeout: %dms, cooldown: %ds)",
-			cfg.Diagnostics.TimeoutMs, cfg.Diagnostics.CooldownSeconds)
+		// Enable capture-aware spike retention with configured cap
+		stateManager.EnableCaptureAwareSpikeRetentionWithCap(cfg.Diagnostics.MaxUncapturedSpikes)
+		log.Printf("Diagnostic capture enabled (timeout: %dms, cooldown: %ds, max_uncaptured_spikes: %d)",
+			cfg.Diagnostics.TimeoutMs, cfg.Diagnostics.CooldownSeconds, cfg.Diagnostics.MaxUncapturedSpikes)
 	}
 
 	// Wire diagnostic capture service into HTTP and ICMP probe clients

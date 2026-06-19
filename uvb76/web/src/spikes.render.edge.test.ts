@@ -38,8 +38,8 @@ describe('spikes DOM renderer: edge cases', () => {
       mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
       // Should not throw
       await expect(loadSpikeDiagnostics('test-target')).resolves.not.toThrow();
-      // Should still render the capture status
-      expect(container.textContent).toContain('Capture: ok');
+      // Should still render the capture status (now "ready" instead of "ok")
+      expect(container.textContent).toContain('Capture: ready');
     });
   });
 
