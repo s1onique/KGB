@@ -198,16 +198,66 @@ run_lab() {
         grep -E "lab-tovarisch|probe|timeout|capture|spike|diagnostic|http_probe|recovery" "$UVB76_LOG" \
             > "$UVB76_PROBE_CAPTURE_EVENTS_FILE" 2>/dev/null || true
 
-        # Poll for HTTP failure event/capture after defect cursor
+        # STEP 1: Wait for HTTP failure spike EVENT (not capture yet)
         # Expected reasons: http_probe_timeout, http_probe_failure, http_probe_connection_refused
-        # Accept any capture with failure status after the defect cursor
-        log_info "Polling for defect capture event..."
-        if wait_for_capture_after_cursor "during-defect" "$PHASE_DEFECT_CURSOR" "http_probe_timeout|http_probe_failure|http_probe_connection_refused|timeout|error" 30 "$SPIKES_DURING_DEFECT_POLL_FILE"; then
-            log_info "[PASS] Defect capture event found via polling"
+        log_info "Phase 2 Step 1: Waiting for failure spike event..."
+        DEFECT_OBSERVED=false
+        DEFECT_EVENT_ID=""
+        DEFECT_REASONS=""
+
+        if wait_for_spike_event_after_cursor "during-defect" "$PHASE_DEFECT_CURSOR" "http_probe_timeout|http_probe_failure|http_probe_connection_refused" 30 "$SPIKES_DURING_DEFECT_POLL_FILE"; then
+            DEFECT_EVENT_ID="$MATCHED_EVENT_ID"
+            DEFECT_REASONS="$MATCHED_REASONS"
+            log_info "[PASS] Failure spike event found: event_id=$DEFECT_EVENT_ID reasons=$DEFECT_REASONS"
             DEFECT_OBSERVED=true
+
+            # STEP 2: Now wait for the CAPTURE for this specific event
+            log_info "Phase 2 Step 2: Waiting for failure capture for event $DEFECT_EVENT_ID..."
+            if wait_for_spike_capture_after_event "during-defect" "$DEFECT_EVENT_ID" 15 "$SPIKES_DURING_DEFECT_POLL_FILE"; then
+                log_info "[PASS] Failure capture found for event $DEFECT_EVENT_ID"
+                # Write the actual capture JSON as evidence (strict - fail if invalid)
+                if echo "$MATCHED_CAPTURE_JSON" | jq '.' > "$CAPTURE_DURING_DEFECT_FILE" 2>&1; then
+                    # Only write success summary if JSON was valid
+                    jq -n \
+                        --arg phase "during-defect" \
+                        --arg status "ok" \
+                        --arg event_id "$DEFECT_EVENT_ID" \
+                        --arg reasons "$DEFECT_REASONS" \
+                        '{
+                            phase: $phase,
+                            status: $status,
+                            event_id: $event_id,
+                            reasons: $reasons,
+                            capture_found: true
+                        }' > "${CAPTURE_DURING_DEFECT_FILE}.summary" 2>/dev/null || true
+                else
+                    log_error "Matched capture JSON was invalid for event $DEFECT_EVENT_ID"
+                    DEFECT_OBSERVED=false
+                fi
+            else
+                log_error "[FAIL] Capture missing for event_id=$DEFECT_EVENT_ID"
+                # Write failure reason for result.json
+                jq -n \
+                    --arg phase "during-defect" \
+                    --arg status "no_capture_for_event" \
+                    --arg event_id "$DEFECT_EVENT_ID" \
+                    --arg reasons "$DEFECT_REASONS" \
+                    '{
+                        phase: $phase,
+                        status: $status,
+                        event_id: $event_id,
+                        reasons: $reasons,
+                        capture_found: false,
+                        failure_reason: "capture_missing"
+                    }' > "$CAPTURE_DURING_DEFECT_FILE"
+                DEFECT_OBSERVED=false
+            fi
         else
+            log_error "[FAIL] No failure spike event found after 30s"
+            DEFECT_OBSERVED=false
+
             # Fallback: query spikes API directly and check for failure capture
-            log_warn "Polling timed out, checking spikes API directly..."
+            log_warn "Checking spikes API directly for fallback analysis..."
             query_spikes_api "$LAB_DIR/spikes-during-defect.json" "lab-tovarisch" "true"
             extract_latest_capture "$LAB_DIR/spikes-during-defect.json" "$CAPTURE_DURING_DEFECT_FILE" "during-defect"
             REQUESTED_PATH_DURING_DEFECT="/status.json?include=network_diag"
@@ -262,15 +312,64 @@ run_lab() {
         log_warn "Connectivity may not be fully restored"
     fi
 
-    # Poll for recovery event/capture
-    # Expected reason: http_probe_recovery
-    log_info "Polling for recovery capture event..."
-    if wait_for_capture_after_cursor "after-recovery" "$PHASE_RECOVERY_CURSOR" "http_probe_recovery" 30 "$SPIKES_AFTER_RECOVERY_POLL_FILE"; then
-        log_info "[PASS] Recovery capture event found via polling"
-        RECOVERY_CAPTURE_OK=true
+    # STEP 1: Wait for http_probe_recovery spike EVENT (not capture yet)
+    log_info "Phase 3 Step 1: Waiting for recovery spike event..."
+    RECOVERY_CAPTURE_OK=false
+    RECOVERY_EVENT_ID=""
+    RECOVERY_REASONS=""
+
+    if wait_for_spike_event_after_cursor "after-recovery" "$PHASE_RECOVERY_CURSOR" "http_probe_recovery" 30 "$SPIKES_AFTER_RECOVERY_POLL_FILE"; then
+        RECOVERY_EVENT_ID="$MATCHED_EVENT_ID"
+        RECOVERY_REASONS="$MATCHED_REASONS"
+        log_info "[PASS] Recovery spike event found: event_id=$RECOVERY_EVENT_ID reasons=$RECOVERY_REASONS"
+
+        # STEP 2: Now wait for the CAPTURE for this specific event
+        log_info "Phase 3 Step 2: Waiting for recovery capture for event $RECOVERY_EVENT_ID..."
+        if wait_for_spike_capture_after_event "after-recovery" "$RECOVERY_EVENT_ID" 15 "$SPIKES_AFTER_RECOVERY_POLL_FILE"; then
+            log_info "[PASS] Recovery capture found for event $RECOVERY_EVENT_ID"
+            # Write the actual capture JSON as evidence (strict - fail if invalid)
+            if echo "$MATCHED_CAPTURE_JSON" | jq '.' > "$CAPTURE_AFTER_RECOVERY_FILE" 2>&1; then
+                RECOVERY_CAPTURE_OK=true
+                # Only write success summary if JSON was valid
+                jq -n \
+                    --arg phase "after-recovery" \
+                    --arg status "ok" \
+                    --arg event_id "$RECOVERY_EVENT_ID" \
+                    --arg reasons "$RECOVERY_REASONS" \
+                    '{
+                        phase: $phase,
+                        status: $status,
+                        event_id: $event_id,
+                        reasons: $reasons,
+                        capture_found: true
+                    }' > "${CAPTURE_AFTER_RECOVERY_FILE}.summary" 2>/dev/null || true
+            else
+                log_error "Matched capture JSON was invalid for event $RECOVERY_EVENT_ID"
+                RECOVERY_CAPTURE_OK=false
+            fi
+        else
+            log_error "[FAIL] Recovery capture missing for event_id=$RECOVERY_EVENT_ID"
+            jq -n \
+                --arg phase "after-recovery" \
+                --arg status "no_capture_for_event" \
+                --arg event_id "$RECOVERY_EVENT_ID" \
+                --arg reasons "$RECOVERY_REASONS" \
+                '{
+                    phase: $phase,
+                    status: $status,
+                    event_id: $event_id,
+                    reasons: $reasons,
+                    capture_found: false,
+                    failure_reason: "capture_missing"
+                }' > "$CAPTURE_AFTER_RECOVERY_FILE"
+            RECOVERY_CAPTURE_OK=false
+        fi
     else
+        log_error "[FAIL] No recovery spike event found after 30s"
+        RECOVERY_CAPTURE_OK=false
+
         # Fallback: query spikes API directly
-        log_warn "Polling timed out, checking spikes API directly..."
+        log_warn "Checking spikes API directly for fallback analysis..."
         query_spikes_api "$LAB_DIR/spikes-after-recovery.json" "lab-tovarisch" "true"
         extract_latest_capture "$LAB_DIR/spikes-after-recovery.json" "$CAPTURE_AFTER_RECOVERY_FILE" "after-recovery"
         REQUESTED_PATH_AFTER_RECOVERY="/status.json?include=network_diag"

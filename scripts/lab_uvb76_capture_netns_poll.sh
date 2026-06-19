@@ -4,10 +4,12 @@
 # Helper functions for polling probe samples and capture events.
 # Sourced by lab_uvb76_capture_netns_lib.sh.
 
-# Wait for probe samples with reachability after a cursor
-# Polls every 2s until success or timeout
-# Saves final API response as artifact
-# Returns 0 if reachable samples found, 1 otherwise
+# Wait for probe samples to prove the HTTP probe loop is running.
+# Uses the /api/v1/latency/series endpoint which returns LatencySeries
+# with .retained_sample_count and .points[].
+# Polls every 2s until success or timeout.
+# Saves final API response as artifact.
+# Returns 0 if samples found, 1 otherwise.
 wait_for_probe_samples_after_cursor() {
     local target="${1:-lab-tovarisch}"
     local kind="${2:-http}"
@@ -21,38 +23,56 @@ wait_for_probe_samples_after_cursor() {
     local interval=2
     local elapsed=0
     local success=false
+    local last_response=""
 
     while [[ $elapsed -lt $timeout ]]; do
-        local query_url="${UVB76_API_URL}/api/v1/latency?target_id=${target}&kind=${kind}&range_seconds=60"
-        [[ -n "$cursor" ]] && query_url="${query_url}&after=${cursor}"
+        # Use the correct series endpoint for time-series data
+        local query_url="${UVB76_API_URL}/api/v1/latency/series?target_id=${target}&probe_kind=${kind}&range_seconds=120"
 
         local response
         response=$(ip netns exec "$NS_UVB76" curl -s -c /tmp/uvb76-cookies.txt -b /tmp/uvb76-cookies.txt \
             "$query_url" 2>/dev/null)
+        last_response="$response"
 
         if [[ -z "$response" ]] || ! echo "$response" | jq -e . >/dev/null 2>&1; then
-            log_warn "Empty or invalid latency API response at ${elapsed}s"
+            log_warn "Empty or invalid latency series response at ${elapsed}s"
         else
+            # The LatencySeries schema has .retained_sample_count (actual count) and .points[] (chart points)
             local sample_count
-            sample_count=$(echo "$response" | jq '.sample_count // 0' 2>/dev/null || echo "0")
+            sample_count=$(echo "$response" | jq '.retained_sample_count // 0' 2>/dev/null || echo "0")
+
+            # Also check .returned_point_count for chart points
+            local point_count
+            point_count=$(echo "$response" | jq '.returned_point_count // 0' 2>/dev/null || echo "0")
 
             if [[ "$sample_count" -gt 0 ]]; then
+                # Count samples with valid percentiles (reachable)
                 local reachable_count
-                reachable_count=$(echo "$response" | jq '[.samples[] | select(.reachable == true)] | length' 2>/dev/null || echo "0")
+                reachable_count=$(echo "$response" | jq '[.points[] | select(.sample_count > 0)] | length' 2>/dev/null || echo "0")
+
+                log_info "Latency series: retained=$sample_count samples, $point_count points, $reachable_count with data (${elapsed}s)"
 
                 if [[ "$reachable" == "true" ]]; then
+                    # Need at least 2 points with data to prove probe loop is running
                     if [[ "$reachable_count" -ge 2 ]]; then
-                        log_info "Found $reachable_count reachable samples (${elapsed}s elapsed)"
+                        log_info "Found $reachable_count usable points (probe loop confirmed running)"
                         success=true
                     else
-                        log_info "Found $sample_count samples but only $reachable_count reachable (need 2)"
+                        log_info "Found $sample_count samples but only $reachable_count usable (need 2)"
                     fi
                 else
                     log_info "Found $sample_count samples (${elapsed}s elapsed)"
                     success=true
                 fi
             else
-                log_info "No samples yet (${elapsed}s elapsed)"
+                # Also accept the schema variant with .sample_count (deprecated but still supported)
+                sample_count=$(echo "$response" | jq '.sample_count // 0' 2>/dev/null || echo "0")
+                if [[ "$sample_count" -gt 0 ]]; then
+                    log_info "Found $sample_count samples via deprecated field (${elapsed}s elapsed)"
+                    success=true
+                else
+                    log_info "No samples yet - probe loop may still be warming up (${elapsed}s elapsed)"
+                fi
             fi
         fi
 
@@ -67,7 +87,7 @@ wait_for_probe_samples_after_cursor() {
     done
 
     log_error "Timeout waiting for probe samples after ${timeout}s"
-    [[ -n "$artifact_file" ]] && echo "$response" | jq '.' > "$artifact_file" 2>/dev/null || true
+    [[ -n "$artifact_file" ]] && echo "$last_response" | jq '.' > "$artifact_file" 2>/dev/null || true
     return 1
 }
 
@@ -177,6 +197,196 @@ wait_for_capture_after_cursor() {
 
     log_error "Timeout waiting for capture after ${timeout}s"
     [[ -n "$artifact_file" ]] && echo "$last_response" | jq '.' > "$artifact_file" 2>/dev/null || true
+    return 1
+}
+
+# Wait for spike event with specific reason pattern after a cursor.
+# This is the FIRST step - prove the spike EVENT exists.
+# Polls every 2s until success or timeout.
+# Saves final API response as artifact.
+# Returns 0 if spike event found with matching reasons, 1 otherwise.
+wait_for_spike_event_after_cursor() {
+    local phase="${1:-unknown}"
+    local cursor="${2:-}"
+    local reason_regex="${3:-http_probe_timeout|http_probe_failure|http_probe_connection_refused}"
+    local timeout="${4:-30}"
+    local artifact_file="${5:-}"
+
+    log_info "Waiting for spike event: phase=$phase reason=$reason_regex timeout=${timeout}s"
+
+    local interval=2
+    local elapsed=0
+    local success=false
+    local last_response=""
+    local matched_event_id=""
+    local matched_reasons=""
+
+    while [[ $elapsed -lt $timeout ]]; do
+        local spikes_response
+        spikes_response=$(ip netns exec "$NS_UVB76" curl -s -c /tmp/uvb76-cookies.txt -b /tmp/uvb76-cookies.txt \
+            "${UVB76_API_URL}/api/v1/latency/spikes?target_id=lab-tovarisch&include_captures=true&limit=20" 2>/dev/null)
+        last_response="$spikes_response"
+
+        if [[ -z "$spikes_response" ]] || ! echo "$spikes_response" | jq -e . >/dev/null 2>&1; then
+            log_warn "Empty or invalid spikes API response at ${elapsed}s"
+        else
+            local spike_count
+            spike_count=$(echo "$spikes_response" | jq '.count // 0' 2>/dev/null || echo "0")
+
+            if [[ "$spike_count" -gt 0 ]]; then
+                log_info "Checking $spike_count spikes for event with reason matching: $reason_regex"
+
+                local spike_index=0
+                local found_event=false
+
+                while [[ $spike_index -lt 20 ]]; do
+                    local spike
+                    spike=$(echo "$spikes_response" | jq --argjson idx "$spike_index" '.spikes[$idx] // null' 2>/dev/null)
+                    [[ "$spike" == "null" || "$spike" == "" ]] && break
+
+                    local event_id
+                    event_id=$(echo "$spike" | jq -r '.event_id // empty' 2>/dev/null)
+
+                    local sample_ts
+                    sample_ts=$(echo "$spike" | jq -r '.sample_ts // empty' 2>/dev/null)
+
+                    # Check if spike is after cursor
+                    local after_cursor=true
+                    if [[ -n "$cursor" ]]; then
+                        after_cursor=$(is_capture_after_cursor "$sample_ts" "$cursor" && echo "true" || echo "false")
+                    fi
+
+                    if [[ "$after_cursor" != "true" ]]; then
+                        spike_index=$((spike_index + 1))
+                        continue
+                    fi
+
+                    local spike_reasons
+                    spike_reasons=$(echo "$spike" | jq -r '.reasons // [] | join("|")' 2>/dev/null)
+
+                    log_info "  Spike $spike_index: event_id=$event_id sample_ts=$sample_ts reasons=$spike_reasons"
+
+                    # Check if reasons match
+                    if echo "$spike_reasons" | grep -qE "$reason_regex"; then
+                        found_event=true
+                        matched_event_id="$event_id"
+                        matched_reasons="$spike_reasons"
+                        log_info "[PASS] Spike event found: event_id=$event_id reasons=$spike_reasons"
+                        break
+                    fi
+
+                    spike_index=$((spike_index + 1))
+                done
+
+                if [[ "$found_event" == "true" ]]; then
+                    success=true
+                    # Export matched event info for caller
+                    export MATCHED_EVENT_ID="$matched_event_id"
+                    export MATCHED_REASONS="$matched_reasons"
+                    break
+                else
+                    log_info "Found $spike_count spikes but no event matching $reason_regex after cursor"
+                fi
+            else
+                log_info "No spikes yet (${elapsed}s elapsed)"
+            fi
+        fi
+
+        if [[ "$success" == "true" ]]; then
+            [[ -n "$artifact_file" ]] && echo "$spikes_response" | jq '.' > "$artifact_file" 2>/dev/null || true
+            [[ -n "$artifact_file" ]] && log_info "Saved spike event artifact: $artifact_file"
+            return 0
+        fi
+
+        sleep $interval
+        elapsed=$((elapsed + interval))
+    done
+
+    log_error "Timeout waiting for spike event after ${timeout}s"
+    [[ -n "$artifact_file" ]] && echo "$last_response" | jq '.' > "$artifact_file" 2>/dev/null || true
+    export MATCHED_EVENT_ID=""
+    export MATCHED_REASONS=""
+    return 1
+}
+
+# Wait for capture for a specific spike event.
+# This is the SECOND step - prove the capture exists for the event.
+# Uses the event_id to precisely match the capture.
+# Polls every 2s until success or timeout.
+# On success, exports MATCHED_CAPTURE_JSON with the actual capture object.
+# Returns 0 if capture found for event_id, 1 otherwise.
+wait_for_spike_capture_after_event() {
+    local phase="${1:-unknown}"
+    local event_id="${2:-}"
+    local timeout="${3:-30}"
+    local artifact_file="${4:-}"
+
+    log_info "Waiting for capture: phase=$phase event_id=$event_id timeout=${timeout}s"
+
+    if [[ -z "$event_id" ]]; then
+        log_error "No event_id provided for capture wait"
+        return 1
+    fi
+
+    local interval=2
+    local elapsed=0
+    local success=false
+    local last_response=""
+    local matched_capture_json=""
+
+    while [[ $elapsed -lt $timeout ]]; do
+        local spikes_response
+        spikes_response=$(ip netns exec "$NS_UVB76" curl -s -c /tmp/uvb76-cookies.txt -b /tmp/uvb76-cookies.txt \
+            "${UVB76_API_URL}/api/v1/latency/spikes?target_id=lab-tovarisch&include_captures=true&limit=20" 2>/dev/null)
+        last_response="$spikes_response"
+
+        if [[ -z "$spikes_response" ]] || ! echo "$spikes_response" | jq -e . >/dev/null 2>&1; then
+            log_warn "Empty or invalid spikes API response at ${elapsed}s"
+        else
+            # Find the spike with matching event_id
+            local spike
+            spike=$(echo "$spikes_response" | jq --arg eid "$event_id" '[.spikes[] | select(.event_id == $eid)] | .[0]' 2>/dev/null)
+
+            if [[ "$spike" == "null" || "$spike" == "" ]]; then
+                log_info "Event $event_id not found in spikes list (${elapsed}s elapsed)"
+            else
+                # Check for captures
+                local captures_json
+                captures_json=$(echo "$spike" | jq '.captures // []' 2>/dev/null)
+                local capture_count
+                capture_count=$(echo "$captures_json" | jq 'length' 2>/dev/null || echo "0")
+
+                if [[ "$capture_count" -gt 0 ]]; then
+                    local cap
+                    cap=$(echo "$captures_json" | jq '.[0]' 2>/dev/null)
+                    local cap_status
+                    cap_status=$(echo "$cap" | jq -r '.status // "unknown"' 2>/dev/null)
+                    local cap_started
+                    cap_started=$(echo "$cap" | jq -r '.capture_started_at // empty' 2>/dev/null)
+
+                    log_info "[PASS] Capture found for event $event_id: status=$cap_status started=$cap_started"
+                    success=true
+                    matched_capture_json="$cap"
+                    export MATCHED_CAPTURE_JSON="$cap"
+                else
+                    log_info "Event $event_id found but no captures yet (${elapsed}s elapsed)"
+                fi
+            fi
+        fi
+
+        if [[ "$success" == "true" ]]; then
+            [[ -n "$artifact_file" ]] && echo "$spikes_response" | jq '.' > "$artifact_file" 2>/dev/null || true
+            [[ -n "$artifact_file" ]] && log_info "Saved capture artifact: $artifact_file"
+            return 0
+        fi
+
+        sleep $interval
+        elapsed=$((elapsed + interval))
+    done
+
+    log_error "Timeout waiting for capture for event $event_id after ${timeout}s"
+    [[ -n "$artifact_file" ]] && echo "$last_response" | jq '.' > "$artifact_file" 2>/dev/null || true
+    export MATCHED_CAPTURE_JSON=""
     return 1
 }
 
