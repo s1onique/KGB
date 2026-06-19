@@ -20,6 +20,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lab_uvb76_capture_netns_lib.sh
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_lib.sh"
 
+# =============================================================================
+# Contract result tracking
+# =============================================================================
+
+CONTRACT_PHASE1_CAPTURE_OK=false
+CONTRACT_PHASE1_PACKET_OK=false
+CONTRACT_PHASE2_COOLDOWN_OK=false
+CONTRACT_PHASE3_CAPTURE_OK=false
+CONTRACT_PHASE3_PACKET_OK=false
+CONTRACT_DIR_OK=false
+CONTRACT_DISTINCT_EVENT_IDS_OK=false
+
 # Main lab execution
 run_lab() {
     log_info "=== UVB-76 Diagnostic Capture Netns Lab ==="
@@ -110,13 +122,15 @@ run_lab() {
     fi
 
     # ========================================
-    # PHASE 0: Baseline probe readiness gate
+    # PHASE 0: Baseline probe readiness gate + status artifact
     # ========================================
     log_info ""
-    log_info "=== PHASE 0: Baseline Probe Readiness Gate ==="
+    log_info "=== PHASE 0: Baseline Probe Readiness Gate + Status Artifact ==="
+
+    # Save UVB-76 status as Phase 0 artifact
+    save_phase0_status
 
     # Poll for probe samples to prove HTTP probe loop is running
-    # This replaces fixed sleep - we poll until we have evidence the probe is working
     if wait_for_probe_samples_after_cursor "lab-tovarisch" "http" "" "true" 20 "$BASELINE_PROBE_READY_FILE"; then
         log_info "[PASS] Baseline probe readiness verified - HTTP probe loop is running"
         PROBE_READY=true
@@ -126,274 +140,235 @@ run_lab() {
         PROBE_READY=false
     fi
 
+    # Copy probe readiness artifact to Phase 0 naming
+    copy_phase0_probe_ready
+
     # Set baseline cursor for phase isolation
     set_phase_cursor "baseline"
 
     # ========================================
-    # PHASE 1: Baseline capture
+    # PHASE 1: First eligible spike captured
     # ========================================
     log_info ""
-    log_info "=== PHASE 1: Baseline Capture ==="
+    log_info "=== PHASE 1: First Eligible Spike Captured ==="
 
-    # Query the spikes API with captures
-    query_spikes_api "$LAB_DIR/spikes-baseline.json" "lab-tovarisch" "true"
+    PHASE1_CAPTURED=false
+    PHASE1_EVENT_ID=""
+    PHASE1_REASONS=""
 
-    # Extract capture evidence from API response
-    # Note: For baseline, we don't expect a natural spike to have occurred yet
-    # We accept: ok (good), no_spikes, no_capture_for_phase (acceptable - no natural spike)
-    extract_latest_capture "$LAB_DIR/spikes-baseline.json" "$CAPTURE_BASELINE_FILE" "baseline"
-    REQUESTED_PATH_BASELINE="/status.json?include=network_diag"
+    # Set phase cursor BEFORE inducing spike
+    set_phase_cursor "phase1"
 
-    # Check if baseline capture was successful
-    # Acceptable statuses for baseline:
-    # - "ok" = capture exists and succeeded (may have occurred during warmup)
-    # - "no_capture_for_phase" = no captures created during baseline window (expected - no natural spike)
-    # - "no_capture_yet" = spike exists but no capture yet
-    # - "no_spikes" = no spikes detected yet
-    local baseline_status
-    baseline_status=$(jq -r '.status' "$CAPTURE_BASELINE_FILE" 2>/dev/null || echo "unknown")
-
-    if [[ "$baseline_status" == "ok" ]]; then
-        BASELINE_CAPTURE_OK=true
-        log_info "[PASS] Baseline capture successful (status: $baseline_status)"
-    elif [[ "$baseline_status" == "no_capture_for_phase" || "$baseline_status" == "no_spikes" || "$baseline_status" == "no_capture_yet" ]]; then
-        # These are acceptable for baseline - we're establishing a pre-defect state
-        # We just need connectivity to be working, not necessarily a spike
-        BASELINE_CAPTURE_OK=true
-        log_info "[PASS] Baseline phase complete (status: $baseline_status - acceptable, no natural spike expected)"
-    else
-        BASELINE_CAPTURE_OK=false
-        log_error "[FAIL] Baseline capture failed: $baseline_status"
-    fi
-
-    # ========================================
-    # PHASE 2: Inject defect and test
-    # ========================================
-    log_info ""
-    log_info "=== PHASE 2: Defect Injection ==="
-
-    # Set defect cursor BEFORE injecting defect - captures after this are during defect
-    set_phase_cursor "defect"
-
-    # Inject 100% loss defect (deterministic)
+    # Inject 100% loss defect to trigger first spike
     inject_netem_defect
     DEFECT_MODE="100pct-loss"
 
-    # Verify defect is in place - ping MUST fail
+    # Verify defect is in place
     if ip netns exec "$NS_UVB76" ping -c 1 -W 2 "$IP_TOVARISCH" > /dev/null 2>&1; then
         log_error "[FAIL] Defect not working - ping succeeded when it should fail"
-        DEFECT_OBSERVED=false
     else
         log_info "[PASS] Defect verified - ping fails as expected"
 
-        # Collect extra diagnostic artifacts for failure analysis
-        # Latency samples during defect
-        log_info "Collecting latency samples during defect..."
-        ip netns exec "$NS_UVB76" curl -s \
-            "${UVB76_API_URL}/api/v1/latency?target_id=lab-tovarisch&kind=http&range_seconds=120" \
-            > "$LATENCY_DURING_DEFECT_FILE" 2>/dev/null || true
+        # STEP 1: Wait for HTTP failure spike EVENT
+        log_info "Phase 1 Step 1: Waiting for failure spike event..."
+        if wait_for_spike_event_after_cursor "phase1" "$PHASE_PHASE1_CURSOR" "http_probe_timeout|http_probe_failure|http_probe_connection_refused" 30 "$LAB_DIR/spikes-phase1-poll.json"; then
+            PHASE1_EVENT_ID="$MATCHED_EVENT_ID"
+            PHASE1_REASONS="$MATCHED_REASONS"
+            log_info "[PASS] Phase 1 spike event found: event_id=$PHASE1_EVENT_ID reasons=$PHASE1_REASONS"
 
-        # Probe/capture events from UVB-76 log
-        log_info "Extracting probe and capture events from UVB-76 log..."
-        grep -E "lab-tovarisch|probe|timeout|capture|spike|diagnostic|http_probe|recovery" "$UVB76_LOG" \
-            > "$UVB76_PROBE_CAPTURE_EVENTS_FILE" 2>/dev/null || true
+            # STEP 2: Wait for the CAPTURE for this event FIRST
+            log_info "Phase 1 Step 2: Waiting for capture for event $PHASE1_EVENT_ID..."
+            if wait_for_spike_capture_after_event "phase1" "$PHASE1_EVENT_ID" 15 "$LAB_DIR/spikes-phase1-capture-poll.json"; then
+                log_info "[PASS] Phase 1 capture found for event $PHASE1_EVENT_ID"
+                PHASE1_CAPTURED=true
 
-        # STEP 1: Wait for HTTP failure spike EVENT (not capture yet)
-        # Expected reasons: http_probe_timeout, http_probe_failure, http_probe_connection_refused
-        log_info "Phase 2 Step 1: Waiting for failure spike event..."
-        DEFECT_OBSERVED=false
-        DEFECT_EVENT_ID=""
-        DEFECT_REASONS=""
+                # NOW query spikes API for full response (with capture populated)
+                query_spikes_api "$LAB_DIR/spikes-phase1.json" "lab-tovarisch" "true"
 
-        if wait_for_spike_event_after_cursor "during-defect" "$PHASE_DEFECT_CURSOR" "http_probe_timeout|http_probe_failure|http_probe_connection_refused" 30 "$SPIKES_DURING_DEFECT_POLL_FILE"; then
-            DEFECT_EVENT_ID="$MATCHED_EVENT_ID"
-            DEFECT_REASONS="$MATCHED_REASONS"
-            log_info "[PASS] Failure spike event found: event_id=$DEFECT_EVENT_ID reasons=$DEFECT_REASONS"
-            DEFECT_OBSERVED=true
+                # Create raw row file for packet extraction
+                local phase1_raw_row_file="$LAB_DIR/phase1-spike-row-raw.json"
+                echo "$(extract_spike_row_for_event "$LAB_DIR/spikes-phase1.json" "$PHASE1_EVENT_ID")" | jq '.' > "$phase1_raw_row_file"
 
-            # STEP 2: Now wait for the CAPTURE for this specific event
-            log_info "Phase 2 Step 2: Waiting for failure capture for event $DEFECT_EVENT_ID..."
-            if wait_for_spike_capture_after_event "during-defect" "$DEFECT_EVENT_ID" 15 "$SPIKES_DURING_DEFECT_POLL_FILE"; then
-                log_info "[PASS] Failure capture found for event $DEFECT_EVENT_ID"
-                # Write the actual capture JSON as evidence (strict - fail if invalid)
-                if echo "$MATCHED_CAPTURE_JSON" | jq '.' > "$CAPTURE_DURING_DEFECT_FILE" 2>&1; then
-                    # Only write success summary if JSON was valid
-                    jq -n \
-                        --arg phase "during-defect" \
-                        --arg status "ok" \
-                        --arg event_id "$DEFECT_EVENT_ID" \
-                        --arg reasons "$DEFECT_REASONS" \
-                        '{
-                            phase: $phase,
-                            status: $status,
-                            event_id: $event_id,
-                            reasons: $reasons,
-                            capture_found: true
-                        }' > "${CAPTURE_DURING_DEFECT_FILE}.summary" 2>/dev/null || true
-                else
-                    log_error "Matched capture JSON was invalid for event $DEFECT_EVENT_ID"
-                    DEFECT_OBSERVED=false
+                # Normalize raw row into contract row
+                if normalize_spike_row_capture_contract "$phase1_raw_row_file" "$PHASE1_SPIKE_ROW_FILE"; then
+                    # Save spike event (full raw)
+                    save_phase_spike_event 1 "$PHASE1_SPIKE_EVENT_FILE" "$(cat "$LAB_DIR/spikes-phase1.json")" "$PHASE1_EVENT_ID" "$PHASE1_REASONS"
+
+                    # Save capture packet from RAW row (has captures[] with network_diag)
+                    if save_phase_capture_packet 1 "$PHASE1_CAPTURE_PACKET_FILE" "$phase1_raw_row_file"; then
+                        # Save contract summary
+                        save_phase_contract_summary 1 "$PHASE1_CAPTURE_CONTRACT_FILE" "$PHASE1_SPIKE_ROW_FILE" "$PHASE1_CAPTURE_PACKET_FILE"
+
+                        # Assert Phase 1 contract
+                        if assert_captured_row_contract 1 "$PHASE1_SPIKE_ROW_FILE" "$PHASE1_CAPTURE_PACKET_FILE"; then
+                            CONTRACT_PHASE1_CAPTURE_OK=true
+                            CONTRACT_PHASE1_PACKET_OK=true
+                            log_info "[PASS] Phase 1 contract assertions passed"
+                        fi
+                    fi
                 fi
             else
-                log_error "[FAIL] Capture missing for event_id=$DEFECT_EVENT_ID"
-                # Write failure reason for result.json
-                jq -n \
-                    --arg phase "during-defect" \
-                    --arg status "no_capture_for_event" \
-                    --arg event_id "$DEFECT_EVENT_ID" \
-                    --arg reasons "$DEFECT_REASONS" \
-                    '{
-                        phase: $phase,
-                        status: $status,
-                        event_id: $event_id,
-                        reasons: $reasons,
-                        capture_found: false,
-                        failure_reason: "capture_missing"
-                    }' > "$CAPTURE_DURING_DEFECT_FILE"
-                DEFECT_OBSERVED=false
+                log_error "[FAIL] Phase 1 capture missing for event_id=$PHASE1_EVENT_ID"
             fi
         else
-            log_error "[FAIL] No failure spike event found after 30s"
-            DEFECT_OBSERVED=false
-
-            # Fallback: query spikes API directly and check for failure capture
-            log_warn "Checking spikes API directly for fallback analysis..."
-            query_spikes_api "$LAB_DIR/spikes-during-defect.json" "lab-tovarisch" "true"
-            extract_latest_capture "$LAB_DIR/spikes-during-defect.json" "$CAPTURE_DURING_DEFECT_FILE" "during-defect"
-            REQUESTED_PATH_DURING_DEFECT="/status.json?include=network_diag"
-
-            local during_status
-            during_status=$(jq -r '.status' "$CAPTURE_DURING_DEFECT_FILE" 2>/dev/null || echo "unknown")
-
-            if [[ "$during_status" == "timeout" || "$during_status" == "error" ]]; then
-                DEFECT_OBSERVED=true
-                log_info "[PASS] Defect observed in diagnostic capture (status: $during_status)"
-            elif [[ "$during_status" == "ok" ]]; then
-                # Capture succeeded despite defect - check latency
-                local latency_ms
-                latency_ms=$(jq -r '.latency_ms // 0' "$CAPTURE_DURING_DEFECT_FILE" 2>/dev/null || echo "0")
-                if [[ "$latency_ms" -gt 1000 ]]; then
-                    DEFECT_OBSERVED=true
-                    log_info "[PASS] Defect observed - high latency: ${latency_ms}ms"
-                else
-                    DEFECT_OBSERVED=false
-                    log_error "[FAIL] Defect not observed - latency: ${latency_ms}ms"
-                fi
-            elif [[ "$during_status" == "no_capture_for_phase" || "$during_status" == "no_spikes" ]]; then
-                DEFECT_OBSERVED=false
-                log_error "[FAIL] No capture for defect phase - probe loop may not be working properly"
-            else
-                DEFECT_OBSERVED=false
-                log_error "[FAIL] Defect effect unclear: $during_status"
-            fi
+            log_error "[FAIL] Phase 1 no failure spike event found after 30s"
         fi
     fi
 
     # ========================================
-    # PHASE 3: Recovery
+    # PHASE 2: Inside-cooldown spike skipped
     # ========================================
     log_info ""
-    log_info "=== PHASE 3: Recovery ==="
+    log_info "=== PHASE 2: Inside-Cooldown Spike Skipped ==="
 
-    # Clear the defect FIRST
-    clear_defect
+    PHASE2_SKIPPED=false
+    PHASE2_EVENT_ID=""
+    PHASE2_REASONS=""
 
-    # Set recovery cursor AFTER clearing defect - captures after this are post-recovery
-    set_phase_cursor "recovery"
+    # Set phase cursor BEFORE inducing spike
+    set_phase_cursor "phase2"
 
-    # Wait for connectivity to restore
-    log_info "Waiting for connectivity to restore..."
-    sleep 3
+    # Reinject defect BEFORE cooldown expires
+    # Lab cooldown is 5 seconds, so reinject immediately
+    log_info "Reinjecting defect before cooldown expires..."
+    inject_netem_defect
 
-    # Verify connectivity restored
+    # Verify defect is in place again
     if ip netns exec "$NS_UVB76" ping -c 1 -W 2 "$IP_TOVARISCH" > /dev/null 2>&1; then
-        log_info "Connectivity restored"
+        log_error "[FAIL] Defect not working - ping succeeded when it should fail"
     else
-        log_warn "Connectivity may not be fully restored"
-    fi
+        log_info "[PASS] Defect verified - ping fails as expected"
 
-    # STEP 1: Wait for http_probe_recovery spike EVENT (not capture yet)
-    log_info "Phase 3 Step 1: Waiting for recovery spike event..."
-    RECOVERY_CAPTURE_OK=false
-    RECOVERY_EVENT_ID=""
-    RECOVERY_REASONS=""
+        # STEP 1: Wait for HTTP failure spike EVENT
+        log_info "Phase 2 Step 1: Waiting for failure spike event..."
+        if wait_for_spike_event_after_cursor "phase2" "$PHASE_PHASE2_CURSOR" "http_probe_timeout|http_probe_failure|http_probe_connection_refused" 15 "$LAB_DIR/spikes-phase2-poll.json"; then
+            PHASE2_EVENT_ID="$MATCHED_EVENT_ID"
+            PHASE2_REASONS="$MATCHED_REASONS"
+            log_info "[PASS] Phase 2 spike event found: event_id=$PHASE2_EVENT_ID reasons=$PHASE2_REASONS"
 
-    if wait_for_spike_event_after_cursor "after-recovery" "$PHASE_RECOVERY_CURSOR" "http_probe_recovery" 30 "$SPIKES_AFTER_RECOVERY_POLL_FILE"; then
-        RECOVERY_EVENT_ID="$MATCHED_EVENT_ID"
-        RECOVERY_REASONS="$MATCHED_REASONS"
-        log_info "[PASS] Recovery spike event found: event_id=$RECOVERY_EVENT_ID reasons=$RECOVERY_REASONS"
+            # Query spikes API for full response
+            query_spikes_api "$LAB_DIR/spikes-phase2.json" "lab-tovarisch" "true"
 
-        # STEP 2: Now wait for the CAPTURE for this specific event
-        log_info "Phase 3 Step 2: Waiting for recovery capture for event $RECOVERY_EVENT_ID..."
-        if wait_for_spike_capture_after_event "after-recovery" "$RECOVERY_EVENT_ID" 15 "$SPIKES_AFTER_RECOVERY_POLL_FILE"; then
-            log_info "[PASS] Recovery capture found for event $RECOVERY_EVENT_ID"
-            # Write the actual capture JSON as evidence (strict - fail if invalid)
-            if echo "$MATCHED_CAPTURE_JSON" | jq '.' > "$CAPTURE_AFTER_RECOVERY_FILE" 2>&1; then
-                RECOVERY_CAPTURE_OK=true
-                # Only write success summary if JSON was valid
-                jq -n \
-                    --arg phase "after-recovery" \
-                    --arg status "ok" \
-                    --arg event_id "$RECOVERY_EVENT_ID" \
-                    --arg reasons "$RECOVERY_REASONS" \
-                    '{
-                        phase: $phase,
-                        status: $status,
-                        event_id: $event_id,
-                        reasons: $reasons,
-                        capture_found: true
-                    }' > "${CAPTURE_AFTER_RECOVERY_FILE}.summary" 2>/dev/null || true
+            # Save spike event (full raw)
+            save_phase_spike_event 2 "$PHASE2_SPIKE_EVENT_FILE" "$(cat "$LAB_DIR/spikes-phase2.json")" "$PHASE2_EVENT_ID" "$PHASE2_REASONS"
+
+            # STEP 2: Wait for skipped_cooldown row (NOT a capture)
+            # The polling helper will normalize and write the row when it finds skipped_cooldown
+            log_info "Phase 2 Step 2: Waiting for skipped_cooldown row for event $PHASE2_EVENT_ID..."
+            if wait_for_skipped_cooldown_spike_row_after_event 2 "$PHASE2_EVENT_ID" 15 "$PHASE2_SPIKE_ROW_FILE"; then
+                log_info "[PASS] Phase 2 skipped_cooldown row found for event $PHASE2_EVENT_ID"
+                PHASE2_SKIPPED=true
+
+                # Save contract summary (no packet file for skipped cooldown)
+                save_phase_contract_summary 2 "$PHASE2_CAPTURE_CONTRACT_FILE" "$PHASE2_SPIKE_ROW_FILE" ""
+
+                # Assert Phase 2 contract using normalized row
+                if assert_skipped_cooldown_row_contract 2 "$PHASE2_SPIKE_ROW_FILE"; then
+                    CONTRACT_PHASE2_COOLDOWN_OK=true
+                    log_info "[PASS] Phase 2 contract assertions passed"
+                fi
             else
-                log_error "Matched capture JSON was invalid for event $RECOVERY_EVENT_ID"
-                RECOVERY_CAPTURE_OK=false
+                log_error "[FAIL] Phase 2 skipped_cooldown row not found for event_id=$PHASE2_EVENT_ID"
             fi
         else
-            log_error "[FAIL] Recovery capture missing for event_id=$RECOVERY_EVENT_ID"
-            jq -n \
-                --arg phase "after-recovery" \
-                --arg status "no_capture_for_event" \
-                --arg event_id "$RECOVERY_EVENT_ID" \
-                --arg reasons "$RECOVERY_REASONS" \
-                '{
-                    phase: $phase,
-                    status: $status,
-                    event_id: $event_id,
-                    reasons: $reasons,
-                    capture_found: false,
-                    failure_reason: "capture_missing"
-                }' > "$CAPTURE_AFTER_RECOVERY_FILE"
-            RECOVERY_CAPTURE_OK=false
-        fi
-    else
-        log_error "[FAIL] No recovery spike event found after 30s"
-        RECOVERY_CAPTURE_OK=false
-
-        # Fallback: query spikes API directly
-        log_warn "Checking spikes API directly for fallback analysis..."
-        query_spikes_api "$LAB_DIR/spikes-after-recovery.json" "lab-tovarisch" "true"
-        extract_latest_capture "$LAB_DIR/spikes-after-recovery.json" "$CAPTURE_AFTER_RECOVERY_FILE" "after-recovery"
-        REQUESTED_PATH_AFTER_RECOVERY="/status.json?include=network_diag"
-
-        local recovery_status
-        recovery_status=$(jq -r '.status' "$CAPTURE_AFTER_RECOVERY_FILE" 2>/dev/null || echo "unknown")
-
-        if [[ "$recovery_status" == "ok" ]]; then
-            RECOVERY_CAPTURE_OK=true
-            log_info "[PASS] Recovery capture successful (status: $recovery_status)"
-        elif [[ "$recovery_status" == "no_capture_for_phase" || "$recovery_status" == "no_spikes" ]]; then
-            RECOVERY_CAPTURE_OK=false
-            log_error "[FAIL] No recovery capture - probe loop may not be working properly"
-        else
-            RECOVERY_CAPTURE_OK=false
-            log_error "[FAIL] Recovery capture failed: $recovery_status"
+            log_error "[FAIL] Phase 2 no failure spike event found after 15s"
         fi
     fi
 
-    # Collect latency after recovery
-    log_info "Collecting latency samples after recovery..."
-    ip netns exec "$NS_UVB76" curl -s \
-        "${UVB76_API_URL}/api/v1/latency?target_id=lab-tovarisch&kind=http&range_seconds=60" \
-        > "$LATENCY_AFTER_RECOVERY_FILE" 2>/dev/null || true
+    # ========================================
+    # PHASE 3: Post-cooldown spike captured again
+    # ========================================
+    log_info ""
+    log_info "=== PHASE 3: Post-Cooldown Spike Captured Again ==="
+
+    # Wait for cooldown to expire (lab cooldown is 5 seconds, add buffer)
+    log_info "Waiting for cooldown to expire (8 seconds + buffer)..."
+    sleep 10
+
+    PHASE3_CAPTURED=false
+    PHASE3_EVENT_ID=""
+    PHASE3_REASONS=""
+
+    # Clear previous defect first
+    clear_defect
+    sleep 2
+
+    # Re-inject defect after cooldown
+    log_info "Reinjecting defect after cooldown expires..."
+    inject_netem_defect
+
+    # Verify defect is in place
+    if ip netns exec "$NS_UVB76" ping -c 1 -W 2 "$IP_TOVARISCH" > /dev/null 2>&1; then
+        log_error "[FAIL] Defect not working - ping succeeded when it should fail"
+    else
+        log_info "[PASS] Defect verified - ping fails as expected"
+
+        # Set phase cursor BEFORE inducing spike
+        set_phase_cursor "phase3"
+
+        # STEP 1: Wait for HTTP failure spike EVENT
+        log_info "Phase 3 Step 1: Waiting for failure spike event..."
+        if wait_for_spike_event_after_cursor "phase3" "$PHASE_PHASE3_CURSOR" "http_probe_timeout|http_probe_failure|http_probe_connection_refused" 30 "$LAB_DIR/spikes-phase3-poll.json"; then
+            PHASE3_EVENT_ID="$MATCHED_EVENT_ID"
+            PHASE3_REASONS="$MATCHED_REASONS"
+            log_info "[PASS] Phase 3 spike event found: event_id=$PHASE3_EVENT_ID reasons=$PHASE3_REASONS"
+
+            # STEP 2: Wait for the CAPTURE for this event FIRST
+            log_info "Phase 3 Step 2: Waiting for capture for event $PHASE3_EVENT_ID..."
+            if wait_for_spike_capture_after_event "phase3" "$PHASE3_EVENT_ID" 15 "$LAB_DIR/spikes-phase3-capture-poll.json"; then
+                log_info "[PASS] Phase 3 capture found for event $PHASE3_EVENT_ID"
+                PHASE3_CAPTURED=true
+
+                # NOW query spikes API for full response (with capture populated)
+                query_spikes_api "$LAB_DIR/spikes-phase3.json" "lab-tovarisch" "true"
+
+                # Create raw row file for packet extraction
+                local phase3_raw_row_file="$LAB_DIR/phase3-spike-row-raw.json"
+                echo "$(extract_spike_row_for_event "$LAB_DIR/spikes-phase3.json" "$PHASE3_EVENT_ID")" | jq '.' > "$phase3_raw_row_file"
+
+                # Normalize raw row into contract row
+                if normalize_spike_row_capture_contract "$phase3_raw_row_file" "$PHASE3_SPIKE_ROW_FILE"; then
+                    # Save spike event (full raw)
+                    save_phase_spike_event 3 "$PHASE3_SPIKE_EVENT_FILE" "$(cat "$LAB_DIR/spikes-phase3.json")" "$PHASE3_EVENT_ID" "$PHASE3_REASONS"
+
+                    # Save capture packet from RAW row (has captures[] with network_diag)
+                    if save_phase_capture_packet 3 "$PHASE3_CAPTURE_PACKET_FILE" "$phase3_raw_row_file"; then
+                        # Save contract summary
+                        save_phase_contract_summary 3 "$PHASE3_CAPTURE_CONTRACT_FILE" "$PHASE3_SPIKE_ROW_FILE" "$PHASE3_CAPTURE_PACKET_FILE"
+
+                        # Assert Phase 3 contract
+                        if assert_captured_row_contract 3 "$PHASE3_SPIKE_ROW_FILE" "$PHASE3_CAPTURE_PACKET_FILE"; then
+                            CONTRACT_PHASE3_CAPTURE_OK=true
+                            CONTRACT_PHASE3_PACKET_OK=true
+                            log_info "[PASS] Phase 3 contract assertions passed"
+                        fi
+                    fi
+                fi
+            else
+                log_error "[FAIL] Phase 3 capture missing for event_id=$PHASE3_EVENT_ID"
+            fi
+        else
+            log_error "[FAIL] Phase 3 no failure spike event found after 30s"
+        fi
+    fi
+
+    # Clear defect for cleanup
+    clear_defect
+
+    # ========================================
+    # Run contract verification
+    # ========================================
+    log_info ""
+    log_info "=== Running Contract Verification ==="
+
+    if run_contract_verification; then
+        CONTRACT_DIR_OK=true
+    else
+        log_error "[FAIL] Contract verification failed"
+    fi
+
+    # Verify distinct event IDs across phases
+    verify_distinct_event_ids
 
     # ========================================
     # Write final result
@@ -405,39 +380,15 @@ run_lab() {
     log_info "=== Lab Complete ==="
     log_info "Artifact directory: $LAB_DIR"
     log_info ""
-    log_info "Summary:"
-    log_info "  Probe readiness: $([ "$PROBE_READY" = true ] && echo "OK" || echo "FAIL")"
-    log_info "  Baseline capture: $([ "$BASELINE_CAPTURE_OK" = true ] && echo "OK" || echo "FAIL")"
-    log_info "  Defect observed: $([ "$DEFECT_OBSERVED" = true ] && echo "YES" || echo "NO")"
-    log_info "  Recovery capture: $([ "$RECOVERY_CAPTURE_OK" = true ] && echo "OK" || echo "FAIL")"
+    log_info "Phase artifacts:"
+    log_info "  Phase 0: $([ -f "$PHASE0_STATUS_FILE" ] && echo "status saved" || echo "MISSING")"
+    log_info "  Phase 1: $([ -f "$PHASE1_SPIKE_ROW_FILE" ] && echo "row saved" || echo "MISSING") / $([ -f "$PHASE1_CAPTURE_PACKET_FILE" ] && echo "packet saved" || echo "MISSING")"
+    log_info "  Phase 2: $([ -f "$PHASE2_SPIKE_ROW_FILE" ] && echo "row saved" || echo "MISSING")"
+    log_info "  Phase 3: $([ -f "$PHASE3_SPIKE_ROW_FILE" ] && echo "row saved" || echo "MISSING") / $([ -f "$PHASE3_CAPTURE_PACKET_FILE" ] && echo "packet saved" || echo "MISSING")"
     log_info ""
+    print_lab_result_summary
 
-    # Determine exit code
-    local exit_code=0
-    if [[ "$PROBE_READY" != "true" ]]; then
-        log_error "Probe readiness failed - HTTP probe loop not working"
-        exit_code=1
-    fi
-    if [[ "$BASELINE_CAPTURE_OK" != "true" ]]; then
-        log_error "Baseline capture failed"
-        exit_code=1
-    fi
-    if [[ "$DEFECT_OBSERVED" != "true" ]]; then
-        log_error "Defect was not observed - lab purpose not proven"
-        exit_code=1
-    fi
-    if [[ "$RECOVERY_CAPTURE_OK" != "true" ]]; then
-        log_error "Recovery capture failed"
-        exit_code=1
-    fi
-
-    if [[ $exit_code -eq 0 ]]; then
-        log_info "Result: PASS"
-    else
-        log_error "Result: FAIL"
-    fi
-
-    return $exit_code
+    compute_lab_exit_code
 }
 
 # Run lab when executed directly

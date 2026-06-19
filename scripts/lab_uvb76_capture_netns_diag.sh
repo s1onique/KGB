@@ -12,6 +12,9 @@ LAB_PASS="lab-password"  # This password is only for the lab config
 
 # Track timestamps for phase isolation (captures must be created after these cursors)
 declare -g PHASE_BASELINE_CURSOR=""
+declare -g PHASE_PHASE1_CURSOR=""
+declare -g PHASE_PHASE2_CURSOR=""
+declare -g PHASE_PHASE3_CURSOR=""
 declare -g PHASE_DEFECT_CURSOR=""
 declare -g PHASE_RECOVERY_CURSOR=""
 
@@ -92,6 +95,18 @@ set_phase_cursor() {
         baseline)
             PHASE_BASELINE_CURSOR="$cursor"
             log_info "Set baseline cursor: $PHASE_BASELINE_CURSOR"
+            ;;
+        phase1)
+            PHASE_PHASE1_CURSOR="$cursor"
+            log_info "Set phase1 cursor: $PHASE_PHASE1_CURSOR"
+            ;;
+        phase2)
+            PHASE_PHASE2_CURSOR="$cursor"
+            log_info "Set phase2 cursor: $PHASE_PHASE2_CURSOR"
+            ;;
+        phase3)
+            PHASE_PHASE3_CURSOR="$cursor"
+            log_info "Set phase3 cursor: $PHASE_PHASE3_CURSOR"
             ;;
         defect|during-defect)
             PHASE_DEFECT_CURSOR="$cursor"

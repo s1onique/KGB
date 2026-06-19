@@ -21,6 +21,14 @@ source "${SCRIPT_DIR}/lab_uvb76_capture_netns_result.sh"
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_tovarisch.sh"
 # shellcheck source=lab_uvb76_capture_netns_contract.sh
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_contract.sh"
+# shellcheck source=lab_uvb76_capture_netns_contract_normalizers.sh
+source "${SCRIPT_DIR}/lab_uvb76_capture_netns_contract_normalizers.sh"
+# shellcheck source=lab_uvb76_capture_netns_contract_assertions.sh
+source "${SCRIPT_DIR}/lab_uvb76_capture_netns_contract_assertions.sh"
+# shellcheck source=lab_uvb76_capture_netns_phase_helpers.sh
+source "${SCRIPT_DIR}/lab_uvb76_capture_netns_phase_helpers.sh"
+# shellcheck source=lab_uvb76_capture_netns_result_helpers.sh
+source "${SCRIPT_DIR}/lab_uvb76_capture_netns_result_helpers.sh"
 
 # Global variables (set by main script)
 declare -g LAB_DIR=""
@@ -59,6 +67,7 @@ declare -g SPIKES_AFTER_RECOVERY_POLL_FILE=""
 
 # Phase-separated artifact paths (for diagnostic packet contract verification)
 declare -g PHASE0_STATUS_FILE=""
+declare -g PHASE0_PROBE_READY_FILE=""
 declare -g PHASE1_SPIKE_EVENT_FILE=""
 declare -g PHASE1_SPIKE_ROW_FILE=""
 declare -g PHASE1_CAPTURE_PACKET_FILE=""
@@ -161,6 +170,7 @@ setup_temp_dir() {
     
     # Phase-separated artifact paths (for diagnostic packet contract verification)
     PHASE0_STATUS_FILE="$LAB_DIR/${ARTIFACT_PHASE0_STATUS}"
+    PHASE0_PROBE_READY_FILE="$LAB_DIR/${ARTIFACT_PHASE0_PROBE_READY}"
     PHASE1_SPIKE_EVENT_FILE="$LAB_DIR/${ARTIFACT_PHASE1_SPIKE_EVENT}"
     PHASE1_SPIKE_ROW_FILE="$LAB_DIR/${ARTIFACT_PHASE1_SPIKE_ROW}"
     PHASE1_CAPTURE_PACKET_FILE="$LAB_DIR/${ARTIFACT_PHASE1_CAPTURE_PACKET}"
@@ -208,9 +218,6 @@ setup_trap() { trap cleanup EXIT; }
 
 generate_tovarisch_config() {
     log_info "Generating tovarisch config..."
-    # Use INI format with [server].listen for bind address.
-    # 0.0.0.0 makes tovarisch reachable from the veth peer (ns-uvb76).
-    # The --listen-all-public-dangerous flag is required for 0.0.0.0 bind.
     cat > "$TOVARISCH_CONFIG" <<EOF
 [server]
 listen = "0.0.0.0:${TOVARISCH_PORT}"
@@ -220,74 +227,18 @@ EOF
 
 generate_uvb76_config() {
     log_info "Generating UVB-76 config..."
-    # Real password hash for "lab-password" computed as sha256(salt + password)
-    # Format: sha256:<16-byte-salt-hex>:<sha256-hash-hex>
-    # Salt: ad31a00094d25f7b5b3fa5ba2a4998db
-    # Hash: ae3908b2ae4825fc884248f29385f4497ca9f3ff0c3d1416c6a216f3a400c4e1
-    #
-    # Lab-optimized probe settings:
-    # - interval_seconds: 2 (fast probe cycle for lab timing)
-    # - timeout_milliseconds: 1000 (deterministic 1s timeout for 100% loss defect)
-    # - window_seconds: 60 (short window for fast spike detection)
-    # - retained_range_seconds: 120 (enough for 2 minutes of samples)
-    # - recent_samples_max: 120 (at 2s interval, covers retained_range)
+    # Lab: 2s probes, 1s timeout, 5s cooldown
     cat > "$UVB76_CONFIG" <<EOF
 {
-  "listen": {
-    "addr": ":${UVB76_PORT}",
-    "tls_cert_file": "",
-    "tls_key_file": ""
-  },
-  "auth": {
-    "username": "lab-admin",
-    "password_sha256": "sha256:ad31a00094d25f7b5b3fa5ba2a4998db:ae3908b2ae4825fc884248f29385f4497ca9f3ff0c3d1416c6a216f3a400c4e1"
-  },
-  "scrape": {
-    "interval_seconds": 60,
-    "timeout_milliseconds": 5000
-  },
+  "listen": {"addr": ":${UVB76_PORT}", "tls_cert_file": "", "tls_key_file": ""},
+  "auth": {"username": "lab-admin", "password_sha256": "sha256:ad31a00094d25f7b5b3fa5ba2a4998db:ae3908b2ae4825fc884248f29385f4497ca9f3ff0c3d1416c6a216f3a400c4e1"},
+  "scrape": {"interval_seconds": 60, "timeout_milliseconds": 5000},
   "latency": {
-    "http": {
-      "enabled": true,
-      "interval_seconds": 2,
-      "timeout_milliseconds": 1000,
-      "window_seconds": 60,
-      "retained_range_seconds": 120,
-      "histogram_buckets_ms": [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
-      "recent_samples_max": 120
-    },
-    "icmp": {
-      "enabled": false,
-      "interval_seconds": 1,
-      "timeout_seconds": 3,
-      "window_seconds": 60,
-      "retained_range_seconds": 300,
-      "histogram_buckets_ms": [1, 5, 10, 25, 50, 100, 250, 500, 1000],
-      "recent_samples_max": 300
-    }
+    "http": {"enabled": true, "interval_seconds": 2, "timeout_milliseconds": 1000, "window_seconds": 60, "retained_range_seconds": 120, "histogram_buckets_ms": [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000], "recent_samples_max": 120},
+    "icmp": {"enabled": false, "interval_seconds": 1, "timeout_seconds": 3, "window_seconds": 60, "retained_range_seconds": 300, "histogram_buckets_ms": [1, 5, 10, 25, 50, 100, 250, 500, 1000], "recent_samples_max": 300}
   },
-  "diagnostics": {
-    "enabled": true,
-    "capture_on_spike": true,
-    "timeout_ms": 2000,
-    "cooldown_seconds": 5,
-    "max_uncaptured_spikes": 50,
-    "peers": [
-      {
-        "name": "tovarisch-lab",
-        "base_url": "${DIAG_PEER_BASE_URL}",
-        "targets": ["lab-tovarisch"]
-      }
-    ]
-  },
-  "targets": [
-    {
-      "id": "lab-tovarisch",
-      "name": "Lab Tovarisch",
-      "base_url": "${DIAG_PEER_BASE_URL}",
-      "enabled": true
-    }
-  ]
+  "diagnostics": {"enabled": true, "capture_on_spike": true, "timeout_ms": 2000, "cooldown_seconds": 5, "max_uncaptured_spikes": 50, "peers": [{"name": "tovarisch-lab", "base_url": "${DIAG_PEER_BASE_URL}", "targets": ["lab-tovarisch"]}]},
+  "targets": [{"id": "lab-tovarisch", "name": "Lab Tovarisch", "base_url": "${DIAG_PEER_BASE_URL}", "enabled": true}]
 }
 EOF
     log_info "UVB-76 config: $UVB76_CONFIG"

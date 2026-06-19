@@ -58,27 +58,57 @@ jobs:
             exit 1
           fi
 
-          # Extract key values
-          baseline_ok=$(jq -r '.baseline_capture_ok' "${{ steps.find-result.outputs.result_file }}")
-          defect_observed=$(jq -r '.defect_observed' "${{ steps.find-result.outputs.result_file }}")
-          recovery_ok=$(jq -r '.recovery_capture_ok' "${{ steps.find-result.outputs.result_file }}")
+          # Extract contract boolean values
+          probe_ready=$(jq -r '.probe_ready' "${{ steps.find-result.outputs.result_file }}")
+          phase1_capture_ok=$(jq -r '.contract.phase1_capture_contract_ok' "${{ steps.find-result.outputs.result_file }}")
+          phase1_packet_ok=$(jq -r '.contract.phase1_packet_contract_ok' "${{ steps.find-result.outputs.result_file }}")
+          phase2_cooldown_ok=$(jq -r '.contract.phase2_cooldown_contract_ok' "${{ steps.find-result.outputs.result_file }}")
+          phase3_capture_ok=$(jq -r '.contract.phase3_capture_contract_ok' "${{ steps.find-result.outputs.result_file }}")
+          phase3_packet_ok=$(jq -r '.contract.phase3_packet_contract_ok' "${{ steps.find-result.outputs.result_file }}")
+          dir_contract_ok=$(jq -r '.contract.dir_contract_ok' "${{ steps.find-result.outputs.result_file }}")
+          distinct_event_ids_ok=$(jq -r '.contract.distinct_event_ids_ok' "${{ steps.find-result.outputs.result_file }}")
 
           echo "Verification:"
-          echo "  baseline_capture_ok: $baseline_ok"
-          echo "  defect_observed: $defect_observed"
-          echo "  recovery_capture_ok: $recovery_ok"
+          echo "  probe_ready: $probe_ready"
+          echo "  phase1_capture_ok: $phase1_capture_ok"
+          echo "  phase1_packet_ok: $phase1_packet_ok"
+          echo "  phase2_cooldown_ok: $phase2_cooldown_ok"
+          echo "  phase3_capture_ok: $phase3_capture_ok"
+          echo "  phase3_packet_ok: $phase3_packet_ok"
+          echo "  dir_contract_ok: $dir_contract_ok"
+          echo "  distinct_event_ids_ok: $distinct_event_ids_ok"
 
           # Fail if any required check failed
-          if [[ "$baseline_ok" != "true" ]]; then
-            echo "FAIL: baseline capture did not succeed"
+          if [[ "$probe_ready" != "true" ]]; then
+            echo "FAIL: probe readiness failed"
             exit 1
           fi
-          if [[ "$defect_observed" != "true" ]]; then
-            echo "FAIL: defect was not observed - lab purpose not proven"
+          if [[ "$phase1_capture_ok" != "true" ]]; then
+            echo "FAIL: Phase 1 capture contract failed"
             exit 1
           fi
-          if [[ "$recovery_ok" != "true" ]]; then
-            echo "FAIL: recovery capture did not succeed"
+          if [[ "$phase1_packet_ok" != "true" ]]; then
+            echo "FAIL: Phase 1 packet contract failed"
+            exit 1
+          fi
+          if [[ "$phase2_cooldown_ok" != "true" ]]; then
+            echo "FAIL: Phase 2 cooldown contract failed"
+            exit 1
+          fi
+          if [[ "$phase3_capture_ok" != "true" ]]; then
+            echo "FAIL: Phase 3 capture contract failed"
+            exit 1
+          fi
+          if [[ "$phase3_packet_ok" != "true" ]]; then
+            echo "FAIL: Phase 3 packet contract failed"
+            exit 1
+          fi
+          if [[ "$dir_contract_ok" != "true" ]]; then
+            echo "FAIL: Directory contract verification failed"
+            exit 1
+          fi
+          if [[ "$distinct_event_ids_ok" != "true" ]]; then
+            echo "FAIL: Distinct event IDs verification failed"
             exit 1
           fi
 

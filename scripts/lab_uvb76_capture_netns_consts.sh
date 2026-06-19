@@ -72,6 +72,7 @@ ARTIFACT_TOVARISCH_CONFIG="tovarisch.conf"
 # Phase-separated artifact names (for diagnostic packet contract verification)
 # Phase 0: Baseline probe readiness
 ARTIFACT_PHASE0_STATUS="phase0-status.json"
+ARTIFACT_PHASE0_PROBE_READY="phase0-probe-ready.json"
 
 # Phase 1: First eligible spike (fresh-start capture)
 ARTIFACT_PHASE1_SPIKE_EVENT="phase1-spike-event.json"

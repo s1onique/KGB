@@ -1,0 +1,209 @@
+#!/bin/bash
+# lab_uvb76_capture_netns_contract_normalizers.sh — Normalization helpers for phase artifacts
+#
+# Normalizes spike rows from the API to contract verifier shape.
+
+# Normalize spike row's capture info to contract verifier's expected shape.
+normalize_spike_row_capture_contract() {
+    local raw_row_file="$1"
+    local out_file="$2"
+
+    if [[ ! -f "$raw_row_file" ]]; then
+        log_error "[FAIL] normalize_spike_row_capture_contract: raw file not found: $raw_row_file"
+        return 1
+    fi
+
+    local capture_info
+    capture_info=$(jq '[.captures[] | select(.capture_status != null)] | .[0] // null' "$raw_row_file" 2>/dev/null || echo "null")
+
+    if [[ "$capture_info" == "null" || "$capture_info" == "" ]]; then
+        log_error "[FAIL] normalize_spike_row_capture_contract: no capture_info found"
+        return 1
+    fi
+
+    local capture_status cooldown_scope last_capture next_eligible cooldown_seconds
+    local capture_exists is_protected suppressed_by_cooldown
+
+    capture_status=$(jq -r '.capture_status // "unknown"' <<< "$capture_info" 2>/dev/null)
+    capture_exists=$(jq -r '.capture_exists // false' <<< "$capture_info" 2>/dev/null)
+    is_protected=$(jq -r '.is_protected // false' <<< "$capture_info" 2>/dev/null)
+
+    local cooldown_info_json="null"
+    if jq -e '.cooldown_info != null' <<< "$capture_info" >/dev/null 2>&1; then
+        cooldown_info_json=$(jq '.cooldown_info' <<< "$capture_info" 2>/dev/null)
+        suppressed_by_cooldown="true"
+    else
+        suppressed_by_cooldown="false"
+    fi
+
+    jq -n \
+        --arg capture_status "$capture_status" \
+        --argjson capture_exists "$capture_exists" \
+        --argjson is_protected "$is_protected" \
+        --argjson suppressed_by_cooldown "$suppressed_by_cooldown" \
+        --argjson cooldown_info "$cooldown_info_json" \
+        '{
+            capture_status: $capture_status,
+            capture_exists: $capture_exists,
+            is_protected: $is_protected,
+            cooldown_info: $cooldown_info,
+            suppressed_by_cooldown: $suppressed_by_cooldown
+        }' > "$out_file"
+
+    log_info "Normalized spike row saved: $out_file"
+    return 0
+}
+
+# Save Phase N spike row from spikes API response (normalized contract row)
+save_phase_spike_row() {
+    local phase_num="$1"
+    local phase_row_file="$2"
+    local spikes_file="$3"
+    local event_id="$4"
+
+    log_info "Saving Phase $phase_num spike row: event_id=$event_id"
+
+    local raw_row_file
+    raw_row_file=$(mktemp "/tmp/phase${phase_num}-raw-row-XXXXXX.json")
+
+    local spike_row
+    spike_row=$(jq --arg eid "$event_id" '[.spikes[] | select(.event_id == $eid)] | .[0]' "$spikes_file" 2>/dev/null || echo "{}")
+
+    if [[ "$spike_row" == "null" || "$spike_row" == "{}" ]]; then
+        log_error "[FAIL] Phase $phase_num: spike event not found: event_id=$event_id"
+        rm -f "$raw_row_file"
+        return 1
+    fi
+
+    echo "$spike_row" | jq '.' > "$raw_row_file"
+
+    if ! normalize_spike_row_capture_contract "$raw_row_file" "$phase_row_file"; then
+        log_error "[FAIL] Phase $phase_num: failed to normalize spike row"
+        rm -f "$raw_row_file"
+        return 1
+    fi
+
+    rm -f "$raw_row_file"
+    log_info "Phase $phase_num spike row saved: $phase_row_file"
+    return 0
+}
+
+# Save Phase N capture packet from raw spike row
+save_phase_capture_packet() {
+    local phase_num="$1"
+    local packet_file="$2"
+    local spike_row_file="$3"
+
+    log_info "Extracting capture packet from spike row for Phase $phase_num"
+
+    local network_diag
+    network_diag=$(jq '[.captures[] | select(.network_diag != null)] | .[0] | .network_diag // null' "$spike_row_file" 2>/dev/null || echo "null")
+
+    if [[ "$network_diag" == "null" || "$network_diag" == "" ]]; then
+        log_error "[FAIL] Phase $phase_num: no network_diag found in spike row"
+        return 1
+    fi
+
+    jq -n \
+        --arg phase "phase${phase_num}" \
+        --argjson network_diag "$network_diag" \
+        --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{
+            phase: $phase,
+            network_diag: $network_diag,
+            timestamp: $timestamp
+        }' > "$packet_file"
+
+    log_info "Phase $phase_num capture packet saved: $packet_file"
+    return 0
+}
+
+# Save Phase N spike event (full raw debug artifact)
+save_phase_spike_event() {
+    local phase_num="$1"
+    local phase_event_file="$2"
+    local spikes_response="$3"
+    local event_id="$4"
+    local reasons="$5"
+
+    log_info "Saving Phase $phase_num spike event: event_id=$event_id"
+
+    local spike_row
+    spike_row=$(echo "$spikes_response" | jq --arg eid "$event_id" \
+        '[.spikes[] | select(.event_id == $eid)] | .[0] // {}' 2>/dev/null || echo "{}")
+
+    jq -n \
+        --arg phase "phase${phase_num}" \
+        --arg event_id "$event_id" \
+        --arg reasons "$reasons" \
+        --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --argjson spike_row "$spike_row" \
+        '{
+            phase: $phase,
+            event_id: $event_id,
+            reasons: $reasons,
+            timestamp: $timestamp,
+            spike_row: $spike_row
+        }' > "$phase_event_file"
+
+    log_info "Phase $phase_num spike event saved: $phase_event_file"
+}
+
+# Save Phase N contract summary
+save_phase_contract_summary() {
+    local phase_num="$1"
+    local contract_file="$2"
+    local spike_row_file="$3"
+    local packet_file="$4"
+
+    log_info "Generating contract summary for Phase $phase_num"
+
+    local capture_status="unknown" capture_exists="false" is_protected="false"
+    local cooldown_info_present="false" last_successful_capture_at_present="false"
+    local next_capture_eligible_at_present="false" network_diag_present="false" packet_contract_ok="false"
+
+    if [[ -f "$spike_row_file" ]]; then
+        capture_status=$(jq -r '.capture_status // "unknown"' "$spike_row_file" 2>/dev/null || echo "unknown")
+        capture_exists=$(jq -r '.capture_exists // false' "$spike_row_file" 2>/dev/null || echo "false")
+        is_protected=$(jq -r '.is_protected // false' "$spike_row_file" 2>/dev/null || echo "false")
+
+        if jq -e '.cooldown_info != null' "$spike_row_file" >/dev/null 2>&1; then
+            cooldown_info_present="true"
+            jq -e '.cooldown_info.last_successful_capture_at != null' "$spike_row_file" >/dev/null 2>&1 && last_successful_capture_at_present="true"
+            jq -e '.cooldown_info.next_capture_eligible_at != null' "$spike_row_file" >/dev/null 2>&1 && next_capture_eligible_at_present="true"
+        fi
+    fi
+
+    if [[ -f "$packet_file" ]]; then
+        if jq -e '.network_diag != null' "$packet_file" >/dev/null 2>&1; then
+            network_diag_present="true"
+        fi
+        "${SCRIPT_DIR}/verify_uvb76_diag_packet_contract.sh" --capture "$packet_file" --phase "phase${phase_num}" >/dev/null 2>&1 && packet_contract_ok="true"
+    fi
+
+    jq -n \
+        --arg phase "phase${phase_num}" \
+        --arg capture_status "$capture_status" \
+        --argjson capture_exists "$capture_exists" \
+        --argjson is_protected "$is_protected" \
+        --argjson cooldown_info_present "$cooldown_info_present" \
+        --argjson last_successful_capture_at_present "$last_successful_capture_at_present" \
+        --argjson next_capture_eligible_at_present "$next_capture_eligible_at_present" \
+        --argjson network_diag_present "$network_diag_present" \
+        --argjson packet_contract_ok "$packet_contract_ok" \
+        --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{
+            phase: $phase,
+            capture_status: $capture_status,
+            capture_exists: $capture_exists,
+            is_protected: $is_protected,
+            cooldown_info_present: $cooldown_info_present,
+            last_successful_capture_at_present: $last_successful_capture_at_present,
+            next_capture_eligible_at_present: $next_capture_eligible_at_present,
+            network_diag_present: $network_diag_present,
+            packet_contract_ok: $packet_contract_ok,
+            timestamp: $timestamp
+        }' > "$contract_file"
+
+    log_info "Phase $phase_num contract summary saved: $contract_file"
+}

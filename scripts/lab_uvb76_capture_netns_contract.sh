@@ -30,15 +30,15 @@ save_phase_spike_event() {
     
     # Extract the spike row for this event
     local spike_row
-    spike_row=$(echo "$spikes_response" | jq --argjson idx 0 \
-        '[.spikes[] | select(.event_id == $eid)] | .[0]' --arg eid "$event_id" 2>/dev/null || echo "{}")
+    spike_row=$(echo "$spikes_response" | jq --arg eid "$event_id" \
+        '[.spikes[] | select(.event_id == $eid)] | .[0] // {}' 2>/dev/null || echo "{}")
     
     # Write spike event artifact with metadata
     jq -n \
         --arg phase "phase${phase_num}" \
-        --argjson event_id "$event_id" \
-        --argjson reasons "$reasons" \
-        --argjson timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --arg event_id "$event_id" \
+        --arg reasons "$reasons" \
+        --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --argjson spike_row "$spike_row" \
         '{
             phase: $phase,
@@ -86,7 +86,7 @@ save_capture_packet() {
     jq -n \
         --arg phase "phase${phase_num}" \
         --argjson network_diag "$network_diag" \
-        --argjson timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         '{
             phase: $phase,
             network_diag: $network_diag,
@@ -160,7 +160,7 @@ save_phase_contract_summary() {
         --argjson next_capture_eligible_at_present "$next_capture_eligible_at_present" \
         --argjson network_diag_present "$network_diag_present" \
         --argjson packet_contract_ok "$packet_contract_ok" \
-        --argjson timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         '{
             phase: $phase,
             capture_status: $capture_status,
@@ -261,7 +261,7 @@ assert_captured_row_contract() {
     [[ "$ok" == "true" ]] && return 0 || return 1
 }
 
-# Assert contract for a skipped_cooldown row
+# Assert contract for a skipped_cooldown row (validates normalized root-level row)
 assert_skipped_cooldown_row_contract() {
     local phase="$1"
     local spike_row_file="$2"
@@ -270,38 +270,35 @@ assert_skipped_cooldown_row_contract() {
     
     log_info "Asserting skipped_cooldown row contract for phase $phase"
     
-    # Extract capture info
-    local capture_info
-    capture_info=$(jq '[.captures[] | select(.capture_status != null)] | .[0]' "$spike_row_file" 2>/dev/null || echo "{}")
-    
-    if [[ "$capture_info" == "{}" || "$capture_info" == "null" ]]; then
-        log_error "[FAIL] Phase $phase: no capture info found in spike row"
-        return 1
+    # Validate normalized root-level row
+    # capture_status must be skipped_cooldown
+    if ! jq -e '.capture_status == "skipped_cooldown"' "$spike_row_file" >/dev/null 2>&1; then
+        local actual_status
+        actual_status=$(jq -r '.capture_status // "null"' "$spike_row_file" 2>/dev/null)
+        log_error "[FAIL] Phase $phase: expected capture_status=skipped_cooldown, got: $actual_status"
+        ok=false
     fi
     
-    local capture_status
-    capture_status=$(jq -r '.capture_status // "unknown"' <<< "$capture_info" 2>/dev/null || echo "unknown")
-    
-    # capture_status must be skipped_cooldown
-    if [[ "$capture_status" != "skipped_cooldown" ]]; then
-        log_error "[FAIL] Phase $phase: expected capture_status=skipped_cooldown, got: $capture_status"
+    # capture_exists must be false for skipped_cooldown
+    if ! jq -e '.capture_exists == false' "$spike_row_file" >/dev/null 2>&1; then
+        log_error "[FAIL] Phase $phase: expected capture_exists=false for skipped_cooldown"
         ok=false
     fi
     
     # cooldown_info must be present
-    if ! jq -e '.cooldown_info != null' <<< "$capture_info" >/dev/null 2>&1; then
+    if ! jq -e '.cooldown_info != null' "$spike_row_file" >/dev/null 2>&1; then
         log_error "[FAIL] Phase $phase: skipped_cooldown row missing cooldown_info"
         ok=false
     fi
     
     # cooldown_info must have last_successful_capture_at
-    if ! jq -e '.cooldown_info.last_successful_capture_at != null' <<< "$capture_info" >/dev/null 2>&1; then
+    if ! jq -e '.cooldown_info.last_successful_capture_at != null' "$spike_row_file" >/dev/null 2>&1; then
         log_error "[FAIL] Phase $phase: skipped_cooldown row missing cooldown_info.last_successful_capture_at"
         ok=false
     fi
     
     # cooldown_info must have next_capture_eligible_at
-    if ! jq -e '.cooldown_info.next_capture_eligible_at != null' <<< "$capture_info" >/dev/null 2>&1; then
+    if ! jq -e '.cooldown_info.next_capture_eligible_at != null' "$spike_row_file" >/dev/null 2>&1; then
         log_error "[FAIL] Phase $phase: skipped_cooldown row missing cooldown_info.next_capture_eligible_at"
         ok=false
     fi
