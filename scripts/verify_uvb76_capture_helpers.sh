@@ -327,6 +327,14 @@ main() {
     echo ""
     
     run_normalize_capture_status_tests
+    
+    # Run row normalization tests from split file (LLM-friendly: under 450 lines)
+    # Use bash to avoid permission issues if executable bit is not set
+    echo ""
+    if ! bash "${SCRIPT_DIR}/verify_uvb76_row_normalization_tests.sh" --self-test; then
+        ERRORS=$((ERRORS + 1))
+    fi
+    
     run_packet_extraction_tests
     
     echo ""

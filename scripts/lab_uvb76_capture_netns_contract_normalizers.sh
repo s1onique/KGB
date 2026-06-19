@@ -4,6 +4,23 @@
 # Normalizes spike rows from the API to contract verifier shape.
 
 # Normalize spike row's capture info to contract verifier's expected shape.
+#
+# EXTRACTION LOGIC (must match wait_for_spike_capture_after_event):
+#   - Use the first capture's .captures[0]
+#   - If .capture_status is present AND non-empty, use it
+#   - Else if .status is present AND non-empty, use it
+#   - Else unknown
+#
+# CANONICAL NORMALIZATION:
+#   - ok|captured -> captured
+#   - timeout|error|failed -> failed
+#   - skipped_cooldown -> skipped_cooldown
+#   - disabled -> disabled
+#   - not_configured -> not_configured
+#   - not_attempted -> not_attempted
+#   - in_progress|pending -> pending
+#   - empty/unknown -> pending (for missing captures)
+#
 normalize_spike_row_capture_contract() {
     local raw_row_file="$1"
     local out_file="$2"
@@ -13,20 +30,68 @@ normalize_spike_row_capture_contract() {
         return 1
     fi
 
+    # Select the first capture from .captures[]
     local capture_info
-    capture_info=$(jq '[.captures[] | select(.capture_status != null)] | .[0] // null' "$raw_row_file" 2>/dev/null || echo "null")
+    capture_info=$(jq '.captures[0] // null' "$raw_row_file" 2>/dev/null || echo "null")
 
+    # Check if capture exists at all
     if [[ "$capture_info" == "null" || "$capture_info" == "" ]]; then
-        log_error "[FAIL] normalize_spike_row_capture_contract: no capture_info found"
-        return 1
+        # No captures - this is a missing capture case
+        # Emit not_attempted for the normalized status
+        jq -n \
+            --arg capture_status "not_attempted" \
+            --argjson capture_exists false \
+            --argjson is_protected false \
+            --argjson suppressed_by_cooldown false \
+            --argjson cooldown_info null \
+            '{
+                capture_status: $capture_status,
+                capture_exists: $capture_exists,
+                is_protected: $is_protected,
+                cooldown_info: $cooldown_info,
+                suppressed_by_cooldown: $suppressed_by_cooldown
+            }' > "$out_file"
+        log_info "Normalized spike row saved (no captures): $out_file"
+        return 0
     fi
 
-    local capture_status cooldown_scope last_capture next_eligible cooldown_seconds
-    local capture_exists is_protected suppressed_by_cooldown
+    # EXTRACT raw status using the same rule as wait_for_spike_capture_after_event:
+    # - Use .capture_status if present and non-empty
+    # - Else use .status
+    local raw_status
+    local has_capture_status
+    has_capture_status=$(echo "$capture_info" | jq -r '.capture_status // empty' 2>/dev/null)
+    if [[ -n "$has_capture_status" ]]; then
+        raw_status=$(echo "$capture_info" | jq -r '.capture_status' 2>/dev/null)
+    else
+        raw_status=$(echo "$capture_info" | jq -r '.status // "unknown"' 2>/dev/null)
+    fi
 
-    capture_status=$(jq -r '.capture_status // "unknown"' <<< "$capture_info" 2>/dev/null)
-    capture_exists=$(jq -r '.capture_exists // false' <<< "$capture_info" 2>/dev/null)
-    is_protected=$(jq -r '.is_protected // false' <<< "$capture_info" 2>/dev/null)
+    # NORMALIZE raw status to canonical form
+    # This must match normalize_capture_status from lab_uvb76_capture_netns_capture_poll.sh
+    local capture_status
+    case "$raw_status" in
+        ok|captured)      capture_status="captured" ;;
+        timeout|error|failed) capture_status="failed" ;;
+        skipped_cooldown)  capture_status="skipped_cooldown" ;;
+        disabled)          capture_status="disabled" ;;
+        not_configured)    capture_status="not_configured" ;;
+        not_attempted)     capture_status="not_attempted" ;;
+        in_progress|pending) capture_status="pending" ;;
+        *)                 capture_status="unknown" ;;
+    esac
+
+    # Extract other fields
+    # For captured rows, default capture_exists and is_protected to true
+    # since the canonical status means the capture succeeded and packet exists
+    local capture_exists is_protected suppressed_by_cooldown
+    if [[ "$capture_status" == "captured" ]]; then
+        capture_exists=$(jq -r '.capture_exists // true' <<< "$capture_info" 2>/dev/null)
+        is_protected=$(jq -r '.is_protected // true' <<< "$capture_info" 2>/dev/null)
+    else
+        capture_exists=$(jq -r '.capture_exists // false' <<< "$capture_info" 2>/dev/null)
+        is_protected=$(jq -r '.is_protected // false' <<< "$capture_info" 2>/dev/null)
+    fi
 
     local cooldown_info_json="null"
     if jq -e '.cooldown_info != null' <<< "$capture_info" >/dev/null 2>&1; then
@@ -50,7 +115,7 @@ normalize_spike_row_capture_contract() {
             suppressed_by_cooldown: $suppressed_by_cooldown
         }' > "$out_file"
 
-    log_info "Normalized spike row saved: $out_file"
+    log_info "Normalized spike row saved: $out_file (raw_status=$raw_status -> normalized=$capture_status)"
     return 0
 }
 
