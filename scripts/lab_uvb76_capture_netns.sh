@@ -82,6 +82,9 @@ run_lab() {
         exit 1
     fi
 
+    # Collect listen sockets diagnostic (verifies binding address)
+    collect_tovarisch_listen_sockets
+
     # Verify tovarisch status endpoints
     if ! verify_tovarisch_status; then
         log_error "tovarisch status verification failed"

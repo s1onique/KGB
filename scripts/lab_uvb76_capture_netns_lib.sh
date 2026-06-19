@@ -13,6 +13,8 @@ source "${SCRIPT_DIR}/lab_uvb76_capture_netns_topology.sh"
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_defect.sh"
 # shellcheck source=lab_uvb76_capture_netns_diag.sh
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_diag.sh"
+# shellcheck source=lab_uvb76_capture_netns_tovarisch.sh
+source "${SCRIPT_DIR}/lab_uvb76_capture_netns_tovarisch.sh"
 
 # Global variables (set by main script)
 declare -g LAB_DIR=""
@@ -29,9 +31,12 @@ declare -g NS_UVB76_IP_ADDR_FILE=""
 declare -g NS_UVB76_IP_ROUTE_FILE=""
 declare -g NS_TOVARISCH_IP_ADDR_FILE=""
 declare -g NS_TOVARISCH_IP_ROUTE_FILE=""
+declare -g TOVARISCH_LISTEN_SOCKETS_FILE=""
 declare -g PING_BASELINE_FILE=""
 declare -g CURL_STATUS_BASELINE_FILE=""
 declare -g CURL_STATUS_NETWORK_DIAG_BASELINE_FILE=""
+declare -g CURL_PEER_STATUS_NETWORK_DIAG_FILE=""
+declare -g CURL_PEER_STATUS_NETWORK_DIAG_EXITCODE_FILE=""
 declare -g CAPTURE_BASELINE_FILE=""
 declare -g DEFECT_BEFORE_FILE=""
 declare -g DEFECT_TC_QDISC_FILE=""
@@ -110,9 +115,12 @@ setup_temp_dir() {
     NS_UVB76_IP_ROUTE_FILE="$LAB_DIR/ns-uvb76-ip-route.txt"
     NS_TOVARISCH_IP_ADDR_FILE="$LAB_DIR/ns-tovarisch-ip-addr.txt"
     NS_TOVARISCH_IP_ROUTE_FILE="$LAB_DIR/ns-tovarisch-ip-route.txt"
+    TOVARISCH_LISTEN_SOCKETS_FILE="$LAB_DIR/tovarisch-listen-sockets.txt"
     PING_BASELINE_FILE="$LAB_DIR/ping-baseline.txt"
     CURL_STATUS_BASELINE_FILE="$LAB_DIR/curl-status-baseline.json"
     CURL_STATUS_NETWORK_DIAG_BASELINE_FILE="$LAB_DIR/curl-status-network-diag-baseline.json"
+    CURL_PEER_STATUS_NETWORK_DIAG_FILE="$LAB_DIR/curl-peer-status-network-diag.txt"
+    CURL_PEER_STATUS_NETWORK_DIAG_EXITCODE_FILE="$LAB_DIR/curl-peer-status-network-diag.exitcode"
     CAPTURE_BASELINE_FILE="$LAB_DIR/capture-baseline.json"
     DEFECT_BEFORE_FILE="$LAB_DIR/defect-before.txt"
     DEFECT_TC_QDISC_FILE="$LAB_DIR/defect-tc-qdisc.txt"
@@ -155,12 +163,12 @@ setup_trap() { trap cleanup EXIT; }
 
 generate_tovarisch_config() {
     log_info "Generating tovarisch config..."
+    # Use INI format with [server].listen for bind address.
+    # 0.0.0.0 makes tovarisch reachable from the veth peer (ns-uvb76).
+    # The --listen-all-public-dangerous flag is required for 0.0.0.0 bind.
     cat > "$TOVARISCH_CONFIG" <<EOF
-{
-  "serve": {
-    "http_port": ${TOVARISCH_PORT}
-  }
-}
+[server]
+listen = "0.0.0.0:${TOVARISCH_PORT}"
 EOF
     log_info "tovarisch config: $TOVARISCH_CONFIG"
 }
@@ -247,8 +255,10 @@ start_tovarisch() {
     sleep 1
 
     # Start tovarisch serve
+    # --listen-all-public-dangerous is required because config binds to 0.0.0.0
     ip netns exec "$NS_TOVARISCH" "$binary" serve \
         --config "$TOVARISCH_CONFIG" \
+        --listen-all-public-dangerous \
         > "$TOVARISCH_LOG" 2>&1 &
 
     TOVARISCH_PID=$!
@@ -322,7 +332,7 @@ wait_for_tovarisch_http() {
 verify_tovarisch_status() {
     log_info "Verifying tovarisch status endpoints..."
 
-    # Check /status.json
+    # Check /status.json from localhost (ns-tovarisch)
     local status_json
     status_json=$(ip netns exec "$NS_TOVARISCH" curl -s \
         "http://localhost:${TOVARISCH_PORT}/status.json" 2>/dev/null)
@@ -332,7 +342,7 @@ verify_tovarisch_status() {
     fi
     echo "$status_json" > "$CURL_STATUS_BASELINE_FILE"
 
-    # Check /status.json?include=network_diag
+    # Check /status.json?include=network_diag from localhost (ns-tovarisch)
     local status_network_diag
     status_network_diag=$(ip netns exec "$NS_TOVARISCH" curl -s \
         "http://localhost:${TOVARISCH_PORT}/status.json?include=network_diag" 2>/dev/null)
@@ -348,7 +358,39 @@ verify_tovarisch_status() {
         return 1
     fi
 
-    log_info "tovarisch status endpoints verified"
+    # CRITICAL: Verify peer reachability from ns-uvb76 to veth address
+    # This is the smoking gun for loopback-only binding issue.
+    # curl status 000 means no HTTP response received (connection failure).
+    log_info "Verifying peer reachability from ns-uvb76 to veth address..."
+
+    # Capture curl output with verbose mode for diagnostics
+    set +e
+    ip netns exec "$NS_UVB76" curl -sv --connect-timeout 3 \
+        "http://${IP_TOVARISCH}:${TOVARISCH_PORT}/status.json?include=network_diag" \
+        > "$CURL_PEER_STATUS_NETWORK_DIAG_FILE" 2>&1
+    local curl_exit_code=$?
+    echo "$curl_exit_code" > "$CURL_PEER_STATUS_NETWORK_DIAG_EXITCODE_FILE"
+    set -e
+
+    # Check for HTTP response code in verbose output
+    local http_code
+    http_code=$(grep -E '< HTTP/' "$CURL_PEER_STATUS_NETWORK_DIAG_FILE" | tail -1 | awk '{print $3}' || echo "")
+
+    if [[ -z "$http_code" ]]; then
+        log_error "Peer reachability FAILED: No HTTP response from ${IP_TOVARISCH}:${TOVARISCH_PORT}"
+        log_error "curl exit code: $curl_exit_code"
+        log_error "Expected: HTTP 200, Got: connection failure (check tovarisch binds to 0.0.0.0 not 127.0.0.1)"
+        log_error "Artifact: $CURL_PEER_STATUS_NETWORK_DIAG_FILE"
+        return 1
+    fi
+
+    if [[ "$http_code" != "200" ]]; then
+        log_error "Peer reachability returned HTTP $http_code (expected 200)"
+        return 1
+    fi
+
+    log_info "Peer reachability verified: HTTP $http_code from ns-uvb76 to ${IP_TOVARISCH}:${TOVARISCH_PORT}"
+    log_info "tovarisch status endpoints verified (localhost + peer)"
     return 0
 }
 

@@ -58,3 +58,15 @@ test "parseServerConfig parses custom port" {
     try std.testing.expect(cfg.listen != null);
     try std.testing.expectEqualStrings("10.0.0.1:9999", cfg.listen.?);
 }
+
+test "parseServerConfig parses 0.0.0.0 wildcard bind address" {
+    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
+    defer raw.deinit(std.heap.page_allocator);
+    var section = std.StringArrayHashMapUnmanaged([]const u8){};
+    defer section.deinit(std.heap.page_allocator);
+    try section.put(std.heap.page_allocator, "listen", "0.0.0.0:8317");
+    try raw.put(std.heap.page_allocator, "server", section);
+    const cfg = config.parseServerConfig(&raw);
+    try std.testing.expect(cfg.listen != null);
+    try std.testing.expectEqualStrings("0.0.0.0:8317", cfg.listen.?);
+}
