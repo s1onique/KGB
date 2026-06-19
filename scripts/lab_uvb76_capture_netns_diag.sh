@@ -318,9 +318,9 @@ extract_latest_capture() {
 trigger_capture_via_production_path() {
     log_info "Triggering capture via production path (waiting for probe cycle)..."
 
-    # The HTTP probe runs every 5 seconds (configured in UVB-76 config)
+    # The HTTP probe runs every 2 seconds (configured in UVB-76 config)
     # We wait for at least 2 probe cycles to ensure samples are recorded
-    wait_for_capture 15
+    wait_for_capture 10
 
     log_info "Production path capture triggered"
 }

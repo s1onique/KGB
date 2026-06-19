@@ -109,9 +109,25 @@ run_lab() {
         exit 1
     fi
 
-    # Wait for HTTP probe to collect baseline samples
-    log_info "Waiting for HTTP probe to collect baseline samples..."
-    sleep 20
+    # ========================================
+    # PHASE 0: Baseline probe readiness gate
+    # ========================================
+    log_info ""
+    log_info "=== PHASE 0: Baseline Probe Readiness Gate ==="
+
+    # Poll for probe samples to prove HTTP probe loop is running
+    # This replaces fixed sleep - we poll until we have evidence the probe is working
+    if wait_for_probe_samples_after_cursor "lab-tovarisch" "http" "" "true" 20 "$BASELINE_PROBE_READY_FILE"; then
+        log_info "[PASS] Baseline probe readiness verified - HTTP probe loop is running"
+        PROBE_READY=true
+    else
+        log_error "[FAIL] Baseline probe readiness FAILED - no probe samples after 20s"
+        log_error "This means the HTTP probe loop is not running or not reaching tovarisch"
+        PROBE_READY=false
+    fi
+
+    # Set baseline cursor for phase isolation
+    set_phase_cursor "baseline"
 
     # ========================================
     # PHASE 1: Baseline capture
@@ -127,9 +143,6 @@ run_lab() {
     # We accept: ok (good), no_spikes, no_capture_for_phase (acceptable - no natural spike)
     extract_latest_capture "$LAB_DIR/spikes-baseline.json" "$CAPTURE_BASELINE_FILE" "baseline"
     REQUESTED_PATH_BASELINE="/status.json?include=network_diag"
-
-    # Set baseline cursor - captures must be created AFTER this time for subsequent phases
-    set_phase_cursor "baseline"
 
     # Check if baseline capture was successful
     # Acceptable statuses for baseline:
@@ -173,9 +186,6 @@ run_lab() {
     else
         log_info "[PASS] Defect verified - ping fails as expected"
 
-        # Wait for probe to observe defect
-        sleep 20
-
         # Collect extra diagnostic artifacts for failure analysis
         # Latency samples during defect
         log_info "Collecting latency samples during defect..."
@@ -188,33 +198,44 @@ run_lab() {
         grep -E "lab-tovarisch|probe|timeout|capture|spike|diagnostic|http_probe|recovery" "$UVB76_LOG" \
             > "$UVB76_PROBE_CAPTURE_EVENTS_FILE" 2>/dev/null || true
 
-        # Query the spikes API during defect
-        # Using defect cursor to ensure we only get captures created after defect was injected
-        query_spikes_api "$LAB_DIR/spikes-during-defect.json" "lab-tovarisch" "true"
-        extract_latest_capture "$LAB_DIR/spikes-during-defect.json" "$CAPTURE_DURING_DEFECT_FILE" "during-defect"
-        REQUESTED_PATH_DURING_DEFECT="/status.json?include=network_diag"
-
-        # Check if defect was observed (timeout/error status)
-        local during_status
-        during_status=$(jq -r '.status' "$CAPTURE_DURING_DEFECT_FILE" 2>/dev/null || echo "unknown")
-
-        if [[ "$during_status" == "timeout" || "$during_status" == "error" ]]; then
+        # Poll for HTTP failure event/capture after defect cursor
+        # Expected reasons: http_probe_timeout, http_probe_failure, http_probe_connection_refused
+        # Accept any capture with failure status after the defect cursor
+        log_info "Polling for defect capture event..."
+        if wait_for_capture_after_cursor "during-defect" "$PHASE_DEFECT_CURSOR" "http_probe_timeout|http_probe_failure|http_probe_connection_refused|timeout|error" 30 "$SPIKES_DURING_DEFECT_POLL_FILE"; then
+            log_info "[PASS] Defect capture event found via polling"
             DEFECT_OBSERVED=true
-            log_info "[PASS] Defect observed in diagnostic capture (status: $during_status)"
-        elif [[ "$during_status" == "ok" ]]; then
-            # Capture succeeded despite defect - check latency
-            local latency_ms
-            latency_ms=$(jq -r '.latency_ms // 0' "$CAPTURE_DURING_DEFECT_FILE" 2>/dev/null || echo "0")
-            if [[ "$latency_ms" -gt 1000 ]]; then
+        else
+            # Fallback: query spikes API directly and check for failure capture
+            log_warn "Polling timed out, checking spikes API directly..."
+            query_spikes_api "$LAB_DIR/spikes-during-defect.json" "lab-tovarisch" "true"
+            extract_latest_capture "$LAB_DIR/spikes-during-defect.json" "$CAPTURE_DURING_DEFECT_FILE" "during-defect"
+            REQUESTED_PATH_DURING_DEFECT="/status.json?include=network_diag"
+
+            local during_status
+            during_status=$(jq -r '.status' "$CAPTURE_DURING_DEFECT_FILE" 2>/dev/null || echo "unknown")
+
+            if [[ "$during_status" == "timeout" || "$during_status" == "error" ]]; then
                 DEFECT_OBSERVED=true
-                log_info "[PASS] Defect observed - high latency: ${latency_ms}ms"
+                log_info "[PASS] Defect observed in diagnostic capture (status: $during_status)"
+            elif [[ "$during_status" == "ok" ]]; then
+                # Capture succeeded despite defect - check latency
+                local latency_ms
+                latency_ms=$(jq -r '.latency_ms // 0' "$CAPTURE_DURING_DEFECT_FILE" 2>/dev/null || echo "0")
+                if [[ "$latency_ms" -gt 1000 ]]; then
+                    DEFECT_OBSERVED=true
+                    log_info "[PASS] Defect observed - high latency: ${latency_ms}ms"
+                else
+                    DEFECT_OBSERVED=false
+                    log_error "[FAIL] Defect not observed - latency: ${latency_ms}ms"
+                fi
+            elif [[ "$during_status" == "no_capture_for_phase" || "$during_status" == "no_spikes" ]]; then
+                DEFECT_OBSERVED=false
+                log_error "[FAIL] No capture for defect phase - probe loop may not be working properly"
             else
                 DEFECT_OBSERVED=false
-                log_error "[FAIL] Defect not observed - latency: ${latency_ms}ms"
+                log_error "[FAIL] Defect effect unclear: $during_status"
             fi
-        else
-            DEFECT_OBSERVED=false
-            log_error "[FAIL] Defect effect unclear: $during_status"
         fi
     fi
 
@@ -241,26 +262,39 @@ run_lab() {
         log_warn "Connectivity may not be fully restored"
     fi
 
-    # Wait for probe to stabilize
-    sleep 20
-
-    # Query the spikes API after recovery
-    # Using recovery cursor to ensure we only get captures created after recovery
-    query_spikes_api "$LAB_DIR/spikes-after-recovery.json" "lab-tovarisch" "true"
-    extract_latest_capture "$LAB_DIR/spikes-after-recovery.json" "$CAPTURE_AFTER_RECOVERY_FILE" "after-recovery"
-    REQUESTED_PATH_AFTER_RECOVERY="/status.json?include=network_diag"
-
-    # Check if recovery capture was successful
-    local recovery_status
-    recovery_status=$(jq -r '.status' "$CAPTURE_AFTER_RECOVERY_FILE" 2>/dev/null || echo "unknown")
-
-    if [[ "$recovery_status" == "ok" ]]; then
+    # Poll for recovery event/capture
+    # Expected reason: http_probe_recovery
+    log_info "Polling for recovery capture event..."
+    if wait_for_capture_after_cursor "after-recovery" "$PHASE_RECOVERY_CURSOR" "http_probe_recovery" 30 "$SPIKES_AFTER_RECOVERY_POLL_FILE"; then
+        log_info "[PASS] Recovery capture event found via polling"
         RECOVERY_CAPTURE_OK=true
-        log_info "[PASS] Recovery capture successful (status: $recovery_status)"
     else
-        RECOVERY_CAPTURE_OK=false
-        log_error "[FAIL] Recovery capture failed: $recovery_status"
+        # Fallback: query spikes API directly
+        log_warn "Polling timed out, checking spikes API directly..."
+        query_spikes_api "$LAB_DIR/spikes-after-recovery.json" "lab-tovarisch" "true"
+        extract_latest_capture "$LAB_DIR/spikes-after-recovery.json" "$CAPTURE_AFTER_RECOVERY_FILE" "after-recovery"
+        REQUESTED_PATH_AFTER_RECOVERY="/status.json?include=network_diag"
+
+        local recovery_status
+        recovery_status=$(jq -r '.status' "$CAPTURE_AFTER_RECOVERY_FILE" 2>/dev/null || echo "unknown")
+
+        if [[ "$recovery_status" == "ok" ]]; then
+            RECOVERY_CAPTURE_OK=true
+            log_info "[PASS] Recovery capture successful (status: $recovery_status)"
+        elif [[ "$recovery_status" == "no_capture_for_phase" || "$recovery_status" == "no_spikes" ]]; then
+            RECOVERY_CAPTURE_OK=false
+            log_error "[FAIL] No recovery capture - probe loop may not be working properly"
+        else
+            RECOVERY_CAPTURE_OK=false
+            log_error "[FAIL] Recovery capture failed: $recovery_status"
+        fi
     fi
+
+    # Collect latency after recovery
+    log_info "Collecting latency samples after recovery..."
+    ip netns exec "$NS_UVB76" curl -s \
+        "${UVB76_API_URL}/api/v1/latency?target_id=lab-tovarisch&kind=http&range_seconds=60" \
+        > "$LATENCY_AFTER_RECOVERY_FILE" 2>/dev/null || true
 
     # ========================================
     # Write final result
@@ -273,6 +307,7 @@ run_lab() {
     log_info "Artifact directory: $LAB_DIR"
     log_info ""
     log_info "Summary:"
+    log_info "  Probe readiness: $([ "$PROBE_READY" = true ] && echo "OK" || echo "FAIL")"
     log_info "  Baseline capture: $([ "$BASELINE_CAPTURE_OK" = true ] && echo "OK" || echo "FAIL")"
     log_info "  Defect observed: $([ "$DEFECT_OBSERVED" = true ] && echo "YES" || echo "NO")"
     log_info "  Recovery capture: $([ "$RECOVERY_CAPTURE_OK" = true ] && echo "OK" || echo "FAIL")"
@@ -280,6 +315,10 @@ run_lab() {
 
     # Determine exit code
     local exit_code=0
+    if [[ "$PROBE_READY" != "true" ]]; then
+        log_error "Probe readiness failed - HTTP probe loop not working"
+        exit_code=1
+    fi
     if [[ "$BASELINE_CAPTURE_OK" != "true" ]]; then
         log_error "Baseline capture failed"
         exit_code=1

@@ -13,6 +13,10 @@ source "${SCRIPT_DIR}/lab_uvb76_capture_netns_topology.sh"
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_defect.sh"
 # shellcheck source=lab_uvb76_capture_netns_diag.sh
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_diag.sh"
+# shellcheck source=lab_uvb76_capture_netns_poll.sh
+source "${SCRIPT_DIR}/lab_uvb76_capture_netns_poll.sh"
+# shellcheck source=lab_uvb76_capture_netns_result.sh
+source "${SCRIPT_DIR}/lab_uvb76_capture_netns_result.sh"
 # shellcheck source=lab_uvb76_capture_netns_tovarisch.sh
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_tovarisch.sh"
 
@@ -44,10 +48,15 @@ declare -g CAPTURE_DURING_DEFECT_FILE=""
 declare -g DEFECT_AFTER_CLEAR_FILE=""
 declare -g CAPTURE_AFTER_RECOVERY_FILE=""
 declare -g LATENCY_DURING_DEFECT_FILE=""
+declare -g LATENCY_AFTER_RECOVERY_FILE=""
 declare -g UVB76_PROBE_CAPTURE_EVENTS_FILE=""
 declare -g RESULT_FILE=""
+declare -g BASELINE_PROBE_READY_FILE=""
+declare -g SPIKES_DURING_DEFECT_POLL_FILE=""
+declare -g SPIKES_AFTER_RECOVERY_POLL_FILE=""
 
 # Lab result tracking
+declare -g PROBE_READY=false
 declare -g BASELINE_CAPTURE_OK=false
 declare -g DEFECT_OBSERVED=false
 declare -g RECOVERY_CAPTURE_OK=false
@@ -126,8 +135,12 @@ setup_temp_dir() {
     DEFECT_AFTER_CLEAR_FILE="$LAB_DIR/${ARTIFACT_DEFECT_AFTER_CLEAR}"
     CAPTURE_AFTER_RECOVERY_FILE="$LAB_DIR/${ARTIFACT_CAPTURE_AFTER_RECOVERY}"
     LATENCY_DURING_DEFECT_FILE="$LAB_DIR/${ARTIFACT_LATENCY_DURING_DEFECT}"
+    LATENCY_AFTER_RECOVERY_FILE="$LAB_DIR/${ARTIFACT_LATENCY_AFTER_RECOVERY}"
     UVB76_PROBE_CAPTURE_EVENTS_FILE="$LAB_DIR/${ARTIFACT_UVB76_PROBE_CAPTURE_EVENTS}"
     RESULT_FILE="$LAB_DIR/${ARTIFACT_RESULT}"
+    BASELINE_PROBE_READY_FILE="$LAB_DIR/${ARTIFACT_BASELINE_PROBE_READY}"
+    SPIKES_DURING_DEFECT_POLL_FILE="$LAB_DIR/${ARTIFACT_SPIKES_DURING_DEFECT_POLL}"
+    SPIKES_AFTER_RECOVERY_POLL_FILE="$LAB_DIR/${ARTIFACT_SPIKES_AFTER_RECOVERY_POLL}"
 }
 
 make_artifacts_readable() {
@@ -179,6 +192,13 @@ generate_uvb76_config() {
     # Format: sha256:<16-byte-salt-hex>:<sha256-hash-hex>
     # Salt: ad31a00094d25f7b5b3fa5ba2a4998db
     # Hash: ae3908b2ae4825fc884248f29385f4497ca9f3ff0c3d1416c6a216f3a400c4e1
+    #
+    # Lab-optimized probe settings:
+    # - interval_seconds: 2 (fast probe cycle for lab timing)
+    # - timeout_milliseconds: 1000 (deterministic 1s timeout for 100% loss defect)
+    # - window_seconds: 60 (short window for fast spike detection)
+    # - retained_range_seconds: 120 (enough for 2 minutes of samples)
+    # - recent_samples_max: 120 (at 2s interval, covers retained_range)
     cat > "$UVB76_CONFIG" <<EOF
 {
   "listen": {
@@ -197,12 +217,12 @@ generate_uvb76_config() {
   "latency": {
     "http": {
       "enabled": true,
-      "interval_seconds": 5,
-      "timeout_milliseconds": 3000,
+      "interval_seconds": 2,
+      "timeout_milliseconds": 1000,
       "window_seconds": 60,
-      "retained_range_seconds": 300,
+      "retained_range_seconds": 120,
       "histogram_buckets_ms": [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
-      "recent_samples_max": 300
+      "recent_samples_max": 120
     },
     "icmp": {
       "enabled": false,
@@ -392,59 +412,4 @@ verify_tovarisch_status() {
     log_info "Peer reachability verified: HTTP $http_code from ns-uvb76 to ${IP_TOVARISCH}:${TOVARISCH_PORT}"
     log_info "tovarisch status endpoints verified (localhost + peer)"
     return 0
-}
-
-# Write result.json with valid JSON output using jq
-write_result() {
-    log_info "Writing result.json..."
-
-    # Compute ok boolean properly
-    local ok_val=false
-    if [[ "$BASELINE_CAPTURE_OK" == true && "$DEFECT_OBSERVED" == true && "$RECOVERY_CAPTURE_OK" == true ]]; then
-        ok_val=true
-    fi
-
-    # Use jq -n for valid JSON output
-    local uvb76_pid_json="null"
-    local tovarisch_pid_json="null"
-    if [[ -n "$UVB76_PID" ]]; then
-        uvb76_pid_json="$UVB76_PID"
-    fi
-    if [[ -n "$TOVARISCH_PID" ]]; then
-        tovarisch_pid_json="$TOVARISCH_PID"
-    fi
-
-    jq -n \
-        --arg artifact_dir "$LAB_DIR" \
-        --arg defect_mode "$DEFECT_MODE" \
-        --arg requested_path_baseline "$REQUESTED_PATH_BASELINE" \
-        --arg requested_path_during_defect "$REQUESTED_PATH_DURING_DEFECT" \
-        --arg requested_path_after_recovery "$REQUESTED_PATH_AFTER_RECOVERY" \
-        --argjson uvb76_pid "$uvb76_pid_json" \
-        --argjson tovarisch_pid "$tovarisch_pid_json" \
-        --argjson ok "$ok_val" \
-        --argjson baseline_capture_ok "$BASELINE_CAPTURE_OK" \
-        --argjson defect_observed "$DEFECT_OBSERVED" \
-        --argjson recovery_capture_ok "$RECOVERY_CAPTURE_OK" \
-        '{
-            ok: $ok,
-            baseline_capture_ok: $baseline_capture_ok,
-            defect_observed: $defect_observed,
-            recovery_capture_ok: $recovery_capture_ok,
-            artifact_dir: $artifact_dir,
-            uvb76_pid: $uvb76_pid,
-            tovarisch_pid: $tovarisch_pid,
-            defect_mode: $defect_mode,
-            requested_path_baseline: $requested_path_baseline,
-            requested_path_during_defect: $requested_path_during_defect,
-            requested_path_after_recovery: $requested_path_after_recovery
-        }' > "$RESULT_FILE"
-
-    log_info "Result written to $RESULT_FILE"
-
-    # Validate the output is valid JSON
-    if ! jq . "$RESULT_FILE" > /dev/null 2>&1; then
-        log_error "result.json is not valid JSON!"
-        return 1
-    fi
 }
