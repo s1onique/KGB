@@ -302,10 +302,32 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleTargets returns the list of configured targets.
+// TargetInfo represents a target with its effective probe URL for debugging.
+type TargetInfo struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	BaseURL         string `json:"base_url"`
+	ProbeURL        string `json:"probe_url,omitempty"`
+	EffectiveProbeURL string `json:"effective_probe_url"`
+	Enabled         bool   `json:"enabled"`
+}
+
+// handleTargets returns the list of configured targets with effective probe URLs.
 func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.cfg.Targets)
+	
+	targets := make([]TargetInfo, len(s.cfg.Targets))
+	for i, t := range s.cfg.Targets {
+		targets[i] = TargetInfo{
+			ID:                t.ID,
+			Name:              t.Name,
+			BaseURL:           t.BaseURL,
+			ProbeURL:          t.ProbeURL,
+			EffectiveProbeURL: config.TargetProbeURL(&t),
+			Enabled:           t.Enabled,
+		}
+	}
+	json.NewEncoder(w).Encode(targets)
 }
 
 // ServerStatus represents the runtime status of the UVB-76 server.

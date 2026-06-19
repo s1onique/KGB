@@ -87,6 +87,14 @@ run_lab() {
 
     # PHASE 0: Baseline probe readiness gate + status artifact
     log_info ""; log_info "=== PHASE 0: Baseline Probe Readiness Gate + Status Artifact ==="
+    
+    # CRITICAL: Save and verify effective probe URL BEFORE anything else
+    # This proves the exact URL UVB-76 will probe. Fails hard - no point continuing if wrong.
+    if ! save_effective_probe_url; then
+        log_error "[FAIL] Effective probe URL verification failed - lab cannot proceed"
+        exit 1
+    fi
+    
     save_phase0_status
 
     if wait_for_probe_samples_after_cursor "lab-tovarisch" "http" "" "true" 20 "$BASELINE_PROBE_READY_FILE"; then

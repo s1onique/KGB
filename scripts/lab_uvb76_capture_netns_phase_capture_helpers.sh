@@ -38,17 +38,30 @@ wait_and_fetch_capture_with_defect_clear() {
     log_info "Phase $phase_num Step 0: Injecting lab probe defect..."
     inject_netem_defect "$defect_mode"
     
-    # For lab-probe mode, verify /lab/probe returns 503 and /status returns 200
+    # For lab-probe mode, verify effective probe URL returns 503 and /status returns 200
     if [[ "$defect_mode" == "$DEFECT_MODE_LAB_PROBE" ]]; then
-        local probe_status
-        probe_status=$(ip netns exec "$NS_UVB76" curl -s -o /dev/null -w "%{http_code}" \
-            "http://${IP_TOVARISCH}:${TOVARISCH_PORT}/lab/probe" 2>/dev/null)
-        if [[ "$probe_status" != "503" ]]; then
-            log_error "[FAIL] Lab probe defect not working - /lab/probe returned $probe_status, expected 503"
+        # Extract effective probe URL from saved artifact
+        local effective_probe_url
+        effective_probe_url=$(jq -r '.effective_probe_url // empty' "$EFFECTIVE_PROBE_URL_FILE" 2>/dev/null)
+        
+        if [[ -z "$effective_probe_url" || "$effective_probe_url" == "empty" ]]; then
+            log_error "[FAIL] Effective probe URL not found in artifact"
             return 1
         fi
-        log_info "[PASS] Lab probe defect verified - /lab/probe returns 503"
         
+        log_info "Using effective probe URL from artifact: $effective_probe_url"
+        
+        # Verify effective probe URL returns 503 during defect
+        local probe_status
+        probe_status=$(ip netns exec "$NS_UVB76" curl -s -o /dev/null -w "%{http_code}" \
+            "$effective_probe_url" 2>/dev/null)
+        if [[ "$probe_status" != "503" ]]; then
+            log_error "[FAIL] Lab probe defect not working - effective probe URL returned $probe_status, expected 503"
+            return 1
+        fi
+        log_info "[PASS] Lab probe defect verified - effective probe URL returns 503"
+        
+        # Verify /status remains healthy during defect (for diagnostics)
         local status_status
         status_status=$(ip netns exec "$NS_UVB76" curl -s -o /dev/null -w "%{http_code}" \
             "http://${IP_TOVARISCH}:${TOVARISCH_PORT}/status" 2>/dev/null)

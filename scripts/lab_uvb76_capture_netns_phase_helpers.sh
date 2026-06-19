@@ -3,6 +3,56 @@
 #
 # Phase 0 helpers and Phase 2 skipped cooldown polling.
 
+# Declare effective probe URL file globally (set in lib)
+declare -g EFFECTIVE_PROBE_URL_FILE=""
+
+# Save the effective probe URL as an artifact for verification.
+# This fetches from UVB-76 targets API and extracts the effective_probe_url field.
+save_effective_probe_url() {
+    log_info "Saving effective probe URL artifact..."
+    
+    # Get targets from UVB-76 API
+    local response
+    response=$(ip netns exec "$NS_UVB76" curl -s -c /tmp/uvb76-cookies.txt -b /tmp/uvb76-cookies.txt \
+        "${UVB76_API_URL}/api/v1/targets" 2>/dev/null)
+
+    if [[ -z "$response" ]] || ! echo "$response" | jq -e . >/dev/null 2>&1; then
+        log_error "[FAIL] Failed to get targets from UVB-76 API"
+        echo "{}" > "$EFFECTIVE_PROBE_URL_FILE"
+        return 1
+    fi
+
+    # Extract effective_probe_url for lab-tovarisch target
+    local effective_url
+    effective_url=$(echo "$response" | jq -r '.[] | select(.id == "lab-tovarisch") | .effective_probe_url // empty' 2>/dev/null)
+
+    if [[ -z "$effective_url" || "$effective_url" == "empty" ]]; then
+        log_error "[FAIL] effective_probe_url not found in targets response"
+        echo "$response" | jq '.' > "$EFFECTIVE_PROBE_URL_FILE"
+        return 1
+    fi
+
+    # Save as artifact
+    cat > "$EFFECTIVE_PROBE_URL_FILE" <<EOF
+{
+  "target_id": "lab-tovarisch",
+  "effective_probe_url": "${effective_url}",
+  "expected_probe_url": "http://${IP_TOVARISCH}:${TOVARISCH_PORT}/lab/probe"
+}
+EOF
+
+    log_info "[PASS] Effective probe URL saved: $effective_url"
+    
+    # Verify it matches expected
+    if [[ "$effective_url" == "http://${IP_TOVARISCH}:${TOVARISCH_PORT}/lab/probe" ]]; then
+        log_info "[PASS] Effective probe URL matches expected /lab/probe"
+        return 0
+    else
+        log_error "[FAIL] Effective probe URL mismatch: got $effective_url, expected http://${IP_TOVARISCH}:${TOVARISCH_PORT}/lab/probe"
+        return 1
+    fi
+}
+
 # Save UVB-76 status API response as Phase 0 artifact
 save_phase0_status() {
     log_info "Saving Phase 0 status artifact..."

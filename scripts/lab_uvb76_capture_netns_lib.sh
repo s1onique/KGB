@@ -177,6 +177,7 @@ setup_temp_dir() {
     # Phase-separated artifact paths (for diagnostic packet contract verification)
     PHASE0_STATUS_FILE="$LAB_DIR/${ARTIFACT_PHASE0_STATUS}"
     PHASE0_PROBE_READY_FILE="$LAB_DIR/${ARTIFACT_PHASE0_PROBE_READY}"
+    EFFECTIVE_PROBE_URL_FILE="$LAB_DIR/${ARTIFACT_EFFECTIVE_PROBE_URL}"
     PHASE1_SPIKE_EVENT_FILE="$LAB_DIR/${ARTIFACT_PHASE1_SPIKE_EVENT}"
     PHASE1_SPIKE_ROW_FILE="$LAB_DIR/${ARTIFACT_PHASE1_SPIKE_ROW}"
     PHASE1_CAPTURE_PACKET_FILE="$LAB_DIR/${ARTIFACT_PHASE1_CAPTURE_PACKET}"
@@ -246,9 +247,12 @@ EOF
 generate_uvb76_config() {
     log_info "Generating UVB-76 config..."
     # Lab: 2s probes, 1s timeout, 5s cooldown
-    # IMPORTANT: base_url points to /lab/probe for the target (probe)
-    # but diagnostics still use /status for capture
+    # IMPORTANT: 
+    # - probe_url specifies the HTTP probe endpoint (/lab/probe returns 503 during defect)
+    # - base_url is used for diagnostics (/status always healthy)
+    # - With probe_url set, UVB-76 probes /lab/probe (not base_url + /status)
     local probe_url="http://${IP_TOVARISCH}:${TOVARISCH_PORT}/lab/probe"
+    local base_url="http://${IP_TOVARISCH}:${TOVARISCH_PORT}"
     local diag_url="http://${IP_TOVARISCH}:${TOVARISCH_PORT}/status"
     
     cat > "$UVB76_CONFIG" <<EOF
@@ -261,11 +265,12 @@ generate_uvb76_config() {
     "icmp": {"enabled": false, "interval_seconds": 1, "timeout_seconds": 3, "window_seconds": 60, "retained_range_seconds": 300, "histogram_buckets_ms": [1, 5, 10, 25, 50, 100, 250, 500, 1000], "recent_samples_max": 300}
   },
   "diagnostics": {"enabled": true, "capture_on_spike": true, "timeout_ms": 2000, "cooldown_seconds": 5, "max_uncaptured_spikes": 50, "peers": [{"name": "tovarisch-lab", "base_url": "${diag_url}", "targets": ["lab-tovarisch"]}]},
-  "targets": [{"id": "lab-tovarisch", "name": "Lab Tovarisch", "base_url": "${probe_url}", "enabled": true}]
+  "targets": [{"id": "lab-tovarisch", "name": "Lab Tovarisch", "base_url": "${base_url}", "probe_url": "${probe_url}", "enabled": true}]
 }
 EOF
     log_info "UVB-76 config: $UVB76_CONFIG"
-    log_info "  Probe target: $probe_url"
+    log_info "  Probe URL (probe_url): $probe_url"
+    log_info "  Base URL (base_url): $base_url"
     log_info "  Diagnostic base: $diag_url"
 }
 

@@ -9,10 +9,26 @@ import (
 	"strings"
 )
 
-// TargetStatusURL returns the status probe URL for a target base URL.
-// Used consistently by both the probe loop and latency series metadata.
+// TargetStatusURL returns the status diagnostic URL for a target base URL.
+// This is the URL used for diagnostic capture, NOT for latency probing.
+// The actual status endpoint fetched by diagnostics is /status (without .json suffix).
+// UVB-76 probe uses TargetProbeURL() instead for latency measurements.
 func TargetStatusURL(baseURL string) string {
 	return strings.TrimRight(baseURL, "/") + "/status"
+}
+
+// TargetProbeURL returns the effective HTTP probe URL for a target.
+// Priority:
+// 1. If TargetConfig.ProbeURL is set and non-empty, use it directly (explicit probe URL)
+// 2. Otherwise, fall back to TargetStatusURL(baseURL) which appends /status
+//
+// This allows labs to probe /lab/probe (returns 503 during defect) while
+// diagnostics still fetch /status (always healthy).
+func TargetProbeURL(t *TargetConfig) string {
+	if t.ProbeURL != "" {
+		return t.ProbeURL
+	}
+	return TargetStatusURL(t.BaseURL)
 }
 
 // Config represents the full configuration for UVB-76.
@@ -49,7 +65,13 @@ type TargetConfig struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	BaseURL string `json:"base_url"`
-	Enabled bool   `json:"enabled"`
+	// ProbeURL is the explicit HTTP probe endpoint for this target.
+	// If set, this URL is used directly for HTTP probing (latency measurement).
+	// If empty, the probe uses base_url + "/status" (backward compatible default).
+	// This allows probing a different path than diagnostics (/status).
+	// Example: probe_url = "http://host:8317/lab/probe" while diagnostics uses base_url.
+	ProbeURL string `json:"probe_url,omitempty"`
+	Enabled  bool   `json:"enabled"`
 }
 
 // Validation errors.

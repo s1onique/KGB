@@ -73,6 +73,7 @@ ARTIFACT_TOVARISCH_CONFIG="tovarisch.conf"
 # Phase 0: Baseline probe readiness
 ARTIFACT_PHASE0_STATUS="phase0-status.json"
 ARTIFACT_PHASE0_PROBE_READY="phase0-probe-ready.json"
+ARTIFACT_EFFECTIVE_PROBE_URL="phase0-effective-probe-url.json"
 
 # Phase 1: First eligible spike (fresh-start capture)
 ARTIFACT_PHASE1_SPIKE_EVENT="phase1-spike-event.json"
