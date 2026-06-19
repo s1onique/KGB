@@ -20,18 +20,26 @@ extract_spike_row_for_event() {
 
 # Save phase spike event artifact
 save_phase_spike_event() {
-    local phase_num="$1"
-    local phase_event_file="$2"
-    local spikes_response="$3"
-    local event_id="$4"
-    local reasons="$5"
+    local phase_num="${1:-unknown}"
+    local phase_event_file="${2:-}"
+    local spikes_response="${3:-}"
+    local event_id="${4:-unknown}"
+    local reasons="${5:-unknown}"
+    
+    # Validate required arguments
+    if [[ -z "$phase_event_file" ]]; then
+        log_error "[FAIL] save_phase_spike_event: missing phase_event_file argument"
+        return 1
+    fi
     
     log_info "Saving phase $phase_num spike event: event_id=$event_id reasons=$reasons"
     
     # Extract the spike row for this event
-    local spike_row
-    spike_row=$(echo "$spikes_response" | jq --arg eid "$event_id" \
-        '[.spikes[] | select(.event_id == $eid)] | .[0] // {}' 2>/dev/null || echo "{}")
+    local spike_row="{}"
+    if [[ -n "$spikes_response" ]]; then
+        spike_row=$(echo "$spikes_response" | jq --arg eid "$event_id" \
+            '[.spikes[] | select(.event_id == $eid)] | .[0] // {}' 2>/dev/null || echo "{}")
+    fi
     
     # Write spike event artifact with metadata
     jq -n \
@@ -53,10 +61,20 @@ save_phase_spike_event() {
 
 # Save phase spike row artifact (just the row from spikes API)
 save_phase_spike_row() {
-    local phase_num="$1"
-    local phase_row_file="$2"
-    local spikes_file="$3"
-    local event_id="$4"
+    local phase_num="${1:-unknown}"
+    local phase_row_file="${2:-}"
+    local spikes_file="${3:-}"
+    local event_id="${4:-unknown}"
+    
+    # Validate required arguments
+    if [[ -z "$phase_row_file" ]]; then
+        log_error "[FAIL] save_phase_spike_row: missing phase_row_file argument"
+        return 1
+    fi
+    if [[ -z "$spikes_file" ]]; then
+        log_error "[FAIL] save_phase_spike_row: missing spikes_file argument"
+        return 1
+    fi
     
     log_info "Saving phase $phase_num spike row: event_id=$event_id"
     
@@ -72,15 +90,34 @@ save_phase_spike_row() {
 # Save capture packet artifact from a spike row
 # Extracts the network_diag from the capture within the spike row
 save_capture_packet() {
-    local phase_num="$1"
-    local packet_file="$2"
-    local spike_row_file="$3"
+    local phase_num="${1:-unknown}"
+    local packet_file="${2:-}"
+    local spike_row_file="${3:-}"
+    
+    # Validate required arguments
+    if [[ -z "$packet_file" ]]; then
+        log_error "[FAIL] save_capture_packet: missing packet_file argument"
+        return 1
+    fi
+    if [[ -z "$spike_row_file" ]]; then
+        log_error "[FAIL] save_capture_packet: missing spike_row_file argument"
+        return 1
+    fi
+    if [[ ! -f "$spike_row_file" ]]; then
+        log_error "[FAIL] save_capture_packet: file not found: $spike_row_file"
+        return 1
+    fi
     
     log_info "Extracting capture packet from spike row for phase $phase_num"
     
     # Extract network_diag from the capture within spike row
-    local network_diag
-    network_diag=$(jq '[.captures[] | select(.network_diag != null)] | .[0] | .network_diag' "$spike_row_file" 2>/dev/null || echo "null")
+    local network_diag="null"
+    network_diag=$(jq '[.captures[]? | select(.network_diag != null)] | .[0] | .network_diag // null' "$spike_row_file" 2>/dev/null || echo "null")
+    
+    if [[ "$network_diag" == "null" || "$network_diag" == "" ]]; then
+        log_error "[FAIL] Phase $phase_num: no network_diag found in spike row"
+        return 1
+    fi
     
     # Write as standalone packet artifact
     jq -n \
@@ -98,10 +135,16 @@ save_capture_packet() {
 
 # Save contract summary for a phase
 save_phase_contract_summary() {
-    local phase_num="$1"
-    local contract_file="$2"
-    local spike_row_file="$3"
-    local packet_file="$4"
+    local phase_num="${1:-unknown}"
+    local contract_file="${2:-}"
+    local spike_row_file="${3:-}"
+    local packet_file="${4:-}"
+    
+    # Validate required arguments
+    if [[ -z "$contract_file" ]]; then
+        log_error "[FAIL] save_phase_contract_summary: missing contract_file argument"
+        return 1
+    fi
     
     log_info "Generating contract summary for phase $phase_num"
     
@@ -114,7 +157,7 @@ save_phase_contract_summary() {
     local network_diag_present="false"
     local packet_contract_ok="false"
     
-    if [[ -f "$spike_row_file" ]]; then
+    if [[ -n "$spike_row_file" && -f "$spike_row_file" ]]; then
         # Get capture status from the spike row's capture info
         # The spike row may have capture_info or captures[]
         local capture_info
@@ -139,7 +182,7 @@ save_phase_contract_summary() {
         fi
     fi
     
-    if [[ -f "$packet_file" ]]; then
+    if [[ -n "$packet_file" && -f "$packet_file" ]]; then
         if jq -e '.network_diag != null' "$packet_file" >/dev/null 2>&1; then
             network_diag_present="true"
         fi
@@ -179,8 +222,22 @@ save_phase_contract_summary() {
 
 # Run contract verifier on all phase artifacts
 run_contract_verification() {
-    local output_file="$1"
-    local lab_dir="$2"
+    local output_file="${1:-}"
+    local lab_dir="${2:-}"
+    
+    # Validate required arguments
+    if [[ -z "$output_file" ]]; then
+        log_error "[FAIL] run_contract_verification: missing output_file argument"
+        return 1
+    fi
+    if [[ -z "$lab_dir" ]]; then
+        log_error "[FAIL] run_contract_verification: missing lab_dir argument"
+        return 1
+    fi
+    if [[ ! -d "$lab_dir" ]]; then
+        log_error "[FAIL] run_contract_verification: lab directory not found: $lab_dir"
+        return 1
+    fi
     
     log_info "Running contract verification on artifacts: $lab_dir"
     

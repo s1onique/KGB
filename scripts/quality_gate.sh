@@ -143,6 +143,12 @@ python3 scripts/verify_cold_resume_checkpoints.py
 echo "[gate] checking AXIOM-2 cold-resume checkpoints self-test"
 python3 scripts/verify_cold_resume_checkpoints.py --self-test
 
+echo "[gate] checking UVB-76 capture helpers self-test"
+bash scripts/verify_uvb76_capture_helpers.sh --self-test
+
+echo "[gate] checking UVB-76 diag packet contract self-test"
+bash scripts/verify_uvb76_diag_packet_contract.sh --self-test
+
 echo "[gate] checking forbidden generic naming"
 
 # Use git grep to search tracked file contents (not filenames) with timeout

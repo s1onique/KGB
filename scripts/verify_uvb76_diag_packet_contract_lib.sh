@@ -264,3 +264,178 @@ FIXTURE_BAD_TCP_MALFORMED_FIELDS='{
     ]
   }
 }'
+
+# =============================================================================
+# Capture Status Contract Fixtures
+# =============================================================================
+
+# Good: capture entry with status=ok and network_diag present (normalized row)
+FIXTURE_CAPTURE_OK_WITH_DIAG='{
+  "capture_status": "ok",
+  "capture_exists": true,
+  "is_protected": true,
+  "network_diag": {
+    "status": "ok",
+    "started_at": "2026-01-01T00:00:00Z"
+  }
+}'
+
+# Good: capture entry with status=captured and network_diag present (normalized row)
+FIXTURE_CAPTURE_CAPTURED_WITH_DIAG='{
+  "capture_status": "captured",
+  "capture_exists": true,
+  "is_protected": true,
+  "network_diag": {
+    "status": "ok",
+    "started_at": "2026-01-01T00:00:00Z"
+  }
+}'
+
+# Bad: capture entry with status=timeout (should fail Phase 1/3 capture contract)
+FIXTURE_CAPTURE_TIMEOUT_NO_DIAG='{
+  "capture_status": "timeout",
+  "capture_exists": true,
+  "is_protected": false,
+  "network_diag": null
+}'
+
+# Bad: capture entry with status=ok but no network_diag (should fail Phase 1/3)
+FIXTURE_CAPTURE_OK_NO_DIAG='{
+  "capture_status": "ok",
+  "capture_exists": true,
+  "is_protected": true,
+  "network_diag": null
+}'
+
+# Bad: capture entry with status=failed (should fail Phase 1/3)
+FIXTURE_CAPTURE_FAILED='{
+  "capture_status": "failed",
+  "capture_exists": true,
+  "is_protected": false,
+  "network_diag": null
+}'
+
+# Bad: capture entry with status=error (should fail Phase 1/3)
+FIXTURE_CAPTURE_ERROR='{
+  "capture_status": "error",
+  "capture_exists": true,
+  "is_protected": false,
+  "network_diag": null
+}'
+
+# Bad: capture entry with status=not_attempted (should fail Phase 1/3)
+FIXTURE_CAPTURE_NOT_ATTEMPTED='{
+  "capture_status": "not_attempted",
+  "capture_exists": false,
+  "is_protected": false,
+  "network_diag": null
+}'
+
+# Good: skipped_cooldown row (valid for Phase 2)
+FIXTURE_SKIPPED_COOLDOWN_VALID='{
+  "capture_status": "skipped_cooldown",
+  "capture_exists": false,
+  "is_protected": false,
+  "cooldown_info": {
+    "cooldown_scope": "per_target",
+    "last_successful_capture_at": "2026-01-01T00:00:00Z",
+    "next_capture_eligible_at": "2026-01-01T00:00:05Z",
+    "cooldown_seconds": 5
+  }
+}'
+
+# Bad: skipped_cooldown row when Phase 1 failed - should be flagged as invalid dependency
+FIXTURE_SKIPPED_COOLDOWN_NO_PRIOR_CAPTURE='{
+  "capture_status": "skipped_cooldown",
+  "capture_exists": false,
+  "is_protected": false,
+  "cooldown_info": {
+    "cooldown_scope": "per_target",
+    "last_successful_capture_at": null,
+    "next_capture_eligible_at": "2026-01-01T00:00:05Z",
+    "cooldown_seconds": 5
+  }
+}'
+
+# Bad: raw spike row with captures[0].status=ok but no network_diag
+FIXTURE_RAW_CAPTURE_OK_NO_DIAG='{
+  "event_id": "evt-123",
+  "captures": [
+    {
+      "status": "ok",
+      "capture_status": "ok",
+      "capture_exists": true,
+      "is_protected": true,
+      "network_diag": null
+    }
+  ]
+}'
+
+# Good: raw spike row with captures[0].status=ok and network_diag
+FIXTURE_RAW_CAPTURE_OK_WITH_DIAG='{
+  "event_id": "evt-123",
+  "captures": [
+    {
+      "status": "ok",
+      "capture_status": "ok",
+      "capture_exists": true,
+      "is_protected": true,
+      "network_diag": {
+        "status": "ok",
+        "started_at": "2026-01-01T00:00:00Z"
+      }
+    }
+  ]
+}'
+
+# Good: raw spike row with captures[0].status=timeout (should fail Phase 1/3)
+FIXTURE_RAW_CAPTURE_TIMEOUT='{
+  "event_id": "evt-123",
+  "captures": [
+    {
+      "status": "timeout",
+      "capture_status": "timeout",
+      "capture_exists": true,
+      "is_protected": false,
+      "network_diag": null
+    }
+  ]
+}'
+
+# Good: raw spike row with captures[0].packet.network_diag (alternative shape)
+FIXTURE_RAW_CAPTURE_PACKET_NESTED='{
+  "event_id": "evt-123",
+  "captures": [
+    {
+      "status": "ok",
+      "capture_status": "ok",
+      "capture_exists": true,
+      "is_protected": true,
+      "packet": {
+        "network_diag": {
+          "status": "ok",
+          "started_at": "2026-01-01T00:00:00Z"
+        }
+      }
+    }
+  ]
+}'
+
+# Good: raw spike row with captures[0].diagnostics.network_diag (alternative shape)
+FIXTURE_RAW_CAPTURE_DIAGNOSTICS_NESTED='{
+  "event_id": "evt-123",
+  "captures": [
+    {
+      "status": "ok",
+      "capture_status": "ok",
+      "capture_exists": true,
+      "is_protected": true,
+      "diagnostics": {
+        "network_diag": {
+          "status": "ok",
+          "started_at": "2026-01-01T00:00:00Z"
+        }
+      }
+    }
+  ]
+}'

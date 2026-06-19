@@ -225,55 +225,94 @@ run_lab() {
     PHASE2_EVENT_ID=""
     PHASE2_REASONS=""
 
-    # Set phase cursor BEFORE inducing spike
-    set_phase_cursor "phase2"
+    # Phase 2 is only valid if Phase 1 successfully captured.
+    # If Phase 1 failed (timeout or no network_diag), the cooldown was not armed,
+    # so we cannot expect skipped_cooldown behavior.
+    if [[ "$CONTRACT_PHASE1_CAPTURE_OK" != "true" || "$CONTRACT_PHASE1_PACKET_OK" != "true" ]]; then
+        log_error "[SKIP] Phase 2: skipped because Phase 1 capture failed (cooldown not armed)"
+        log_error "  phase1_capture_required_for_cooldown=true"
+        log_error "  phase1_capture_ok=$CONTRACT_PHASE1_CAPTURE_OK"
+        log_error "  phase1_packet_ok=$CONTRACT_PHASE1_PACKET_OK"
+        log_error "  phase2_cooldown_contract_ok=false (skipped dependency)"
+        
+        # Save a skipped-phase artifact for contract completeness
+        jq -n \
+            --arg phase "phase2" \
+            --arg reason "phase1_capture_failed" \
+            --argjson phase1_capture_ok "$CONTRACT_PHASE1_CAPTURE_OK" \
+            --argjson phase1_packet_ok "$CONTRACT_PHASE1_PACKET_OK" \
+            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{
+                phase: $phase,
+                status: "skipped",
+                reason: $reason,
+                phase1_capture_ok: $phase1_capture_ok,
+                phase1_packet_ok: $phase1_packet_ok,
+                timestamp: $timestamp
+            }' > "$PHASE2_SPIKE_ROW_FILE" 2>/dev/null || true
+        
+        # Save contract summary for skipped phase
+        save_phase_contract_summary 2 "$PHASE2_CAPTURE_CONTRACT_FILE" "$PHASE2_SPIKE_ROW_FILE" ""
+        
+        # Skip Phase 2 entirely - go to Phase 3
+        log_info "Proceeding to Phase 3..."
+        CONTRACT_PHASE2_COOLDOWN_OK=false
+    fi
+    # End Phase 2 conditional
 
-    # Reinject defect BEFORE cooldown expires
-    # Lab cooldown is 5 seconds, so reinject immediately
-    log_info "Reinjecting defect before cooldown expires..."
-    inject_netem_defect
+    # Only run Phase 2 actual test if Phase 1 succeeded
+    if [[ "$CONTRACT_PHASE1_CAPTURE_OK" == "true" && "$CONTRACT_PHASE1_PACKET_OK" == "true" ]]; then
+        # Set phase cursor BEFORE inducing spike
+        set_phase_cursor "phase2"
 
-    # Verify defect is in place again
-    if ip netns exec "$NS_UVB76" ping -c 1 -W 2 "$IP_TOVARISCH" > /dev/null 2>&1; then
-        log_error "[FAIL] Defect not working - ping succeeded when it should fail"
-    else
-        log_info "[PASS] Defect verified - ping fails as expected"
+        # Reinject defect BEFORE cooldown expires
+        # Lab cooldown is 5 seconds, so reinject immediately
+        log_info "Reinjecting defect before cooldown expires..."
+        inject_netem_defect
 
-        # STEP 1: Wait for HTTP failure spike EVENT
-        log_info "Phase 2 Step 1: Waiting for failure spike event..."
-        if wait_for_spike_event_after_cursor "phase2" "$PHASE_PHASE2_CURSOR" "http_probe_timeout|http_probe_failure|http_probe_connection_refused" 15 "$LAB_DIR/spikes-phase2-poll.json"; then
-            PHASE2_EVENT_ID="$MATCHED_EVENT_ID"
-            PHASE2_REASONS="$MATCHED_REASONS"
-            log_info "[PASS] Phase 2 spike event found: event_id=$PHASE2_EVENT_ID reasons=$PHASE2_REASONS"
+        # Verify defect is in place again
+        if ip netns exec "$NS_UVB76" ping -c 1 -W 2 "$IP_TOVARISCH" > /dev/null 2>&1; then
+            log_error "[FAIL] Defect not working - ping succeeded when it should fail"
+        else
+            log_info "[PASS] Defect verified - ping fails as expected"
 
-            # Query spikes API for full response
-            query_spikes_api "$LAB_DIR/spikes-phase2.json" "lab-tovarisch" "true"
+            # STEP 1: Wait for HTTP failure spike EVENT
+            log_info "Phase 2 Step 1: Waiting for failure spike event..."
+            if wait_for_spike_event_after_cursor "phase2" "$PHASE_PHASE2_CURSOR" "http_probe_timeout|http_probe_failure|http_probe_connection_refused" 15 "$LAB_DIR/spikes-phase2-poll.json"; then
+                PHASE2_EVENT_ID="$MATCHED_EVENT_ID"
+                PHASE2_REASONS="$MATCHED_REASONS"
+                log_info "[PASS] Phase 2 spike event found: event_id=$PHASE2_EVENT_ID reasons=$PHASE2_REASONS"
 
-            # Save spike event (full raw)
-            save_phase_spike_event 2 "$PHASE2_SPIKE_EVENT_FILE" "$(cat "$LAB_DIR/spikes-phase2.json")" "$PHASE2_EVENT_ID" "$PHASE2_REASONS"
+                # Query spikes API for full response
+                query_spikes_api "$LAB_DIR/spikes-phase2.json" "lab-tovarisch" "true"
 
-            # STEP 2: Wait for skipped_cooldown row (NOT a capture)
-            # The polling helper will normalize and write the row when it finds skipped_cooldown
-            log_info "Phase 2 Step 2: Waiting for skipped_cooldown row for event $PHASE2_EVENT_ID..."
-            if wait_for_skipped_cooldown_spike_row_after_event 2 "$PHASE2_EVENT_ID" 15 "$PHASE2_SPIKE_ROW_FILE"; then
-                log_info "[PASS] Phase 2 skipped_cooldown row found for event $PHASE2_EVENT_ID"
-                PHASE2_SKIPPED=true
+                # Save spike event (full raw)
+                save_phase_spike_event 2 "$PHASE2_SPIKE_EVENT_FILE" "$(cat "$LAB_DIR/spikes-phase2.json")" "$PHASE2_EVENT_ID" "$PHASE2_REASONS"
 
-                # Save contract summary (no packet file for skipped cooldown)
-                save_phase_contract_summary 2 "$PHASE2_CAPTURE_CONTRACT_FILE" "$PHASE2_SPIKE_ROW_FILE" ""
+                # STEP 2: Wait for skipped_cooldown row (NOT a capture)
+                # The polling helper will normalize and write the row when it finds skipped_cooldown
+                log_info "Phase 2 Step 2: Waiting for skipped_cooldown row for event $PHASE2_EVENT_ID..."
+                if wait_for_skipped_cooldown_spike_row_after_event 2 "$PHASE2_EVENT_ID" 15 "$PHASE2_SPIKE_ROW_FILE"; then
+                    log_info "[PASS] Phase 2 skipped_cooldown row found for event $PHASE2_EVENT_ID"
+                    PHASE2_SKIPPED=true
 
-                # Assert Phase 2 contract using normalized row
-                if assert_skipped_cooldown_row_contract 2 "$PHASE2_SPIKE_ROW_FILE"; then
-                    CONTRACT_PHASE2_COOLDOWN_OK=true
-                    log_info "[PASS] Phase 2 contract assertions passed"
+                    # Save contract summary (no packet file for skipped cooldown)
+                    save_phase_contract_summary 2 "$PHASE2_CAPTURE_CONTRACT_FILE" "$PHASE2_SPIKE_ROW_FILE" ""
+
+                    # Assert Phase 2 contract using normalized row
+                    if assert_skipped_cooldown_row_contract 2 "$PHASE2_SPIKE_ROW_FILE"; then
+                        CONTRACT_PHASE2_COOLDOWN_OK=true
+                        log_info "[PASS] Phase 2 contract assertions passed"
+                    fi
+                else
+                    log_error "[FAIL] Phase 2 skipped_cooldown row not found for event_id=$PHASE2_EVENT_ID"
                 fi
             else
-                log_error "[FAIL] Phase 2 skipped_cooldown row not found for event_id=$PHASE2_EVENT_ID"
+                log_error "[FAIL] Phase 2 no failure spike event found after 15s"
             fi
-        else
-            log_error "[FAIL] Phase 2 no failure spike event found after 15s"
         fi
     fi
+    # End Phase 2 actual test
 
     # ========================================
     # PHASE 3: Post-cooldown spike captured again

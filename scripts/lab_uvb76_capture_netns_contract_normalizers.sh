@@ -88,19 +88,95 @@ save_phase_spike_row() {
     return 0
 }
 
-# Save Phase N capture packet from raw spike row
-save_phase_capture_packet() {
-    local phase_num="$1"
-    local packet_file="$2"
-    local spike_row_file="$3"
+# Save Phase N capture packet from raw spike row.
+# Extracts network_diag from various possible locations:
+#   - .captures[].network_diag (direct)
+#   - .captures[].packet.network_diag
+#   - .captures[].diagnostics.network_diag
+#   - .captures[].network_diag_packet.network_diag
+#   - .network_diag (if row is already packet-shaped)
+# Fails if no network_diag object exists.
+save_phase_capture_packet_from_raw_row() {
+    local phase_num="${1:-unknown}"
+    local packet_file="${2:-}"
+    local spike_row_file="${3:-}"
+
+    # Validate required arguments
+    if [[ -z "$packet_file" ]]; then
+        log_error "[FAIL] save_phase_capture_packet_from_raw_row: missing packet_file argument"
+        return 1
+    fi
+    if [[ -z "$spike_row_file" ]]; then
+        log_error "[FAIL] save_phase_capture_packet_from_raw_row: missing spike_row_file argument"
+        return 1
+    fi
+    if [[ ! -f "$spike_row_file" ]]; then
+        log_error "[FAIL] save_phase_capture_packet_from_raw_row: file not found: $spike_row_file"
+        return 1
+    fi
 
     log_info "Extracting capture packet from spike row for Phase $phase_num"
 
-    local network_diag
-    network_diag=$(jq '[.captures[] | select(.network_diag != null)] | .[0] | .network_diag // null' "$spike_row_file" 2>/dev/null || echo "null")
+    local network_diag="null"
+    local network_diag_found=false
 
-    if [[ "$network_diag" == "null" || "$network_diag" == "" ]]; then
+    # Try .captures[].network_diag (direct)
+    if [[ "$network_diag_found" != "true" ]]; then
+        if jq -e '.captures[0].network_diag != null' "$spike_row_file" >/dev/null 2>&1; then
+            network_diag=$(jq '.captures[0].network_diag' "$spike_row_file" 2>/dev/null || echo "null")
+            network_diag_found=true
+            log_info "Found network_diag in .captures[0].network_diag"
+        fi
+    fi
+
+    # Try .captures[].packet.network_diag
+    if [[ "$network_diag_found" != "true" ]]; then
+        if jq -e '.captures[0].packet.network_diag != null' "$spike_row_file" >/dev/null 2>&1; then
+            network_diag=$(jq '.captures[0].packet.network_diag' "$spike_row_file" 2>/dev/null || echo "null")
+            network_diag_found=true
+            log_info "Found network_diag in .captures[0].packet.network_diag"
+        fi
+    fi
+
+    # Try .captures[].diagnostics.network_diag
+    if [[ "$network_diag_found" != "true" ]]; then
+        if jq -e '.captures[0].diagnostics.network_diag != null' "$spike_row_file" >/dev/null 2>&1; then
+            network_diag=$(jq '.captures[0].diagnostics.network_diag' "$spike_row_file" 2>/dev/null || echo "null")
+            network_diag_found=true
+            log_info "Found network_diag in .captures[0].diagnostics.network_diag"
+        fi
+    fi
+
+    # Try .captures[].network_diag_packet.network_diag
+    if [[ "$network_diag_found" != "true" ]]; then
+        if jq -e '.captures[0].network_diag_packet.network_diag != null' "$spike_row_file" >/dev/null 2>&1; then
+            network_diag=$(jq '.captures[0].network_diag_packet.network_diag' "$spike_row_file" 2>/dev/null || echo "null")
+            network_diag_found=true
+            log_info "Found network_diag in .captures[0].network_diag_packet.network_diag"
+        fi
+    fi
+
+    # Try .network_diag (if row is already packet-shaped)
+    if [[ "$network_diag_found" != "true" ]]; then
+        if jq -e '.network_diag != null' "$spike_row_file" >/dev/null 2>&1; then
+            network_diag=$(jq '.network_diag' "$spike_row_file" 2>/dev/null || echo "null")
+            network_diag_found=true
+            log_info "Found network_diag in root .network_diag"
+        fi
+    fi
+
+    if [[ "$network_diag_found" != "true" ]]; then
         log_error "[FAIL] Phase $phase_num: no network_diag found in spike row"
+        # Log available keys for debugging
+        local available_keys
+        available_keys=$(jq 'path(scalars) | map(tostring) | join(".")' "$spike_row_file" 2>/dev/null | head -20 || echo "unknown")
+        log_error "  Sample paths in row: $available_keys"
+        return 1
+    fi
+
+    # Verify network_diag is an object
+    if ! echo "$network_diag" | jq -e 'type == "object"' >/dev/null 2>&1; then
+        log_error "[FAIL] Phase $phase_num: network_diag is not an object"
         return 1
     fi
 
@@ -116,6 +192,15 @@ save_phase_capture_packet() {
 
     log_info "Phase $phase_num capture packet saved: $packet_file"
     return 0
+}
+
+# Legacy wrapper for backward compatibility
+save_phase_capture_packet() {
+    local phase_num="${1:-unknown}"
+    local packet_file="${2:-}"
+    local spike_row_file="${3:-}"
+
+    save_phase_capture_packet_from_raw_row "$phase_num" "$packet_file" "$spike_row_file"
 }
 
 # Save Phase N spike event (full raw debug artifact)
@@ -149,12 +234,23 @@ save_phase_spike_event() {
     log_info "Phase $phase_num spike event saved: $phase_event_file"
 }
 
-# Save Phase N contract summary
+# Save Phase N contract summary.
+# Arguments:
+#   phase_num: phase identifier (e.g., "1", "2", "3")
+#   contract_file: output file path (required)
+#   spike_row_file: normalized spike row file (optional, can be empty for skipped phases)
+#   packet_file: capture packet file (optional, can be empty for skipped cooldown phases)
 save_phase_contract_summary() {
-    local phase_num="$1"
-    local contract_file="$2"
-    local spike_row_file="$3"
-    local packet_file="$4"
+    local phase_num="${1:-unknown}"
+    local contract_file="${2:-}"
+    local spike_row_file="${3:-}"
+    local packet_file="${4:-}"
+
+    # Validate required arguments
+    if [[ -z "$contract_file" ]]; then
+        log_error "[FAIL] save_phase_contract_summary: missing contract_file argument"
+        return 1
+    fi
 
     log_info "Generating contract summary for Phase $phase_num"
 
@@ -162,7 +258,7 @@ save_phase_contract_summary() {
     local cooldown_info_present="false" last_successful_capture_at_present="false"
     local next_capture_eligible_at_present="false" network_diag_present="false" packet_contract_ok="false"
 
-    if [[ -f "$spike_row_file" ]]; then
+    if [[ -n "$spike_row_file" && -f "$spike_row_file" ]]; then
         capture_status=$(jq -r '.capture_status // "unknown"' "$spike_row_file" 2>/dev/null || echo "unknown")
         capture_exists=$(jq -r '.capture_exists // false' "$spike_row_file" 2>/dev/null || echo "false")
         is_protected=$(jq -r '.is_protected // false' "$spike_row_file" 2>/dev/null || echo "false")
@@ -174,7 +270,7 @@ save_phase_contract_summary() {
         fi
     fi
 
-    if [[ -f "$packet_file" ]]; then
+    if [[ -n "$packet_file" && -f "$packet_file" ]]; then
         if jq -e '.network_diag != null' "$packet_file" >/dev/null 2>&1; then
             network_diag_present="true"
         fi
