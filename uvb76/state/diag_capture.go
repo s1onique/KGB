@@ -9,7 +9,7 @@ type DiagCaptureStatus string
 
 const (
 	DiagCaptureStatusOK            DiagCaptureStatus = "ok"
-	DiagCaptureStatusUnavailable  DiagCaptureStatus = "unavailable"
+	DiagCaptureStatusUnavailable   DiagCaptureStatus = "unavailable"
 	DiagCaptureStatusTimeout       DiagCaptureStatus = "timeout"
 	DiagCaptureStatusError         DiagCaptureStatus = "error"
 	DiagCaptureStatusDisabled      DiagCaptureStatus = "disabled"
@@ -24,19 +24,24 @@ type DiagCapture struct {
 	DurationMs           *int64            `json:"duration_ms,omitempty"`
 	Status               DiagCaptureStatus `json:"status"`
 	Error                *string           `json:"error,omitempty"`
-	NetworkDiag         *NetworkDiagData  `json:"network_diag,omitempty"`
+	NetworkDiag          *NetworkDiagData  `json:"network_diag,omitempty"`
 	SuppressedByCooldown bool              `json:"suppressed_by_cooldown,omitempty"`
 	ReferencedCaptureID  string            `json:"referenced_capture_id,omitempty"`
+	// RequestedPath provides sanitized request evidence for error cases.
+	// Only includes path and query (no scheme/host/credentials).
+	// Example: "/status.json?include=network_diag"
+	// This helps operators debug 404 issues without exposing sensitive details.
+	RequestedPath *string `json:"requested_path,omitempty"`
 }
 
 type NetworkDiagData struct {
-	StartedAt   string                  `json:"started_at"`
-	Status      string                  `json:"status"`
-	Wireguard   *WireguardDiagData     `json:"wireguard,omitempty"`
-	Interfaces  []InterfaceDiagData    `json:"interfaces"`
-	Routes      []RouteDiagData       `json:"routes"`
-	UnderlayTCP []TcpSocketDiagData    `json:"underlay_tcp"`
-	Events      []DiagEventData       `json:"events"`
+	StartedAt   string              `json:"started_at"`
+	Status      string              `json:"status"`
+	Wireguard   *WireguardDiagData  `json:"wireguard,omitempty"`
+	Interfaces  []InterfaceDiagData `json:"interfaces"`
+	Routes      []RouteDiagData     `json:"routes"`
+	UnderlayTCP []TcpSocketDiagData `json:"underlay_tcp"`
+	Events      []DiagEventData     `json:"events"`
 }
 
 type WireguardDiagData struct {
@@ -45,8 +50,8 @@ type WireguardDiagData struct {
 }
 
 type WgInterfaceDiagData struct {
-	Name   string            `json:"name"`
-	Status string            `json:"status"`
+	Name   string           `json:"name"`
+	Status string           `json:"status"`
 	Peers  []WgPeerDiagData `json:"peers"`
 }
 
@@ -136,7 +141,7 @@ func NewCaptureStoreWithMax(maxCaptures int) *CaptureStore {
 		captures:    make(map[string][]DiagCapture),
 		lastCapture: make(map[string]time.Time),
 		maxCaptures: maxCaptures,
-		inFlight:   make(map[string]bool),
+		inFlight:    make(map[string]bool),
 	}
 }
 
@@ -228,31 +233,31 @@ func (cs *CaptureStore) Clear() {
 
 // SpikeRetentionStats holds spike retention metadata for UI display.
 type SpikeRetentionStats struct {
-	RetainedSpikeCount      int `json:"retained_spike_count"`
-	VisibleSpikeCount       int `json:"visible_spike_count"`
-	ProtectedCaptureCount   int `json:"protected_capture_count"`
-	PurgeEligibleCount      int `json:"purge_eligible_count"`
-	MaxUncapturedSpikes     int `json:"max_uncaptured_spikes"`
+	RetainedSpikeCount    int `json:"retained_spike_count"`
+	VisibleSpikeCount     int `json:"visible_spike_count"`
+	ProtectedCaptureCount int `json:"protected_capture_count"`
+	PurgeEligibleCount    int `json:"purge_eligible_count"`
+	MaxUncapturedSpikes   int `json:"max_uncaptured_spikes"`
 }
 
 // CaptureStatus represents the derived capture protection status for a spike.
 type CaptureStatus string
 
 const (
-	CaptureStatusReady             CaptureStatus = "ready"              // capture exists and can be accessed
-	CaptureStatusInProgress        CaptureStatus = "in_progress"         // capture creation in flight
-	CaptureStatusTimeout           CaptureStatus = "timeout"            // timeout error
-	CaptureStatusError             CaptureStatus = "error"              // capture error
-	CaptureStatusSuppressed        CaptureStatus = "suppressed_by_cooldown" // suppressed by cooldown
-	CaptureStatusMissing           CaptureStatus = "missing"            // metadata refers to missing artifact
-	CaptureStatusNone              CaptureStatus = "none"               // no capture attempted
+	CaptureStatusReady      CaptureStatus = "ready"                  // capture exists and can be accessed
+	CaptureStatusInProgress CaptureStatus = "in_progress"            // capture creation in flight
+	CaptureStatusTimeout    CaptureStatus = "timeout"                // timeout error
+	CaptureStatusError      CaptureStatus = "error"                  // capture error
+	CaptureStatusSuppressed CaptureStatus = "suppressed_by_cooldown" // suppressed by cooldown
+	CaptureStatusMissing    CaptureStatus = "missing"                // metadata refers to missing artifact
+	CaptureStatusNone       CaptureStatus = "none"                   // no capture attempted
 )
 
 // SpikeCaptureInfo holds capture-derived protection info for a spike.
 type SpikeCaptureInfo struct {
-	CaptureStatus  CaptureStatus `json:"capture_status"`
-	CaptureExists bool          `json:"capture_exists"`  // true if artifact exists
-	IsProtected   bool          `json:"is_protected"`    // true if spike must not be purged
+	CaptureStatus CaptureStatus `json:"capture_status"`
+	CaptureExists bool          `json:"capture_exists"` // true if artifact exists
+	IsProtected   bool          `json:"is_protected"`   // true if spike must not be purged
 }
 
 // GetCaptureInfo returns derived capture protection info for a spike.

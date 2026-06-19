@@ -16,18 +16,18 @@ const (
 )
 
 type DiagnosticsConfig struct {
-	Enabled              bool             `json:"enabled"`
-	CaptureOnSpike       bool             `json:"capture_on_spike"`
-	TimeoutMs            int              `json:"timeout_ms"`
-	CooldownSeconds      int              `json:"cooldown_seconds"`
-	MaxUncapturedSpikes  int              `json:"max_uncaptured_spikes"`  // cap for purge-eligible spikes
-	Peers                []DiagPeerConfig `json:"peers"`
+	Enabled             bool             `json:"enabled"`
+	CaptureOnSpike      bool             `json:"capture_on_spike"`
+	TimeoutMs           int              `json:"timeout_ms"`
+	CooldownSeconds     int              `json:"cooldown_seconds"`
+	MaxUncapturedSpikes int              `json:"max_uncaptured_spikes"` // cap for purge-eligible spikes
+	Peers               []DiagPeerConfig `json:"peers"`
 }
 
 type DiagPeerConfig struct {
-	Name     string   `json:"name"`
-	BaseURL  string   `json:"base_url"`
-	Targets  []string `json:"targets"`
+	Name    string   `json:"name"`
+	BaseURL string   `json:"base_url"`
+	Targets []string `json:"targets"`
 }
 
 func (d *DiagnosticsConfig) ApplyDefaults() {
@@ -110,19 +110,25 @@ func ValidateDiagPeerBaseURL(baseURL string) error {
 
 const DiagPeerStatusInclude = "network_diag"
 
+// TovarischStatusEndpoint is the canonical status endpoint path for tovarisch.
+// Must be /status.json (not /status) to match actual tovarisch HTTP server.
+const TovarischStatusEndpoint = "/status.json"
+
 // DiagPeerStatusURL constructs the full status URL with include=network_diag query param.
 // baseURL must be origin/base path only (no query strings or userinfo).
-// Returns URL like "http://host:8317/status?include=network_diag".
+// Returns URL like "http://host:8317/status.json?include=network_diag".
 func DiagPeerStatusURL(baseURL string) string {
 	u, err := url.Parse(baseURL)
 	if err != nil {
-		// Fallback: append /status and query directly (should not happen if validation passed)
-		return strings.TrimSuffix(baseURL, "/") + "/status?include=" + DiagPeerStatusInclude
+		// Fallback: append /status.json and query directly (should not happen if validation passed)
+		return strings.TrimSuffix(baseURL, "/") + TovarischStatusEndpoint + "?include=" + DiagPeerStatusInclude
 	}
 
-	// Ensure we have a clean path
-	u.Path = strings.TrimSuffix(u.Path, "/") + "/status"
-	u.RawQuery = "include=" + DiagPeerStatusInclude
+	// Ensure we have a clean path using canonical /status.json endpoint
+	u.Path = strings.TrimSuffix(u.Path, "/") + TovarischStatusEndpoint
+	q := url.Values{}
+	q.Set("include", DiagPeerStatusInclude)
+	u.RawQuery = q.Encode()
 	return u.String()
 }
 

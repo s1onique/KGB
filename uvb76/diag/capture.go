@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -82,6 +83,16 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig) state.Diag
 
 	statusURL := config.DiagPeerStatusURL(peer.BaseURL)
 
+	// Extract sanitized path+query for error evidence (no credentials/host)
+	u, _ := url.Parse(statusURL)
+	var sanitizedPath string
+	if u != nil {
+		sanitizedPath = u.Path
+		if u.RawQuery != "" {
+			sanitizedPath += "?" + u.RawQuery
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cs.cfg.TimeoutMs)*time.Millisecond)
 	defer cancel()
 
@@ -89,6 +100,7 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig) state.Diag
 	if err != nil {
 		capture.Status = state.DiagCaptureStatusError
 		capture.Error = SafeErrorMessage(fmt.Sprintf("request creation failed: %v", err))
+		capture.RequestedPath = &sanitizedPath
 		finishCapture(&capture)
 		return capture
 	}
@@ -102,6 +114,7 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig) state.Diag
 			capture.Status = state.DiagCaptureStatusError
 			capture.Error = SafeErrorMessage(fmt.Sprintf("request failed: %v", err))
 		}
+		capture.RequestedPath = &sanitizedPath
 		finishCapture(&capture)
 		return capture
 	}
@@ -109,7 +122,12 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig) state.Diag
 
 	if resp.StatusCode != http.StatusOK {
 		capture.Status = state.DiagCaptureStatusError
-		capture.Error = SafeErrorMessage(fmt.Sprintf("status code %d", resp.StatusCode))
+		if resp.StatusCode == http.StatusNotFound {
+			capture.Error = SafeErrorMessage("Capture request returned HTTP 404")
+		} else {
+			capture.Error = SafeErrorMessage(fmt.Sprintf("Capture request returned HTTP %d", resp.StatusCode))
+		}
+		capture.RequestedPath = &sanitizedPath
 		finishCapture(&capture)
 		return capture
 	}
@@ -118,6 +136,7 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig) state.Diag
 	if err := json.NewDecoder(resp.Body).Decode(&tovarischResp); err != nil {
 		capture.Status = state.DiagCaptureStatusError
 		capture.Error = SafeErrorMessage(fmt.Sprintf("parse failed: %v", err))
+		capture.RequestedPath = &sanitizedPath
 		finishCapture(&capture)
 		return capture
 	}

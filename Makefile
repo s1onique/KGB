@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test lab-uvb76-capture-url
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 87
@@ -191,6 +191,14 @@ uvb76-build-linux-arm64: uvb76-web-build
 
 uvb76-test: uvb76-web-build
 	cd uvb76 && go test -v ./...
+
+# === UVB-76 Capture URL Lab ===
+# Hermetic regression test for diagnostic capture URL construction.
+# Verifies that diagnostic capture uses canonical /status.json?include=network_diag.
+
+lab-uvb76-capture-url:
+	@echo "=== UVB-76 Capture URL Lab ==="
+	@./scripts/verify_uvb76_capture_url_lab.sh
 
 # === opkg Package Targets (Entware/AsusWRT-Merlin) ===
 

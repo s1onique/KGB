@@ -11,10 +11,21 @@ import (
 )
 
 // fakeTovarischHandler returns a handler that serves fake tovarisch status responses.
+// This handler only accepts the canonical tovarisch endpoint: /status.json
+// with include=network_diag query param. All other paths return 404.
 func fakeTovarischHandler(networkDiagJSON string, statusCode int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/status" {
+		// Must be GET to /status.json with include=network_diag
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if r.URL.Path != "/status.json" {
 			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if r.URL.Query().Get("include") != "network_diag" {
+			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
 		w.WriteHeader(statusCode)
@@ -71,10 +82,10 @@ func setupTestServer(t *testing.T, tovarischServerURL string) (*Server, *state.M
 	hash, _ := config.HashPassword("correct-password", salt)
 
 	cfg := &config.Config{
-		Listen:   config.ListenConfig{Addr: ":0"},
-		Auth:     config.AuthConfig{Username: "admin", PasswordSHA256: hash},
-		Scrape:   config.ScrapeConfig{IntervalSeconds: 30, TimeoutMilliseconds: 5000},
-		Latency:  config.LatencyConfig{},
+		Listen:  config.ListenConfig{Addr: ":0"},
+		Auth:    config.AuthConfig{Username: "admin", PasswordSHA256: hash},
+		Scrape:  config.ScrapeConfig{IntervalSeconds: 30, TimeoutMilliseconds: 5000},
+		Latency: config.LatencyConfig{},
 		Diagnostics: config.DiagnosticsConfig{
 			Enabled:         true,
 			CaptureOnSpike:  true,

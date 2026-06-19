@@ -11,37 +11,37 @@ func TestDiagPeerStatusURL_Basic(t *testing.T) {
 		{
 			name:     "simple host port",
 			baseURL:  "http://host:8317",
-			expected: "http://host:8317/status?include=network_diag",
+			expected: "http://host:8317/status.json?include=network_diag",
 		},
 		{
 			name:     "trailing slash trimmed",
 			baseURL:  "http://host:8317/",
-			expected: "http://host:8317/status?include=network_diag",
+			expected: "http://host:8317/status.json?include=network_diag",
 		},
 		{
 			name:     "with base path",
 			baseURL:  "http://host:8317/api",
-			expected: "http://host:8317/api/status?include=network_diag",
+			expected: "http://host:8317/api/status.json?include=network_diag",
 		},
 		{
 			name:     "with base path and trailing slash",
 			baseURL:  "http://host:8317/api/",
-			expected: "http://host:8317/api/status?include=network_diag",
+			expected: "http://host:8317/api/status.json?include=network_diag",
 		},
 		{
 			name:     "https scheme",
 			baseURL:  "https://secure.host:8443",
-			expected: "https://secure.host:8443/status?include=network_diag",
+			expected: "https://secure.host:8443/status.json?include=network_diag",
 		},
 		{
 			name:     "IP address",
 			baseURL:  "http://10.149.149.1:8317",
-			expected: "http://10.149.149.1:8317/status?include=network_diag",
+			expected: "http://10.149.149.1:8317/status.json?include=network_diag",
 		},
 		{
 			name:     "localhost",
 			baseURL:  "http://localhost:8080",
-			expected: "http://localhost:8080/status?include=network_diag",
+			expected: "http://localhost:8080/status.json?include=network_diag",
 		},
 	}
 
@@ -58,12 +58,12 @@ func TestDiagPeerStatusURL_Basic(t *testing.T) {
 func TestDiagPeerStatusURL_QueryOrder(t *testing.T) {
 	// URL params may be reordered by net/url, verify include param is present
 	result := DiagPeerStatusURL("http://host:8317")
-	
+
 	// Check that include=network_diag is in the result
 	if result == "" {
 		t.Error("DiagPeerStatusURL returned empty string")
 	}
-	
+
 	// The URL should end with include=network_diag or contain it
 	found := false
 	for _, param := range []string{
@@ -81,7 +81,7 @@ func TestDiagPeerStatusURL_QueryOrder(t *testing.T) {
 			break
 		}
 	}
-	
+
 	if !found {
 		t.Errorf("DiagPeerStatusURL result %q does not contain expected param", result)
 	}

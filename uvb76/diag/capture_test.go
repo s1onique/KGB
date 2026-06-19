@@ -47,8 +47,8 @@ func TestTriggerCapture_NoPeerMapping(t *testing.T) {
 
 func TestTriggerCapture_SuccessfulCapture(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/status" {
-			t.Errorf("expected /status, got %s", r.URL.Path)
+		if r.URL.Path != "/status.json" {
+			t.Errorf("expected /status.json, got %s", r.URL.Path)
 		}
 		if r.URL.Query().Get("include") != "network_diag" {
 			t.Errorf("expected include=network_diag, got %s", r.URL.RawQuery)
