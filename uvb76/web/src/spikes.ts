@@ -10,21 +10,28 @@ function escapeText(s: string | null | undefined): string {
   return div.innerHTML;
 }
 
-// Capture status types for display
-type CaptureStatusDisplay = 'ready' | 'in_progress' | 'timeout' | 'error' | 'suppressed_by_cooldown' | 'missing' | 'none';
+// Capture status types for display - explicit statuses matching backend
+type CaptureStatusDisplay = 'captured' | 'skipped_cooldown' | 'failed' | 'disabled' | 'not_configured' | 'not_attempted' | 'in_progress' | 'missing' | 'none';
 
-// Format capture status for display
+// Format capture status for display - uses explicit capture_status field from backend
 function formatCaptureStatus(capture: DiagCapture): CaptureStatusDisplay {
+  // First check explicit capture_status from backend
+  if (capture.capture_status) {
+    return capture.capture_status as CaptureStatusDisplay;
+  }
+  // Fallback to legacy suppressed_by_cooldown flag
   if (capture.suppressed_by_cooldown) {
-    return 'suppressed_by_cooldown';
+    return 'skipped_cooldown';
   }
   switch (capture.status) {
     case 'ok':
-      return 'ready';
+      return 'captured';
     case 'error':
-      return 'error';
+      return 'failed';
     case 'timeout':
-      return 'timeout';
+      return 'failed';
+    case 'disabled':
+      return 'disabled';
     default:
       return 'none';
   }
@@ -33,15 +40,19 @@ function formatCaptureStatus(capture: DiagCapture): CaptureStatusDisplay {
 // Get CSS class for capture status
 function getCaptureStatusClass(status: CaptureStatusDisplay): string {
   switch (status) {
-    case 'ready':
+    case 'captured':
       return 'status-ok';
     case 'in_progress':
       return 'status-warn';
-    case 'timeout':
-    case 'error':
+    case 'failed':
       return 'status-error';
-    case 'suppressed_by_cooldown':
+    case 'skipped_cooldown':
       return 'status-suppressed';
+    case 'disabled':
+    case 'not_configured':
+    case 'not_attempted':
+    case 'missing':
+    case 'none':
     default:
       return 'status-muted';
   }
@@ -50,16 +61,23 @@ function getCaptureStatusClass(status: CaptureStatusDisplay): string {
 // Get human-readable capture status label
 function getCaptureStatusLabel(status: CaptureStatusDisplay): string {
   switch (status) {
-    case 'ready':
-      return 'ready';
+    case 'captured':
+      return 'captured';
     case 'in_progress':
       return 'in progress';
-    case 'timeout':
-      return 'timeout';
-    case 'error':
-      return 'error';
-    case 'suppressed_by_cooldown':
-      return 'suppressed by cooldown';
+    case 'failed':
+      return 'failed';
+    case 'skipped_cooldown':
+      return 'skipped: cooldown';
+    case 'disabled':
+      return 'disabled';
+    case 'not_configured':
+      return 'not configured';
+    case 'not_attempted':
+      return 'not attempted';
+    case 'missing':
+      return 'missing';
+    case 'none':
     default:
       return 'none';
   }
@@ -278,11 +296,8 @@ export async function loadSpikeDiagnostics(targetId: string): Promise<void> {
         captureError = formatError(capture.error);
         const statusLabel = getCaptureStatusLabel(captureStatus);
         const statusClass = getCaptureStatusClass(captureStatus);
-        if (captureStatus === 'suppressed_by_cooldown') {
-          captureBadge = '<span class="capture-badge ' + statusClass + '">suppressed</span>';
-        } else {
-          captureBadge = '<span class="capture-badge ' + statusClass + '">' + statusLabel + '</span>';
-        }
+        // Show explicit status label for all capture statuses
+        captureBadge = '<span class="capture-badge ' + statusClass + '">' + statusLabel + '</span>';
       }
 
       const severityClass = severity.toLowerCase() === 'critical' ? 'severity-critical' : 'severity-warn';

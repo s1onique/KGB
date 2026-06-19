@@ -32,6 +32,12 @@ type DiagCapture struct {
 	// Example: "/status.json?include=network_diag"
 	// This helps operators debug 404 issues without exposing sensitive details.
 	RequestedPath *string `json:"requested_path,omitempty"`
+	// CaptureStatus is the derived capture status for UI display.
+	// This replaces/supplements the boolean suppressed_by_cooldown with explicit status.
+	CaptureStatus CaptureStatus `json:"capture_status"`
+	// CooldownInfo provides auditable metadata when capture was skipped due to cooldown.
+	// This ensures UI can explain WHY a capture was suppressed.
+	CooldownInfo *CaptureCooldownInfo `json:"cooldown_info,omitempty"`
 }
 
 type NetworkDiagData struct {
@@ -241,23 +247,55 @@ type SpikeRetentionStats struct {
 }
 
 // CaptureStatus represents the derived capture protection status for a spike.
+// This is the canonical status for API responses and UI display.
 type CaptureStatus string
 
 const (
-	CaptureStatusReady      CaptureStatus = "ready"                  // capture exists and can be accessed
-	CaptureStatusInProgress CaptureStatus = "in_progress"            // capture creation in flight
-	CaptureStatusTimeout    CaptureStatus = "timeout"                // timeout error
-	CaptureStatusError      CaptureStatus = "error"                  // capture error
-	CaptureStatusSuppressed CaptureStatus = "suppressed_by_cooldown" // suppressed by cooldown
-	CaptureStatusMissing    CaptureStatus = "missing"                // metadata refers to missing artifact
-	CaptureStatusNone       CaptureStatus = "none"                   // no capture attempted
+	// CaptureStatusCaptured indicates a successful capture with attached artifact.
+	CaptureStatusCaptured CaptureStatus = "captured"
+	// CaptureStatusSkippedCooldown indicates capture was skipped due to cooldown from a prior successful capture.
+	CaptureStatusSkippedCooldown CaptureStatus = "skipped_cooldown"
+	// CaptureStatusFailed indicates capture attempt failed (timeout, error, etc.).
+	CaptureStatusFailed CaptureStatus = "failed"
+	// CaptureStatusDisabled indicates capture is not enabled or configured.
+	CaptureStatusDisabled CaptureStatus = "disabled"
+	// CaptureStatusNotConfigured indicates no peer mapping or capture not configured.
+	CaptureStatusNotConfigured CaptureStatus = "not_configured"
+	// CaptureStatusNotAttempted indicates no capture was attempted yet.
+	CaptureStatusNotAttempted CaptureStatus = "not_attempted"
+	// CaptureStatusNone indicates no capture exists for this spike.
+	CaptureStatusNone CaptureStatus = "none"
+	// CaptureStatusInProgress indicates capture is currently in flight.
+	CaptureStatusInProgress CaptureStatus = "in_progress"
+	// CaptureStatusMissing indicates metadata refers to missing artifact.
+	CaptureStatusMissing CaptureStatus = "missing"
 )
+
+// CaptureCooldownInfo holds metadata about why a spike was suppressed by cooldown.
+// This provides auditable context for UI display.
+type CaptureCooldownInfo struct {
+	// Scope indicates the cooldown scope: "global", "per_target", "per_probe", or "per_target_and_probe".
+	Scope string `json:"cooldown_scope"`
+	// LastSuccessfulCaptureAt is the timestamp of the successful capture that started the cooldown.
+	LastSuccessfulCaptureAt *time.Time `json:"last_successful_capture_at,omitempty"`
+	// NextCaptureEligibleAt is when the next capture will be eligible.
+	NextCaptureEligibleAt *time.Time `json:"next_capture_eligible_at,omitempty"`
+	// CooldownSourceSpikeID is the event ID of the spike that caused the cooldown (if retained).
+	CooldownSourceSpikeID string `json:"cooldown_source_spike_id,omitempty"`
+	// CooldownSourceRetained indicates if the source spike is still retained.
+	CooldownSourceRetained bool `json:"cooldown_source_retained"`
+	// CooldownSourceTargetID is the target ID of the source capture.
+	CooldownSourceTargetID string `json:"cooldown_source_target_id,omitempty"`
+	// CooldownSeconds is the configured cooldown duration.
+	CooldownSeconds int `json:"cooldown_seconds"`
+}
 
 // SpikeCaptureInfo holds capture-derived protection info for a spike.
 type SpikeCaptureInfo struct {
-	CaptureStatus CaptureStatus `json:"capture_status"`
-	CaptureExists bool          `json:"capture_exists"` // true if artifact exists
-	IsProtected   bool          `json:"is_protected"`   // true if spike must not be purged
+	CaptureStatus CaptureStatus        `json:"capture_status"`
+	CaptureExists bool                 `json:"capture_exists"` // true if artifact exists
+	IsProtected   bool                 `json:"is_protected"`   // true if spike must not be purged
+	CooldownInfo  *CaptureCooldownInfo `json:"cooldown_info,omitempty"` // cooldown metadata if suppressed
 }
 
 // GetCaptureInfo returns derived capture protection info for a spike.
@@ -287,9 +325,10 @@ func (cs *CaptureStore) GetCaptureInfo(eventID string, isInFlight bool) SpikeCap
 	// Check suppressed by cooldown
 	if capture.SuppressedByCooldown {
 		return SpikeCaptureInfo{
-			CaptureStatus: CaptureStatusSuppressed,
+			CaptureStatus: CaptureStatusSkippedCooldown,
 			CaptureExists: false,
 			IsProtected:   false, // Suppressed captures are purge-eligible
+			CooldownInfo:  capture.CooldownInfo,
 		}
 	}
 
@@ -299,39 +338,39 @@ func (cs *CaptureStore) GetCaptureInfo(eventID string, isInFlight bool) SpikeCap
 		// ok status with no artifact means partial/success without data
 		// Still protected if status is ok (capture was attempted)
 		return SpikeCaptureInfo{
-			CaptureStatus: CaptureStatusReady,
+			CaptureStatus: CaptureStatusCaptured,
 			CaptureExists: capture.NetworkDiag != nil,
 			IsProtected:   true,
 		}
 	case DiagCaptureStatusTimeout:
 		// Timeout with artifact is protected, without is purge-eligible
 		return SpikeCaptureInfo{
-			CaptureStatus: CaptureStatusTimeout,
+			CaptureStatus: CaptureStatusFailed,
 			CaptureExists: capture.NetworkDiag != nil,
 			IsProtected:   capture.NetworkDiag != nil,
 		}
 	case DiagCaptureStatusError:
 		// Error with artifact is protected, without is purge-eligible
 		return SpikeCaptureInfo{
-			CaptureStatus: CaptureStatusError,
+			CaptureStatus: CaptureStatusFailed,
 			CaptureExists: capture.NetworkDiag != nil,
 			IsProtected:   capture.NetworkDiag != nil,
 		}
 	case DiagCaptureStatusDisabled:
 		return SpikeCaptureInfo{
-			CaptureStatus: CaptureStatusNone,
+			CaptureStatus: CaptureStatusDisabled,
 			CaptureExists: false,
 			IsProtected:   false,
 		}
 	case DiagCaptureStatusNoPeerMapping:
 		return SpikeCaptureInfo{
-			CaptureStatus: CaptureStatusNone,
+			CaptureStatus: CaptureStatusNotConfigured,
 			CaptureExists: false,
 			IsProtected:   false,
 		}
 	default:
 		return SpikeCaptureInfo{
-			CaptureStatus: CaptureStatusNone,
+			CaptureStatus: CaptureStatusNotAttempted,
 			CaptureExists: false,
 			IsProtected:   false,
 		}

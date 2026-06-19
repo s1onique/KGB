@@ -141,8 +141,11 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig) state.Diag
 		return capture
 	}
 
+	// Only set CaptureStatusCaptured AFTER successful network diag attachment
+	// This ensures we don't claim success prematurely
 	if tovarischResp.NetworkDiag != nil {
 		capture.NetworkDiag = tovarischResp.NetworkDiag
+		capture.CaptureStatus = state.CaptureStatusCaptured
 	}
 
 	finishCapture(&capture)
@@ -175,12 +178,50 @@ func (cs *CaptureService) recordNoPeerMappingCapture(eventID, targetID string) {
 }
 
 func (cs *CaptureService) recordSuppressedCapture(eventID string, peer *config.DiagPeerConfig, targetID string) {
+	now := time.Now().UTC()
+	
+	// Get cooldown info for auditable metadata
+	lastCaptureTime := cs.captures.GetLastCaptureTime(peer.Name)
+	
+	// Check if this is a valid cooldown suppression (prior successful capture exists)
+	// vs an in-flight race condition (another capture currently running)
+	isCooldownSuppression := !lastCaptureTime.IsZero()
+	
+	if !isCooldownSuppression {
+		// In-flight race condition: another capture is currently running.
+		// This is NOT a cooldown scenario - do NOT set SuppressedByCooldown flag.
+		// This prevents the API projection from returning skipped_cooldown.
+		capture := state.DiagCapture{
+			Source:           peer.Name,
+			BaseURL:          peer.BaseURL,
+			CaptureStartedAt: now,
+			Status:           state.DiagCaptureStatusUnavailable,
+			CaptureStatus:    state.CaptureStatusNotAttempted,
+		}
+		finishCapture(&capture)
+		cs.captures.AddCapture(eventID, capture)
+		return
+	}
+	
+	// Valid cooldown suppression: prior successful capture exists
+	cooldownSeconds := cs.cfg.CooldownSeconds
+	nextEligibleAt := lastCaptureTime.Add(time.Duration(cooldownSeconds) * time.Second)
+	cooldownInfo := &state.CaptureCooldownInfo{
+		Scope:                    "per_target",
+		LastSuccessfulCaptureAt: &lastCaptureTime,
+		NextCaptureEligibleAt:   &nextEligibleAt,
+		CooldownSeconds:         cooldownSeconds,
+		CooldownSourceRetained:  false,
+	}
+	
 	capture := state.DiagCapture{
 		Source:               peer.Name,
 		BaseURL:              peer.BaseURL,
-		CaptureStartedAt:     time.Now().UTC(),
+		CaptureStartedAt:     now,
 		Status:               state.DiagCaptureStatusOK,
 		SuppressedByCooldown: true,
+		CaptureStatus:        state.CaptureStatusSkippedCooldown,
+		CooldownInfo:         cooldownInfo,
 	}
 	finishCapture(&capture)
 	cs.captures.AddCapture(eventID, capture)

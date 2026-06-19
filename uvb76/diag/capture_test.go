@@ -151,7 +151,9 @@ func TestTriggerCapture_InFlightSuppression(t *testing.T) {
 	svc.TriggerCapture("event-1", "target-1")
 	time.Sleep(10 * time.Millisecond)
 
-	// Trigger second capture (should be suppressed due to in-flight)
+	// Trigger second capture (should be suppressed due to in-flight race)
+	// Note: In-flight suppression is NOT a cooldown scenario, so SuppressedByCooldown is false.
+	// Instead, it records not_attempted status since there's no prior successful capture.
 	svc.TriggerCapture("event-2", "target-1")
 	time.Sleep(50 * time.Millisecond)
 
@@ -160,8 +162,9 @@ func TestTriggerCapture_InFlightSuppression(t *testing.T) {
 		t.Fatalf("expected 1 capture, got %d", len(captures))
 	}
 	capture := captures[0]
-	if !capture.SuppressedByCooldown {
-		t.Error("expected suppressed capture due to in-flight")
+	// In-flight without prior successful capture should be not_attempted, not skipped_cooldown
+	if capture.CaptureStatus == state.CaptureStatusSkippedCooldown {
+		t.Error("invariant violation: in-flight capture should not be skipped_cooldown without prior capture")
 	}
 }
 

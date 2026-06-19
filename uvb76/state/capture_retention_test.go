@@ -34,8 +34,8 @@ func TestCaptureStore_GetCaptureInfo_OKWithArtifact(t *testing.T) {
 	})
 
 	info := store.GetCaptureInfo("event-1", false)
-	if info.CaptureStatus != CaptureStatusReady {
-		t.Errorf("expected CaptureStatusReady, got %s", info.CaptureStatus)
+	if info.CaptureStatus != CaptureStatusCaptured {
+		t.Errorf("expected CaptureStatusCaptured, got %s", info.CaptureStatus)
 	}
 	if !info.CaptureExists {
 		t.Error("expected CaptureExists=true")
@@ -58,8 +58,8 @@ func TestCaptureStore_GetCaptureInfo_OKWithoutArtifact(t *testing.T) {
 	})
 
 	info := store.GetCaptureInfo("event-1", false)
-	if info.CaptureStatus != CaptureStatusReady {
-		t.Errorf("expected CaptureStatusReady, got %s", info.CaptureStatus)
+	if info.CaptureStatus != CaptureStatusCaptured {
+		t.Errorf("expected CaptureStatusCaptured, got %s", info.CaptureStatus)
 	}
 	if info.CaptureExists {
 		t.Error("expected CaptureExists=false")
@@ -82,8 +82,8 @@ func TestCaptureStore_GetCaptureInfo_TimeoutWithArtifact(t *testing.T) {
 	})
 
 	info := store.GetCaptureInfo("event-1", false)
-	if info.CaptureStatus != CaptureStatusTimeout {
-		t.Errorf("expected CaptureStatusTimeout, got %s", info.CaptureStatus)
+	if info.CaptureStatus != CaptureStatusFailed {
+		t.Errorf("expected CaptureStatusFailed, got %s", info.CaptureStatus)
 	}
 	if !info.CaptureExists {
 		t.Error("expected CaptureExists=true")
@@ -105,8 +105,8 @@ func TestCaptureStore_GetCaptureInfo_TimeoutWithoutArtifact(t *testing.T) {
 	})
 
 	info := store.GetCaptureInfo("event-1", false)
-	if info.CaptureStatus != CaptureStatusTimeout {
-		t.Errorf("expected CaptureStatusTimeout, got %s", info.CaptureStatus)
+	if info.CaptureStatus != CaptureStatusFailed {
+		t.Errorf("expected CaptureStatusFailed, got %s", info.CaptureStatus)
 	}
 	if info.CaptureExists {
 		t.Error("expected CaptureExists=false")
@@ -128,8 +128,8 @@ func TestCaptureStore_GetCaptureInfo_ErrorWithArtifact(t *testing.T) {
 	})
 
 	info := store.GetCaptureInfo("event-1", false)
-	if info.CaptureStatus != CaptureStatusError {
-		t.Errorf("expected CaptureStatusError, got %s", info.CaptureStatus)
+	if info.CaptureStatus != CaptureStatusFailed {
+		t.Errorf("expected CaptureStatusFailed, got %s", info.CaptureStatus)
 	}
 	if !info.CaptureExists {
 		t.Error("expected CaptureExists=true")
@@ -151,8 +151,8 @@ func TestCaptureStore_GetCaptureInfo_ErrorWithoutArtifact(t *testing.T) {
 	})
 
 	info := store.GetCaptureInfo("event-1", false)
-	if info.CaptureStatus != CaptureStatusError {
-		t.Errorf("expected CaptureStatusError, got %s", info.CaptureStatus)
+	if info.CaptureStatus != CaptureStatusFailed {
+		t.Errorf("expected CaptureStatusFailed, got %s", info.CaptureStatus)
 	}
 	if info.CaptureExists {
 		t.Error("expected CaptureExists=false")
@@ -175,8 +175,8 @@ func TestCaptureStore_GetCaptureInfo_SuppressedCooldown(t *testing.T) {
 	})
 
 	info := store.GetCaptureInfo("event-1", false)
-	if info.CaptureStatus != CaptureStatusSuppressed {
-		t.Errorf("expected CaptureStatusSuppressed, got %s", info.CaptureStatus)
+	if info.CaptureStatus != CaptureStatusSkippedCooldown {
+		t.Errorf("expected CaptureStatusSkippedCooldown, got %s", info.CaptureStatus)
 	}
 	if info.IsProtected {
 		t.Error("expected IsProtected=false for suppressed capture")
@@ -208,8 +208,8 @@ func TestCaptureStore_GetCaptureInfo_Disabled(t *testing.T) {
 	})
 
 	info := store.GetCaptureInfo("event-1", false)
-	if info.CaptureStatus != CaptureStatusNone {
-		t.Errorf("expected CaptureStatusNone for disabled, got %s", info.CaptureStatus)
+	if info.CaptureStatus != CaptureStatusDisabled {
+		t.Errorf("expected CaptureStatusDisabled for disabled, got %s", info.CaptureStatus)
 	}
 	if info.IsProtected {
 		t.Error("expected IsProtected=false for disabled capture")
@@ -227,8 +227,8 @@ func TestCaptureStore_GetCaptureInfo_NoPeerMapping(t *testing.T) {
 	})
 
 	info := store.GetCaptureInfo("event-1", false)
-	if info.CaptureStatus != CaptureStatusNone {
-		t.Errorf("expected CaptureStatusNone for no_peer_mapping, got %s", info.CaptureStatus)
+	if info.CaptureStatus != CaptureStatusNotConfigured {
+		t.Errorf("expected CaptureStatusNotConfigured for no_peer_mapping, got %s", info.CaptureStatus)
 	}
 	if info.IsProtected {
 		t.Error("expected IsProtected=false for no_peer_mapping capture")
@@ -316,8 +316,8 @@ func TestCaptureStore_MultipleCaptures(t *testing.T) {
 
 	// Most recent should be used
 	info := store.GetCaptureInfo("event-1", false)
-	if info.CaptureStatus != CaptureStatusReady {
-		t.Errorf("expected CaptureStatusReady (most recent), got %s", info.CaptureStatus)
+	if info.CaptureStatus != CaptureStatusCaptured {
+		t.Errorf("expected CaptureStatusCaptured (most recent), got %s", info.CaptureStatus)
 	}
 }
 
