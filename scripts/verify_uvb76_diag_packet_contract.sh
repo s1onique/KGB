@@ -102,6 +102,95 @@ verify_packet_shape() {
 }
 
 # =============================================================================
+# TCP Diagnostics Contract Verification
+# =============================================================================
+
+# Contract: Captured HTTP/TCP packets must include EITHER:
+#   - non-empty underlay_tcp array, OR
+#   - explicit structured absence reason via underlay_tcp event with fields.reason
+#
+# UI-only string "No TCP diagnostics captured" is NOT sufficient.
+# Warning-only events with no structured fields are NOT sufficient.
+
+# Allowed absence reasons (machine-checkable, not free-text escape hatch)
+ALLOWED_TCP_ABSENCE_REASONS="no_matching_socket socket_closed_before_capture command_failed not_configured permission_denied target_not_tcp target_mapping_missing unsupported_platform"
+
+verify_tcp_diagnostics_contract() {
+    local packet_file="$1"; local phase="${2:-unknown}"; local ok=true
+    log_info "Verifying TCP diagnostics contract: $packet_file (phase: $phase)"
+    
+    # First verify basic packet shape
+    if ! jq -e '.network_diag != null' "$packet_file" >/dev/null 2>&1; then
+        log_fail "TCP contract requires network_diag (phase: $phase)"
+        return 1
+    fi
+    
+    # HARDENING 1: Enforce underlay_tcp is an array (not object or other type)
+    if ! jq -e '(.network_diag.underlay_tcp | type) == "array"' "$packet_file" >/dev/null 2>&1; then
+        log_fail "TCP contract FAILED: underlay_tcp must be an array, not object/other type (phase: $phase)"
+        return 1
+    fi
+    
+    # Check if underlay_tcp has entries
+    local tcp_count
+    tcp_count=$(jq '.network_diag.underlay_tcp | length' "$packet_file" 2>/dev/null || echo "0")
+    log_info "  underlay_tcp count: $tcp_count"
+    
+    if [[ "$tcp_count" -gt 0 ]]; then
+        # Has TCP sockets - contract satisfied
+        log_pass "TCP diagnostics contract satisfied: has $tcp_count socket(s) (phase: $phase)"
+        return 0
+    fi
+    
+    # Empty underlay_tcp - require structured absence reason via underlay_tcp event
+    log_info "  underlay_tcp is empty, checking for structured absence reason..."
+    
+    # HARDENING 2 & 3: Support fields as object OR JSON string, validate reason against allowlist
+    # Extract all reason values from underlay_tcp events and check against allowlist
+    local has_valid_reason=false
+    local found_reason="none"
+    
+    # Get all underlay_tcp event reasons as space-separated string
+    # Handle both object-style and string-style fields
+    local reasons
+    reasons=$(jq -r '[
+      .network_diag.events[] | 
+      select(.source == "underlay_tcp") | 
+      select(.fields != null) |
+      if (.fields | type) == "object" then .fields.reason
+      elif (.fields | type) == "string" then (.fields | fromjson | .reason)
+      else null end
+    ] | map(select(. != null)) | join(" ")' "$packet_file" 2>/dev/null || echo "")
+    
+    log_info "  Found reasons in events: '$reasons'"
+    
+    # Check if any found reason is in the allowlist
+    for found in $reasons; do
+        for allowed in $ALLOWED_TCP_ABSENCE_REASONS; do
+            if [[ "$found" == "$allowed" ]]; then
+                has_valid_reason=true
+                found_reason="$allowed"
+                break 2
+            fi
+        done
+    done
+    
+    if [[ "$has_valid_reason" == "true" ]]; then
+        log_pass "TCP diagnostics contract satisfied: structured absence reason '$found_reason' (phase: $phase)"
+        return 0
+    fi
+    
+    # FAIL: empty TCP without valid structured reason
+    log_fail "TCP diagnostics contract FAILED: empty underlay_tcp with no allowed structured absence reason (phase: $phase)"
+    log_fail "  Expected: non-empty underlay_tcp array OR underlay_tcp event with allowed fields.reason"
+    log_fail "  Allowed reasons: $ALLOWED_TCP_ABSENCE_REASONS"
+    log_fail "  Found reasons: '${reasons:-none}'"
+    log_fail "  UI-only messages like 'No TCP diagnostics captured' are NOT sufficient"
+    ok=false
+    [[ "$ok" == "true" ]] && return 0 || return 1
+}
+
+# =============================================================================
 # Contract summary
 # =============================================================================
 
@@ -143,6 +232,21 @@ run_self_test() {
     echo "$FIXTURE_BAD_SKIPPED_NO_LAST" > "$test_dir/bad-skipped-no-last.json"; run_test "Bad: skipped_cooldown without last_successful_capture_at" fail verify_skipped_cooldown_row "$test_dir/bad-skipped-no-last.json" "self-test"
     echo "$FIXTURE_BAD_CAPTURED_NO_PACKET" > "$test_dir/bad-captured-no-packet.json"; run_test "Bad: captured packet with network_diag null" fail verify_packet_shape "$test_dir/bad-captured-no-packet.json" "self-test"
     echo "$FIXTURE_BAD_CAPTURED_NO_EXISTS" > "$test_dir/bad-captured-no-exists.json"; run_test "Bad: captured with capture_exists=false" fail verify_captured_row "$test_dir/bad-captured-no-exists.json" "self-test"
+    
+    # TCP Diagnostics Contract Tests
+    echo "$FIXTURE_GOOD_TCP_WITH_SOCKETS" > "$test_dir/good-tcp-with-sockets.json"; run_test "Good: TCP with sockets" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-with-sockets.json" "self-test"
+    echo "$FIXTURE_GOOD_TCP_ABSENCE_WITH_EVENT" > "$test_dir/good-tcp-absence-event.json"; run_test "Good: TCP absence with structured event" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-absence-event.json" "self-test"
+    echo "$FIXTURE_GOOD_TCP_ABSENCE_SOCKET_CLOSED" > "$test_dir/good-tcp-socket-closed.json"; run_test "Good: TCP socket_closed_before_capture" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-socket-closed.json" "self-test"
+    echo "$FIXTURE_GOOD_TCP_ABSENCE_COMMAND_FAILED" > "$test_dir/good-tcp-command-failed.json"; run_test "Good: TCP command_failed reason" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-command-failed.json" "self-test"
+    echo "$FIXTURE_GOOD_TCP_ABSENCE_NOT_CONFIGURED" > "$test_dir/good-tcp-not-configured.json"; run_test "Good: TCP not_configured reason" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-not-configured.json" "self-test"
+    echo "$FIXTURE_GOOD_TCP_FIELDS_AS_OBJECT" > "$test_dir/good-tcp-fields-as-object.json"; run_test "Good: TCP fields as object with reason" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-fields-as-object.json" "self-test"
+    echo "$FIXTURE_BAD_TCP_ABSENCE_NO_EVENT" > "$test_dir/bad-tcp-no-event.json"; run_test "Bad: TCP absence with no event" fail verify_tcp_diagnostics_contract "$test_dir/bad-tcp-no-event.json" "self-test"
+    echo "$FIXTURE_BAD_TCP_WARNING_ONLY" > "$test_dir/bad-tcp-warning-only.json"; run_test "Bad: TCP warning-only (no structured reason)" fail verify_tcp_diagnostics_contract "$test_dir/bad-tcp-warning-only.json" "self-test"
+    echo "$FIXTURE_BAD_TCP_NO_FIELDS_IN_EVENT" > "$test_dir/bad-tcp-no-fields.json"; run_test "Bad: TCP event without fields" fail verify_tcp_diagnostics_contract "$test_dir/bad-tcp-no-fields.json" "self-test"
+    echo "$FIXTURE_BAD_TCP_UNDERLAY_IS_OBJECT" > "$test_dir/bad-tcp-underlay-is-object.json"; run_test "Bad: TCP underlay_tcp is object, not array" fail verify_tcp_diagnostics_contract "$test_dir/bad-tcp-underlay-is-object.json" "self-test"
+    echo "$FIXTURE_BAD_TCP_UNKNOWN_REASON" > "$test_dir/bad-tcp-unknown-reason.json"; run_test "Bad: TCP unknown reason" fail verify_tcp_diagnostics_contract "$test_dir/bad-tcp-unknown-reason.json" "self-test"
+    echo "$FIXTURE_BAD_TCP_MALFORMED_FIELDS" > "$test_dir/bad-tcp-malformed-fields.json"; run_test "Bad: TCP malformed fields JSON" fail verify_tcp_diagnostics_contract "$test_dir/bad-tcp-malformed-fields.json" "self-test"
+    
     rm -rf "$test_dir"; echo "=== Self-test Summary ==="; echo "Passed: $t_pass"; echo "Failed: $t_err"
     [[ $t_err -gt 0 ]] && echo "SELF-TEST FAILED" || echo "SELF-TEST PASSED"
     [[ $t_err -gt 0 ]] && return 1 || return 0
@@ -221,11 +325,13 @@ main() {
             esac
             rm -f "$tmp_norm"
         done
-        # Verify all phase packets
+        # Verify all phase packets (shape + TCP diagnostics contract)
         for packet in "$verify_dir"/phase*-capture-packet.json; do
             [[ -f "$packet" ]] || continue
             local phase; phase=$(basename "$packet" .json)
             verify_packet_shape "$packet" "$phase" || ok=false
+            # TCP diagnostics contract: all captured packets must have TCP diagnostics or structured absence
+            verify_tcp_diagnostics_contract "$packet" "$phase" || ok=false
         done
         [[ "$ok" == "true" ]] && exit 0 || exit 1
     fi
@@ -240,6 +346,8 @@ main() {
     fi
     if [[ -n "$cap_file" ]]; then
         verify_packet_shape "$cap_file" "$phase" || ok=false
+        # TCP diagnostics contract
+        verify_tcp_diagnostics_contract "$cap_file" "$phase" || ok=false
     fi
     if [[ -n "$out_file" ]]; then
         write_contract_summary "$phase" "$row_file" "$cap_file" "$out_file"

@@ -61,3 +61,206 @@ FIXTURE_BAD_CAPTURED_NO_EXISTS='{"capture_status":"captured","capture_exists":fa
 FIXTURE_BAD_CAPTURED_NOT_PROTECTED='{"capture_status":"captured","capture_exists":true,"is_protected":false}'
 FIXTURE_BAD_NOT_ATTEMPTED_SUPPRESSED='{"capture_status":"not_attempted","capture_exists":false,"is_protected":false,"suppressed_by_cooldown":true}'
 FIXTURE_BAD_FAILED_WITH_COOLDOWN='{"capture_status":"failed","cooldown_info":{"last_successful_capture_at":"2026-01-01T00:00:00Z","next_capture_eligible_at":"2026-01-01T00:00:05Z","cooldown_seconds":5}}'
+
+# =============================================================================
+# TCP Diagnostics Contract Fixtures
+# =============================================================================
+
+# Good: packet with actual TCP socket diagnostics
+FIXTURE_GOOD_TCP_WITH_SOCKETS='{
+  "network_diag": {
+    "status": "ok",
+    "started_at": "2026-01-01T00:00:00Z",
+    "underlay_tcp": [
+      {
+        "name": "xray",
+        "state": "ESTAB",
+        "local": "127.0.0.1:8080",
+        "remote": "127.0.0.1:9090",
+        "rtt_ms": 0.5,
+        "status": "ok"
+      }
+    ],
+    "events": []
+  }
+}'
+
+# Good: packet with empty TCP but structured absence reason via event
+FIXTURE_GOOD_TCP_ABSENCE_WITH_EVENT='{
+  "network_diag": {
+    "status": "ok",
+    "started_at": "2026-01-01T00:00:00Z",
+    "underlay_tcp": [],
+    "events": [
+      {
+        "ts": "2026-01-01T00:00:00Z",
+        "severity": "warning",
+        "source": "underlay_tcp",
+        "message": "no matching socket found for filter",
+        "fields": "{\"reason\":\"no_matching_socket\",\"filter_port\":8080}"
+      }
+    ]
+  }
+}'
+
+# Good: packet with empty TCP but socket_closed_before_capture reason
+FIXTURE_GOOD_TCP_ABSENCE_SOCKET_CLOSED='{
+  "network_diag": {
+    "status": "warning",
+    "started_at": "2026-01-01T00:00:00Z",
+    "underlay_tcp": [],
+    "events": [
+      {
+        "ts": "2026-01-01T00:00:00Z",
+        "severity": "warning",
+        "source": "underlay_tcp",
+        "message": "socket closed before capture completed",
+        "fields": "{\"reason\":\"socket_closed_before_capture\"}"
+      }
+    ]
+  }
+}'
+
+# Good: packet with command_failed reason
+FIXTURE_GOOD_TCP_ABSENCE_COMMAND_FAILED='{
+  "network_diag": {
+    "status": "unavailable",
+    "started_at": "2026-01-01T00:00:00Z",
+    "underlay_tcp": [],
+    "events": [
+      {
+        "ts": "2026-01-01T00:00:00Z",
+        "severity": "error",
+        "source": "underlay_tcp",
+        "message": "ss -tin command failed",
+        "fields": "{\"reason\":\"command_failed\",\"exit_code\":127}"
+      }
+    ]
+  }
+}'
+
+# Good: packet with not_configured reason (TCP diag disabled)
+FIXTURE_GOOD_TCP_ABSENCE_NOT_CONFIGURED='{
+  "network_diag": {
+    "status": "disabled",
+    "started_at": "2026-01-01T00:00:00Z",
+    "underlay_tcp": [],
+    "events": [
+      {
+        "ts": "2026-01-01T00:00:00Z",
+        "severity": "info",
+        "source": "underlay_tcp",
+        "message": "underlay TCP diagnostics disabled by config",
+        "fields": "{\"reason\":\"not_configured\"}"
+      }
+    ]
+  }
+}'
+
+# Bad: packet with empty TCP but NO events (missing structured reason)
+FIXTURE_BAD_TCP_ABSENCE_NO_EVENT='{
+  "network_diag": {
+    "status": "ok",
+    "started_at": "2026-01-01T00:00:00Z",
+    "underlay_tcp": [],
+    "events": []
+  }
+}'
+
+# Bad: packet with underlay_tcp entries but warning-only event (no structured reason)
+FIXTURE_BAD_TCP_WARNING_ONLY='{
+  "network_diag": {
+    "status": "warning",
+    "started_at": "2026-01-01T00:00:00Z",
+    "underlay_tcp": [],
+    "events": [
+      {
+        "ts": "2026-01-01T00:00:00Z",
+        "severity": "warning",
+        "source": "underlay_tcp",
+        "message": "No TCP diagnostics captured"
+      }
+    ]
+  }
+}'
+
+# Bad: packet with underlay_tcp entries but no fields in event
+FIXTURE_BAD_TCP_NO_FIELDS_IN_EVENT='{
+  "network_diag": {
+    "status": "warning",
+    "started_at": "2026-01-01T00:00:00Z",
+    "underlay_tcp": [],
+    "events": [
+      {
+        "ts": "2026-01-01T00:00:00Z",
+        "severity": "warning",
+        "source": "underlay_tcp",
+        "message": "TCP diag unavailable"
+      }
+    ]
+  }
+}'
+
+# Good: fields is an object (not JSON string) with allowed reason
+FIXTURE_GOOD_TCP_FIELDS_AS_OBJECT='{
+  "network_diag": {
+    "status": "warning",
+    "started_at": "2026-01-01T00:00:00Z",
+    "underlay_tcp": [],
+    "events": [
+      {
+        "ts": "2026-01-01T00:00:00Z",
+        "severity": "warning",
+        "source": "underlay_tcp",
+        "message": "no matching socket found",
+        "fields": {"reason": "no_matching_socket", "filter_port": 8080}
+      }
+    ]
+  }
+}'
+
+# Bad: underlay_tcp is an object, not an array
+FIXTURE_BAD_TCP_UNDERLAY_IS_OBJECT='{
+  "network_diag": {
+    "status": "ok",
+    "started_at": "2026-01-01T00:00:00Z",
+    "underlay_tcp": {"count": 1},
+    "events": []
+  }
+}'
+
+# Bad: reason is not in the allowlist
+FIXTURE_BAD_TCP_UNKNOWN_REASON='{
+  "network_diag": {
+    "status": "warning",
+    "started_at": "2026-01-01T00:00:00Z",
+    "underlay_tcp": [],
+    "events": [
+      {
+        "ts": "2026-01-01T00:00:00Z",
+        "severity": "warning",
+        "source": "underlay_tcp",
+        "message": "TCP diag unavailable",
+        "fields": "{\"reason\":\"lol\"}"
+      }
+    ]
+  }
+}'
+
+# Bad: fields is malformed JSON string
+FIXTURE_BAD_TCP_MALFORMED_FIELDS='{
+  "network_diag": {
+    "status": "warning",
+    "started_at": "2026-01-01T00:00:00Z",
+    "underlay_tcp": [],
+    "events": [
+      {
+        "ts": "2026-01-01T00:00:00Z",
+        "severity": "warning",
+        "source": "underlay_tcp",
+        "message": "TCP diag unavailable",
+        "fields": "{bad json"
+      }
+    ]
+  }
+}'
