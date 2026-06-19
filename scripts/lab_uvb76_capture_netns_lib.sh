@@ -178,6 +178,7 @@ setup_temp_dir() {
     PHASE0_STATUS_FILE="$LAB_DIR/${ARTIFACT_PHASE0_STATUS}"
     PHASE0_PROBE_READY_FILE="$LAB_DIR/${ARTIFACT_PHASE0_PROBE_READY}"
     EFFECTIVE_PROBE_URL_FILE="$LAB_DIR/${ARTIFACT_EFFECTIVE_PROBE_URL}"
+    EFFECTIVE_DIAG_URL_FILE="$LAB_DIR/${ARTIFACT_EFFECTIVE_DIAG_URL}"
     PHASE1_SPIKE_EVENT_FILE="$LAB_DIR/${ARTIFACT_PHASE1_SPIKE_EVENT}"
     PHASE1_SPIKE_ROW_FILE="$LAB_DIR/${ARTIFACT_PHASE1_SPIKE_ROW}"
     PHASE1_CAPTURE_PACKET_FILE="$LAB_DIR/${ARTIFACT_PHASE1_CAPTURE_PACKET}"
@@ -253,7 +254,10 @@ generate_uvb76_config() {
     # - With probe_url set, UVB-76 probes /lab/probe (not base_url + /status)
     local probe_url="http://${IP_TOVARISCH}:${TOVARISCH_PORT}/lab/probe"
     local base_url="http://${IP_TOVARISCH}:${TOVARISCH_PORT}"
-    local diag_url="http://${IP_TOVARISCH}:${TOVARISCH_PORT}/status"
+    # IMPORTANT: diagnostics base_url must be origin-only (no path).
+    # DiagPeerStatusURL() appends /status.json automatically.
+    # Using "/status" here would cause double-path: /status/status.json
+    local diag_base_url="${base_url}"
     
     cat > "$UVB76_CONFIG" <<EOF
 {
@@ -264,14 +268,14 @@ generate_uvb76_config() {
     "http": {"enabled": true, "interval_seconds": 2, "timeout_milliseconds": 1000, "window_seconds": 60, "retained_range_seconds": 120, "histogram_buckets_ms": [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000], "recent_samples_max": 120},
     "icmp": {"enabled": false, "interval_seconds": 1, "timeout_seconds": 3, "window_seconds": 60, "retained_range_seconds": 300, "histogram_buckets_ms": [1, 5, 10, 25, 50, 100, 250, 500, 1000], "recent_samples_max": 300}
   },
-  "diagnostics": {"enabled": true, "capture_on_spike": true, "timeout_ms": 2000, "cooldown_seconds": 5, "max_uncaptured_spikes": 50, "peers": [{"name": "tovarisch-lab", "base_url": "${diag_url}", "targets": ["lab-tovarisch"]}]},
+  "diagnostics": {"enabled": true, "capture_on_spike": true, "timeout_ms": 2000, "cooldown_seconds": 5, "max_uncaptured_spikes": 50, "peers": [{"name": "tovarisch-lab", "base_url": "${diag_base_url}", "targets": ["lab-tovarisch"]}]},
   "targets": [{"id": "lab-tovarisch", "name": "Lab Tovarisch", "base_url": "${base_url}", "probe_url": "${probe_url}", "enabled": true}]
 }
 EOF
     log_info "UVB-76 config: $UVB76_CONFIG"
     log_info "  Probe URL (probe_url): $probe_url"
     log_info "  Base URL (base_url): $base_url"
-    log_info "  Diagnostic base: $diag_url"
+    log_info "  Diagnostic base_url: $diag_base_url (DiagPeerStatusURL will append /status.json?include=network_diag)"
 }
 
 start_tovarisch() {

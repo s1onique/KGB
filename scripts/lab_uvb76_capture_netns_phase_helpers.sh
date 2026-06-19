@@ -6,6 +6,9 @@
 # Declare effective probe URL file globally (set in lib)
 declare -g EFFECTIVE_PROBE_URL_FILE=""
 
+# Declare effective diagnostic URL file globally (set in lib)
+declare -g EFFECTIVE_DIAG_URL_FILE=""
+
 # Save the effective probe URL as an artifact for verification.
 # This fetches from UVB-76 targets API and extracts the effective_probe_url field.
 save_effective_probe_url() {
@@ -163,4 +166,74 @@ wait_for_skipped_cooldown_spike_row_after_event() {
     fi
 
     return 1
+}
+
+# Save the effective diagnostic capture URL as an artifact for Phase 0 verification.
+# The diagnostic capture URL is derived from the diagnostics peer base_url:
+# - If base_url is "http://host:port", DiagPeerStatusURL() produces "http://host:port/status.json?include=network_diag"
+# - If base_url is "http://host:port/status", it produces "http://host:port/status/status.json" (DOUBLE PATH - WRONG)
+# This artifact proves the URL construction is correct.
+save_effective_diag_url() {
+    log_info "Saving effective diagnostic capture URL artifact..."
+    
+    # Get diagnostics config from UVB-76 API
+    local response
+    response=$(ip netns exec "$NS_UVB76" curl -s -c /tmp/uvb76-cookies.txt -b /tmp/uvb76-cookies.txt \
+        "${UVB76_API_URL}/api/v1/config/diagnostics" 2>/dev/null)
+
+    if [[ -z "$response" ]] || ! echo "$response" | jq -e . >/dev/null 2>&1; then
+        log_error "[FAIL] Failed to get diagnostics config from UVB-76 API"
+        echo "{}" > "$EFFECTIVE_DIAG_URL_FILE"
+        return 1
+    fi
+
+    # Extract peer base_url for lab-tovarisch target
+    local peer_base_url
+    peer_base_url=$(echo "$response" | jq -r '.peers[] | select(.targets[] == "lab-tovarisch") | .base_url // empty' 2>/dev/null)
+
+    if [[ -z "$peer_base_url" || "$peer_base_url" == "empty" ]]; then
+        log_error "[FAIL] Diagnostics peer base_url not found for lab-tovarisch"
+        echo "$response" | jq '.' > "$EFFECTIVE_DIAG_URL_FILE"
+        return 1
+    fi
+
+    # Derive expected diagnostic URL using the same logic as config.DiagPeerStatusURL()
+    # The Go DiagPeerStatusURL function:
+    # 1. Parses base_url
+    # 2. Sets path to base_path + "/status.json"
+    # 3. Adds "?include=network_diag"
+    # So "http://host:port" → "http://host:port/status.json?include=network_diag"
+    local diag_base="${peer_base_url%/}"  # Remove trailing slash
+    local expected_diag_url="${diag_base}/status.json?include=network_diag"
+
+    # Verify the diagnostic URL is reachable from the uvb76 namespace
+    local diag_status
+    diag_status=$(ip netns exec "$NS_UVB76" curl -s -o /dev/null -w "%{http_code}" \
+        "$expected_diag_url" 2>/dev/null)
+
+    # Save as artifact
+    cat > "$EFFECTIVE_DIAG_URL_FILE" <<EOF
+{
+  "target_id": "lab-tovarisch",
+  "peer_base_url": "${peer_base_url}",
+  "expected_diag_url": "${expected_diag_url}",
+  "diag_url_http_status": "${diag_status}",
+  "expected_status": "200",
+  "path_check": "should be /status.json?include=network_diag (NOT /status/status.json)"
+}
+EOF
+
+    log_info "[PASS] Effective diagnostic URL saved: $expected_diag_url"
+    log_info "  Peer base_url: $peer_base_url"
+    log_info "  Diagnostic URL HTTP status: $diag_status"
+    
+    # Verify it returns 200
+    if [[ "$diag_status" == "200" ]]; then
+        log_info "[PASS] Diagnostic URL is reachable (HTTP 200)"
+        return 0
+    else
+        log_error "[FAIL] Diagnostic URL returned $diag_status, expected 200"
+        log_error "This suggests a double-path issue: base_url should be origin-only, not include /status"
+        return 1
+    fi
 }

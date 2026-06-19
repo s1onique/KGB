@@ -32,6 +32,13 @@ type DiagCapture struct {
 	// Example: "/status.json?include=network_diag"
 	// This helps operators debug 404 issues without exposing sensitive details.
 	RequestedPath *string `json:"requested_path,omitempty"`
+	// EffectiveCaptureURL is the full URL that was requested (with query params).
+	// Useful for debugging URL construction issues.
+	// Example: "http://host:8317/status.json?include=network_diag"
+	EffectiveCaptureURL string `json:"effective_capture_url,omitempty"`
+	// HTTPStatusCode captures the HTTP status code from the diagnostic response.
+	// This helps distinguish between 404 (path issue), 500 (server error), etc.
+	HTTPStatusCode *int `json:"http_status_code,omitempty"`
 	// CaptureStatus is the derived capture status for UI display.
 	// This replaces/supplements the boolean suppressed_by_cooldown with explicit status.
 	CaptureStatus CaptureStatus `json:"capture_status"`

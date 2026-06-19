@@ -75,13 +75,14 @@ func (cs *CaptureService) TriggerCapture(eventID, targetID string) {
 
 func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig) state.DiagCapture {
 	capture := state.DiagCapture{
-		Source:           peer.Name,
-		BaseURL:          peer.BaseURL,
-		CaptureStartedAt: time.Now().UTC(),
-		Status:           state.DiagCaptureStatusOK,
+		Source:               peer.Name,
+		BaseURL:              peer.BaseURL,
+		CaptureStartedAt:     time.Now().UTC(),
+		Status:               state.DiagCaptureStatusOK,
+		EffectiveCaptureURL: config.DiagPeerStatusURL(peer.BaseURL),
 	}
 
-	statusURL := config.DiagPeerStatusURL(peer.BaseURL)
+	statusURL := capture.EffectiveCaptureURL
 
 	// Extract sanitized path+query for error evidence (no credentials/host)
 	u, _ := url.Parse(statusURL)
@@ -120,10 +121,13 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig) state.Diag
 	}
 	defer resp.Body.Close()
 
+	// Record HTTP status code for all responses (including errors)
+	capture.HTTPStatusCode = &resp.StatusCode
+
 	if resp.StatusCode != http.StatusOK {
 		capture.Status = state.DiagCaptureStatusError
 		if resp.StatusCode == http.StatusNotFound {
-			capture.Error = SafeErrorMessage("Capture request returned HTTP 404")
+			capture.Error = SafeErrorMessage("Capture request returned HTTP 404 (check base_url is origin-only, not full path)")
 		} else {
 			capture.Error = SafeErrorMessage(fmt.Sprintf("Capture request returned HTTP %d", resp.StatusCode))
 		}

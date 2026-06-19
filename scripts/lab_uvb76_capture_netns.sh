@@ -95,6 +95,14 @@ run_lab() {
         exit 1
     fi
     
+    # CRITICAL: Save and verify effective diagnostic URL BEFORE anything else
+    # This proves the exact URL UVB-76 will use for diagnostic capture.
+    # Verifies base_url is origin-only (not full path) to avoid double-path issues.
+    if ! save_effective_diag_url; then
+        log_error "[FAIL] Effective diagnostic URL verification failed - lab cannot proceed"
+        exit 1
+    fi
+    
     save_phase0_status
 
     if wait_for_probe_samples_after_cursor "lab-tovarisch" "http" "" "true" 20 "$BASELINE_PROBE_READY_FILE"; then

@@ -43,6 +43,11 @@ func TestDiagPeerStatusURL_Basic(t *testing.T) {
 			baseURL:  "http://localhost:8080",
 			expected: "http://localhost:8080/status.json?include=network_diag",
 		},
+		{
+			name:     "IP address with trailing slash",
+			baseURL:  "http://10.88.76.2:8317/",
+			expected: "http://10.88.76.2:8317/status.json?include=network_diag",
+		},
 	}
 
 	for _, tt := range tests {
