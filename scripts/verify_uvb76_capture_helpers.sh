@@ -91,6 +91,39 @@ run_normalize_capture_status_tests() {
     # empty -> pending
     test_normalize_capture_status "" "pending" "empty maps to pending"
     
+    # EXTRACTION SELF-TEST: Full JSON extraction rule
+    # Test case 1: capture_status="" + status="timeout" -> extraction gives "timeout" -> normalized "failed"
+    # Empty .capture_status is treated as absent, falls back to .status
+    local cap_json='{"capture_status": "", "status": "timeout"}'
+    local extracted
+    extracted=$(echo "$cap_json" | jq -r '.capture_status // empty' 2>/dev/null)
+    if [[ -z "$extracted" ]]; then
+        # No capture_status -> fall back to status
+        extracted=$(echo "$cap_json" | jq -r '.status // "unknown"' 2>/dev/null)
+    fi
+    local expected="failed"
+    local actual
+    actual=$(normalize_capture_status "$extracted")
+    if [[ "$actual" == "$expected" ]]; then
+        log_pass "EXTRACTION: capture_status=\"\" + status=\"timeout\" -> normalized=\"$actual\" (expected: $expected)"
+    else
+        log_fail "EXTRACTION: capture_status=\"\" + status=\"timeout\" -> normalized=\"$actual\" (expected: $expected)"
+    fi
+    
+    # Test case 2: capture_status="skipped_cooldown" + status="ok" -> extraction gives "skipped_cooldown"
+    cap_json='{"capture_status": "skipped_cooldown", "status": "ok"}'
+    extracted=$(echo "$cap_json" | jq -r '.capture_status // empty' 2>/dev/null)
+    if [[ -z "$extracted" ]]; then
+        extracted=$(echo "$cap_json" | jq -r '.status // "unknown"' 2>/dev/null)
+    fi
+    expected="skipped_cooldown"
+    actual=$(normalize_capture_status "$extracted")
+    if [[ "$actual" == "$expected" ]]; then
+        log_pass "EXTRACTION: capture_status=\"skipped_cooldown\" + status=\"ok\" -> normalized=\"$actual\" (expected: $expected)"
+    else
+        log_fail "EXTRACTION: capture_status=\"skipped_cooldown\" + status=\"ok\" -> normalized=\"$actual\" (expected: $expected)"
+    fi
+    
     # unknown -> unknown
     test_normalize_capture_status "unknown" "unknown" "unknown maps to unknown"
     

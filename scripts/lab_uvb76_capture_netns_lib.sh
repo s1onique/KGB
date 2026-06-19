@@ -17,6 +17,8 @@ source "${SCRIPT_DIR}/lab_uvb76_capture_netns_diag.sh"
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_poll.sh"
 # shellcheck source=lab_uvb76_capture_netns_capture_poll.sh
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_capture_poll.sh"
+# shellcheck source=lab_uvb76_capture_netns_fetch_packet.sh
+source "${SCRIPT_DIR}/lab_uvb76_capture_netns_fetch_packet.sh"
 # shellcheck source=lab_uvb76_capture_netns_result.sh
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_result.sh"
 # shellcheck source=lab_uvb76_capture_netns_tovarisch.sh

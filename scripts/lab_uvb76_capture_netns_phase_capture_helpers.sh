@@ -3,6 +3,14 @@
 #
 # Extracted helper functions to keep the main lab script under LLM-friendly limits.
 # Sourced by lab_uvb76_capture_netns_lib.sh.
+#
+# CRITICAL TIMING: For captured/skipped_cooldown/captured contract:
+#   - Inject defect to trigger spike detection (probe fails)
+#   - Clear defect BEFORE waiting for capture
+#   - Wait for capture (now succeeds because defect is cleared)
+#   - Fetch diagnostic packet (also works because defect is cleared)
+#
+# This ensures Phase 1/3 capture_status=captured, not failed/timeout.
 
 # Wait for spike event and then capture, then fetch diagnostic packet.
 # Returns 0 on success, sets CONTRACT_*_CAPTURE_OK and CONTRACT_*_PACKET_OK globals.
@@ -22,7 +30,10 @@ wait_and_fetch_capture_with_defect_clear() {
     local captured=false
     local packet_ok=false
     
-    # Inject defect to trigger spike
+    # STEP 0: Inject defect to trigger spike detection
+    # The spike is detected based on the probe's observed failure (timeout).
+    # We don't need to maintain the defect for the capture itself.
+    log_info "Phase $phase_num Step 0: Injecting defect to trigger probe failure..."
     inject_netem_defect "$defect_mode"
     
     # Verify defect is in place
@@ -33,6 +44,7 @@ wait_and_fetch_capture_with_defect_clear() {
     log_info "[PASS] Defect verified - ping fails as expected"
     
     # STEP 1: Wait for HTTP failure spike EVENT
+    # The spike event is created when the probe detects the failure.
     log_info "Phase $phase_num Step 1: Waiting for failure spike event..."
     if wait_for_spike_event_after_cursor "$phase_prefix" "$phase_cursor" "http_probe_timeout|http_probe_failure|http_probe_connection_refused" "$spike_timeout" "$LAB_DIR/spikes-${phase_prefix}-poll.json"; then
         local_event_id="$MATCHED_EVENT_ID"
@@ -43,7 +55,15 @@ wait_and_fetch_capture_with_defect_clear() {
         export "$phase_event_id_var=$local_event_id"
         export "$phase_reasons_var=$local_reasons"
         
+        # CRITICAL FIX: Clear defect BEFORE waiting for capture
+        # The capture itself should succeed (not fail/timeout) to produce
+        # capture_status=captured. The spike event already captured the failure.
+        log_info "Phase $phase_num: Clearing defect before capture wait..."
+        clear_defect
+        sleep 2
+        
         # STEP 2: Wait for the CAPTURE for this event
+        # With defect cleared, the capture should succeed (status=ok → captured).
         log_info "Phase $phase_num Step 2: Waiting for capture for event $local_event_id..."
         if wait_for_spike_capture_after_event "$phase_prefix" "$local_event_id" "$capture_timeout" "$LAB_DIR/spikes-${phase_prefix}-capture-poll.json"; then
             log_info "[PASS] Phase $phase_num capture found for event $local_event_id"
@@ -65,12 +85,7 @@ wait_and_fetch_capture_with_defect_clear() {
                 local phase_event_file="${!phase_event_file_var}"
                 save_phase_spike_event "$phase_num" "$phase_event_file" "$(cat "$LAB_DIR/spikes-${phase_prefix}.json")" "$local_event_id" "$local_reasons"
                 
-                # CRITICAL: Clear defect BEFORE fetching diagnostic packet
-                log_info "Clearing defect before diagnostic packet fetch..."
-                clear_defect
-                sleep 1
-                
-                # Fetch diagnostic packet
+                # Fetch diagnostic packet (defect already cleared above)
                 local metadata_file="$LAB_DIR/${phase_prefix}-capture-metadata.json"
                 local fetch_response="$LAB_DIR/${phase_prefix}-capture-fetch-response.json"
                 local fetch_summary="$LAB_DIR/${phase_prefix}-capture-fetch-summary.json"
