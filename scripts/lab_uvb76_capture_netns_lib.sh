@@ -66,16 +66,25 @@ check_linux() {
 # Check required tools
 check_dependencies() {
     local missing=()
-    for cmd in ip netns tc curl jq; do
-        if ! command -v "$cmd" &> /dev/null; then
+
+    for cmd in ip tc curl jq; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
             missing+=("$cmd")
         fi
     done
+
     if [[ ${#missing[@]} -gt 0 ]]; then
         log_error "Missing required tools: ${missing[*]}"
         log_error "Install: iproute2 jq curl"
         return 1
     fi
+
+    if ! ip netns list >/dev/null 2>&1; then
+        log_error "ip netns is unavailable or not permitted"
+        log_error "Install iproute2 and run with sufficient privileges"
+        return 1
+    fi
+
     return 0
 }
 
