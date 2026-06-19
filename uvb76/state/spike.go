@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -211,6 +212,10 @@ func (sd *SpikeDetector) getTracker(targetID, kind string) *spikeTracker {
 
 // DetectAndRecord checks a sample for spike conditions and records if detected.
 // Returns the spike event if detected, nil otherwise.
+//
+// HTTP probe failures (reachable=false) are treated as first-class failure events,
+// not just latency anomalies. This ensures diagnostic captures are triggered
+// for hard failures like timeouts, connection refused, etc.
 func (sd *SpikeDetector) DetectAndRecord(
 	targetID, kind string,
 	latencyMs float64,
@@ -241,25 +246,62 @@ func (sd *SpikeDetector) DetectAndRecord(
 	var severity string
 	var reasons []string
 
-	// Check absolute thresholds first (highest priority)
-	if latencyMs >= criticalMs {
+	// Check for probe failure FIRST - HTTP failures are first-class diagnostic events
+	// ICMP failures continue to use latency-based spike detection (different semantics)
+	if !reached && kind == "http" {
+		// HTTP probe failure is always significant, regardless of latency
 		severity = "critical"
-		reasons = append(reasons, kind+"_critical_absolute_threshold")
-		// Check if relative threshold also exceeded (for evidence)
+		
+		// Determine failure type based on error message
+		if probeError != nil {
+			errStr := *probeError
+			if len(errStr) > 0 {
+				// Case-insensitive check for error type
+				errLower := strings.ToLower(errStr)
+				if strings.Contains(errLower, "timeout") || strings.Contains(errLower, "deadline") {
+					reasons = append(reasons, "http_probe_timeout")
+				} else if strings.Contains(errLower, "connection refused") {
+					reasons = append(reasons, "http_probe_connection_refused")
+				} else if strings.Contains(errLower, "no such host") || strings.Contains(errLower, "lookup") || strings.Contains(errLower, "dial") {
+					reasons = append(reasons, "http_probe_dns_failure")
+				} else if strings.Contains(errLower, "connection reset") {
+					reasons = append(reasons, "http_probe_connection_reset")
+				} else {
+					reasons = append(reasons, "http_probe_failure")
+				}
+			} else {
+				reasons = append(reasons, "http_probe_failure")
+			}
+		} else {
+			reasons = append(reasons, "http_probe_failure")
+		}
+		
+		// Still check if relative threshold also exceeded (for evidence)
 		if sd.shouldIncludeRelativeReason(previousSamples, medianMs, latencyMs) {
 			reasons = append(reasons, "relative_10x_median_threshold")
 		}
-	} else if latencyMs >= warningMs {
-		severity = "warning"
-		reasons = append(reasons, kind+"_warning_absolute_threshold")
-		// Check if relative threshold also exceeded significantly (for evidence)
-		if sd.shouldIncludeRelativeReason(previousSamples, medianMs, latencyMs) {
+	} else {
+		// Normal latency spike detection for successful probes
+		// Check absolute thresholds first (highest priority)
+		if latencyMs >= criticalMs {
+			severity = "critical"
+			reasons = append(reasons, kind+"_critical_absolute_threshold")
+			// Check if relative threshold also exceeded (for evidence)
+			if sd.shouldIncludeRelativeReason(previousSamples, medianMs, latencyMs) {
+				reasons = append(reasons, "relative_10x_median_threshold")
+			}
+		} else if latencyMs >= warningMs {
+			severity = "warning"
+			reasons = append(reasons, kind+"_warning_absolute_threshold")
+			// Check if relative threshold also exceeded significantly (for evidence)
+			if sd.shouldIncludeRelativeReason(previousSamples, medianMs, latencyMs) {
+				reasons = append(reasons, "relative_10x_median_threshold")
+			}
+		} else if sd.shouldIncludeRelativeReason(previousSamples, medianMs, latencyMs) {
+			// Only relative threshold triggered
+			severity = "warning"
 			reasons = append(reasons, "relative_10x_median_threshold")
 		}
-	} else if sd.shouldIncludeRelativeReason(previousSamples, medianMs, latencyMs) {
-		// Only relative threshold triggered
-		severity = "warning"
-		reasons = append(reasons, "relative_10x_median_threshold")
 	}
 
 	// No spike detected

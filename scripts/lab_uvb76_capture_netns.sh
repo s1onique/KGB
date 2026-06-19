@@ -176,6 +176,18 @@ run_lab() {
         # Wait for probe to observe defect
         sleep 20
 
+        # Collect extra diagnostic artifacts for failure analysis
+        # Latency samples during defect
+        log_info "Collecting latency samples during defect..."
+        ip netns exec "$NS_UVB76" curl -s \
+            "${UVB76_API_URL}/api/v1/latency?target_id=lab-tovarisch&kind=http&range_seconds=120" \
+            > "$LATENCY_DURING_DEFECT_FILE" 2>/dev/null || true
+
+        # Probe/capture events from UVB-76 log
+        log_info "Extracting probe and capture events from UVB-76 log..."
+        grep -E "lab-tovarisch|probe|timeout|capture|spike|diagnostic|http_probe|recovery" "$UVB76_LOG" \
+            > "$UVB76_PROBE_CAPTURE_EVENTS_FILE" 2>/dev/null || true
+
         # Query the spikes API during defect
         # Using defect cursor to ensure we only get captures created after defect was injected
         query_spikes_api "$LAB_DIR/spikes-during-defect.json" "lab-tovarisch" "true"

@@ -25,6 +25,9 @@ type Client struct {
 	stopCh         chan struct{}
 	wg             sync.WaitGroup
 	enabled        bool
+	// lastReachability tracks the previous reachability state per target for recovery detection
+	// Uses tri-state (unknown/reachable/unreachable) to avoid false-positive recovery
+	lastReachability map[string]state.ReachabilityState
 }
 
 // NewClient creates a new HTTP probe client.
@@ -33,11 +36,12 @@ func NewClient(httpCfg *config.HTTPProbeConfig, st *state.Manager, targets []*co
 		httpClient: &http.Client{
 			Timeout: time.Duration(httpCfg.TimeoutMilliseconds) * time.Millisecond,
 		},
-		cfg:     httpCfg,
-		state:   st,
-		targets: make(map[string]*config.TargetConfig),
-		stopCh:  make(chan struct{}),
-		enabled: httpCfg.IsEnabled(),
+		cfg:                 httpCfg,
+		state:               st,
+		targets:             make(map[string]*config.TargetConfig),
+		stopCh:              make(chan struct{}),
+		enabled:             httpCfg.IsEnabled(),
+		lastReachability:    make(map[string]state.ReachabilityState),
 	}
 
 	for _, t := range targets {
@@ -151,7 +155,13 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 	if err != nil {
 		// Record latency for failed request (still useful for timeout monitoring)
 		c.state.RecordLatency(t.ID, latencyMs, false)
-		// Spike detection for failed request
+		
+		// Track last reachability state for recovery detection
+		c.mu.Lock()
+		c.lastReachability[t.ID] = state.ReachabilityUnreachable
+		c.mu.Unlock()
+		
+		// Spike detection for failed request - this now creates diagnostic events for failures
 		errStr := fmt.Sprintf("request failed: %v", err)
 		if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, false, nil, nil, &errStr, previousSamples); spike != nil {
 			c.triggerDiagCapture(spike.EventID, t.ID)
@@ -160,16 +170,32 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 	}
 	defer resp.Body.Close()
 
-	// Record successful latency measurement
-	c.state.RecordLatency(t.ID, latencyMs, true)
-
-	// Spike detection for successful request
+	// Get HTTP status code for recording
 	var httpStatus *int
 	if resp != nil {
 		httpStatus = &resp.StatusCode
 	}
+
+	// Check for recovery: was previously unreachable, now succeeding
+	c.mu.Lock()
+	wasUnreachable := c.lastReachability[t.ID] == state.ReachabilityUnreachable
+	c.lastReachability[t.ID] = state.ReachabilityReachable
+	c.mu.Unlock()
+
+	// Record successful latency measurement
+	c.state.RecordLatency(t.ID, latencyMs, true)
+
+	// Spike detection for successful request (latency spikes)
 	if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, true, nil, httpStatus, nil, previousSamples); spike != nil {
 		c.triggerDiagCapture(spike.EventID, t.ID)
+	}
+	
+	// Recovery detection: if we were unreachable and now succeeded, trigger a recovery capture
+	// Use dedicated RecordRecoveryEvent() instead of fake error injection
+	if wasUnreachable {
+		if recoverySpike := c.state.RecordRecoveryEvent(t.ID, "http", latencyMs, sampleTs, httpStatus, previousSamples); recoverySpike != nil {
+			c.triggerDiagCapture(recoverySpike.EventID, t.ID)
+		}
 	}
 }
 

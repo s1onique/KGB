@@ -405,35 +405,6 @@ func CalculatePercentiles(sortedSamples []float64, percentiles []float64) map[fl
 	return result
 }
 
-// GetSpikeDetector returns the spike detector for this manager.
-func (m *Manager) GetSpikeDetector() *SpikeDetector {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.spikeDetector
-}
-
-// GetSpikes returns spike events for a target/kind combination.
-func (m *Manager) GetSpikes(targetID, kind string, limit int) []SpikeEvent {
-	return m.spikeDetector.GetSpikes(targetID, kind, limit)
-}
-
-// DetectAndRecordSpike checks a sample for spike conditions and records if detected.
-func (m *Manager) DetectAndRecordSpike(
-	targetID, kind string,
-	latencyMs float64,
-	sampleTs time.Time,
-	reachable bool,
-	schedulerDelayMs *float64,
-	httpStatus *int,
-	probeError *string,
-	previousSamples []LatencySample,
-) *SpikeEvent {
-	return m.spikeDetector.DetectAndRecord(
-		targetID, kind, latencyMs, sampleTs, reachable,
-		schedulerDelayMs, httpStatus, probeError, previousSamples,
-	)
-}
-
 // GetCaptureStore returns the diagnostic capture store.
 func (m *Manager) GetCaptureStore() *CaptureStore {
 	m.mu.RLock()
