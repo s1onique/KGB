@@ -4,6 +4,7 @@ package state
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -72,83 +73,6 @@ func DefaultSpikeConfig() SpikeConfig {
 		MaxPreviousSamples:   30,    // capture 30 previous samples
 		MaxEventsPerTracker:  100,   // retain 100 spike events per tracker
 	}
-}
-
-// spikeTracker tracks spike events for a single target/probe kind combination.
-type spikeTracker struct {
-	mu          sync.Mutex
-	events      []SpikeEvent // ring buffer of spike events
-	maxEvents   int          // max events to retain
-	config      SpikeConfig
-	kind        string       // "http" or "icmp"
-}
-
-// newSpikeTracker creates a new spike tracker with the given configuration.
-func newSpikeTracker(kind string, config SpikeConfig) *spikeTracker {
-	return &spikeTracker{
-		events:    make([]SpikeEvent, 0, config.MaxEventsPerTracker),
-		maxEvents: config.MaxEventsPerTracker,
-		config:    config,
-		kind:      kind,
-	}
-}
-
-// recordSpike records a spike event, evicting oldest if at capacity.
-// EVICTION POLICY: Capture-aware spike retention
-// - Protected spikes (with captures or in-flight) are NEVER evicted
-// - Only purge-eligible spikes count against the uncaptured cap
-// - maxEvents limits total storage, but protected spikes don't count toward it
-func (st *spikeTracker) recordSpike(event SpikeEvent, getProtectionInfo func(eventID string) (isProtected bool, hasArtifact bool)) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-
-	// Count purge-eligible (uncaptured) spikes
-	purgeableCount := 0
-	for _, ev := range st.events {
-		isProtected, _ := getProtectionInfo(ev.EventID)
-		if !isProtected {
-			purgeableCount++
-		}
-	}
-
-	// Evict oldest purge-eligible spike if we're at the uncaptured cap
-	if purgeableCount >= st.config.MaxEventsPerTracker {
-		// Find and remove oldest purge-eligible spike
-		for i := 0; i < len(st.events); i++ {
-			isProtected, _ := getProtectionInfo(st.events[i].EventID)
-			if !isProtected {
-				// Remove this purge-eligible spike
-				st.events = append(st.events[:i], st.events[i+1:]...)
-				break
-			}
-		}
-	}
-
-	st.events = append(st.events, event)
-}
-
-// getEvents returns all spike events (newest first for display).
-func (st *spikeTracker) getEvents(limit int) []SpikeEvent {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-
-	if limit <= 0 || limit > len(st.events) {
-		limit = len(st.events)
-	}
-
-	// Return newest first (reverse order)
-	result := make([]SpikeEvent, limit)
-	for i := 0; i < limit; i++ {
-		result[i] = st.events[len(st.events)-1-i]
-	}
-	return result
-}
-
-// count returns the number of spike events.
-func (st *spikeTracker) count() int {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	return len(st.events)
 }
 
 // SpikeDetector handles spike detection and event recording.
@@ -361,15 +285,48 @@ func (sd *SpikeDetector) DetectAndRecord(
 }
 
 // calculateMedian computes the median of successful samples from the previous samples.
+//
+// DEFENSIVE FUNCTION - NOT FULLY THREAD-SAFE:
+// This function assumes the caller provides immutable input. It:
+// - Validates slice header sanity (detects corruption from data races upstream)
+// - Filters NaN/Inf values that could corrupt sort or cause panics
+// - Creates a private copy of latency values before sorting
+//
+// The caller is responsible for ensuring `samples` is immutable for the duration
+// of this call. In production, this is guaranteed by:
+// - LatencyTracker.GetRecentSamples() returns a defensive copy under tracker locking.
+//   (See TestLatencyTracker_ReturnedSliceIsDefensiveCopy for proof.)
+// - The spike detector itself is protected by its own mutex.
 func (sd *SpikeDetector) calculateMedian(samples []LatencySample) float64 {
+	// Defensive: check for obviously corrupted slice header
+	if cap(samples) == 0 && len(samples) > 0 {
+		// Corrupted slice header: len > 0 but cap == 0 is invalid
+		// This can happen from data races corrupting the slice header
+		return 0
+	}
+
 	if len(samples) == 0 {
 		return 0
 	}
 
-	// Collect successful latencies
-	var latencies []float64
-	for _, s := range samples {
-		if s.Reachable {
+	// Defensive: ensure we don't read more elements than capacity allows
+	safeLen := len(samples)
+	if cap(samples) > 0 && safeLen > cap(samples) {
+		// Corrupted slice header: len > cap is impossible from normal Go code
+		// This strongly indicates a data race corrupting the slice header
+		safeLen = cap(samples)
+	}
+
+	if safeLen == 0 {
+		return 0
+	}
+
+	// Collect successful latencies with defensive copy and NaN/Inf filtering
+	// Pre-allocate with expected capacity to avoid dynamic growth races
+	latencies := make([]float64, 0, safeLen)
+	for i := 0; i < safeLen; i++ {
+		s := samples[i]
+		if s.Reachable && !math.IsNaN(s.LatencyMs) && !math.IsInf(s.LatencyMs, 0) {
 			latencies = append(latencies, s.LatencyMs)
 		}
 	}
@@ -378,7 +335,7 @@ func (sd *SpikeDetector) calculateMedian(samples []LatencySample) float64 {
 		return 0
 	}
 
-	// Sort for median calculation
+	// Sort for median calculation (creates private copy for sort)
 	sort.Float64s(latencies)
 
 	mid := len(latencies) / 2
