@@ -29,6 +29,8 @@ const bfd_status = @import("bfd/status.zig");
 const bgp_status = @import("bgp/status.zig");
 const bgp_serve = @import("cli/bgp_serve.zig");
 const bgp_diag = @import("status_bgp_diagnostics.zig");
+const status_network_diag = @import("status_network_diag.zig");
+const network_diag_config = @import("net/network_diag_config.zig");
 
 // Re-export BGP diagnostics from separate module for LLM-friendly file sizes.
 pub const BgpDiagnostics = bgp_diag.BgpDiagnostics;
@@ -307,6 +309,79 @@ fn renderStatus(writer: anytype, s: Status) !void {
     }
     try writer.writeAll("]"); // Close checks array
     try renderBgpDiagnostics(writer, s.bgp);
+    try writer.writeAll(",\"runtime\":{\"pid\":");
+    try writer.print("{d}", .{s.runtime.pid});
+    if (s.runtime.rss_kib) |rss| {
+        try writer.writeAll(",\"rss_kib\":");
+        try writer.print("{d}", .{rss});
+    } else {
+        try writer.writeAll(",\"rss_kib\":null");
+    }
+    try writer.writeAll("}}\n");
+}
+
+/// Render status payload with optional network diagnostics.
+/// When include_network_diag is true, includes the network_diag field.
+/// MemoryOwnership: Transient allocation for network_diag within request scope.
+/// The collectNetworkDiag() call allocates via page_allocator, but deinit()
+/// is called via defer before the handler returns, releasing all memory.
+pub fn renderPayloadWithContextAndDiag(
+    writer: anytype,
+    inputs: RuntimeStatusInputs,
+    allocator: std.mem.Allocator,
+    include_network_diag: bool,
+) !void {
+    var scratch = StatusScratch{};
+    const s = buildStatusWithInputs(inputs, &scratch);
+
+    // Collect network diagnostics if requested
+    var network_diag_opt: ?status_network_diag.NetworkDiag = null;
+    if (include_network_diag) {
+        // Use default disabled config - this ensures we return a valid structured
+        // response even without explicit network_diag configuration.
+        const diag_cfg = network_diag_config.NetworkDiagConfig{ .enabled = true };
+        network_diag_opt = status_network_diag.collectNetworkDiag(allocator, diag_cfg) catch null;
+    }
+    defer {
+        if (network_diag_opt) |*d| {
+            d.deinit(allocator);
+        }
+    }
+
+    // Render the status JSON with optional network_diag
+    try writer.writeAll("{\"service\":\"");
+    try writer.writeAll(s.service);
+    try writer.writeAll("\",\"version\":\"");
+    try writer.writeAll(s.version);
+    try writer.writeAll("\",\"node_id\":\"");
+    try writer.writeAll(s.node_id);
+    try writer.writeAll("\",\"status\":\"");
+    try writer.writeAll(@tagName(s.status));
+    try writer.writeAll("\",\"checks\":[");
+    for (s.checks, 0..) |check, i| {
+        if (i > 0) try writer.writeAll(",");
+        try writer.writeAll("{\"name\":\"");
+        try writer.writeAll(check.name);
+        try writer.writeAll("\",\"status\":\"");
+        try writer.writeAll(@tagName(check.status));
+        try writer.writeAll("\",\"detail\":\"");
+        try writer.writeAll(check.detail);
+        try writer.writeAll("\"}");
+    }
+    try writer.writeAll("]"); // Close checks array
+    try renderBgpDiagnostics(writer, s.bgp);
+
+    // Include network_diag when requested - either collected data or structured error
+    if (include_network_diag) {
+        try writer.writeAll(",\"network_diag\":");
+        if (network_diag_opt) |*diag| {
+            try status_network_diag.renderNetworkDiag(writer, diag);
+        } else {
+            // On collection failure, return structured error response instead of omitting
+            try writer.writeAll("{\"status\":\"unavailable\",\"wireguard\":null,\"interfaces\":[],\"routes\":[],\"underlay_tcp\":[],\"events\":[]}");
+        }
+    }
+
     try writer.writeAll(",\"runtime\":{\"pid\":");
     try writer.print("{d}", .{s.runtime.pid});
     if (s.runtime.rss_kib) |rss| {

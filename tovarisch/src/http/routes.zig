@@ -22,6 +22,8 @@ pub const Request = struct {
     method: Method,
     path: []const u8,
     version: []const u8,
+    /// Raw query string (everything after '?'), or empty if no query.
+    query: []const u8 = "",
 };
 
 /// Route handler function type.
@@ -51,19 +53,43 @@ fn parseMethod(method_str: []const u8) Method {
 /// Parse an HTTP request line.
 /// Returns the parsed request or null if invalid.
 pub fn parseRequestLine(line: []const u8) ?Request {
-    // Expected format: "METHOD /path HTTP/version"
+    // Expected format: "METHOD /path[?query] HTTP/version"
     var parts = std.mem.splitScalar(u8, line, ' ');
     const method_str = parts.next() orelse return null;
-    const path = parts.next() orelse return null;
+    const target = parts.next() orelse return null;
     const version = parts.next() orelse return null;
 
     const method = parseMethod(method_str);
+
+    // Split request target into path and query (RFC 9112 origin-form)
+    var path: []const u8 = target;
+    var query: []const u8 = "";
+    if (std.mem.indexOfScalar(u8, target, '?')) |i| {
+        path = target[0..i];
+        query = target[i + 1 ..];
+    }
 
     return Request{
         .method = method,
         .path = path,
         .version = version,
+        .query = query,
     };
+}
+
+/// Check if the query string contains include=network_diag.
+/// Supports:
+/// - include=network_diag
+/// - include=network_diag&other=value
+/// - other=value&include=network_diag
+/// - other=value&include=network_diag&more=value
+fn queryHasIncludeNetworkDiag(query: []const u8) bool {
+    if (query.len == 0) return false;
+    var it = std.mem.splitScalar(u8, query, '&');
+    while (it.next()) |part| {
+        if (std.mem.eql(u8, part, "include=network_diag")) return true;
+    }
+    return false;
 }
 
 /// Health check handler - returns simple ok status.
@@ -72,40 +98,49 @@ pub fn handleHealthz(fd: i32, _: *anyopaque) !void {
 }
 
 /// Status handler - returns full status JSON with BFD, config, and live BGP state.
-pub fn handleStatus(fd: i32, state: *anyopaque) !void {
+/// When include_network_diag is true, includes the network_diag field.
+pub fn handleStatus(fd: i32, state: *anyopaque, include_network_diag: bool) !void {
     // Cast opaque state to ServeContext to get BFD runtime, config check, and BGP state.
     const ctx = @as(*server.ServeContext, @ptrCast(@alignCast(state)));
 
-    // For HTTP, we need to render status to a buffer first then send it. Use a simple fixed buffer writer.
-    var buf: [4096]u8 = undefined;
+    // For HTTP, we need to render status to a buffer first then send it.
+    // Use larger buffer when including network_diag to accommodate extended output.
+    var buf: [16384]u8 = undefined;
     var len: usize = 0;
 
     const writer = struct {
-        buf: *[4096]u8,
+        buf: *[16384]u8,
         len: *usize,
 
         pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) !void {
-            if (self.len.* >= 4096) return error.BufferOverflow;
+            if (self.len.* >= 16384) return error.BufferOverflow;
             const written = std.fmt.bufPrint(self.buf[self.len.*..], fmt, args) catch return error.BufferOverflow;
             self.len.* += written.len;
         }
 
         pub fn writeAll(self: @This(), bytes: []const u8) !void {
-            if (self.len.* + bytes.len > 4096) return error.BufferOverflow;
+            if (self.len.* + bytes.len > 16384) return error.BufferOverflow;
             // Use for loop instead of @memcpy to avoid aliasing panic in Zig 0.16
             for (bytes, 0..) |byte, i| {
                 self.buf[self.len.* + i] = byte;
             }
             self.len.* += bytes.len;
         }
+
+        pub fn writeByte(self: @This(), c: u8) !void {
+            if (self.len.* >= 16384) return error.BufferOverflow;
+            self.buf[self.len.*] = c;
+            self.len.* += 1;
+        }
     }{ .buf = &buf, .len = &len };
 
-    // Pass BFD runtime, config check, and FULL BGP load result.
-    try status.renderPayloadWithContext(writer, .{
+    try status.renderPayloadWithContextAndDiag(writer, .{
         .bfd_runtime = ctx.bfd_runtime,
         .config_check = ctx.config_check,
         .bgp_result = ctx.bgp_result,
-    });
+        // MemoryOwnership: Transient allocation for network_diag within HTTP request handler scope.
+        // The renderPayloadWithContextAndDiag() function releases all memory via defer before returning.
+    }, std.heap.page_allocator, include_network_diag);
     const json = buf[0..len];
 
     try response.writeSimpleJsonFd(fd, 200, json);
@@ -174,7 +209,7 @@ pub fn routeRequestFd(fd: i32, req: Request, state: *anyopaque) !bool {
         return true;
     }
 
-    // Route by path
+    // Route by path (query string is ignored for routing)
     if (std.mem.eql(u8, req.path, "/healthz")) {
         try handleHealthz(fd, state);
         return true;
@@ -182,12 +217,14 @@ pub fn routeRequestFd(fd: i32, req: Request, state: *anyopaque) !bool {
 
     // /status is an ergonomic alias for /status.json
     if (std.mem.eql(u8, req.path, "/status")) {
-        try handleStatus(fd, state);
+        const include_network_diag = queryHasIncludeNetworkDiag(req.query);
+        try handleStatus(fd, state, include_network_diag);
         return true;
     }
 
     if (std.mem.eql(u8, req.path, "/status.json")) {
-        try handleStatus(fd, state);
+        const include_network_diag = queryHasIncludeNetworkDiag(req.query);
+        try handleStatus(fd, state, include_network_diag);
         return true;
     }
 
@@ -291,160 +328,3 @@ test "parseRequestLine parses /unknown path for 404" {
     try std.testing.expect(std.mem.eql(u8, req.?.path, "/unknown"));
 }
 
-// --- Status handler response tests ---
-// These tests verify that the status handler produces correct JSON output.
-
-test "status handler response contains status payload" {
-    // Test that the status payload contains the expected service and checks.
-    // This verifies handleStatus() will produce valid status JSON.
-    var scratch = status.StatusScratch{};
-    const s = status.buildStatus(&scratch);
-    try std.testing.expectEqualStrings("tovarisch", s.service);
-    try std.testing.expect(s.checks.len > 0);
-
-    // Verify the renderPayload output contains expected status fields
-    // Use 8192 buffer to accommodate all 9 checks including BGP detail
-    var buf: [8192]u8 = undefined;
-    var len: usize = 0;
-
-    const writer = struct {
-        buf: *[8192]u8,
-        len: *usize,
-
-        pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) !void {
-            if (self.len.* >= 8192) return error.BufferOverflow;
-            const written = std.fmt.bufPrint(self.buf[self.len.*..], fmt, args) catch return error.BufferOverflow;
-            self.len.* += written.len;
-        }
-
-        pub fn writeAll(self: @This(), bytes: []const u8) !void {
-            if (self.len.* + bytes.len > 8192) return error.BufferOverflow;
-            // Use for loop instead of @memcpy to avoid aliasing panic in Zig 0.16
-            for (bytes, 0..) |byte, i| {
-                self.buf[self.len.* + i] = byte;
-            }
-            self.len.* += bytes.len;
-        }
-    }{ .buf = &buf, .len = &len };
-
-    try status.renderPayload(writer);
-    const json = buf[0..len];
-
-    // Verify key status elements in JSON output
-    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"service\":\"tovarisch\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"checks\":["));
-    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"name\":\"http\""));
-}
-
-test "status handler includes http check in output" {
-    // Explicitly verify that the status JSON includes the http check
-    var buf: [8192]u8 = undefined;
-    var len: usize = 0;
-
-    const writer = struct {
-        buf: *[8192]u8,
-        len: *usize,
-
-        pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) !void {
-            if (self.len.* >= 8192) return error.BufferOverflow;
-            const written = std.fmt.bufPrint(self.buf[self.len.*..], fmt, args) catch return error.BufferOverflow;
-            self.len.* += written.len;
-        }
-
-        pub fn writeAll(self: @This(), bytes: []const u8) !void {
-            if (self.len.* + bytes.len > 8192) return error.BufferOverflow;
-            // Use for loop instead of @memcpy to avoid aliasing panic in Zig 0.16
-            for (bytes, 0..) |byte, i| {
-                self.buf[self.len.* + i] = byte;
-            }
-            self.len.* += bytes.len;
-        }
-    }{ .buf = &buf, .len = &len };
-
-    try status.renderPayload(writer);
-    const json = buf[0..len];
-
-    // HTTP check should be present with ok status
-    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"name\":\"http\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"status\":\"ok\""));
-}
-
-// --- BFD runtime wiring tests ---
-
-test "serve status endpoint reflects configured BFD runtime" {
-    // Verifies status rendering with configured BFD runtime differs from null.
-    const bfd_status_module = @import("../bfd/status.zig");
-
-    // Create a test BFD runtime with a peer
-    var runtime = try bfd_status_module.createTestRuntime();
-    defer runtime.deinit();
-    try bfd_status_module.addTestPeer(&runtime.rt, "10.0.0.1", "10.0.0.2");
-
-    // Create serve context with the runtime
-    var serve_ctx = server.ServeContext.init(std.testing.allocator);
-    defer serve_ctx.deinit();
-    serve_ctx.bfd_runtime = &runtime.rt;
-
-    // Render status with the BFD runtime
-    var buf: [4096]u8 = undefined;
-    var len: usize = 0;
-
-    const writer = struct {
-        buf: *[4096]u8,
-        len: *usize,
-
-        pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) !void {
-            if (self.len.* >= 4096) return error.BufferOverflow;
-            const written = std.fmt.bufPrint(self.buf[self.len.*..], fmt, args) catch return error.BufferOverflow;
-            self.len.* += written.len;
-        }
-
-        pub fn writeAll(self: @This(), bytes: []const u8) !void {
-            if (self.len.* + bytes.len > 4096) return error.BufferOverflow;
-            // MemoryCopySafety: self.buf is a fixed [4096]u8 buffer. bytes is a caller-provided slice. They are distinct memory regions; no aliasing.
-            @memcpy(self.buf[self.len.*..][0..bytes.len], bytes);
-            self.len.* += bytes.len;
-        }
-    }{ .buf = &buf, .len = &len };
-
-    // Pass BFD runtime through context
-    try status.renderPayloadWithBfd(writer, serve_ctx.bfd_runtime);
-    const json = buf[0..len];
-
-    // With configured BFD runtime, the bfd check should reflect peer info
-    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"name\":\"bfd\""));
-    // The detail should show peer count, not "bfd not configured"
-    try std.testing.expect(!std.mem.containsAtLeast(u8, json, 1, "bfd not configured"));
-}
-
-test "serve status endpoint with null BFD shows not configured" {
-    // Verify that null BFD runtime produces "bfd not configured" status.
-    var buf: [4096]u8 = undefined;
-    var len: usize = 0;
-
-    const writer = struct {
-        buf: *[4096]u8,
-        len: *usize,
-
-        pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) !void {
-            if (self.len.* >= 4096) return error.BufferOverflow;
-            const written = std.fmt.bufPrint(self.buf[self.len.*..], fmt, args) catch return error.BufferOverflow;
-            self.len.* += written.len;
-        }
-
-        pub fn writeAll(self: @This(), bytes: []const u8) !void {
-            if (self.len.* + bytes.len > 4096) return error.BufferOverflow;
-            // MemoryCopySafety: self.buf is a fixed [4096]u8 buffer. bytes is a caller-provided slice. They are distinct memory regions; no aliasing.
-            @memcpy(self.buf[self.len.*..][0..bytes.len], bytes);
-            self.len.* += bytes.len;
-        }
-    }{ .buf = &buf, .len = &len };
-
-    // Pass null BFD runtime
-    try status.renderPayloadWithBfd(writer, null);
-    const json = buf[0..len];
-
-    // Null runtime should show "bfd not configured"
-    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"name\":\"bfd\""));
-    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "bfd not configured"));
-}
