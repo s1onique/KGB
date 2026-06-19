@@ -302,23 +302,30 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// TargetInfo represents a target with its effective probe URL for debugging.
+// TargetInfo represents a target with its effective probe URL and diagnostic capture URL for debugging.
 type TargetInfo struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	BaseURL         string `json:"base_url"`
-	ProbeURL        string `json:"probe_url,omitempty"`
-	EffectiveProbeURL string `json:"effective_probe_url"`
-	Enabled         bool   `json:"enabled"`
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	BaseURL             string `json:"base_url"`
+	ProbeURL            string `json:"probe_url,omitempty"`
+	EffectiveProbeURL   string `json:"effective_probe_url"`
+	Enabled             bool   `json:"enabled"`
+	// Diagnostic capture info is empty/omitted if no diagnostics peer targets this target.
+	DiagnosticPeerName  string `json:"diagnostic_peer_name,omitempty"`
+	DiagnosticBaseURL   string `json:"diagnostic_base_url,omitempty"`
+	EffectiveCaptureURL string `json:"effective_capture_url,omitempty"`
 }
 
-// handleTargets returns the list of configured targets with effective probe URLs.
+// handleTargets returns the list of configured targets with effective probe URLs and diagnostic capture URLs.
 func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	
+	// Build target->diagPeer mapping
+	targetToPeer := s.cfg.Diagnostics.TargetToDiagPeers()
+	
 	targets := make([]TargetInfo, len(s.cfg.Targets))
 	for i, t := range s.cfg.Targets {
-		targets[i] = TargetInfo{
+		info := TargetInfo{
 			ID:                t.ID,
 			Name:              t.Name,
 			BaseURL:           t.BaseURL,
@@ -326,6 +333,15 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 			EffectiveProbeURL: config.TargetProbeURL(&t),
 			Enabled:           t.Enabled,
 		}
+		
+		// Add diagnostic capture info if this target has a diagnostics peer
+		if peer, ok := targetToPeer[t.ID]; ok {
+			info.DiagnosticPeerName = peer.Name
+			info.DiagnosticBaseURL = peer.BaseURL
+			info.EffectiveCaptureURL = config.DiagPeerStatusURL(peer.BaseURL)
+		}
+		
+		targets[i] = info
 	}
 	json.NewEncoder(w).Encode(targets)
 }

@@ -169,62 +169,79 @@ wait_for_skipped_cooldown_spike_row_after_event() {
 }
 
 # Save the effective diagnostic capture URL as an artifact for Phase 0 verification.
-# The diagnostic capture URL is derived from the diagnostics peer base_url:
+# The diagnostic capture URL is exposed via GET /api/v1/targets endpoint as effective_capture_url.
+# This is derived from the diagnostics peer base_url using config.DiagPeerStatusURL():
 # - If base_url is "http://host:port", DiagPeerStatusURL() produces "http://host:port/status.json?include=network_diag"
 # - If base_url is "http://host:port/status", it produces "http://host:port/status/status.json" (DOUBLE PATH - WRONG)
 # This artifact proves the URL construction is correct.
 save_effective_diag_url() {
     log_info "Saving effective diagnostic capture URL artifact..."
     
-    # Get diagnostics config from UVB-76 API
-    local response
-    response=$(ip netns exec "$NS_UVB76" curl -s -c /tmp/uvb76-cookies.txt -b /tmp/uvb76-cookies.txt \
-        "${UVB76_API_URL}/api/v1/config/diagnostics" 2>/dev/null)
+    # Artifact paths in LAB_DIR for GitHub artifact upload
+    local diag_api_response_file="$LAB_DIR/phase0-effective-diagnostic-url-api-response.json"
+    local diag_api_status_file="$LAB_DIR/phase0-effective-diagnostic-url-api-status.txt"
+    
+    # Get targets from UVB-76 API (includes effective_capture_url per target)
+    local http_code response
+    http_code=$(ip netns exec "$NS_UVB76" curl -s -c /tmp/uvb76-cookies.txt -b /tmp/uvb76-cookies.txt \
+        -w "%{http_code}" -o /tmp/uvb76-targets-response.json \
+        "${UVB76_API_URL}/api/v1/targets" 2>/dev/null)
+    
+    response=$(cat /tmp/uvb76-targets-response.json 2>/dev/null)
 
     if [[ -z "$response" ]] || ! echo "$response" | jq -e . >/dev/null 2>&1; then
-        log_error "[FAIL] Failed to get diagnostics config from UVB-76 API"
+        log_error "[FAIL] Failed to get targets from UVB-76 API (HTTP $http_code)"
+        if [[ -n "$response" ]]; then
+            echo "$response" | jq '.' > "$diag_api_response_file" 2>/dev/null || echo "$response" > "$diag_api_response_file"
+            log_error "Response saved to $diag_api_response_file"
+            echo "http_code: $http_code" > "$diag_api_status_file"
+        fi
         echo "{}" > "$EFFECTIVE_DIAG_URL_FILE"
         return 1
     fi
 
-    # Extract peer base_url for lab-tovarisch target
-    local peer_base_url
-    peer_base_url=$(echo "$response" | jq -r '.peers[] | select(.targets[] == "lab-tovarisch") | .base_url // empty' 2>/dev/null)
+    # Save API response and status as artifacts (in LAB_DIR for artifact upload)
+    echo "$response" | jq '.' > "$diag_api_response_file" 2>/dev/null || true
+    echo "http_code: $http_code" > "$diag_api_status_file"
 
-    if [[ -z "$peer_base_url" || "$peer_base_url" == "empty" ]]; then
-        log_error "[FAIL] Diagnostics peer base_url not found for lab-tovarisch"
-        echo "$response" | jq '.' > "$EFFECTIVE_DIAG_URL_FILE"
+    # Extract effective_capture_url for lab-tovarisch target
+    local effective_capture_url
+    effective_capture_url=$(echo "$response" | jq -r '.[] | select(.id == "lab-tovarisch") | .effective_capture_url // empty' 2>/dev/null)
+
+    if [[ -z "$effective_capture_url" || "$effective_capture_url" == "empty" || "$effective_capture_url" == "null" ]]; then
+        log_error "[FAIL] effective_capture_url not found in targets response for lab-tovarisch"
+        log_error "Response excerpt:"
+        echo "$response" | jq '.[] | select(.id == "lab-tovarisch")' 2>/dev/null || echo "$response"
+        echo "{}" > "$EFFECTIVE_DIAG_URL_FILE"
         return 1
     fi
 
-    # Derive expected diagnostic URL using the same logic as config.DiagPeerStatusURL()
-    # The Go DiagPeerStatusURL function:
-    # 1. Parses base_url
-    # 2. Sets path to base_path + "/status.json"
-    # 3. Adds "?include=network_diag"
-    # So "http://host:port" → "http://host:port/status.json?include=network_diag"
-    local diag_base="${peer_base_url%/}"  # Remove trailing slash
-    local expected_diag_url="${diag_base}/status.json?include=network_diag"
+    # Extract peer info for artifact
+    local peer_name peer_base_url
+    peer_name=$(echo "$response" | jq -r '.[] | select(.id == "lab-tovarisch") | .diagnostic_peer_name // "unknown"' 2>/dev/null)
+    peer_base_url=$(echo "$response" | jq -r '.[] | select(.id == "lab-tovarisch") | .diagnostic_base_url // "unknown"' 2>/dev/null)
 
     # Verify the diagnostic URL is reachable from the uvb76 namespace
     local diag_status
     diag_status=$(ip netns exec "$NS_UVB76" curl -s -o /dev/null -w "%{http_code}" \
-        "$expected_diag_url" 2>/dev/null)
+        "$effective_capture_url" 2>/dev/null)
 
     # Save as artifact
     cat > "$EFFECTIVE_DIAG_URL_FILE" <<EOF
 {
   "target_id": "lab-tovarisch",
-  "peer_base_url": "${peer_base_url}",
-  "expected_diag_url": "${expected_diag_url}",
+  "diagnostic_peer_name": "${peer_name}",
+  "diagnostic_base_url": "${peer_base_url}",
+  "effective_capture_url": "${effective_capture_url}",
   "diag_url_http_status": "${diag_status}",
   "expected_status": "200",
   "path_check": "should be /status.json?include=network_diag (NOT /status/status.json)"
 }
 EOF
 
-    log_info "[PASS] Effective diagnostic URL saved: $expected_diag_url"
-    log_info "  Peer base_url: $peer_base_url"
+    log_info "[PASS] Effective diagnostic URL saved: $effective_capture_url"
+    log_info "  Diagnostic peer: $peer_name"
+    log_info "  Diagnostic base_url: $peer_base_url"
     log_info "  Diagnostic URL HTTP status: $diag_status"
     
     # Verify it returns 200
