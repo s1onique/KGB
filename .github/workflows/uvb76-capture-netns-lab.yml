@@ -1,0 +1,99 @@
+name: UVB-76 Capture Netns Lab
+
+on:
+  workflow_dispatch:
+
+jobs:
+  uvb76-capture-netns-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      ZIG_VERSION: "0.16.0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Show Zig version
+        run: zig version
+
+      - name: Install lab dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iproute2 jq iputils-ping curl
+
+      - name: Build tovarisch for Linux
+        run: |
+          cd tovarisch
+          zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
+
+      - name: Run lab
+        run: sudo --preserve-env=PATH,TOVARISCH_BINARY make lab-uvb76-capture-netns
+
+      - name: Find result artifact
+        id: find-result
+        run: |
+          RESULT_FILE=$(find /tmp/kgb-uvb76-capture-netns-lab-* -name "result.json" -type f 2>/dev/null | sort -r | head -1)
+          if [[ -z "$RESULT_FILE" ]]; then
+            echo "ERROR: result.json not found"
+            exit 1
+          fi
+          echo "result_file=$RESULT_FILE" >> $GITHUB_OUTPUT
+          echo "artifact_dir=$(dirname $RESULT_FILE)" >> $GITHUB_OUTPUT
+
+      - name: Show result.json
+        run: cat "${{ steps.find-result.outputs.result_file }}"
+
+      - name: Verify result
+        run: |
+          # Check if result.json is valid JSON
+          if ! jq . "${{ steps.find-result.outputs.result_file }}" > /dev/null 2>&1; then
+            echo "ERROR: result.json is not valid JSON"
+            exit 1
+          fi
+
+          # Extract key values
+          baseline_ok=$(jq -r '.baseline_capture_ok' "${{ steps.find-result.outputs.result_file }}")
+          defect_observed=$(jq -r '.defect_observed' "${{ steps.find-result.outputs.result_file }}")
+          recovery_ok=$(jq -r '.recovery_capture_ok' "${{ steps.find-result.outputs.result_file }}")
+
+          echo "Verification:"
+          echo "  baseline_capture_ok: $baseline_ok"
+          echo "  defect_observed: $defect_observed"
+          echo "  recovery_capture_ok: $recovery_ok"
+
+          # Fail if any required check failed
+          if [[ "$baseline_ok" != "true" ]]; then
+            echo "FAIL: baseline capture did not succeed"
+            exit 1
+          fi
+          if [[ "$defect_observed" != "true" ]]; then
+            echo "FAIL: defect was not observed - lab purpose not proven"
+            exit 1
+          fi
+          if [[ "$recovery_ok" != "true" ]]; then
+            echo "FAIL: recovery capture did not succeed"
+            exit 1
+          fi
+
+          echo "All verification checks passed"
+
+      - name: Make lab logs readable
+        if: always()
+        run: sudo chmod -R a+rX /tmp/kgb-uvb76-capture-netns-lab-* 2>/dev/null || true
+
+      - name: Upload lab logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uvb76-capture-netns-lab-logs
+          path: |
+            /tmp/kgb-uvb76-capture-netns-lab-*/**
+          retention-days: 7
+

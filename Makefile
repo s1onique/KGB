@@ -200,6 +200,17 @@ lab-uvb76-capture-url:
 	@echo "=== UVB-76 Capture URL Lab ==="
 	@./scripts/verify_uvb76_capture_url_lab.sh
 
+# === UVB-76 Capture Netns Lab ===
+# Runtime lab that runs real UVB-76 and tovarisch in Linux network namespaces
+# with network impairment injection to test diagnostic capture behavior.
+# Primary execution: GitHub Actions (workflow_dispatch)
+# NOT part of make gate
+
+BASH ?= bash
+
+lab-uvb76-capture-netns:
+	@$(BASH) ./scripts/lab_uvb76_capture_netns.sh
+
 # === opkg Package Targets (Entware/AsusWRT-Merlin) ===
 
 # Build opkg package for Entware/AsusWRT-Merlin
