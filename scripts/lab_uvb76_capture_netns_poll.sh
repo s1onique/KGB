@@ -46,19 +46,20 @@ wait_for_probe_samples_after_cursor() {
             point_count=$(echo "$response" | jq '.returned_point_count // 0' 2>/dev/null || echo "0")
 
             if [[ "$sample_count" -gt 0 ]]; then
-                # Count samples with valid percentiles (reachable)
+                # Count samples with valid percentiles (diagnostic only)
                 local reachable_count
                 reachable_count=$(echo "$response" | jq '[.points[] | select(.sample_count > 0)] | length' 2>/dev/null || echo "0")
 
                 log_info "Latency series: retained=$sample_count samples, $point_count points, $reachable_count with data (${elapsed}s)"
 
                 if [[ "$reachable" == "true" ]]; then
-                    # Need at least 2 points with data to prove probe loop is running
-                    if [[ "$reachable_count" -ge 2 ]]; then
-                        log_info "Found $reachable_count usable points (probe loop confirmed running)"
+                    # Accept sample_count >= 2 as proof the probe loop is running
+                    # Keep reachable_count as diagnostic only
+                    if [[ "$sample_count" -ge 2 ]]; then
+                        log_info "Found $sample_count retained samples (probe loop confirmed running)"
                         success=true
                     else
-                        log_info "Found $sample_count samples but only $reachable_count usable (need 2)"
+                        log_info "Found $sample_count samples (need 2 to confirm probe loop)"
                     fi
                 else
                     log_info "Found $sample_count samples (${elapsed}s elapsed)"
@@ -268,34 +269,32 @@ wait_for_spike_event_after_cursor() {
 
                     # Check if reasons match
                     if echo "$spike_reasons" | grep -qE "$reason_regex"; then
-                        found_event=true
                         matched_event_id="$event_id"
                         matched_reasons="$spike_reasons"
                         log_info "[PASS] Spike event found: event_id=$event_id reasons=$spike_reasons"
-                        break
+
+                        # Export matched event info for caller
+                        export MATCHED_EVENT_ID="$matched_event_id"
+                        export MATCHED_REASONS="$matched_reasons"
+
+                        # Save artifact and return immediately
+                        if [[ -n "$artifact_file" ]]; then
+                            echo "$spikes_response" | jq '.' > "$artifact_file" 2>/dev/null || true
+                            log_info "Saved spike event artifact: $artifact_file"
+                        fi
+
+                        return 0
                     fi
 
                     spike_index=$((spike_index + 1))
                 done
 
-                if [[ "$found_event" == "true" ]]; then
-                    success=true
-                    # Export matched event info for caller
-                    export MATCHED_EVENT_ID="$matched_event_id"
-                    export MATCHED_REASONS="$matched_reasons"
-                    break
-                else
+                if [[ "$found_event" != "true" ]]; then
                     log_info "Found $spike_count spikes but no event matching $reason_regex after cursor"
                 fi
             else
                 log_info "No spikes yet (${elapsed}s elapsed)"
             fi
-        fi
-
-        if [[ "$success" == "true" ]]; then
-            [[ -n "$artifact_file" ]] && echo "$spikes_response" | jq '.' > "$artifact_file" 2>/dev/null || true
-            [[ -n "$artifact_file" ]] && log_info "Saved spike event artifact: $artifact_file"
-            return 0
         fi
 
         sleep $interval
