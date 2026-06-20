@@ -211,6 +211,65 @@ EOF
     fi
     rm -f "$test_packet_10"
     
+    # =============================================================================
+    # Self-test for jq is_fallback read (boolean-default bug fix)
+    # =============================================================================
+    # The jq // operator treats false as falsey, causing wrong defaults.
+    # Test 11: is_fallback=false must read as "false", not "null"
+    echo ""
+    echo "--- Testing is_fallback read fix ---"
+    local test_summary_false; test_summary_false=$(mktemp "/tmp/test-summary-false-XXXXXX.json")
+    echo '{"is_fallback":false,"summary_source":"stored_spike_row_capture"}' > "$test_summary_false"
+    
+    # Old buggy pattern: jq -r '.is_fallback // "null"' returns "null" for false
+    local buggy_value; buggy_value=$(jq -r '.is_fallback // "null"' "$test_summary_false" 2>/dev/null)
+    # Fixed pattern: use presence detection
+    local fixed_value; fixed_value=$(jq -r 'if has("is_fallback") then (.is_fallback | tostring) else "null" end' "$test_summary_false" 2>/dev/null)
+    
+    echo "  is_fallback=false with buggy // : '$buggy_value'"
+    echo "  is_fallback=false with fix has(): '$fixed_value'"
+    
+    if [[ "$buggy_value" == "null" ]]; then
+        echo "[EXPECTED] Buggy pattern correctly shows 'false' is treated as falsey by //"
+    fi
+    
+    if [[ "$fixed_value" == "false" ]]; then
+        echo "[PASS] is_fallback=false is read as 'false' (not 'null')"
+    else
+        echo "[FAIL] is_fallback=false read as '$fixed_value' (expected: 'false')"
+        failures=$((failures + 1))
+    fi
+    rm -f "$test_summary_false"
+    
+    # Test 12: is_fallback=true must also read correctly
+    local test_summary_true; test_summary_true=$(mktemp "/tmp/test-summary-true-XXXXXX.json")
+    echo '{"is_fallback":true,"summary_source":"live_fetch"}' > "$test_summary_true"
+    
+    local fixed_value_true; fixed_value_true=$(jq -r 'if has("is_fallback") then (.is_fallback | tostring) else "null" end' "$test_summary_true" 2>/dev/null)
+    
+    if [[ "$fixed_value_true" == "true" ]]; then
+        echo "[PASS] is_fallback=true is read as 'true'"
+    else
+        echo "[FAIL] is_fallback=true read as '$fixed_value_true' (expected: 'true')"
+        failures=$((failures + 1))
+    fi
+    rm -f "$test_summary_true"
+    
+    # Test 13: missing is_fallback field should return "null"
+    local test_summary_missing; test_summary_missing=$(mktemp "/tmp/test-summary-missing-XXXXXX.json")
+    echo '{"summary_source":"unknown"}' > "$test_summary_missing"
+    
+    local fixed_value_missing; fixed_value_missing=$(jq -r 'if has("is_fallback") then (.is_fallback | tostring) else "null" end' "$test_summary_missing" 2>/dev/null)
+    
+    if [[ "$fixed_value_missing" == "null" ]]; then
+        echo "[PASS] Missing is_fallback is read as 'null'"
+    else
+        echo "[FAIL] Missing is_fallback read as '$fixed_value_missing' (expected: 'null')"
+        failures=$((failures + 1))
+    fi
+    rm -f "$test_summary_missing"
+    
+    echo ""
     echo "--- Self-test: $failures failures ---"
     [[ $failures -eq 0 ]] && return 0 || return 1
 }

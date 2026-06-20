@@ -164,7 +164,9 @@ assert_phase1_real_capture() {
         jq -c '{is_fallback, summary_source, event_id, found_location, capture_source}' "$summary_file" 2>/dev/null || true
         
         local fetch_is_fallback
-        fetch_is_fallback=$(jq -r '.is_fallback // "null"' "$summary_file" 2>/dev/null || echo "null")
+        # FIX: jq // operator treats false as a falsey value (like null), causing wrong default.
+        # Use explicit presence detection instead of truthiness.
+        fetch_is_fallback=$(jq -r 'if has("is_fallback") then (.is_fallback | tostring) else "null" end' "$summary_file" 2>/dev/null || echo "null")
         
         if [[ "$fetch_is_fallback" == "false" ]]; then
             log_info "[PASS] Phase 1: used stored capture artifact (is_fallback=false)"
