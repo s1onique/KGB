@@ -18,12 +18,19 @@ write_result() {
         tovarisch_pid_json="$TOVARISCH_PID"
     fi
 
-    # Compute ok boolean - must include all contract checks
+    # Compute ok boolean - must include all contract checks including TCP diagnostics
+    # TCP contract: phase1 and phase3 packets must pass TCP diagnostics contract
+    local tcp_contract_ok=false
+    if [[ "$TCP_CONTRACT_PHASE1_OK" == true && "$TCP_CONTRACT_PHASE3_OK" == true ]]; then
+        tcp_contract_ok=true
+    fi
+    
     local ok_val=false
     if [[ "$PROBE_READY" == true && "$CONTRACT_PHASE1_CAPTURE_OK" == true && \
           "$CONTRACT_PHASE1_PACKET_OK" == true && "$CONTRACT_PHASE2_COOLDOWN_OK" == true && \
           "$CONTRACT_PHASE3_CAPTURE_OK" == true && "$CONTRACT_PHASE3_PACKET_OK" == true && \
-          "$CONTRACT_DIR_OK" == true && "$CONTRACT_DISTINCT_EVENT_IDS_OK" == true ]]; then
+          "$tcp_contract_ok" == true && "$CONTRACT_DIR_OK" == true && \
+          "$CONTRACT_DISTINCT_EVENT_IDS_OK" == true ]]; then
         ok_val=true
     fi
 
@@ -37,6 +44,9 @@ write_result() {
         --argjson phase2_cooldown_contract_ok "$CONTRACT_PHASE2_COOLDOWN_OK" \
         --argjson phase3_capture_contract_ok "$CONTRACT_PHASE3_CAPTURE_OK" \
         --argjson phase3_packet_contract_ok "$CONTRACT_PHASE3_PACKET_OK" \
+        --argjson tcp_contract_ok "$tcp_contract_ok" \
+        --argjson tcp_contract_phase1_ok "$TCP_CONTRACT_PHASE1_OK" \
+        --argjson tcp_contract_phase3_ok "$TCP_CONTRACT_PHASE3_OK" \
         --argjson dir_contract_ok "$CONTRACT_DIR_OK" \
         --argjson distinct_event_ids_ok "$CONTRACT_DISTINCT_EVENT_IDS_OK" \
         --argjson uvb76_pid "$uvb76_pid_json" \
@@ -54,12 +64,18 @@ write_result() {
                 phase2_cooldown_contract_ok: $phase2_cooldown_contract_ok,
                 phase3_capture_contract_ok: $phase3_capture_contract_ok,
                 phase3_packet_contract_ok: $phase3_packet_contract_ok,
+                tcp_contract_ok: $tcp_contract_ok,
+                tcp_contract_phase1_ok: $tcp_contract_phase1_ok,
+                tcp_contract_phase3_ok: $tcp_contract_phase3_ok,
                 dir_contract_ok: $dir_contract_ok,
                 distinct_event_ids_ok: $distinct_event_ids_ok
             }
         }' > "$RESULT_FILE"
 
     log_info "Result written to $RESULT_FILE"
+    
+    # Log TCP contract status for visibility
+    log_info "TCP diagnostics contract in result: $tcp_contract_ok (phase1=$TCP_CONTRACT_PHASE1_OK, phase3=$TCP_CONTRACT_PHASE3_OK)"
 
     # Validate the output is valid JSON
     if ! jq . "$RESULT_FILE" > /dev/null 2>&1; then

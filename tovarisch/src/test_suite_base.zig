@@ -60,7 +60,11 @@ const _net_route_diag = @import("net/route_diag.zig");
 const _net_extended_interface_stats = @import("net/extended_interface_stats.zig");
 const _net_wg_dump_collector = @import("net/wg_dump_collector.zig");
 const _status_network_diag = @import("status_network_diag.zig");
+const _status_network_diag_types = @import("status_network_diag_types.zig");
+const _status_network_diag_events = @import("status_network_diag_events.zig");
+const _status_network_diag_tcp = @import("status_network_diag_tcp.zig");
 const _status_network_diag_tests = @import("status_network_diag_tests.zig");
+const _status_network_diag_ownership_tests = @import("status_network_diag_ownership_tests.zig");
 const _net_ss_parser_tests = @import("net/ss_parser_tests.zig");
 
 // Force test discovery
@@ -110,7 +114,11 @@ test { std.testing.refAllDecls(@import("net/safe_command.zig")); }
 test { std.testing.refAllDecls(@import("net/ss_parser.zig")); }
 test { std.testing.refAllDecls(@import("net/ss_parser_tests.zig")); }
 test { std.testing.refAllDecls(@import("status_network_diag.zig")); }
+test { std.testing.refAllDecls(@import("status_network_diag_types.zig")); }
+test { std.testing.refAllDecls(@import("status_network_diag_events.zig")); }
+test { std.testing.refAllDecls(@import("status_network_diag_tcp.zig")); }
 test { std.testing.refAllDecls(@import("status_network_diag_tests.zig")); }
+test { std.testing.refAllDecls(@import("status_network_diag_ownership_tests.zig")); }
 test { std.testing.refAllDecls(@import("net/route_diag.zig")); }
 test { std.testing.refAllDecls(@import("net/extended_interface_stats.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_dump_collector.zig")); }

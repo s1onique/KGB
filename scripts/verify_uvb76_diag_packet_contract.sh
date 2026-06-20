@@ -113,7 +113,7 @@ verify_packet_shape() {
 # Warning-only events with no structured fields are NOT sufficient.
 
 # Allowed absence reasons (machine-checkable, not free-text escape hatch)
-ALLOWED_TCP_ABSENCE_REASONS="no_matching_socket socket_closed_before_capture command_failed not_configured permission_denied target_not_tcp target_mapping_missing unsupported_platform"
+ALLOWED_TCP_ABSENCE_REASONS="no_matching_socket socket_closed_before_capture command_failed not_configured permission_denied target_not_tcp target_mapping_missing unsupported_platform parse_failed"
 
 verify_tcp_diagnostics_contract() {
     local packet_file="$1"; local phase="${2:-unknown}"; local ok=true
@@ -239,6 +239,7 @@ run_self_test() {
     echo "$FIXTURE_GOOD_TCP_ABSENCE_SOCKET_CLOSED" > "$test_dir/good-tcp-socket-closed.json"; run_test "Good: TCP socket_closed_before_capture" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-socket-closed.json" "self-test"
     echo "$FIXTURE_GOOD_TCP_ABSENCE_COMMAND_FAILED" > "$test_dir/good-tcp-command-failed.json"; run_test "Good: TCP command_failed reason" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-command-failed.json" "self-test"
     echo "$FIXTURE_GOOD_TCP_ABSENCE_NOT_CONFIGURED" > "$test_dir/good-tcp-not-configured.json"; run_test "Good: TCP not_configured reason" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-not-configured.json" "self-test"
+    echo "$FIXTURE_GOOD_TCP_ABSENCE_PARSE_FAILED" > "$test_dir/good-tcp-parse-failed.json"; run_test "Good: TCP parse_failed reason" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-parse-failed.json" "self-test"
     echo "$FIXTURE_GOOD_TCP_FIELDS_AS_OBJECT" > "$test_dir/good-tcp-fields-as-object.json"; run_test "Good: TCP fields as object with reason" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-fields-as-object.json" "self-test"
     echo "$FIXTURE_BAD_TCP_ABSENCE_NO_EVENT" > "$test_dir/bad-tcp-no-event.json"; run_test "Bad: TCP absence with no event" fail verify_tcp_diagnostics_contract "$test_dir/bad-tcp-no-event.json" "self-test"
     echo "$FIXTURE_BAD_TCP_WARNING_ONLY" > "$test_dir/bad-tcp-warning-only.json"; run_test "Bad: TCP warning-only (no structured reason)" fail verify_tcp_diagnostics_contract "$test_dir/bad-tcp-warning-only.json" "self-test"

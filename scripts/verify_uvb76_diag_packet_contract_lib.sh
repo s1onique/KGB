@@ -1,8 +1,5 @@
-#!/bin/bash
 # verify_uvb76_diag_packet_contract_lib.sh — Packet contract verifier library
-#
 # Shared library for verify_uvb76_diag_packet_contract.sh
-# Contains fixtures for self-testing.
 
 # Colors (defined in parent script)
 RED='\033[0;31m'
@@ -19,9 +16,6 @@ log_fail() { echo -e "${RED}[FAIL]${NC} $*" >&2; ERRORS=$((ERRORS + 1)); }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $*" >&2; WARNINGS=$((WARNINGS + 1)); }
 log_info() { [[ "${VERBOSE:-false}" == "true" ]] && echo "[INFO] $*" || true; }
 
-# =============================================================================
-# Helper: assert_jq FILE EXPR MESSAGE
-# =============================================================================
 assert_jq() {
     local file="$1"
     local expr="$2"
@@ -40,9 +34,6 @@ assert_jq() {
     return 0
 }
 
-# =============================================================================
-# Fixtures for self-test
-# =============================================================================
 
 # Good fixtures
 FIXTURE_GOOD_CAPTURED_ROW='{"capture_status":"captured","capture_exists":true,"is_protected":true}'
@@ -62,11 +53,8 @@ FIXTURE_BAD_CAPTURED_NOT_PROTECTED='{"capture_status":"captured","capture_exists
 FIXTURE_BAD_NOT_ATTEMPTED_SUPPRESSED='{"capture_status":"not_attempted","capture_exists":false,"is_protected":false,"suppressed_by_cooldown":true}'
 FIXTURE_BAD_FAILED_WITH_COOLDOWN='{"capture_status":"failed","cooldown_info":{"last_successful_capture_at":"2026-01-01T00:00:00Z","next_capture_eligible_at":"2026-01-01T00:00:05Z","cooldown_seconds":5}}'
 
-# =============================================================================
-# TCP Diagnostics Contract Fixtures
-# =============================================================================
 
-# Good: packet with actual TCP socket diagnostics
+# Good: TCP with sockets
 FIXTURE_GOOD_TCP_WITH_SOCKETS='{
   "network_diag": {
     "status": "ok",
@@ -85,7 +73,7 @@ FIXTURE_GOOD_TCP_WITH_SOCKETS='{
   }
 }'
 
-# Good: packet with empty TCP but structured absence reason via event
+# Good: TCP absence with event
 FIXTURE_GOOD_TCP_ABSENCE_WITH_EVENT='{
   "network_diag": {
     "status": "ok",
@@ -103,7 +91,7 @@ FIXTURE_GOOD_TCP_ABSENCE_WITH_EVENT='{
   }
 }'
 
-# Good: packet with empty TCP but socket_closed_before_capture reason
+# Good: socket_closed_before_capture
 FIXTURE_GOOD_TCP_ABSENCE_SOCKET_CLOSED='{
   "network_diag": {
     "status": "warning",
@@ -121,7 +109,7 @@ FIXTURE_GOOD_TCP_ABSENCE_SOCKET_CLOSED='{
   }
 }'
 
-# Good: packet with command_failed reason
+# Good: command_failed
 FIXTURE_GOOD_TCP_ABSENCE_COMMAND_FAILED='{
   "network_diag": {
     "status": "unavailable",
@@ -139,7 +127,7 @@ FIXTURE_GOOD_TCP_ABSENCE_COMMAND_FAILED='{
   }
 }'
 
-# Good: packet with not_configured reason (TCP diag disabled)
+# Good: not_configured
 FIXTURE_GOOD_TCP_ABSENCE_NOT_CONFIGURED='{
   "network_diag": {
     "status": "disabled",
@@ -157,7 +145,25 @@ FIXTURE_GOOD_TCP_ABSENCE_NOT_CONFIGURED='{
   }
 }'
 
-# Bad: packet with empty TCP but NO events (missing structured reason)
+# Good: parse_failed
+FIXTURE_GOOD_TCP_ABSENCE_PARSE_FAILED='{
+  "network_diag": {
+    "status": "unavailable",
+    "started_at": "2026-01-01T00:00:00Z",
+    "underlay_tcp": [],
+    "events": [
+      {
+        "ts": "2026-01-01T00:00:00Z",
+        "severity": "error",
+        "source": "underlay_tcp",
+        "message": "failed to parse ss output",
+        "fields": "{\"reason\":\"parse_failed\",\"detail\":\"UnexpectedToken\"}"
+      }
+    ]
+  }
+}'
+
+# Bad: no event
 FIXTURE_BAD_TCP_ABSENCE_NO_EVENT='{
   "network_diag": {
     "status": "ok",
@@ -167,7 +173,7 @@ FIXTURE_BAD_TCP_ABSENCE_NO_EVENT='{
   }
 }'
 
-# Bad: packet with underlay_tcp entries but warning-only event (no structured reason)
+# Bad: warning-only event
 FIXTURE_BAD_TCP_WARNING_ONLY='{
   "network_diag": {
     "status": "warning",
@@ -184,7 +190,7 @@ FIXTURE_BAD_TCP_WARNING_ONLY='{
   }
 }'
 
-# Bad: packet with underlay_tcp entries but no fields in event
+# Bad: event without fields
 FIXTURE_BAD_TCP_NO_FIELDS_IN_EVENT='{
   "network_diag": {
     "status": "warning",
@@ -201,7 +207,7 @@ FIXTURE_BAD_TCP_NO_FIELDS_IN_EVENT='{
   }
 }'
 
-# Good: fields is an object (not JSON string) with allowed reason
+# Good: fields as object
 FIXTURE_GOOD_TCP_FIELDS_AS_OBJECT='{
   "network_diag": {
     "status": "warning",
@@ -219,7 +225,7 @@ FIXTURE_GOOD_TCP_FIELDS_AS_OBJECT='{
   }
 }'
 
-# Bad: underlay_tcp is an object, not an array
+# Bad: underlay_tcp is object
 FIXTURE_BAD_TCP_UNDERLAY_IS_OBJECT='{
   "network_diag": {
     "status": "ok",
@@ -229,7 +235,7 @@ FIXTURE_BAD_TCP_UNDERLAY_IS_OBJECT='{
   }
 }'
 
-# Bad: reason is not in the allowlist
+# Bad: unknown reason
 FIXTURE_BAD_TCP_UNKNOWN_REASON='{
   "network_diag": {
     "status": "warning",
@@ -247,7 +253,7 @@ FIXTURE_BAD_TCP_UNKNOWN_REASON='{
   }
 }'
 
-# Bad: fields is malformed JSON string
+# Bad: malformed JSON fields
 FIXTURE_BAD_TCP_MALFORMED_FIELDS='{
   "network_diag": {
     "status": "warning",
@@ -265,11 +271,8 @@ FIXTURE_BAD_TCP_MALFORMED_FIELDS='{
   }
 }'
 
-# =============================================================================
-# Capture Status Contract Fixtures
-# =============================================================================
 
-# Good: capture entry with status=ok and network_diag present (normalized row)
+# Good: capture with diag
 FIXTURE_CAPTURE_OK_WITH_DIAG='{
   "capture_status": "ok",
   "capture_exists": true,
@@ -280,7 +283,7 @@ FIXTURE_CAPTURE_OK_WITH_DIAG='{
   }
 }'
 
-# Good: capture entry with status=captured and network_diag present (normalized row)
+# Good: captured with diag
 FIXTURE_CAPTURE_CAPTURED_WITH_DIAG='{
   "capture_status": "captured",
   "capture_exists": true,
@@ -291,7 +294,7 @@ FIXTURE_CAPTURE_CAPTURED_WITH_DIAG='{
   }
 }'
 
-# Bad: capture entry with status=timeout (should fail Phase 1/3 capture contract)
+# Bad: capture timeout
 FIXTURE_CAPTURE_TIMEOUT_NO_DIAG='{
   "capture_status": "timeout",
   "capture_exists": true,
@@ -299,7 +302,7 @@ FIXTURE_CAPTURE_TIMEOUT_NO_DIAG='{
   "network_diag": null
 }'
 
-# Bad: capture entry with status=ok but no network_diag (should fail Phase 1/3)
+# Bad: ok without diag
 FIXTURE_CAPTURE_OK_NO_DIAG='{
   "capture_status": "ok",
   "capture_exists": true,
@@ -307,7 +310,7 @@ FIXTURE_CAPTURE_OK_NO_DIAG='{
   "network_diag": null
 }'
 
-# Bad: capture entry with status=failed (should fail Phase 1/3)
+# Bad: capture failed
 FIXTURE_CAPTURE_FAILED='{
   "capture_status": "failed",
   "capture_exists": true,
@@ -315,7 +318,7 @@ FIXTURE_CAPTURE_FAILED='{
   "network_diag": null
 }'
 
-# Bad: capture entry with status=error (should fail Phase 1/3)
+# Bad: capture error
 FIXTURE_CAPTURE_ERROR='{
   "capture_status": "error",
   "capture_exists": true,
@@ -323,7 +326,7 @@ FIXTURE_CAPTURE_ERROR='{
   "network_diag": null
 }'
 
-# Bad: capture entry with status=not_attempted (should fail Phase 1/3)
+# Bad: not_attempted
 FIXTURE_CAPTURE_NOT_ATTEMPTED='{
   "capture_status": "not_attempted",
   "capture_exists": false,
@@ -331,7 +334,7 @@ FIXTURE_CAPTURE_NOT_ATTEMPTED='{
   "network_diag": null
 }'
 
-# Good: skipped_cooldown row (valid for Phase 2)
+# Good: skipped_cooldown
 FIXTURE_SKIPPED_COOLDOWN_VALID='{
   "capture_status": "skipped_cooldown",
   "capture_exists": false,
@@ -344,7 +347,7 @@ FIXTURE_SKIPPED_COOLDOWN_VALID='{
   }
 }'
 
-# Bad: skipped_cooldown row when Phase 1 failed - should be flagged as invalid dependency
+# Bad: skipped_cooldown without prior capture
 FIXTURE_SKIPPED_COOLDOWN_NO_PRIOR_CAPTURE='{
   "capture_status": "skipped_cooldown",
   "capture_exists": false,

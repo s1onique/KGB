@@ -220,7 +220,12 @@ save_phase_contract_summary() {
     log_info "Phase $phase_num contract summary saved: $contract_file"
 }
 
+# TCP Diagnostics contract tracking (exported for result.sh to use)
+declare -g TCP_CONTRACT_PHASE1_OK=false
+declare -g TCP_CONTRACT_PHASE3_OK=false
+
 # Run contract verifier on all phase artifacts
+# Sets TCP_CONTRACT_PHASE*_OK variables for result.sh to use
 run_contract_verification() {
     local output_file="${1:-}"
     local lab_dir="${2:-}"
@@ -249,6 +254,13 @@ run_contract_verification() {
         return 0
     fi
     
+    # Reset TCP contract tracking
+    TCP_CONTRACT_PHASE1_OK=false
+    TCP_CONTRACT_PHASE3_OK=false
+    
+    local overall_ok=true
+    local packet_verification_failed=false
+    
     # Run verifier on all phase spike rows
     {
         echo "=== Contract Verification Output ==="
@@ -264,6 +276,7 @@ run_contract_verification() {
                 echo "[PASS] Spike row contract verified"
             else
                 echo "[FAIL] Spike row contract FAILED"
+                overall_ok=false
             fi
             echo ""
         done
@@ -271,11 +284,23 @@ run_contract_verification() {
         for packet in "$lab_dir"/phase*-capture-packet.json; do
             [[ -f "$packet" ]] || continue
             
+            local phase_name
+            phase_name=$(basename "$packet" .json)
+            
             echo "--- Verifying: $(basename "$packet") ---"
-            if "$verifier" --capture "$packet" --phase "$(basename "$packet" .json)" 2>&1; then
-                echo "[PASS] Packet contract verified"
+            local packet_ec=0
+            if "$verifier" --capture "$packet" --phase "$phase_name" 2>&1; then
+                echo "[PASS] Packet contract verified (shape + TCP diagnostics)"
+                # Track TCP contract status for phase1 and phase3
+                if [[ "$phase_name" == "phase1-capture-packet" ]]; then
+                    TCP_CONTRACT_PHASE1_OK=true
+                elif [[ "$phase_name" == "phase3-capture-packet" ]]; then
+                    TCP_CONTRACT_PHASE3_OK=true
+                fi
             else
-                echo "[FAIL] Packet contract FAILED"
+                echo "[FAIL] Packet contract FAILED (shape and/or TCP diagnostics)"
+                overall_ok=false
+                packet_verification_failed=true
             fi
             echo ""
         done
@@ -283,7 +308,18 @@ run_contract_verification() {
         echo "=== Contract Verification Complete ==="
     } > "$output_file" 2>&1 || true
     
+    # Log TCP contract status for visibility
+    log_info "TCP diagnostics contract status:"
+    log_info "  Phase 1 capture packet: $TCP_CONTRACT_PHASE1_OK"
+    log_info "  Phase 3 capture packet: $TCP_CONTRACT_PHASE3_OK"
+    
     log_info "Contract verification output: $output_file"
+    
+    # Return failure if any row or packet verification failed
+    if [[ "$overall_ok" != "true" ]]; then
+        return 1
+    fi
+    return 0
 }
 
 # Assert contract for a captured row.

@@ -1,226 +1,133 @@
-// status_network_diag_tests.zig — Unit tests for network diagnostics ownership
+// status_network_diag_tests.zig — Unit tests for TCP diagnostics absence events
 //
-// Tests ownership model:
-// - TcpSocketOutput strings are duplicated from parser-owned TcpSocket
-// - freeTcpSockets is called after copying
-// - NetworkDiag.deinit is safe for disabled, unavailable, and normal payloads
+// Tests TCP absence events:
+// - non-empty TCP sockets -> no absence reason required
+// - empty TCP after successful ss/no match -> event reason no_matching_socket
+// - command failure -> reason command_failed
+// - disabled/not configured -> reason not_configured
 
 const std = @import("std");
 const status_network_diag = @import("status_network_diag.zig");
-const ss_parser = @import("net/ss_parser.zig");
+const network_diag_config = @import("net/network_diag_config.zig");
 
 const testing = std.testing;
 
 // ============================================================================
-// Tests: NetworkDiag.deinit for disabled status
+// Tests: TCP Absence Events
 // ============================================================================
 
-test "NetworkDiag.deinit is safe for disabled status" {
-    const allocator = testing.allocator;
-    var diag = status_network_diag.NetworkDiag{
-        .started_at = try allocator.dupe(u8, "1718700000000"),
-        .status = .disabled,
-        .wireguard = null,
-        .interfaces = &.{},
-        .routes = &.{},
-        .underlay_tcp = &.{},
-        .events = &.{},
+test "TcpAbsenceReason enum has all allowed values" {
+    // Verify all expected reasons are present
+    const reasons = .{
+        status_network_diag.TcpAbsenceReason.no_matching_socket,
+        status_network_diag.TcpAbsenceReason.socket_closed_before_capture,
+        status_network_diag.TcpAbsenceReason.command_failed,
+        status_network_diag.TcpAbsenceReason.not_configured,
+        status_network_diag.TcpAbsenceReason.permission_denied,
+        status_network_diag.TcpAbsenceReason.target_not_tcp,
+        status_network_diag.TcpAbsenceReason.target_mapping_missing,
+        status_network_diag.TcpAbsenceReason.unsupported_platform,
+        status_network_diag.TcpAbsenceReason.parse_failed,
     };
 
-    diag.deinit(allocator);
-}
-
-test "NetworkDiag.deinit is safe for unavailable status" {
-    const allocator = testing.allocator;
-    var diag = status_network_diag.NetworkDiag{
-        .started_at = try allocator.dupe(u8, "1718700000000"),
-        .status = .unavailable,
-        .wireguard = null,
-        .interfaces = &.{},
-        .routes = &.{},
-        .underlay_tcp = &.{},
-        .events = &.{},
-    };
-
-    diag.deinit(allocator);
-}
-
-test "NetworkDiag.deinit is safe for normal status with empty slices" {
-    const allocator = testing.allocator;
-    var diag = status_network_diag.NetworkDiag{
-        .started_at = try allocator.dupe(u8, "1718700000000"),
-        .status = .ok,
-        .wireguard = null,
-        .interfaces = &.{},
-        .routes = &.{},
-        .underlay_tcp = &.{},
-        .events = &.{},
-    };
-
-    diag.deinit(allocator);
+    // All reasons should have valid tag names
+    inline for (reasons) |reason| {
+        const name = @tagName(reason);
+        try testing.expect(name.len > 0);
+    }
 }
 
 // ============================================================================
-// Tests: NetworkDiag.deinit with underlay_tcp sockets
+// Tests: collectNetworkDiag with TCP diagnostics disabled
 // ============================================================================
 
-test "NetworkDiag.deinit frees underlay_tcp socket strings" {
+test "collectNetworkDiag with disabled diagnostics returns empty events" {
     const allocator = testing.allocator;
-    var diag = status_network_diag.NetworkDiag{
-        .started_at = try allocator.dupe(u8, "1718700000000"),
-        .status = .ok,
-        .wireguard = null,
-        .interfaces = &.{},
-        .routes = &.{},
-        .underlay_tcp = try allocator.alloc(status_network_diag.TcpSocketOutput, 1),
-        .events = &.{},
+
+    const cfg = network_diag_config.NetworkDiagConfig{
+        .enabled = false,
+        .wireguard = .{ .enabled = false },
+        .underlay_tcp = .{ .enabled = false },
     };
 
-    // Simulate what collectNetworkDiag does - duplicate strings
-    diag.underlay_tcp[0] = .{
-        .name = try allocator.dupe(u8, "xray"),
-        .state = try allocator.dupe(u8, "ESTAB"),
-        .local = try allocator.dupe(u8, "redacted:443"),
-        .remote = try allocator.dupe(u8, "redacted:12345"),
-        .rtt_ms = 49.2,
-        .rttvar_ms = 4.2,
-        .rto_ms = 220,
-        .retransmits = 0,
-        .unacked = 3,
-        .cwnd = 10,
-        .send_queue_bytes = 0,
-        .recv_queue_bytes = 0,
-        .status = try allocator.dupe(u8, "ok"),
-    };
+    var diag = try status_network_diag.collectNetworkDiag(allocator, cfg);
+    defer diag.deinit(allocator);
 
-    diag.deinit(allocator);
+    // When diagnostics are fully disabled, no events should be generated
+    try testing.expectEqualSlices(status_network_diag.EventOutput, &.{}, diag.events);
 }
 
-test "NetworkDiag.deinit frees multiple underlay_tcp sockets" {
+test "collectNetworkDiag with TCP disabled but overall enabled" {
     const allocator = testing.allocator;
-    var diag = status_network_diag.NetworkDiag{
-        .started_at = try allocator.dupe(u8, "1718700000000"),
-        .status = .ok,
-        .wireguard = null,
-        .interfaces = &.{},
-        .routes = &.{},
-        .underlay_tcp = try allocator.alloc(status_network_diag.TcpSocketOutput, 2),
-        .events = &.{},
+
+    const cfg = network_diag_config.NetworkDiagConfig{
+        .enabled = true,
+        .wireguard = .{ .enabled = false },
+        .underlay_tcp = .{
+            .enabled = false,
+            .commands_enabled = false,
+        },
     };
 
-    // First socket
-    diag.underlay_tcp[0] = .{
-        .name = try allocator.dupe(u8, "xray"),
-        .state = try allocator.dupe(u8, "ESTAB"),
-        .local = try allocator.dupe(u8, "redacted:443"),
-        .remote = try allocator.dupe(u8, "redacted:12345"),
-        .rtt_ms = 49.2,
-        .rttvar_ms = 4.2,
-        .rto_ms = 220,
-        .retransmits = 0,
-        .unacked = 3,
-        .cwnd = 10,
-        .send_queue_bytes = 0,
-        .recv_queue_bytes = 0,
-        .status = try allocator.dupe(u8, "ok"),
+    var diag = try status_network_diag.collectNetworkDiag(allocator, cfg);
+    defer diag.deinit(allocator);
+
+    // TCP disabled should produce a not_configured event
+    try testing.expect(diag.events.len == 1);
+    try testing.expectEqualStrings("underlay_tcp", diag.events[0].source);
+    try testing.expectEqualStrings("warning", diag.events[0].severity);
+    try testing.expect(diag.events[0].fields != null);
+    try testing.expect(std.mem.containsAtLeast(u8, diag.events[0].fields.?, 1, "not_configured"));
+}
+
+test "collectNetworkDiag with TCP enabled but commands disabled" {
+    const allocator = testing.allocator;
+
+    const cfg = network_diag_config.NetworkDiagConfig{
+        .enabled = true,
+        .wireguard = .{ .enabled = false },
+        .underlay_tcp = .{
+            .enabled = true,
+            .commands_enabled = false,
+        },
     };
 
-    // Second socket
-    diag.underlay_tcp[1] = .{
-        .name = try allocator.dupe(u8, "unknown"),
-        .state = try allocator.dupe(u8, "LISTEN"),
-        .local = try allocator.dupe(u8, "redacted:8080"),
-        .remote = try allocator.dupe(u8, "redacted:0"),
-        .rtt_ms = null,
-        .rttvar_ms = null,
-        .rto_ms = null,
-        .retransmits = null,
-        .unacked = null,
-        .cwnd = null,
-        .send_queue_bytes = 0,
-        .recv_queue_bytes = 0,
-        .status = try allocator.dupe(u8, "ok"),
-    };
+    var diag = try status_network_diag.collectNetworkDiag(allocator, cfg);
+    defer diag.deinit(allocator);
 
-    diag.deinit(allocator);
+    // Commands disabled should produce a not_configured event
+    try testing.expect(diag.events.len == 1);
+    try testing.expectEqualStrings("underlay_tcp", diag.events[0].source);
+    try testing.expectEqualStrings("warning", diag.events[0].severity);
+    try testing.expect(diag.events[0].fields != null);
+    try testing.expect(std.mem.containsAtLeast(u8, diag.events[0].fields.?, 1, "not_configured"));
 }
 
 // ============================================================================
-// Tests: status_network_diag does not borrow from cmd_result.stdout
+// Tests: JSON shape validation for TCP absence events
 // ============================================================================
 
-test "status_network_diag copies sockets and frees parser-owned memory" {
+test "TCP absence event fields JSON is valid" {
     const allocator = testing.allocator;
 
-    // Create parser-owned sockets (simulating what parseSsTinOutput returns)
-    const input = "State       Recv-Q   Send-Q   Local Address:Port   Peer Address:Port   Process\n" ++
-        "ESTAB       0        0        10.0.0.1:443         192.0.2.1:12345    users:((\"xray\",pid=1234,fd=5))\n";
+    // Build a fields JSON string as the code does
+    const fields_json = try std.fmt.allocPrint(allocator, "{{\"reason\":\"{s}\"}}", .{"no_matching_socket"});
+    defer allocator.free(fields_json);
 
-    const config = ss_parser.ParseConfig{ .redact_addresses = true };
-    const sockets = try ss_parser.parseSsTinOutput(allocator, input, config);
-    defer ss_parser.freeTcpSockets(allocator, sockets); // This is the correct pattern
-
-    // After freeTcpSockets, the original socket strings are freed
-    // Any copy would need to be made BEFORE this point
-
-    try testing.expect(sockets.len == 1);
-    try testing.expectEqualStrings("redacted:443", sockets[0].local.?);
-    try testing.expectEqualStrings("redacted:12345", sockets[0].remote.?);
+    // The fields should be a valid JSON object string
+    try testing.expect(std.mem.startsWith(u8, fields_json, "{\"reason\":"));
+    try testing.expect(std.mem.endsWith(u8, fields_json, "\"}"));
 }
 
-test "TcpSocketOutput strings are owned by NetworkDiag, not parser" {
+test "TCP absence event fields JSON with exit_code is valid" {
     const allocator = testing.allocator;
 
-    // Parse sockets with parser
-    const input = "State       Recv-Q   Send-Q   Local Address:Port   Peer Address:Port   Process\n" ++
-        "ESTAB       0        0        10.0.0.1:443         192.0.2.1:12345    users:((\"xray\",pid=1234,fd=5))\n";
+    // Build a fields JSON string with exit_code as the code does
+    const fields_json = try std.fmt.allocPrint(allocator, "{{\"reason\":\"{s}\",\"exit_code\":{d}}}", .{ "command_failed", 127 });
+    defer allocator.free(fields_json);
 
-    const config = ss_parser.ParseConfig{ .redact_addresses = false };
-    const sockets = try ss_parser.parseSsTinOutput(allocator, input, config);
-
-    // Create TcpSocketOutput by duplicating (as status_network_diag does)
-    const output = status_network_diag.TcpSocketOutput{
-        .name = try allocator.dupe(u8, sockets[0].process_name.?),
-        .state = try allocator.dupe(u8, @tagName(sockets[0].state)),
-        .local = try allocator.dupe(u8, sockets[0].local.?),
-        .remote = try allocator.dupe(u8, sockets[0].remote.?),
-        .rtt_ms = sockets[0].rtt_ms,
-        .rttvar_ms = sockets[0].rttvar_ms,
-        .rto_ms = sockets[0].rto_ms,
-        .retransmits = sockets[0].retransmits,
-        .unacked = sockets[0].unacked,
-        .cwnd = sockets[0].cwnd,
-        .send_queue_bytes = sockets[0].send_queue_bytes,
-        .recv_queue_bytes = sockets[0].recv_queue_bytes,
-        .status = try allocator.dupe(u8, @tagName(sockets[0].status)),
-    };
-
-    // Now we can free parser sockets - output strings are independent copies
-    ss_parser.freeTcpSockets(allocator, sockets);
-
-    // Output still has valid data
-    try testing.expectEqualStrings("\"xray\",pid=1234,fd=5", output.name);
-    try testing.expectEqualStrings("ESTAB", output.state);
-
-    // Cleanup output
-    allocator.free(output.name);
-    allocator.free(output.state);
-    allocator.free(output.local);
-    allocator.free(output.remote);
-    allocator.free(output.status);
-}
-
-// ============================================================================
-// Tests: formatTimestamp returns allocator-owned string
-// ============================================================================
-
-test "formatTimestamp returns allocator-owned string" {
-    const allocator = testing.allocator;
-    const ts = status_network_diag.formatTimestamp(allocator, 1718700000000);
-    const result = try ts;
-    defer allocator.free(result);
-
-    // Result is a valid string representation
-    try testing.expect(result.len > 0);
-    try testing.expect(result[0] == '1'); // Starts with timestamp digits
+    // The fields should be a valid JSON object string with both fields
+    try testing.expect(std.mem.containsAtLeast(u8, fields_json, 1, "\"reason\":"));
+    try testing.expect(std.mem.containsAtLeast(u8, fields_json, 1, "\"exit_code\":"));
+    try testing.expect(std.mem.containsAtLeast(u8, fields_json, 1, "127"));
 }

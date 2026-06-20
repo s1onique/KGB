@@ -264,4 +264,8 @@ test { std.testing.refAllDecls(@import("net/wg_dump_collector.zig")); }
 
 // Status network diagnostics integration
 test { std.testing.refAllDecls(@import("status_network_diag.zig")); }
+test { std.testing.refAllDecls(@import("status_network_diag_types.zig")); }
+test { std.testing.refAllDecls(@import("status_network_diag_events.zig")); }
+test { std.testing.refAllDecls(@import("status_network_diag_tcp.zig")); }
 test { std.testing.refAllDecls(@import("status_network_diag_tests.zig")); }
+test { std.testing.refAllDecls(@import("status_network_diag_ownership_tests.zig")); }
