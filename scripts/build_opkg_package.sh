@@ -279,9 +279,14 @@ if [ ! -s "${PKG_PATH}" ]; then
 fi
 
 # --- Generate SHA256 checksum ---
+# Generate path-portable checksum: cd into dist/opkg so the sha256 file
+# contains only basename paths (artifact-portable after download to release-assets/)
 echo ""
 echo "=== Generating SHA256 checksum ==="
-sha256sum "${PKG_PATH}" > "${PKG_PATH}.sha256"
+(
+    cd "${OUTPUT_DIR}"
+    sha256sum "$(basename "${PKG_PATH}")" > "$(basename "${PKG_PATH}").sha256"
+)
 
 echo ""
 echo "=== Package created successfully ==="

@@ -32,6 +32,34 @@ def log_verbose(msg: str, verbose: bool = False) -> None:
         print(f"[VERBOSE] {msg}")
 
 
+# Regex to reject namespaced package names like uvb76_uvb76-opkg-v0.1.1-rc40-1_aarch64-3.10.ipk
+# Valid names: uvb76_0.1.1-rc40-1_aarch64-3.10.ipk
+INVALID_NAME_PATTERNS = [
+    r'uvb76_uvb76-opkg-v',  # Double namespace prefix
+    r'_v\d',                 # Version with leading v in filename
+]
+
+
+def _verify_filename_pattern(ipk_path: str) -> bool:
+    """Verify the package filename follows the expected naming convention.
+    
+    Rejects filenames containing namespace prefixes like uvb76_uvb76-opkg-v*
+    which would indicate the release tag was incorrectly used as the package version.
+    Only rejects the specific buggy patterns - allows other names for test fixtures.
+    """
+    basename = os.path.basename(ipk_path)
+    
+    # Only reject the specific buggy patterns that indicate the release tag was used as version
+    for pattern in INVALID_NAME_PATTERNS:
+        if re.search(pattern, basename):
+            log_fail(f"Package filename '{basename}' matches invalid pattern '{pattern}'")
+            log_fail("Package version must not contain namespace prefix (e.g., uvb76-opkg-v)")
+            return False
+    
+    log_verbose(f"Filename pattern: OK", True)
+    return True
+
+
 def _parse_gzip_tar_members(ipk_path: str) -> dict[str, bytes]:
     """Parse outer gzip tar and return a dict of member_name -> content."""
     members: dict[str, bytes] = {}
@@ -80,6 +108,11 @@ def verify_ipk(ipk_path: str, verbose: bool = False) -> bool:
         return False
     
     log_verbose(f"File exists and non-empty: {os.path.getsize(ipk_path)} bytes", verbose)
+    
+    # Verify filename pattern BEFORE parsing contents
+    # This catches the bug where packages are named uvb76_uvb76-opkg-v0.1.1-rc40-1_aarch64-3.10.ipk
+    if not _verify_filename_pattern(ipk_path):
+        return False
     
     # Parse outer gzip tar
     try:

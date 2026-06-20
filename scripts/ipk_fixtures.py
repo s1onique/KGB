@@ -74,6 +74,7 @@ def run_self_tests() -> bool:
 
         good_fixture_path = create_good_fixture(work_dir)
         shutil.copy(good_fixture_path, os.path.join(work_dir, '_good.ipk'))
+        shutil.copy(good_fixture_path + '.sha256', os.path.join(work_dir, '_good.ipk.sha256'))
 
         for name, modifier, expected in test_cases:
             total += 1

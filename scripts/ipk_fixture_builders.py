@@ -60,7 +60,8 @@ def _build_data_tar(extra_files=None, init_mode=0o755, init_content=None) -> byt
 
 def create_good_fixture(work_dir: str) -> str:
     """Create a valid ipk fixture using gzip tar format. Returns the fixture path."""
-    fixture_path = os.path.join(work_dir, 'good.ipk')
+    # Use a properly-named package: uvb76_<version>-<revision>_<arch>.ipk
+    fixture_path = os.path.join(work_dir, 'uvb76_1.0.0-1_aarch64-3.10.ipk')
 
     control_content = """Package: uvb76
 Version: 1.0.0-1

@@ -77,15 +77,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -n "${{ inputs.version || '' }}" ]; then
-            version="${{ inputs.version }}"
-          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            version="${GITHUB_REF_NAME#v}"
-          else
-            version="0.0.0-dev.${GITHUB_RUN_NUMBER}"
-          fi
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "resolved_version=${version}" >> "$GITHUB_OUTPUT"
+
+          RELEASE_TAG="${GITHUB_REF_NAME}"
+
+          # Normalize version: strip uvb76-opkg-v namespace prefix
+          case "${RELEASE_TAG}" in
+            uvb76-opkg-v*)
+              PKG_VERSION="${RELEASE_TAG#uvb76-opkg-v}"
+              ;;
+            *)
+              if [ -n "${{ inputs.version || '' }}" ]; then
+                PKG_VERSION="${{ inputs.version }}"
+              else
+                PKG_VERSION="0.0.0-ci.${GITHUB_RUN_NUMBER}"
+              fi
+              ;;
+          esac
+
+          echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "pkg_version=${PKG_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Test
         run: |
@@ -94,7 +104,7 @@ jobs:
 
       - name: Build opkg package
         env:
-          VERSION: ${{ steps.version.outputs.resolved_version }}
+          VERSION: ${{ steps.version.outputs.pkg_version }}
           REVISION: "1"
           OPKG_ARCH: ${{ matrix.opkg_arch }}
           GOOS: ${{ matrix.goos }}
@@ -140,7 +150,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/generate_opkg_release_metadata.py \
-            --version "${{ steps.version.outputs.resolved_version }}" \
+            --version "${{ steps.version.outputs.pkg_version }}" \
             --github-run-number "${{ github.run_number }}" \
             --github-sha "${GITHUB_SHA}" \
             --output-dir dist/opkg
@@ -151,7 +161,7 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: uvb76-opkg-${{ matrix.opkg_arch }}-${{ steps.version.outputs.resolved_version }}
+          name: uvb76-opkg-${{ matrix.opkg_arch }}-${{ steps.version.outputs.pkg_version }}
           path: |
             dist/opkg/*.ipk
             dist/opkg/*.sha256
@@ -195,49 +205,71 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Change into release-assets directory for verification
+          cd release-assets
+
           # Verify manifest and release notes exist
-          test -f release-assets/manifest.txt
-          test -f release-assets/release-notes.md
+          test -f manifest.txt
+          test -f release-notes.md
 
           echo "=== manifest.txt ==="
-          cat release-assets/manifest.txt
+          cat manifest.txt
 
           echo ""
           echo "=== release-notes.md (first 50 lines) ==="
-          head -50 release-assets/release-notes.md
-
-          # Verify SHA256 checksums exist
-          sha_count=$(find release-assets -name '*.sha256' | wc -l)
-          if [[ "$sha_count" -eq 0 ]]; then
-            echo "ERROR: No SHA256 checksum files found" >&2
-            exit 1
-          fi
-          echo "Found $sha_count SHA256 checksum files"
+          head -50 release-notes.md
 
           # Verify at least one .ipk exists
-          ipk_count=$(find release-assets -name '*.ipk' | wc -l)
+          ipk_count=$(find . -maxdepth 1 -name '*.ipk' -type f | wc -l)
           if [[ "$ipk_count" -eq 0 ]]; then
             echo "ERROR: No .ipk packages found" >&2
             exit 1
           fi
-          echo "Found $ipk_count .ipk packages"
+          echo "Found $ipk_count .ipk package(s)"
 
-          # Verify SHA256 checksums are valid
+          # Verify at least one .sha256 exists
+          sha_count=$(find . -maxdepth 1 -name '*.sha256' -type f | wc -l)
+          if [[ "$sha_count" -eq 0 ]]; then
+            echo "ERROR: No SHA256 checksum files found" >&2
+            exit 1
+          fi
+          echo "Found $sha_count SHA256 checksum file(s)"
+
+          # Reject checksum files containing non-portable paths (absolute paths, slashes, dist/ prefix)
+          # This catches the bug where checksums contained "dist/opkg/..." paths
+          echo ""
+          echo "=== Verifying checksum portability ==="
+          for sha in *.sha256; do
+            if [ -f "$sha" ]; then
+              # Extract the path column from sha256sum output (column 2)
+              paths=$(awk '{ print $2 }' "$sha")
+              for p in $paths; do
+                if echo "$p" | grep -qE '(^/|/|^dist/)'; then
+                  echo "ERROR: checksum file '$sha' contains non-portable path: '$p'" >&2
+                  echo "Paths in checksums must be relative basenames only." >&2
+                  exit 1
+                fi
+              done
+              echo "OK: $sha has portable paths"
+            fi
+          done
+
+          # Verify SHA256 checksums are valid (checksums are portable, so we can run from here)
           echo ""
           echo "=== Verifying SHA256 checksums ==="
-          for sha in release-assets/*.sha256; do
-            if sha256sum -c "$sha"; then
-              echo "OK: $(basename "$sha")"
-            else
-              echo "FAIL: $(basename "$sha")" >&2
+          for sha in *.sha256; do
+            if [ -f "$sha" ] && sha256sum -c "$sha"; then
+              echo "OK: $sha"
+            elif [ -f "$sha" ]; then
+              echo "FAIL: $sha" >&2
               exit 1
             fi
           done
 
           # Prevent cross-product asset leakage (no .deb files in opkg release)
-          if find release-assets -type f -name '*.deb' | grep -q .; then
+          if find . -maxdepth 1 -type f -name '*.deb' | grep -q .; then
             echo "ERROR: .deb files found in opkg release (cross-product asset leakage)" >&2
-            find release-assets -type f -name '*.deb' >&2
+            find . -maxdepth 1 -type f -name '*.deb' >&2
             exit 1
           fi
 
