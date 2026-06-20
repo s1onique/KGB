@@ -15,9 +15,10 @@ set -euo pipefail
 VERBOSE="${VERBOSE:-false}"
 ERRORS=0
 
-# Source library with fixtures
+# Source library with fixtures and self-test harness
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/verify_uvb76_diag_packet_contract_lib.sh"
+source "${SCRIPT_DIR}/verify_uvb76_diag_packet_contract_selftest.sh"
 
 log_pass() { echo -e "${GREEN}[PASS]${NC} $*"; }
 log_fail() { echo -e "${RED}[FAIL]${NC} $*" >&2; ERRORS=$((ERRORS + 1)); }
@@ -213,44 +214,42 @@ write_contract_summary() {
 }
 
 # =============================================================================
-# Self-test
+# Self-test (with no-leaked-fail-lines guard)
 # =============================================================================
 
 run_self_test() {
-    echo "=== Running self-test ==="; local test_dir; test_dir=$(mktemp -d "/tmp/uvb76-contract-test-XXXXXX"); local t_err=0; local t_pass=0
-    run_test() {
-        local name="$1"; local expected="$2"; shift 2; echo "--- Test: $name ---"
-        local ec=0; "$@" 2>&1 || ec=$?
-        if [[ "$expected" == "pass" ]]; then [[ $ec -eq 0 ]] && { echo "  [PASS] $name"; t_pass=$((t_pass + 1)); } || { echo "  [FAIL] $name (expected pass, got fail)"; t_err=$((t_err + 1)); }
-        else [[ $ec -ne 0 ]] && { echo "  [PASS] $name (expected fail, got fail)"; t_pass=$((t_pass + 1)); } || { echo "  [FAIL] $name (expected fail, got pass)"; t_err=$((t_err + 1)); }; fi; echo ""
-    }
-    echo "$FIXTURE_GOOD_CAPTURED_ROW" > "$test_dir/good-captured-row.json"; run_test "Good captured row" pass verify_captured_row "$test_dir/good-captured-row.json" "self-test"
-    echo "$FIXTURE_GOOD_CAPTURED_PACKET" > "$test_dir/good-packet.json"; run_test "Good captured packet shape" pass verify_packet_shape "$test_dir/good-packet.json" "self-test"
-    echo "$FIXTURE_GOOD_SKIPPED_ROW" > "$test_dir/good-skipped-row.json"; run_test "Good skipped cooldown row" pass verify_skipped_cooldown_row "$test_dir/good-skipped-row.json" "self-test"
-    echo "$FIXTURE_GOOD_NOT_ATTEMPTED_ROW" > "$test_dir/good-not-attempted.json"; run_test "Good not_attempted row" pass verify_not_attempted_row "$test_dir/good-not-attempted.json" "self-test"
-    echo "$FIXTURE_BAD_SKIPPED_NO_COOLDOWN" > "$test_dir/bad-skipped-no-cooldown.json"; run_test "Bad: skipped_cooldown without cooldown_info" fail verify_skipped_cooldown_row "$test_dir/bad-skipped-no-cooldown.json" "self-test"
-    echo "$FIXTURE_BAD_SKIPPED_NO_LAST" > "$test_dir/bad-skipped-no-last.json"; run_test "Bad: skipped_cooldown without last_successful_capture_at" fail verify_skipped_cooldown_row "$test_dir/bad-skipped-no-last.json" "self-test"
-    echo "$FIXTURE_BAD_CAPTURED_NO_PACKET" > "$test_dir/bad-captured-no-packet.json"; run_test "Bad: captured packet with network_diag null" fail verify_packet_shape "$test_dir/bad-captured-no-packet.json" "self-test"
-    echo "$FIXTURE_BAD_CAPTURED_NO_EXISTS" > "$test_dir/bad-captured-no-exists.json"; run_test "Bad: captured with capture_exists=false" fail verify_captured_row "$test_dir/bad-captured-no-exists.json" "self-test"
+    # Run harness checks first
+    if ! run_self_test_harness_checks; then
+        echo "SELF-TEST FAILED (harness check)"
+        return 1
+    fi
     
-    # TCP Diagnostics Contract Tests
-    echo "$FIXTURE_GOOD_TCP_WITH_SOCKETS" > "$test_dir/good-tcp-with-sockets.json"; run_test "Good: TCP with sockets" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-with-sockets.json" "self-test"
-    echo "$FIXTURE_GOOD_TCP_ABSENCE_WITH_EVENT" > "$test_dir/good-tcp-absence-event.json"; run_test "Good: TCP absence with structured event" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-absence-event.json" "self-test"
-    echo "$FIXTURE_GOOD_TCP_ABSENCE_SOCKET_CLOSED" > "$test_dir/good-tcp-socket-closed.json"; run_test "Good: TCP socket_closed_before_capture" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-socket-closed.json" "self-test"
-    echo "$FIXTURE_GOOD_TCP_ABSENCE_COMMAND_FAILED" > "$test_dir/good-tcp-command-failed.json"; run_test "Good: TCP command_failed reason" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-command-failed.json" "self-test"
-    echo "$FIXTURE_GOOD_TCP_ABSENCE_NOT_CONFIGURED" > "$test_dir/good-tcp-not-configured.json"; run_test "Good: TCP not_configured reason" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-not-configured.json" "self-test"
-    echo "$FIXTURE_GOOD_TCP_ABSENCE_PARSE_FAILED" > "$test_dir/good-tcp-parse-failed.json"; run_test "Good: TCP parse_failed reason" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-parse-failed.json" "self-test"
-    echo "$FIXTURE_GOOD_TCP_FIELDS_AS_OBJECT" > "$test_dir/good-tcp-fields-as-object.json"; run_test "Good: TCP fields as object with reason" pass verify_tcp_diagnostics_contract "$test_dir/good-tcp-fields-as-object.json" "self-test"
-    echo "$FIXTURE_BAD_TCP_ABSENCE_NO_EVENT" > "$test_dir/bad-tcp-no-event.json"; run_test "Bad: TCP absence with no event" fail verify_tcp_diagnostics_contract "$test_dir/bad-tcp-no-event.json" "self-test"
-    echo "$FIXTURE_BAD_TCP_WARNING_ONLY" > "$test_dir/bad-tcp-warning-only.json"; run_test "Bad: TCP warning-only (no structured reason)" fail verify_tcp_diagnostics_contract "$test_dir/bad-tcp-warning-only.json" "self-test"
-    echo "$FIXTURE_BAD_TCP_NO_FIELDS_IN_EVENT" > "$test_dir/bad-tcp-no-fields.json"; run_test "Bad: TCP event without fields" fail verify_tcp_diagnostics_contract "$test_dir/bad-tcp-no-fields.json" "self-test"
-    echo "$FIXTURE_BAD_TCP_UNDERLAY_IS_OBJECT" > "$test_dir/bad-tcp-underlay-is-object.json"; run_test "Bad: TCP underlay_tcp is object, not array" fail verify_tcp_diagnostics_contract "$test_dir/bad-tcp-underlay-is-object.json" "self-test"
-    echo "$FIXTURE_BAD_TCP_UNKNOWN_REASON" > "$test_dir/bad-tcp-unknown-reason.json"; run_test "Bad: TCP unknown reason" fail verify_tcp_diagnostics_contract "$test_dir/bad-tcp-unknown-reason.json" "self-test"
-    echo "$FIXTURE_BAD_TCP_MALFORMED_FIELDS" > "$test_dir/bad-tcp-malformed-fields.json"; run_test "Bad: TCP malformed fields JSON" fail verify_tcp_diagnostics_contract "$test_dir/bad-tcp-malformed-fields.json" "self-test"
+    # Capture body output for sanitization
+    local tmp_output; tmp_output=$(mktemp "/tmp/st-output-XXXXXX.txt")
+    set +e
+    (set -e; run_self_test_body >"$tmp_output" 2>&1)
+    local body_ec=$?
+    set -e
     
-    rm -rf "$test_dir"; echo "=== Self-test Summary ==="; echo "Passed: $t_pass"; echo "Failed: $t_err"
-    [[ $t_err -gt 0 ]] && echo "SELF-TEST FAILED" || echo "SELF-TEST PASSED"
-    [[ $t_err -gt 0 ]] && return 1 || return 0
+    if [[ $body_ec -ne 0 ]]; then
+        echo "=== Self-test FAILED ==="
+        cat "$tmp_output"
+        rm -f "$tmp_output"
+        return 1
+    fi
+    
+    # Check for leaked [FAIL] in output
+    if grep -q '\[FAIL\]' "$tmp_output" 2>/dev/null; then
+        echo "=== Self-test FAILED (leaked [FAIL] lines) ==="
+        cat "$tmp_output"
+        rm -f "$tmp_output"
+        return 1
+    fi
+    
+    echo "=== Self-test PASSED ==="
+    cat "$tmp_output"
+    rm -f "$tmp_output"
+    return 0
 }
 
 # =============================================================================
