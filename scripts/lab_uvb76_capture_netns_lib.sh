@@ -33,6 +33,8 @@ source "${SCRIPT_DIR}/lab_uvb76_capture_netns_contract_assertions.sh"
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_phase_helpers.sh"
 # shellcheck source=lab_uvb76_capture_netns_phase_capture_helpers.sh
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_phase_capture_helpers.sh"
+# shellcheck source=lab_uvb76_capture_netns_fetch_helpers.sh
+source "${SCRIPT_DIR}/lab_uvb76_capture_netns_fetch_helpers.sh"
 # shellcheck source=lab_uvb76_capture_netns_result_helpers.sh
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_result_helpers.sh"
 # shellcheck source=lab_uvb76_capture_netns_cooldown_helpers.sh

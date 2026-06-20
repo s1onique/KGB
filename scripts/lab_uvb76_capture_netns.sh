@@ -144,7 +144,9 @@ run_lab() {
         log_info ""
         log_info "=== PHASE 1 HARDEN: Verifying Real Capture Requirements ==="
         
-        if assert_phase1_real_capture 1 "$PHASE1_SPIKE_ROW_FILE" "$PHASE1_CAPTURE_PACKET_FILE"; then
+        # Phase 1 fetch summary file from extract_network_diag_from_spike_row
+        local phase1_fetch_summary="$LAB_DIR/phase1-capture-fetch-summary.json"
+        if assert_phase1_real_capture 1 "$PHASE1_SPIKE_ROW_FILE" "$PHASE1_CAPTURE_PACKET_FILE" "" "$phase1_fetch_summary"; then
             log_info "[PASS] Phase 1 real capture verification passed"
             CONTRACT_PHASE1_CAPTURE_OK=true
             CONTRACT_PHASE1_PACKET_OK=true

@@ -199,6 +199,7 @@ assert_phase1_real_capture() {
     local spike_row_file="$2"
     local packet_file="$3"
     local prior_phase_row_file="${4:-}"
+    local summary_file="${5:-}"  # fetch summary from extract_network_diag_from_spike_row
     
     local ok=true
     
@@ -292,6 +293,69 @@ assert_phase1_real_capture() {
             PHASE1_HARDEN_FAILED=true
         else
             log_info "[PASS] Phase 1 cooldown anchor: prior phase was captured (cooldown is valid)"
+        fi
+    fi
+    
+    # CRITICAL CHECK 4: Verify stored capture was used (not live fallback)
+    # The event-specific stored capture should be used, not a live /status fetch.
+    # This ensures the diagnostic packet matches the spike event, not current state.
+    # 
+    # FAIL-CLOSED: Missing or malformed summary is a hard failure in normal mode.
+    # A future refactor could silently skip the fallback-source proof if this is just a warning.
+    if [[ -z "$summary_file" || ! -f "$summary_file" ]]; then
+        log_error "[FAIL] Phase 1: missing fetch summary; cannot prove stored capture source"
+        log_error "  File expected: $summary_file"
+        
+        # Check if degraded mode is enabled (debug-only flag)
+        local degraded_mode="${DEGRADED_MODE:-false}"
+        if [[ "$degraded_mode" == "true" ]]; then
+            log_warn "[DEGRADED MODE] Allowing missing summary - debug mode only"
+            log_warn "  This should NEVER happen in production"
+        else
+            log_error "[HARDEN] Missing summary is NOT allowed in hardened mode"
+            log_error "  Expected: fetch summary file with is_fallback field"
+            log_error "  Fix: Ensure extract_network_diag_from_spike_row creates the summary file"
+            ok=false
+            PHASE1_HARDEN_FAILED=true
+        fi
+    else
+        local fetch_is_fallback
+        fetch_is_fallback=$(jq -r '.is_fallback // "null"' "$summary_file" 2>/dev/null || echo "null")
+        
+        if [[ "$fetch_is_fallback" == "false" ]]; then
+            log_info "[PASS] Phase 1: used stored capture artifact (is_fallback=false)"
+            log_info "  Event-specific diagnostic packet confirmed"
+        elif [[ "$fetch_is_fallback" == "true" ]]; then
+            log_error "[FAIL] Phase 1: used live /status fallback instead of stored capture artifact"
+            log_error "  This means the captured spike row did NOT contain embedded network_diag"
+            log_error "  The diagnostic packet does NOT match the specific spike event"
+            
+            # Check if degraded mode is enabled (debug-only flag)
+            local degraded_mode="${DEGRADED_MODE:-false}"
+            if [[ "$degraded_mode" == "true" ]]; then
+                log_warn "[DEGRADED MODE] Allowing fallback fetch - debug mode only"
+                log_warn "  This should NEVER happen in production"
+            else
+                log_error "[HARDEN] Falling back to live /status is NOT allowed in hardened mode"
+                log_error "  Expected: spike row .captures[].network_diag should contain stored diagnostic"
+                log_error "  Fix: Ensure UVB-76 capture service populates network_diag in spike row"
+                ok=false
+                PHASE1_HARDEN_FAILED=true
+            fi
+        else
+            log_error "[FAIL] Phase 1: invalid or malformed fetch summary"
+            log_error "  is_fallback value: $fetch_is_fallback (expected: true or false)"
+            
+            # Check if degraded mode is enabled (debug-only flag)
+            local degraded_mode="${DEGRADED_MODE:-false}"
+            if [[ "$degraded_mode" == "true" ]]; then
+                log_warn "[DEGRADED MODE] Allowing malformed summary - debug mode only"
+                log_warn "  This should NEVER happen in production"
+            else
+                log_error "[HARDEN] Malformed summary is NOT allowed in hardened mode"
+                ok=false
+                PHASE1_HARDEN_FAILED=true
+            fi
         fi
     fi
     

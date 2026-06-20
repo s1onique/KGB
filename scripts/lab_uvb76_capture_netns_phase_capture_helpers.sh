@@ -118,7 +118,14 @@ wait_and_fetch_capture_with_defect_clear() {
                 local packet_file_var="PHASE${phase_num}_CAPTURE_PACKET_FILE"
                 local packet_file="${!packet_file_var}"
                 
-                if fetch_capture_packet "$phase_num" "$metadata_file" "$packet_file" "$fetch_response" "$fetch_summary"; then
+                # CRITICAL: Extract network_diag from spike row FIRST (event-specific stored capture)
+                # This is the canonical stored capture artifact, NOT a live /status fetch
+                # The spike row .captures[].network_diag is the event-specific evidence
+                local phase_fetch_summary="$LAB_DIR/${phase_prefix}-capture-fetch-summary.json"
+                if extract_network_diag_from_spike_row "$phase_num" "$raw_row_file" "$packet_file" "$phase_fetch_summary"; then
+                    log_info "[PASS] Phase $phase_num: extracted network_diag from stored spike row (event-specific capture)"
+                    # is_fallback=false by design - we used the stored artifact
+                    
                     # Save contract summary
                     local contract_file_var="PHASE${phase_num}_CAPTURE_CONTRACT_FILE"
                     local contract_file="${!contract_file_var}"

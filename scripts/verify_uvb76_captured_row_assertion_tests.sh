@@ -23,10 +23,11 @@ log_pass() { echo -e "${GREEN}[PASS]${NC} $*"; PASSES=$((PASSES + 1)); }
 log_fail() { echo -e "${RED}[FAIL]${NC} $*" >&2; ERRORS=$((ERRORS + 1)); }
 log_info() { [[ "$VERBOSE" == "true" ]] && echo "[INFO] $*" || true; }
 
-# Source the normalizers
+# Source the normalizers and fetch helpers
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_capture_poll.sh"
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_contract_normalizers.sh"
+source "${SCRIPT_DIR}/lab_uvb76_capture_netns_fetch_helpers.sh"
 
 # Mock log functions for self-test
 log_info() { [[ "${VERBOSE:-false}" == "true" ]] && echo "[INFO] $*" || true; }
