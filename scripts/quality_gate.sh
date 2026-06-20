@@ -117,6 +117,7 @@ required=(
   scripts/verify_git_history_safety_policy.sh
   scripts/verify_github_no_force_push_ruleset.sh
   scripts/verify_workflow_release_safety.sh
+  scripts/verify_workflow_release_safety.py
 )
 
 for path in "${required[@]}"; do
