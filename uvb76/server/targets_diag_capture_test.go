@@ -1,3 +1,4 @@
+// Package server provides HTTP server tests for UVB-76.
 package server
 
 import (
@@ -11,6 +12,43 @@ import (
 	"github.com/s1onique/KGB/uvb76/config"
 	"github.com/s1onique/KGB/uvb76/state"
 )
+
+// newTestServerWithDiagPeer creates a server with a diagnostics peer configured.
+func newTestServerWithDiagPeer(t *testing.T) (*Server, string) {
+	t.Helper()
+	salt := []byte("1234567890abcdef")
+	hash, _ := config.HashPassword("correct-password", salt)
+
+	cfg := &config.Config{
+		Listen:   config.ListenConfig{Addr: ":0"},
+		Auth:     config.AuthConfig{Username: "admin", PasswordSHA256: hash},
+		Scrape:   config.ScrapeConfig{IntervalSeconds: 30, TimeoutMilliseconds: 5000},
+		Diagnostics: config.DiagnosticsConfig{
+			Enabled:        true,
+			CaptureOnSpike: true,
+			Peers: []config.DiagPeerConfig{
+				{
+					Name:    "tovarisch-lab",
+					BaseURL: "http://10.88.76.2:8317",
+					Targets: []string{"lab-tovarisch"},
+				},
+			},
+		},
+		Targets: []config.TargetConfig{
+			{ID: "lab-tovarisch", Name: "Lab Tovarisch", BaseURL: "http://10.88.76.2:8317", Enabled: true},
+		},
+	}
+
+	// Validate config to trigger PrecomputeCaptureURLs
+	if err := cfg.Validate(config.ValidationOptions{AllowMissingTLS: true}); err != nil {
+		t.Fatalf("Config validation failed: %v", err)
+	}
+
+	st := state.NewManager()
+	srv := NewServer(cfg, st, nil, true)
+	token, _ := srv.sessions.GenerateToken("admin")
+	return srv, token
+}
 
 // TestTargetsEndpoint_ExposesEffectiveCaptureURL verifies that GET /api/v1/targets
 // includes diagnostic capture info (diagnostic_peer_name, diagnostic_base_url,
@@ -37,6 +75,11 @@ func TestTargetsEndpoint_ExposesEffectiveCaptureURL(t *testing.T) {
 		Targets: []config.TargetConfig{
 			{ID: "lab-tovarisch", Name: "Lab Tovarisch", BaseURL: "http://10.88.76.2:8317", Enabled: true},
 		},
+	}
+
+	// Validate to trigger PrecomputeCaptureURLs
+	if err := cfg.Validate(config.ValidationOptions{AllowMissingTLS: true}); err != nil {
+		t.Fatalf("Config validation failed: %v", err)
 	}
 
 	st := state.NewManager()
@@ -118,6 +161,11 @@ func TestTargetsEndpoint_OriginOnlyBaseURLProducesCanonicalStatusPath(t *testing
 		},
 	}
 
+	// Validate to trigger PrecomputeCaptureURLs
+	if err := cfg.Validate(config.ValidationOptions{AllowMissingTLS: true}); err != nil {
+		t.Fatalf("Config validation failed: %v", err)
+	}
+
 	st := state.NewManager()
 	srv := NewServer(cfg, st, nil, true)
 	token, _ := srv.sessions.GenerateToken("admin")
@@ -171,6 +219,11 @@ func TestTargetsEndpoint_FootgunBaseURLWithStatusPath(t *testing.T) {
 		Targets: []config.TargetConfig{
 			{ID: "target-1", Name: "Target 1", BaseURL: "http://localhost:8080/status", Enabled: true},
 		},
+	}
+
+	// Validate to trigger PrecomputeCaptureURLs
+	if err := cfg.Validate(config.ValidationOptions{AllowMissingTLS: true}); err != nil {
+		t.Fatalf("Config validation failed: %v", err)
 	}
 
 	st := state.NewManager()
@@ -231,6 +284,11 @@ func TestTargetsEndpoint_TargetWithoutDiagnosticsPeerHasNoCaptureInfo(t *testing
 		},
 	}
 
+	// Validate to trigger PrecomputeCaptureURLs
+	if err := cfg.Validate(config.ValidationOptions{AllowMissingTLS: true}); err != nil {
+		t.Fatalf("Config validation failed: %v", err)
+	}
+
 	st := state.NewManager()
 	srv := NewServer(cfg, st, nil, true)
 	token, _ := srv.sessions.GenerateToken("admin")
@@ -274,3 +332,74 @@ func TestTargetsEndpoint_TargetWithoutDiagnosticsPeerHasNoCaptureInfo(t *testing
 		t.Errorf("Expected target-2 to have empty EffectiveCaptureURL, got %q", targets[1].EffectiveCaptureURL)
 	}
 }
+
+// TestTargetsEndpoint_UsesPrecomputedCaptureURL verifies that the handler uses
+// precomputed EffectiveCaptureURL (not DiagPeerStatusURL) to avoid URL parsing
+// at request time.
+func TestTargetsEndpoint_UsesPrecomputedCaptureURL(t *testing.T) {
+	salt := []byte("1234567890abcdef")
+	hash, _ := config.HashPassword("correct-password", salt)
+
+	cfg := &config.Config{
+		Listen:   config.ListenConfig{Addr: ":0"},
+		Auth:     config.AuthConfig{Username: "admin", PasswordSHA256: hash},
+		Scrape:   config.ScrapeConfig{IntervalSeconds: 30, TimeoutMilliseconds: 5000},
+		Diagnostics: config.DiagnosticsConfig{
+			Enabled:        true,
+			CaptureOnSpike: true,
+			Peers: []config.DiagPeerConfig{
+				{
+					Name:    "peer-1",
+					BaseURL: "http://10.88.76.2:8317",
+					Targets: []string{"target-1"},
+				},
+			},
+		},
+		Targets: []config.TargetConfig{
+			{ID: "target-1", Name: "Target 1", BaseURL: "http://10.88.76.2:8317", Enabled: true},
+		},
+	}
+
+	// Validate to trigger PrecomputeCaptureURLs
+	if err := cfg.Validate(config.ValidationOptions{AllowMissingTLS: true}); err != nil {
+		t.Fatalf("Config validation failed: %v", err)
+	}
+
+	// Verify precomputation happened
+	peer := cfg.Diagnostics.Peers[0]
+	expectedURL := config.DiagPeerStatusURL(peer.BaseURL)
+	if peer.EffectiveCaptureURL != expectedURL {
+		t.Errorf("Expected precomputed URL %q, got %q", expectedURL, peer.EffectiveCaptureURL)
+	}
+
+	st := state.NewManager()
+	srv := NewServer(cfg, st, nil, true)
+	token, _ := srv.sessions.GenerateToken("admin")
+
+	router := mux.NewRouter()
+	protected := router.PathPrefix("/api/v1").Subrouter()
+	protected.Use(srv.sessionAuthMw())
+	protected.Handle("/targets", http.HandlerFunc(srv.handleTargets))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/targets", nil)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", rec.Code)
+	}
+
+	var targets []TargetInfo
+	if err := json.NewDecoder(rec.Body).Decode(&targets); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	// Verify the response uses the precomputed URL
+	if targets[0].EffectiveCaptureURL != expectedURL {
+		t.Errorf("Expected EffectiveCaptureURL %q, got %q", expectedURL, targets[0].EffectiveCaptureURL)
+	}
+}
+
+
+

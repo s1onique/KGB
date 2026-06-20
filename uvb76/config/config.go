@@ -187,6 +187,10 @@ func (c *Config) Validate(opts ValidationOptions) error {
 		return fmt.Errorf("diagnostics validation failed: %w", err)
 	}
 
+	// Precompute diagnostic URLs after validation to avoid
+	// net/url.Parse calls in request handlers (crash avoidance).
+	c.Diagnostics.PrecomputeCaptureURLs()
+
 	return nil
 }
 

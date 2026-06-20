@@ -317,12 +317,14 @@ type TargetInfo struct {
 }
 
 // handleTargets returns the list of configured targets with effective probe URLs and diagnostic capture URLs.
+// NOTE: This handler does NOT call net/url.Parse - all diagnostic URLs are precomputed
+// at config load time via DiagnosticsConfig.PrecomputeCaptureURLs().
 func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	// Build target->diagPeer mapping
 	targetToPeer := s.cfg.Diagnostics.TargetToDiagPeers()
-	
+
 	targets := make([]TargetInfo, len(s.cfg.Targets))
 	for i, t := range s.cfg.Targets {
 		info := TargetInfo{
@@ -333,14 +335,15 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 			EffectiveProbeURL: config.TargetProbeURL(&t),
 			Enabled:           t.Enabled,
 		}
-		
-		// Add diagnostic capture info if this target has a diagnostics peer
+
+		// Add diagnostic capture info if this target has a diagnostics peer.
+		// Uses precomputed EffectiveCaptureURL - no net/url.Parse at request time.
 		if peer, ok := targetToPeer[t.ID]; ok {
 			info.DiagnosticPeerName = peer.Name
 			info.DiagnosticBaseURL = peer.BaseURL
-			info.EffectiveCaptureURL = config.DiagPeerStatusURL(peer.BaseURL)
+			info.EffectiveCaptureURL = peer.EffectiveCaptureURL
 		}
-		
+
 		targets[i] = info
 	}
 	json.NewEncoder(w).Encode(targets)

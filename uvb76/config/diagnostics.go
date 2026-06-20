@@ -28,6 +28,10 @@ type DiagPeerConfig struct {
 	Name    string   `json:"name"`
 	BaseURL string   `json:"base_url"`
 	Targets []string `json:"targets"`
+	// EffectiveCaptureURL is precomputed at config load time to avoid
+	// net/url.Parse calls in request handlers (avoids crashes under
+	// HTTPS/HTTP2 handler churn on constrained ARM64 routers).
+	EffectiveCaptureURL string `json:"effective_capture_url,omitempty"`
 }
 
 func (d *DiagnosticsConfig) ApplyDefaults() {
@@ -130,6 +134,18 @@ func DiagPeerStatusURL(baseURL string) string {
 	q.Set("include", DiagPeerStatusInclude)
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// PrecomputeCaptureURLs computes EffectiveCaptureURL for all peers.
+// Must be called after Validate() passes, at config load time.
+// This avoids net/url.Parse calls in request handlers.
+func (d *DiagnosticsConfig) PrecomputeCaptureURLs() {
+	if !d.Enabled {
+		return
+	}
+	for i := range d.Peers {
+		d.Peers[i].EffectiveCaptureURL = DiagPeerStatusURL(d.Peers[i].BaseURL)
+	}
 }
 
 func (d *DiagnosticsConfig) TargetToDiagPeers() map[string]*DiagPeerConfig {
