@@ -138,19 +138,21 @@ type SpikeEventWithCaptures struct {
 // =============================================================================
 
 type CaptureStore struct {
-	mu          sync.RWMutex
-	captures    map[string][]DiagCapture
-	lastCapture map[string]time.Time
-	maxCaptures int
-	inFlight    map[string]bool
+	mu               sync.RWMutex
+	captures         map[string][]DiagCapture
+	lastCapture      map[string]time.Time
+	lastCaptureAnchor map[string]CaptureCooldownAnchor // Provenance for cooldown anchors
+	maxCaptures      int
+	inFlight         map[string]bool
 }
 
 func NewCaptureStore() *CaptureStore {
 	return &CaptureStore{
-		captures:    make(map[string][]DiagCapture),
-		lastCapture: make(map[string]time.Time),
-		maxCaptures: 10,
-		inFlight:    make(map[string]bool),
+		captures:         make(map[string][]DiagCapture),
+		lastCapture:      make(map[string]time.Time),
+		lastCaptureAnchor: make(map[string]CaptureCooldownAnchor),
+		maxCaptures:      10,
+		inFlight:         make(map[string]bool),
 	}
 }
 
@@ -159,11 +161,38 @@ func NewCaptureStoreWithMax(maxCaptures int) *CaptureStore {
 		maxCaptures = 10
 	}
 	return &CaptureStore{
-		captures:    make(map[string][]DiagCapture),
-		lastCapture: make(map[string]time.Time),
-		maxCaptures: maxCaptures,
-		inFlight:    make(map[string]bool),
+		captures:         make(map[string][]DiagCapture),
+		lastCapture:      make(map[string]time.Time),
+		lastCaptureAnchor: make(map[string]CaptureCooldownAnchor),
+		maxCaptures:      maxCaptures,
+		inFlight:         make(map[string]bool),
 	}
+}
+
+// isSuccessfulCooldownAnchorCapture returns true if this capture should update
+// the cooldown anchor. Only real successful captures update anchors, not skipped,
+// failed, or suppressed captures.
+func isSuccessfulCooldownAnchorCapture(capture DiagCapture) bool {
+	// Must have a source
+	if capture.Source == "" {
+		return false
+	}
+	// Must not be suppressed by cooldown
+	if capture.SuppressedByCooldown {
+		return false
+	}
+	// Must have successful status
+	if capture.Status != DiagCaptureStatusOK {
+		return false
+	}
+	// Must have captured status OR be legacy (empty capture_status with ok status)
+	// Legacy handling: if CaptureStatus is empty but Status is OK, this is likely
+	// a pre-provenance capture that should not update anchor
+	if capture.CaptureStatus == "" {
+		return false
+	}
+	// Only captured status updates anchor
+	return capture.CaptureStatus == CaptureStatusCaptured
 }
 
 func (cs *CaptureStore) AddCapture(eventID string, capture DiagCapture) {
@@ -177,9 +206,53 @@ func (cs *CaptureStore) AddCapture(eventID string, capture DiagCapture) {
 	captures = append(captures, capture)
 	cs.captures[eventID] = captures
 
-	// Only update cooldown for successful captures that were NOT suppressed
-	if capture.Status == DiagCaptureStatusOK && capture.Source != "" && !capture.SuppressedByCooldown {
-		cs.lastCapture[capture.Source] = time.Now().UTC()
+	// Only update cooldown anchor provenance for successful captures that were NOT suppressed
+	// CRITICAL INVARIANT: Skipped cooldown records MUST NOT update anchor provenance
+	if isSuccessfulCooldownAnchorCapture(capture) {
+		// Use capture's start time for cooldown math consistency with provenance
+		cs.lastCapture[capture.Source] = capture.CaptureStartedAt
+		
+		// Also update the provenance-bearing anchor record
+		cs.lastCaptureAnchor[capture.Source] = CaptureCooldownAnchor{
+			AnchorCaptureID:        eventID,
+			AnchorSource:           capture.Source,
+			AnchorCreatedAt:        capture.CaptureStartedAt,
+			AnchorCompletedAt:      capture.CaptureFinishedAt,
+			AnchorUpdatedByStatus: string(capture.CaptureStatus),
+			CreatedFrom:            "diag_capture_success",
+		}
+	}
+}
+
+// AddCaptureWithProvenance adds a capture with explicit anchor provenance information.
+// Use this method when the caller has additional context (target_id, probe_kind, etc.)
+// that should be recorded in the cooldown anchor.
+func (cs *CaptureStore) AddCaptureWithProvenance(eventID string, capture DiagCapture, anchorTargetID, anchorProbeKind string) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	captures := cs.captures[eventID]
+	if len(captures) >= cs.maxCaptures {
+		captures = captures[1:]
+	}
+	captures = append(captures, capture)
+	cs.captures[eventID] = captures
+
+	// Only update cooldown anchor provenance for successful captures that were NOT suppressed
+	if isSuccessfulCooldownAnchorCapture(capture) {
+		cs.lastCapture[capture.Source] = capture.CaptureStartedAt
+		
+		// Update provenance-bearing anchor record with rich context
+		cs.lastCaptureAnchor[capture.Source] = CaptureCooldownAnchor{
+			AnchorCaptureID:        eventID,
+			AnchorTargetID:        anchorTargetID,
+			AnchorProbeKind:       anchorProbeKind,
+			AnchorSource:          capture.Source,
+			AnchorCreatedAt:       capture.CaptureStartedAt,
+			AnchorCompletedAt:     capture.CaptureFinishedAt,
+			AnchorUpdatedByStatus: string(capture.CaptureStatus),
+			CreatedFrom:           "diag_capture_success",
+		}
 	}
 }
 
@@ -230,6 +303,25 @@ func (cs *CaptureStore) GetLastCaptureTime(peerName string) time.Time {
 	return cs.lastCapture[peerName]
 }
 
+// GetLastCaptureAnchor returns the provenance-bearing anchor for a peer.
+// Returns empty struct if no anchor exists.
+func (cs *CaptureStore) GetLastCaptureAnchor(peerName string) CaptureCooldownAnchor {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	return cs.lastCaptureAnchor[peerName]
+}
+
+// GetAllLastCaptureAnchors returns all cooldown anchors for debugging.
+func (cs *CaptureStore) GetAllLastCaptureAnchors() map[string]CaptureCooldownAnchor {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	result := make(map[string]CaptureCooldownAnchor, len(cs.lastCaptureAnchor))
+	for k, v := range cs.lastCaptureAnchor {
+		result[k] = v
+	}
+	return result
+}
+
 func (cs *CaptureStore) CooldownRemaining(peerName string, cooldownSeconds int) int {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
@@ -249,6 +341,7 @@ func (cs *CaptureStore) Clear() {
 	defer cs.mu.Unlock()
 	cs.captures = make(map[string][]DiagCapture)
 	cs.lastCapture = make(map[string]time.Time)
+	cs.lastCaptureAnchor = make(map[string]CaptureCooldownAnchor)
 	cs.inFlight = make(map[string]bool)
 }
 

@@ -15,7 +15,7 @@ func TestTriggerCapture_Disabled(t *testing.T) {
 	store := state.NewCaptureStore()
 	svc := NewCaptureService(cfg, store)
 
-	svc.TriggerCapture("event-1", "target-1")
+	svc.TriggerCapture("event-1", "target-1", "http")
 	captures := store.GetCaptures("event-1")
 	if len(captures) != 1 {
 		t.Fatalf("expected 1 capture, got %d", len(captures))
@@ -35,7 +35,7 @@ func TestTriggerCapture_NoPeerMapping(t *testing.T) {
 	store := state.NewCaptureStore()
 	svc := NewCaptureService(cfg, store)
 
-	svc.TriggerCapture("event-1", "unknown-target")
+	svc.TriggerCapture("event-1", "unknown-target", "http")
 	captures := store.GetCaptures("event-1")
 	if len(captures) != 1 {
 		t.Fatalf("expected 1 capture, got %d", len(captures))
@@ -69,7 +69,7 @@ func TestTriggerCapture_SuccessfulCapture(t *testing.T) {
 	store := state.NewCaptureStore()
 	svc := NewCaptureService(cfg, store)
 
-	svc.TriggerCapture("event-1", "target-1")
+	svc.TriggerCapture("event-1", "target-1", "http")
 	time.Sleep(100 * time.Millisecond)
 
 	captures := store.GetCaptures("event-1")
@@ -105,6 +105,7 @@ func TestTriggerCapture_CooldownSuppression(t *testing.T) {
 		Source:           "peer1",
 		CaptureStartedAt: now,
 		Status:           state.DiagCaptureStatusOK,
+		CaptureStatus:    state.CaptureStatusCaptured,
 		SuppressedByCooldown: false,
 	})
 
@@ -115,7 +116,7 @@ func TestTriggerCapture_CooldownSuppression(t *testing.T) {
 		t.Error("expected cooldown to be set")
 	}
 
-	svc.TriggerCapture("event-1", "target-1")
+	svc.TriggerCapture("event-1", "target-1", "http")
 	time.Sleep(50 * time.Millisecond)
 
 	captures := store.GetCaptures("event-1")
@@ -148,13 +149,13 @@ func TestTriggerCapture_InFlightSuppression(t *testing.T) {
 	svc := NewCaptureService(cfg, store)
 
 	// Trigger first capture (slow)
-	svc.TriggerCapture("event-1", "target-1")
+	svc.TriggerCapture("event-1", "target-1", "http")
 	time.Sleep(10 * time.Millisecond)
 
 	// Trigger second capture (should be suppressed due to in-flight race)
 	// Note: In-flight suppression is NOT a cooldown scenario, so SuppressedByCooldown is false.
 	// Instead, it records not_attempted status since there's no prior successful capture.
-	svc.TriggerCapture("event-2", "target-1")
+	svc.TriggerCapture("event-2", "target-1", "http")
 	time.Sleep(50 * time.Millisecond)
 
 	captures := store.GetCaptures("event-2")
@@ -184,7 +185,7 @@ func TestTriggerCapture_ServerError(t *testing.T) {
 	store := state.NewCaptureStore()
 	svc := NewCaptureService(cfg, store)
 
-	svc.TriggerCapture("event-1", "target-1")
+	svc.TriggerCapture("event-1", "target-1", "http")
 	time.Sleep(50 * time.Millisecond)
 
 	captures := store.GetCaptures("event-1")

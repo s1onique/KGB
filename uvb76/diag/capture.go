@@ -38,7 +38,9 @@ func NewCaptureService(cfg *config.DiagnosticsConfig, captureStore *state.Captur
 	}
 }
 
-func (cs *CaptureService) TriggerCapture(eventID, targetID string) {
+// TriggerCapture triggers a diagnostic capture for the given spike event.
+// probeKind should be "http" or "icmp" for provenance tracking.
+func (cs *CaptureService) TriggerCapture(eventID, targetID, probeKind string) {
 	if !cs.cfg.Enabled || !cs.cfg.CaptureOnSpike {
 		cs.recordDisabledCapture(eventID, targetID)
 		return
@@ -68,11 +70,15 @@ func (cs *CaptureService) TriggerCapture(eventID, targetID string) {
 	}
 
 	// Trigger async capture
+	// Capture variables for the goroutine to avoid closure issues
+	targetIDForCapture := targetID
+	probeKindForCapture := probeKind
 	cs.wg.Add(1)
 	go func() {
 		defer cs.wg.Done()
 		capture := cs.performCapture(peer)
-		cs.captures.AddCapture(eventID, capture)
+		// Use AddCaptureWithProvenance to include target/probe context for root-cause analysis
+		cs.captures.AddCaptureWithProvenance(eventID, capture, targetIDForCapture, probeKindForCapture)
 		cs.captures.ReleaseInFlight(peer.Name)
 	}()
 }

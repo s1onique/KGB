@@ -85,6 +85,9 @@ func (s *Server) Start() error {
 	protected.Handle("/latency/series", http.HandlerFunc(s.handleTargetLatencySeries)).Methods(http.MethodGet)
 	protected.Handle("/latency/spikes", http.HandlerFunc(s.handleTargetLatencySpikes)).Methods(http.MethodGet)
 
+	// Diagnostics API endpoints
+	protected.Handle("/diagnostics/capture-cooldown", http.HandlerFunc(s.handleCaptureCooldownDiagnostics)).Methods(http.MethodGet)
+
 	// Web UI - serve from embedded filesystem
 	// Assets are served from /assets/* path
 	router.PathPrefix("/assets/").Handler(
@@ -390,4 +393,42 @@ func (s *Server) handleTargetSnapshot(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(snap)
+}
+
+// =============================================================================
+// Cooldown Diagnostics
+// =============================================================================
+
+// CaptureCooldownDiagnostics represents the diagnostics output for cooldown state.
+type CaptureCooldownDiagnostics struct {
+	ServerStartedAt       string                                `json:"server_started_at"`
+	CurrentTime          string                                `json:"current_time"`
+	CooldownAnchors      map[string]state.CaptureCooldownAnchor `json:"cooldown_anchors"`
+	ActiveCooldownKeys   []string                              `json:"active_cooldown_keys"`
+	TotalCaptures        int                                   `json:"total_captures"`
+}
+
+// handleCaptureCooldownDiagnostics returns diagnostic information about cooldown state.
+// This is an admin-only read-only endpoint for debugging cooldown issues.
+func (s *Server) handleCaptureCooldownDiagnostics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	captureStore := s.state.GetCaptureStore()
+	anchors := captureStore.GetAllLastCaptureAnchors()
+
+	// Build list of active cooldown keys (peers with anchors)
+	activeKeys := make([]string, 0, len(anchors))
+	for peerName := range anchors {
+		activeKeys = append(activeKeys, peerName)
+	}
+
+	diagnostics := CaptureCooldownDiagnostics{
+		ServerStartedAt:     s.startedAt.Format(time.RFC3339),
+		CurrentTime:        time.Now().UTC().Format(time.RFC3339),
+		CooldownAnchors:    anchors,
+		ActiveCooldownKeys: activeKeys,
+		TotalCaptures:      captureStore.Count(),
+	}
+
+	json.NewEncoder(w).Encode(diagnostics)
 }

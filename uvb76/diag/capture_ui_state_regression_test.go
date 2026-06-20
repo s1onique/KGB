@@ -187,7 +187,7 @@ func TestUIStateRegression_SkippedCooldownWithoutPriorCaptureIsRejected(t *testi
 	svc.targetPeers = cfg.TargetToDiagPeers()
 
 	// Trigger capture with NO prior successful capture
-	svc.TriggerCapture("first-spike-no-prior", "peer-1")
+	svc.TriggerCapture("first-spike-no-prior", "peer-1", "http")
 	time.Sleep(100 * time.Millisecond)
 
 	info := store.GetCaptureInfo("first-spike-no-prior", false)

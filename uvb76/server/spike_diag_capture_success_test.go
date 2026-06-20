@@ -46,7 +46,7 @@ func TestSpikeCaptureAPI_SuccessPath(t *testing.T) {
 	}
 
 	// Trigger diagnostic capture
-	captureSvc.TriggerCapture(spikeEvent.EventID, "test-target")
+	captureSvc.TriggerCapture(spikeEvent.EventID, "test-target", "http")
 
 	// Wait for async capture to complete
 	captures := waitForCaptures(st.GetCaptureStore(), spikeEvent.EventID, 2*time.Second)
@@ -165,7 +165,7 @@ func TestSpikeCaptureAPI_ExcludeCaptures(t *testing.T) {
 	}
 
 	// Trigger capture
-	captureSvc.TriggerCapture(spikeEvent.EventID, "test-target")
+	captureSvc.TriggerCapture(spikeEvent.EventID, "test-target", "http")
 	waitForCaptures(st.GetCaptureStore(), spikeEvent.EventID, 2*time.Second)
 
 	// Call API WITHOUT include_captures

@@ -164,7 +164,7 @@ func (c *ICMPClient) probeTarget(targetID string) {
 		c.state.RecordICMPLatency(t.ID, float64(c.cfg.TimeoutSeconds*1000), false)
 		errStr := "failed to extract host from base_url"
 		if spike := c.state.DetectAndRecordSpike(t.ID, "icmp", float64(c.cfg.TimeoutSeconds*1000), sampleTs, false, nil, nil, &errStr, previousSamples); spike != nil {
-			c.triggerDiagCapture(spike.EventID, t.ID)
+			c.triggerDiagCapture(spike.EventID, t.ID, "icmp")
 		}
 		return
 	}
@@ -183,7 +183,7 @@ func (c *ICMPClient) probeTarget(targetID string) {
 		c.state.RecordICMPLatency(t.ID, latencyMs, false)
 		errStr := fmt.Sprintf("ping failed: %v", err)
 		if spike := c.state.DetectAndRecordSpike(t.ID, "icmp", latencyMs, sampleTs, false, nil, nil, &errStr, previousSamples); spike != nil {
-			c.triggerDiagCapture(spike.EventID, t.ID)
+			c.triggerDiagCapture(spike.EventID, t.ID, "icmp")
 		}
 		return
 	}
@@ -193,7 +193,7 @@ func (c *ICMPClient) probeTarget(targetID string) {
 
 	// Spike detection for successful ICMP
 	if spike := c.state.DetectAndRecordSpike(t.ID, "icmp", latencyMs, sampleTs, true, nil, nil, nil, previousSamples); spike != nil {
-		c.triggerDiagCapture(spike.EventID, t.ID)
+		c.triggerDiagCapture(spike.EventID, t.ID, "icmp")
 	}
 }
 
@@ -253,12 +253,12 @@ func (c *ICMPClient) SetDiagCapture(diagCapture *diag.CaptureService) {
 
 // triggerDiagCapture triggers async diagnostic capture if diagCapture is configured.
 // This does not block the probe loop.
-func (c *ICMPClient) triggerDiagCapture(eventID, targetID string) {
+func (c *ICMPClient) triggerDiagCapture(eventID, targetID, probeKind string) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	if c.diagCapture != nil {
-		c.diagCapture.TriggerCapture(eventID, targetID)
+		c.diagCapture.TriggerCapture(eventID, targetID, probeKind)
 	}
 }
 

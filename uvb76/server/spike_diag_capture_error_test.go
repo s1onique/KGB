@@ -45,7 +45,7 @@ func TestSpikeCaptureAPI_TovarischError(t *testing.T) {
 	}
 
 	// Trigger capture
-	captureSvc.TriggerCapture(spikeEvent.EventID, "test-target")
+	captureSvc.TriggerCapture(spikeEvent.EventID, "test-target", "http")
 	captures := waitForCaptures(st.GetCaptureStore(), spikeEvent.EventID, 2*time.Second)
 
 	// Call API
@@ -124,7 +124,7 @@ func TestSpikeCaptureAPI_TovarischInvalidJSON(t *testing.T) {
 	}
 
 	// Trigger capture
-	captureSvc.TriggerCapture(spikeEvent.EventID, "test-target")
+	captureSvc.TriggerCapture(spikeEvent.EventID, "test-target", "http")
 	captures := waitForCaptures(st.GetCaptureStore(), spikeEvent.EventID, 2*time.Second)
 
 	// Call API

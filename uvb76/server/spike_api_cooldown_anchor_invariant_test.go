@@ -302,12 +302,11 @@ func TestSpikeAPI_AllVisibleRowsSuppressed_RequiresVisibleOrExplicitAnchor(t *te
 	now := time.Now().UTC()
 
 	// CRITICAL: Create the exact screenshot bug scenario.
-	// Establish cooldown anchor WITHOUT creating a visible spike row for it.
-	// This simulates the anchor spike being evicted from retention or outside time window.
+	// Timeline: Anchor at T=0, spikes at T=10s, T=30s, T=50s, but anchor spike is evicted.
+	// At query time T=60s, all visible spikes are suppressed but anchor is not visible.
 
-	// Step 1: Establish cooldown anchor directly in lastCapture
-	// (no visible spike row for this capture - it was evicted)
-	anchorTime := now.Add(-2 * time.Minute) // 2 minutes ago, outside typical retention window
+	// Step 1: Establish cooldown anchor at T=0 (anchor spike will be "evicted" from visible rows)
+	anchorTime := now.Add(-60 * time.Second) // 60 seconds ago
 	st.GetCaptureStore().AddCapture("anchor-evicted", state.DiagCapture{
 		Source:           "tovarisch-peer",
 		CaptureStartedAt: anchorTime,
@@ -315,7 +314,8 @@ func TestSpikeAPI_AllVisibleRowsSuppressed_RequiresVisibleOrExplicitAnchor(t *te
 		CaptureStatus:    state.CaptureStatusCaptured,
 	})
 
-	// Step 2: Create only skipped cooldown spikes (visible in API response)
+	// Step 2: Create skipped cooldown spikes AFTER the anchor (realistic timeline)
+	// Spike at T=-50s (10s after anchor), spike at T=-30s, spike at T=-10s
 	previousSamples := make([]state.LatencySample, 25)
 	for i := 0; i < 25; i++ {
 		previousSamples[i] = state.LatencySample{
@@ -325,15 +325,18 @@ func TestSpikeAPI_AllVisibleRowsSuppressed_RequiresVisibleOrExplicitAnchor(t *te
 		}
 	}
 
-	skippedTimes := []time.Duration{-90 * time.Second, -60 * time.Second, -30 * time.Second}
-	for _, offset := range skippedTimes {
-		spike := st.DetectAndRecordSpike("test-target", "http", 2000.0, now.Add(offset), true, nil, nil, nil, previousSamples)
+	// Create skipped cooldown spikes - each one occurs after anchor (positive elapsed time)
+	skippedOffsets := []time.Duration{-50 * time.Second, -30 * time.Second, -10 * time.Second}
+	for _, offset := range skippedOffsets {
+		spikeTime := now.Add(offset)
+		spike := st.DetectAndRecordSpike("test-target", "http", 2000.0, spikeTime, true, nil, nil, nil, previousSamples)
 		if spike == nil {
 			t.Fatal("expected skipped spike to be detected")
 		}
 
-		// Evaluate cooldown - should still be active
-		cooldownDecision := st.GetCaptureStore().EvaluateCooldown(now.Add(offset), "tovarisch-peer", 90)
+		// Evaluate cooldown at spike time - anchor (60s ago) is still active
+		// This is realistic: spike arrives, cooldown is evaluated, capture is suppressed
+		cooldownDecision := st.GetCaptureStore().EvaluateCooldown(spikeTime, "tovarisch-peer", 90)
 		recordSuppressedCooldownCapture(st.GetCaptureStore(), spike.EventID, "tovarisch-peer", cooldownDecision)
 	}
 

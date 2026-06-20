@@ -5,6 +5,41 @@ import (
 )
 
 // =============================================================================
+// CaptureCooldownAnchor — Provenance for Cooldown Anchor
+// =============================================================================
+
+// CaptureCooldownAnchor records the provenance of the successful capture that
+// started a cooldown window. This provides root-cause evidence for UI debugging.
+//
+// The anchor is updated ONLY by successful captures (status=captured).
+// Skipped cooldown records MUST NOT update anchor provenance.
+type CaptureCooldownAnchor struct {
+	// AnchorEventID is the event ID of the spike that triggered the anchor capture.
+	AnchorEventID string `json:"anchor_event_id,omitempty"`
+	// AnchorCaptureID is the event ID where the successful capture was recorded.
+	// This may differ from AnchorEventID if the capture was recorded on a different event.
+	AnchorCaptureID string `json:"anchor_capture_id,omitempty"`
+	// AnchorTargetID is the target ID of the successful capture.
+	AnchorTargetID string `json:"anchor_target_id,omitempty"`
+	// AnchorProbeKind is the probe kind (http/icmp) of the anchor capture.
+	AnchorProbeKind string `json:"anchor_probe_kind,omitempty"`
+	// AnchorSource is the diagnostic peer/source that performed the capture.
+	AnchorSource string `json:"anchor_source,omitempty"`
+	// AnchorUpdatedByStatus describes what status updated this anchor.
+	// Values: "captured", "diag_capture_success"
+	AnchorUpdatedByStatus string `json:"anchor_updated_by_status,omitempty"`
+	// AnchorCreatedAt is when the anchor capture was started.
+	AnchorCreatedAt time.Time `json:"anchor_created_at,omitempty"`
+	// AnchorCompletedAt is when the anchor capture was completed (nil if still in progress).
+	AnchorCompletedAt *time.Time `json:"anchor_completed_at,omitempty"`
+	// CreatedFrom describes the path that created this anchor.
+	// Values: "diag_capture_success", "startup_warmup", "api_injection", "test_helper"
+	CreatedFrom string `json:"created_from,omitempty"`
+	// IsWarmupAnchor indicates this anchor was created during startup/warmup.
+	IsWarmupAnchor bool `json:"is_warmup_anchor,omitempty"`
+}
+
+// =============================================================================
 // CaptureCooldownDecision — Authoritative Cooldown Decision
 // =============================================================================
 
@@ -37,6 +72,9 @@ type CaptureCooldownDecision struct {
 	// - false: only successful captures update cooldown
 	// This is the authoritative semantics documented in tests.
 	SkippedAttemptUpdatesCooldown bool `json:"skipped_attempt_updates_cooldown"`
+	// Anchor contains provenance of the successful capture that started the cooldown.
+	// This field is populated when IsInCooldown is true.
+	Anchor *CaptureCooldownAnchor `json:"anchor,omitempty"`
 }
 
 // EvaluateCooldown computes the authoritative cooldown decision at the given time.
@@ -79,13 +117,30 @@ func (cs *CaptureStore) EvaluateCooldown(now time.Time, peerName string, cooldow
 		decision.IsInCooldown = false
 		decision.RemainingCooldownMs = 0
 	} else {
-		// Still in cooldown
+		// Still in cooldown - include anchor provenance
 		decision.IsInCooldown = true
 		decision.RemainingCooldownMs = (cooldownDuration - elapsed).Milliseconds()
+		
+		// Include anchor provenance from the parallel map
+		if anchor, ok := cs.lastCaptureAnchor[peerName]; ok {
+			anchorCopy := anchor
+			decision.Anchor = &anchorCopy
+		}
 	}
 
 	return decision
 }
+
+// AnchorVisibilityReason constants define why an anchor is or is not visible.
+const (
+	AnchorVisibilityReasonRetained          = "retained_visible"
+	AnchorVisibilityReasonFilterWindow      = "outside_filter_window"
+	AnchorVisibilityReasonEvictedRetention   = "evicted_from_retention"
+	AnchorVisibilityReasonTargetFilter       = "outside_target_filter"
+	AnchorVisibilityReasonProbeFilter        = "outside_probe_filter"
+	AnchorVisibilityReasonStartupWarmup      = "startup_warmup_anchor"
+	AnchorVisibilityReasonUnknown           = "unknown_anchor_not_visible"
+)
 
 // BuildCooldownInfoFromDecision creates a CaptureCooldownInfo from a decision.
 // This ensures cooldown_info exactly matches the decision used for skip/capture.
@@ -111,7 +166,25 @@ func BuildCooldownInfoFromDecision(decision CaptureCooldownDecision, source stri
 		// Anchor visibility defaults: assume anchor is visible since lastCapture exists.
 		// API layer should override if anchor spike is outside response scope.
 		AnchorVisible:           !decision.LastSuccessfulCaptureAt.IsZero(),
-		AnchorVisibilityReason: "retained_visible",
+		AnchorVisibilityReason: AnchorVisibilityReasonRetained,
+	}
+
+	// Include anchor provenance if available
+	if decision.Anchor != nil {
+		info.AnchorCaptureID = decision.Anchor.AnchorCaptureID
+		info.AnchorTargetID = decision.Anchor.AnchorTargetID
+		info.AnchorProbeKind = decision.Anchor.AnchorProbeKind
+		info.AnchorSource = decision.Anchor.AnchorSource
+		if !decision.Anchor.AnchorCreatedAt.IsZero() {
+			info.AnchorCreatedAt = &decision.Anchor.AnchorCreatedAt
+		}
+		info.AnchorUpdatedByStatus = decision.Anchor.AnchorUpdatedByStatus
+		info.CreatedFrom = decision.Anchor.CreatedFrom
+		
+		// Copy warmup indicator
+		if decision.Anchor.IsWarmupAnchor {
+			info.IsWarmupAnchor = true
+		}
 	}
 
 	return info
@@ -158,8 +231,32 @@ type CaptureCooldownInfo struct {
 	AnchorVisible bool `json:"anchor_visible"`
 	// AnchorVisibilityReason explains why anchor_visible is false.
 	// Empty when anchor_visible is true.
-	// Values: "retained_visible", "outside_filter_window", "evicted_from_retention", "suppressed_cooldown"
+	// Values: "retained_visible", "outside_filter_window", "evicted_from_retention", 
+	//         "outside_target_filter", "outside_probe_filter", "startup_warmup_anchor",
+	//         "unknown_anchor_not_visible"
 	AnchorVisibilityReason string `json:"anchor_visibility_reason,omitempty"`
+	
+	// === Provenance Fields ===
+	// These fields provide root-cause evidence for the cooldown anchor.
+	
+	// AnchorCaptureID is the event ID where the anchor capture was recorded.
+	AnchorCaptureID string `json:"anchor_capture_id,omitempty"`
+	// AnchorTargetID is the target ID of the successful anchor capture.
+	AnchorTargetID string `json:"anchor_target_id,omitempty"`
+	// AnchorProbeKind is the probe kind (http/icmp) of the anchor capture.
+	AnchorProbeKind string `json:"anchor_probe_kind,omitempty"`
+	// AnchorSource is the diagnostic peer/source that performed the anchor capture.
+	AnchorSource string `json:"anchor_source,omitempty"`
+	// AnchorCreatedAt is when the anchor capture was started.
+	AnchorCreatedAt *time.Time `json:"anchor_created_at,omitempty"`
+	// AnchorUpdatedByStatus describes what status updated this anchor.
+	// Values: "captured", "diag_capture_success"
+	AnchorUpdatedByStatus string `json:"anchor_updated_by_status,omitempty"`
+	// CreatedFrom describes the path that created this anchor.
+	// Values: "diag_capture_success", "startup_warmup", "api_injection", "test_helper"
+	CreatedFrom string `json:"created_from,omitempty"`
+	// IsWarmupAnchor indicates this anchor was created during startup/warmup.
+	IsWarmupAnchor bool `json:"is_warmup_anchor,omitempty"`
 }
 
 // =============================================================================
@@ -311,6 +408,15 @@ func (cs *CaptureStore) SetLastCapture(peerName string, t time.Time) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	cs.lastCapture[peerName] = t
+}
+
+// SetLastCaptureAnchor sets the full provenance anchor for a peer.
+// This is intended for test use only - production code should use AddCapture.
+func (cs *CaptureStore) SetLastCaptureAnchor(peerName string, anchor CaptureCooldownAnchor) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.lastCapture[peerName] = anchor.AnchorCreatedAt
+	cs.lastCaptureAnchor[peerName] = anchor
 }
 
 // =============================================================================

@@ -34,7 +34,7 @@ func TestDiagnosticCaptureUsesCanonicalTovarischStatusURL(t *testing.T) {
 	captureStore := state.NewCaptureStore()
 	captureSvc := diag.NewCaptureService(cfg, captureStore)
 
-	captureSvc.TriggerCapture("test-event", "test-target")
+	captureSvc.TriggerCapture("test-event", "test-target", "http")
 	captures := waitForCaptures(captureStore, "test-event", 2*time.Second)
 	if len(captures) == 0 {
 		t.Fatal("expected at least one capture")
@@ -86,7 +86,7 @@ func TestDiagnosticCaptureUsesCanonicalTovarischStatusURLWithTrailingSlashBaseUR
 	captureStore := state.NewCaptureStore()
 	captureSvc := diag.NewCaptureService(cfg, captureStore)
 
-	captureSvc.TriggerCapture("test-event", "test-target")
+	captureSvc.TriggerCapture("test-event", "test-target", "http")
 	captures := waitForCaptures(captureStore, "test-event", 2*time.Second)
 
 	if len(captures) == 0 {
@@ -146,7 +146,7 @@ func TestDiagnosticCaptureRecordsHTTP404WithSanitizedRequestedPath(t *testing.T)
 	captureStore := state.NewCaptureStore()
 	captureSvc := diag.NewCaptureService(cfg, captureStore)
 
-	captureSvc.TriggerCapture("test-event", "test-target")
+	captureSvc.TriggerCapture("test-event", "test-target", "http")
 	captures := waitForCaptures(captureStore, "test-event", 2*time.Second)
 
 	if len(captures) == 0 {
@@ -238,7 +238,7 @@ func TestCaptureURLLabFullIntegration(t *testing.T) {
 	srv, st, captureSvc, _ := setupTestServer(t, lab.URL())
 	srv.cfg.Diagnostics.Peers[0].BaseURL = lab.URL()
 
-	captureSvc.TriggerCapture("test-event", "test-target")
+	captureSvc.TriggerCapture("test-event", "test-target", "http")
 	captures := waitForCaptures(st.GetCaptureStore(), "test-event", 2*time.Second)
 
 	if len(captures) == 0 {

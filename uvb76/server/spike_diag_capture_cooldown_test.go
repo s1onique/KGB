@@ -44,7 +44,7 @@ func TestSpikeCaptureAPI_CooldownSuppression(t *testing.T) {
 	}
 
 	// Trigger first capture and wait
-	captureSvc.TriggerCapture(spike1.EventID, "test-target")
+	captureSvc.TriggerCapture(spike1.EventID, "test-target", "http")
 	waitForCaptures(st.GetCaptureStore(), spike1.EventID, 2*time.Second)
 
 	// Create second spike immediately (within cooldown)
@@ -54,7 +54,7 @@ func TestSpikeCaptureAPI_CooldownSuppression(t *testing.T) {
 	}
 
 	// Trigger second capture
-	captureSvc.TriggerCapture(spike2.EventID, "test-target")
+	captureSvc.TriggerCapture(spike2.EventID, "test-target", "http")
 	_ = waitForCaptures(st.GetCaptureStore(), spike2.EventID, 2*time.Second)
 
 	// Call API

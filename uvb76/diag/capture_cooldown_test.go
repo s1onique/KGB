@@ -37,7 +37,7 @@ func TestCaptureService_DoesNotRecordSkippedCooldownWithoutPriorCapture(t *testi
 	// FIRST SPIKE: Trigger capture with NO prior successful capture.
 	// The CaptureStore has lastCapture["peer-1"] = zero time (never set).
 	// recordSuppressedCapture should NOT record skipped_cooldown.
-	svc.TriggerCapture("event-1", "peer-1")
+	svc.TriggerCapture("event-1", "peer-1", "http")
 	
 	// Give async goroutine time to complete
 	time.Sleep(100 * time.Millisecond)

@@ -198,7 +198,7 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 		// Spike detection for failed request
 		var errStr string = fmt.Sprintf("request creation failed: %v", err)
 		if spike := c.state.DetectAndRecordSpike(t.ID, "http", float64(c.cfg.TimeoutMilliseconds), sampleTs, false, nil, nil, &errStr, previousSamples); spike != nil {
-			c.triggerDiagCapture(spike.EventID, t.ID)
+			c.triggerDiagCapture(spike.EventID, t.ID, "http")
 		}
 		return
 	}
@@ -221,7 +221,7 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 		// Spike detection for failed request - this now creates diagnostic events for failures
 		errStr := fmt.Sprintf("request failed: %v", err)
 		if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, false, nil, nil, &errStr, previousSamples); spike != nil {
-			c.triggerDiagCapture(spike.EventID, t.ID)
+			c.triggerDiagCapture(spike.EventID, t.ID, "http")
 		}
 		return
 	}
@@ -251,33 +251,33 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 		
 		// Spike detection for unhealthy HTTP response
 		if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, false, nil, &httpStatus, &errStr, previousSamples); spike != nil {
-			c.triggerDiagCapture(spike.EventID, t.ID)
+			c.triggerDiagCapture(spike.EventID, t.ID, "http")
 		}
 		return
 	}
 
 	// Spike detection for successful request (latency spikes)
 	if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, true, nil, &httpStatus, nil, previousSamples); spike != nil {
-		c.triggerDiagCapture(spike.EventID, t.ID)
+		c.triggerDiagCapture(spike.EventID, t.ID, "http")
 	}
 	
 	// Recovery detection: if we were unreachable and now succeeded, trigger a recovery capture
 	// Use dedicated RecordRecoveryEvent() instead of fake error injection
 	if wasUnreachable {
 		if recoverySpike := c.state.RecordRecoveryEvent(t.ID, "http", latencyMs, sampleTs, &httpStatus, previousSamples); recoverySpike != nil {
-			c.triggerDiagCapture(recoverySpike.EventID, t.ID)
+			c.triggerDiagCapture(recoverySpike.EventID, t.ID, "http")
 		}
 	}
 }
 
 // triggerDiagCapture triggers async diagnostic capture if diagCapture is configured.
 // This does not block the probe loop.
-func (c *Client) triggerDiagCapture(eventID, targetID string) {
+func (c *Client) triggerDiagCapture(eventID, targetID, probeKind string) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	if c.diagCapture != nil {
-		c.diagCapture.TriggerCapture(eventID, targetID)
+		c.diagCapture.TriggerCapture(eventID, targetID, probeKind)
 	}
 }
 
