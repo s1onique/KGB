@@ -46,6 +46,13 @@ fetch_capture_packet() {
     requested_path=$(jq -r '.requested_path // empty' "$capture_metadata_file" 2>/dev/null || echo "")
     capture_id=$(jq -r '.capture_id // .referenced_capture_id // empty' "$capture_metadata_file" 2>/dev/null || echo "")
 
+    # Detect if we're falling back (not using event-specific path)
+    local is_fallback="false"
+    if [[ -z "$requested_path" ]]; then
+        is_fallback="true"
+        log_warn "  [FALLBACK] No requested_path in capture metadata - using live /status endpoint"
+        log_warn "  [FALLBACK] This may not match the stored UVB-76 capture artifact shape"
+    fi
     log_info "  event_id=$event_id source=$source base_url=$base_url requested_path=${requested_path:-<fallback>}"
 
     # Must have base_url - that's the tovarisch endpoint
@@ -223,6 +230,7 @@ fetch_capture_packet() {
             --arg http_status "$final_fetch_status" \
             --arg fetch_url "$final_fetch_url" \
             --argjson attempts "$attempts_json" \
+            --argjson is_fallback "$is_fallback" \
             --arg event_id "$event_id" \
             --arg source "$source" \
             --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -232,6 +240,7 @@ fetch_capture_packet() {
                 http_status: $http_status,
                 fetch_url: $fetch_url,
                 attempts: $attempts,
+                is_fallback: $is_fallback,
                 event_id: $event_id,
                 source: $source,
                 timestamp: $timestamp
