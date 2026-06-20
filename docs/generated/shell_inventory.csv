@@ -1,0 +1,49 @@
+path,disposition,risk_flags,owner,notes
+# High-risk scripts (jq, polling, API parsing) - grandfathered pending migration
+scripts/lab_uvb76_capture_netns_lib.sh,grandfathered_needs_owner,"jq,curl,polling",TBD,Bootstrap inventory
+scripts/lab_uvb76_capture_netns_contract.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/lab_uvb76_capture_netns_cooldown_helpers.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/lab_uvb76_capture_netns.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/lab_bgp_bfd_reconnect_lib.sh,grandfathered_needs_owner,"jq,curl",TBD,Bootstrap inventory
+scripts/lab_bgp_bfd_reconnect_bgp_reset.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/lab_uvb76_capture_netns_contract_normalizers.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/verify_uvb76_capture_helpers.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/verify_uvb76_diag_packet_contract.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/verify_uvb76_row_normalization_tests.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/lab_uvb76_capture_netns_diag.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/lab_uvb76_capture_netns_poll.sh,grandfathered_needs_owner,"jq,polling",TBD,Bootstrap inventory
+scripts/lab_bgp_bfd_reconnect.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/verify_bgp_reconnect_artifact.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/verify_uvb76_extract_network_diag_tests.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/lab_bgp_bfd_netns_bfd.sh,grandfathered_needs_owner,"jq,curl",TBD,Bootstrap inventory
+scripts/lab_uvb76_capture_netns_phase1_harden_self_test.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/lab_uvb76_capture_netns_phase_helpers.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/lab_uvb76_capture_netns_fetch_packet.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/lab_bgp_bfd_netns.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/verify_uvb76_captured_row_assertion_tests.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/lab_bgp_bfd_netns_stability.sh,grandfathered_needs_owner,"jq,curl",TBD,Bootstrap inventory
+scripts/lab_uvb76_capture_netns_phase1_harden.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/linux_smoke_test.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/lab_bgp_bfd_netns_tovarisch_diag.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/verify_uvb76_capture_netns_lab.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/lab_uvb76_capture_netns_fetch_helpers.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/lab_uvb76_capture_netns_phase_capture_helpers.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/verify_tovarisch_status_contract.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/lab_uvb76_capture_netns_capture_poll.sh,grandfathered_needs_owner,"jq,polling",TBD,Bootstrap inventory
+scripts/lab_uvb76_capture_netns_result.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/verify_uvb76_diag_packet_contract_lib.sh,grandfathered_needs_owner,trap,TBD,Bootstrap inventory
+scripts/verify_bgp_stability.sh,grandfathered_needs_owner,trap,TBD,Bootstrap inventory
+# Thin wrapper scripts - always allowed
+scripts/coverage_gate.sh,keep_wrapper,none,none,
+scripts/check_final_newlines_regression.sh,keep_wrapper,none,none,
+scripts/verify_opkg_package.sh,keep_wrapper,none,none,
+scripts/verify_workflow_release_safety.sh,keep_wrapper,none,none,
+scripts/lab_uvb76_capture_netns_tovarisch.sh,keep_wrapper,none,none,
+scripts/lab_bgp_bfd_netns_consts.sh,keep_wrapper,none,none,
+scripts/verify_uvb76_capture_url_lab.sh,keep_wrapper,none,none,
+scripts/verify_bfd_up_artifact.sh,keep_wrapper,none,none,
+scripts/lab_uvb76_capture_netns_consts.sh,keep_wrapper,none,none,
+scripts/lab_uvb76_capture_netns_result_helpers.sh,keep_wrapper,none,none,
+scripts/lab_uvb76_capture_netns_defect.sh,keep_wrapper,none,none,
+scripts/lab_uvb76_capture_netns_phase_capture_helpers.sh,keep_wrapper,none,none,
+scripts/lab_uvb76_capture_netns_contract_assertions.sh,keep_wrapper,none,none,

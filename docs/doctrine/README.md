@@ -16,6 +16,7 @@ Canonical doctrine documents for KGB project hygiene and architecture.
 | [llm-friendliness.md](./llm-friendliness.md) | Code readability for agents |
 | [platform-portability.md](./platform-portability.md) | Portable code default, platform isolation rules |
 | [runtime-harness-adaptation.md](./runtime-harness-adaptation.md) | Four-layer harness: contract, skill, action, trajectory |
+| [shell-containment.md](./shell-containment.md) | Shell wrapper policy, banned anti-patterns, migration guide |
 
 ## Day-0 Practices
 

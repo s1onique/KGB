@@ -87,6 +87,8 @@ required=(
   docs/doctrine/ai-native-code-discipline-axioms.md
   docs/doctrine/manifesto_axiom_coverage.csv
   docs/doctrine/git-history-safety.md
+  docs/doctrine/shell-containment.md
+  docs/generated/shell_inventory.csv
   docs/architecture/overview.md
   docs/architecture/naming.md
   docs/architecture/components.md
@@ -209,6 +211,18 @@ echo "[gate] checking git history safety policy"
 echo "[gate] checking split test inventory drift"
 
 ./scripts/verify_split_test_inventory.sh
+
+echo "[gate] checking shell containment"
+
+python3 scripts/verify_shell_containment.py
+
+echo "[gate] checking shell containment self-test"
+
+python3 scripts/verify_shell_containment.py --self-test
+
+echo "[gate] checking shell inventory consistency"
+
+python3 scripts/verify_shell_containment.py --check-inventory
 
 echo "[gate] checking workflow release safety (no release-in-build)"
 

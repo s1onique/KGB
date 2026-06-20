@@ -116,6 +116,31 @@ If you encounter any Zig 0.16-specific difficulty, stale API assumption, compile
 5. If the observation is clearly reusable, also patch `docs/tooling/zig-0.16-observations.md`.
 6. Do not change the curated field manual unless explicitly asked.
 
+## Shell Containment
+
+**No new semantic Shell.** Shell is an acceptable wrapper, not an acceptable brain.
+
+- Thin launchers (exec typed binary): allowed
+- Privilege wrappers (sudo, nsenter): allowed
+- CI glue: allowed
+- JSON parsing, API polling, state machines: **forbidden in shell**
+
+Default replacement:
+- Go for product/lab/UVB-76/tovarisch semantics
+- Python for repo verifiers, docs/reporting, release validation
+
+See `docs/doctrine/shell-containment.md` for full policy.
+
+## Labs Rule
+
+**Bash launches; Go/Python decides.**
+
+Lab scripts may orchestrate typed binaries but must not contain:
+- JSON artifact validation
+- Polling state machines
+- Retry/cooldown logic
+- Phase orchestration
+
 ## Forbidden Moves
 
 - Do not add enterprise/OAuth/governance-first complexity.
@@ -125,3 +150,4 @@ If you encounter any Zig 0.16-specific difficulty, stale API assumption, compile
 - Do not downgrade Zig.
 - Do not bypass the quality gate.
 - Do not make large speculative architecture rewrites.
+- Do not add new shell scripts with risky tokens (jq, polling, curl parsing) without explicit justification.
