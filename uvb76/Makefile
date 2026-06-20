@@ -106,3 +106,17 @@ race-short:
 	$(GOTEST) -race -timeout=30s -short ./state/...
 	$(GOTEST) -race -timeout=30s -short ./probe/...
 	$(GOTEST) -race -timeout=30s -short ./server/...
+
+# === Latency Crash Lab ===
+# Builds the Go lab command and verifier.
+lab-build:
+	$(GOBUILD) -o uvb76-latency-crash-lab ./cmd/uvb76-latency-crash-lab
+	$(GOBUILD) -o uvb76-latency-crash-verify ./cmd/uvb76-latency-crash-verify
+
+# Run the latency crash lab (requires Go toolchain and uvb76 binary built)
+lab-run: build lab-build
+	./uvb76-latency-crash-lab
+
+# Verify an artifact directory (pass artifact dir as argument)
+lab-verify: lab-build
+	./uvb76-latency-crash-verify $(ARTIFACT_DIR)

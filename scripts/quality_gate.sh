@@ -50,7 +50,7 @@ while IFS= read -r f; do
       .git/*|zig-cache/*|zig-out/*|.zig-cache/*|coverage/*|kcov-output/*)
         continue
         ;;
-      *.png|*.jpg|*.jpeg|*.gif|*.ico|*.pdf|*.zip|*.gz|*.tar|*.tgz|*.wasm)
+      *.png|*.jpg|*.jpeg|*.gif|*.ico|*.pdf|*.zip|*.gz|*.tar|*.tgz|*.wasm|uvb76/uvb76-latency-crash-*|*/uvb76-latency-crash-*)
         continue
         ;;
       *node_modules*)

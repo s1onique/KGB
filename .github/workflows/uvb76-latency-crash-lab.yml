@@ -1,0 +1,104 @@
+name: UVB-76 Latency Crash Lab
+
+on:
+  workflow_dispatch:
+
+jobs:
+  uv76-latency-crash-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: uvb76/go.mod
+          cache: true
+
+      - name: Show Go version
+        run: go version
+
+      - name: Show directory
+        run: pwd && ls -la
+
+      - name: Build web UI
+        run: |
+          cd uvb76/web
+          npm ci
+          npm run build
+
+      - name: Build UVB-76
+        run: |
+          cd uvb76
+          go build -o uvb76 .
+
+      - name: Show Go module files
+        run: |
+          ls -la uvb76/go.mod
+          cat uvb76/go.mod
+
+      - name: Build lab command
+        run: |
+          cd uvb76
+          go build -o uvb76-latency-crash-lab ./cmd/uvb76-latency-crash-lab
+
+      - name: Build lab verifier
+        run: |
+          cd uvb76
+          go build -o uvb76-latency-crash-verify ./cmd/uvb76-latency-crash-verify
+
+      - name: Show built binaries
+        run: |
+          ls -la uvb76/uvb76
+          ls -la uvb76/uvb76-latency-crash-lab
+          ls -la uvb76/uvb76-latency-crash-verify
+
+      - name: Run lab
+        run: |
+          cd uvb76
+          ./uvb76-latency-crash-lab
+
+      - name: Show artifacts
+        run: |
+          ls -la /tmp/kgb-uvb76-latency-crash-*/ 2>/dev/null || echo "No artifacts found"
+          find /tmp/kgb-uvb76-latency-crash-* -type f 2>/dev/null || true
+
+      - name: Verify artifacts
+        run: |
+          ARTIFACT_DIR=$(find /tmp -maxdepth 1 -type d -name 'kgb-uvb76-latency-crash-*' -printf '%T@ %p\n' 2>/dev/null | sort -nr | awk 'NR == 1 { print $2 }')
+          if [ -n "$ARTIFACT_DIR" ]; then
+            echo "Verifying artifact dir: $ARTIFACT_DIR"
+            cd uvb76
+            ./uvb76-latency-crash-verify "$ARTIFACT_DIR"
+          else
+            echo "No artifact directory found"
+            exit 1
+          fi
+
+      - name: Make artifacts readable
+        if: always()
+        run: |
+          chmod -R a+rX /tmp/kgb-uvb76-latency-crash-* 2>/dev/null || true
+
+      - name: Upload lab artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uvb76-latency-crash-lab-logs
+          path: |
+            /tmp/kgb-uvb76-latency-crash-*/**
+          retention-days: 7
+
+      - name: Run race detector tests
+        run: |
+          cd uvb76
+          go test -race -timeout=60s ./state/...
+          go test -race -timeout=60s ./probe/...
+
+      - name: Run all tests
+        run: |
+          cd uvb76
+          go test -v ./...

@@ -211,6 +211,18 @@ BASH ?= bash
 lab-uvb76-capture-netns:
 	@$(BASH) ./scripts/lab_uvb76_capture_netns.sh
 
+# === UVB-76 Latency Crash Lab ===
+# Canonical Golang daemon crash/soak lab for LatencyTracker SIGSEGV.
+# Primary execution: GitHub Actions (workflow_dispatch)
+# NOT part of make gate
+
+BASH ?= bash
+
+lab-uvb76-latency-crash:
+	@$(MAKE) uvb76-build
+	@chmod +x uvb76/uvb76
+	@$(BASH) ./scripts/lab_uvb76_latency_crash.sh
+
 # === opkg Package Targets (Entware/AsusWRT-Merlin) ===
 
 # Build opkg package for Entware/AsusWRT-Merlin
