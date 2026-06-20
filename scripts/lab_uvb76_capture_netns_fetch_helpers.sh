@@ -83,9 +83,10 @@ extract_network_diag_from_spike_row() {
         available_keys=$(jq 'path(scalars) | map(tostring) | join(".")' "$spike_row_file" 2>/dev/null | head -20 || echo "unknown")
         log_error "  Sample paths in row: $available_keys"
         
-        # Write failure summary
+        # Write failure summary atomically with self-validation
         if [[ -n "$summary_file" ]]; then
-            jq -n \
+            local tmp_summary="${summary_file}.tmp"
+            if jq -n \
                 --arg phase "phase${phase}" \
                 --arg status "no_network_diag_in_spike_row" \
                 --arg reason "network_diag_not_found_in_stored_capture" \
@@ -97,7 +98,17 @@ extract_network_diag_from_spike_row() {
                     reason: $reason,
                     is_fallback: $is_fallback,
                     timestamp: $timestamp
-                }' > "$summary_file" 2>/dev/null || true
+                }' > "$tmp_summary"; then
+                if jq -e '(.is_fallback == false) and (.status == "no_network_diag_in_spike_row")' "$tmp_summary" >/dev/null 2>&1; then
+                    mv "$tmp_summary" "$summary_file"
+                else
+                    log_error "[FAIL] Phase $phase: fetch summary self-validation failed"
+                    rm -f "$tmp_summary"
+                fi
+            else
+                log_error "[FAIL] Phase $phase: failed to write fetch summary"
+                rm -f "$tmp_summary"
+            fi
         fi
         return 1
     fi
@@ -129,8 +140,10 @@ extract_network_diag_from_spike_row() {
     capture_id=$(jq -r '.captures[0].referenced_capture_id // .captures[0].capture_id // empty' "$spike_row_file" 2>/dev/null || echo "")
     
     # Write success summary with is_fallback=false (stored artifact used)
+    # Uses atomic write with tmp file + self-validation to ensure trustworthy logs
     if [[ -n "$summary_file" ]]; then
-        jq -n \
+        local tmp_summary="${summary_file}.tmp"
+        if jq -n \
             --arg phase "phase${phase}" \
             --arg status "success" \
             --argjson is_fallback false \
@@ -152,8 +165,22 @@ extract_network_diag_from_spike_row() {
                 requested_path: (if $requested_path == "" then null else $requested_path end),
                 capture_id: (if $capture_id == "" then null else $capture_id end),
                 timestamp: $timestamp
-            }' > "$summary_file" 2>/dev/null || true
-        log_info "  Saved fetch summary: $summary_file (is_fallback=false, stored artifact)"
+            }' > "$tmp_summary"; then
+            # Self-validate the summary before committing
+            if jq -e '.is_fallback == false and .summary_source == "stored_spike_row_capture"' "$tmp_summary" >/dev/null 2>&1; then
+                mv "$tmp_summary" "$summary_file"
+                log_info "  Saved fetch summary: $summary_file (is_fallback=false, stored artifact)"
+            else
+                log_error "[FAIL] Phase $phase: fetch summary self-validation failed"
+                cat "$tmp_summary" >&2 || true
+                rm -f "$tmp_summary"
+                return 1
+            fi
+        else
+            log_error "[FAIL] Phase $phase: failed to write fetch summary"
+            rm -f "$tmp_summary"
+            return 1
+        fi
     fi
     
     return 0

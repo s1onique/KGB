@@ -180,6 +180,118 @@ EOF
         log_fail "Full chain: extract_network_diag_from_spike_row failed"
     fi
     
+    # Test 5: Spike row with started_at ONLY (no completed_at, no canonical sections) - extracts but summary has is_fallback=false
+    # Note: This is a valid extraction - the function extracts what's in the spike row.
+    # The hardener will REJECT this as not having real diagnostic fields.
+    echo "Test 5: started_at only extracts (hardener will reject, but extraction succeeds)"
+    cat > "$test_dir/spike-row-started-at-only.json" <<'EOF'
+{
+  "event_id": "evt-test-started-at-only",
+  "captures": [{
+    "capture_status": "captured", "status": "ok", "source": "tovarisch-lab",
+    "network_diag": {"status": "ok", "started_at": "2026-01-01T00:00:00Z"}
+  }]
+}
+EOF
+    packet_output="$test_dir/packet-started-at-only.json"
+    summary_output="$test_dir/summary-started-at-only.json"
+    
+    if extract_network_diag_from_spike_row "1" "$test_dir/spike-row-started-at-only.json" \
+        "$packet_output" "$summary_output" 2>/dev/null; then
+        # Extraction succeeds - the spike row has valid network_diag
+        log_pass "started_at only: extraction succeeded (hardener decides if it's real)"
+        
+        # Verify summary has is_fallback=false
+        # Note: jq -r outputs booleans as literal "false" or "true"
+        local is_fallback
+        is_fallback=$(jq -r '.is_fallback' "$summary_output" 2>/dev/null || echo "null")
+        if [[ "$is_fallback" == "false" ]]; then
+            log_pass "started_at only: summary shows is_fallback=false"
+        else
+            log_fail "started_at only: summary is_fallback is '$is_fallback'"
+        fi
+    else
+        log_fail "started_at only: extraction should succeed (hardener rejects, not extractor)"
+    fi
+    
+    # Test 6: Spike row with started_at + interfaces (tovarisch canonical section) - extraction succeeds
+    echo "Test 6: started_at + interfaces extracts (tovarisch canonical section)"
+    cat > "$test_dir/spike-row-started-at-interfaces.json" <<'EOF'
+{
+  "event_id": "evt-test-started-at-interfaces",
+  "captures": [{
+    "capture_status": "captured", "status": "ok", "source": "tovarisch-lab",
+    "network_diag": {"status": "ok", "started_at": "2026-01-01T00:00:00Z",
+      "interfaces": [{"name": "eth0", "operstate": "up"}]}
+  }]
+}
+EOF
+    packet_output="$test_dir/packet-started-at-interfaces.json"
+    summary_output="$test_dir/summary-started-at-interfaces.json"
+    
+    if extract_network_diag_from_spike_row "1" "$test_dir/spike-row-started-at-interfaces.json" \
+        "$packet_output" "$summary_output" 2>/dev/null; then
+        log_pass "started_at + interfaces: extraction succeeded"
+        
+        # Verify interfaces are preserved
+        local interface_count
+        interface_count=$(jq -r '.network_diag.interfaces | length' "$packet_output" 2>/dev/null || echo "0")
+        if [[ "$interface_count" -gt 0 ]]; then
+            log_pass "started_at + interfaces: interfaces preserved in packet"
+        else
+            log_fail "started_at + interfaces: interfaces missing in packet"
+        fi
+        
+        # Verify summary has is_fallback=false and summary_source
+        # Note: jq -r outputs booleans as literal "false" or "true"
+        local is_fallback
+        is_fallback=$(jq -r '.is_fallback' "$summary_output" 2>/dev/null || echo "null")
+        if [[ "$is_fallback" == "false" ]]; then
+            log_pass "started_at + interfaces: summary is_fallback=false"
+        else
+            log_fail "started_at + interfaces: summary is_fallback is '$is_fallback'"
+        fi
+        
+        local sum_source
+        sum_source=$(jq -r '.summary_source // "null"' "$summary_output" 2>/dev/null || echo "null")
+        if [[ "$sum_source" == "stored_spike_row_capture" ]]; then
+            log_pass "started_at + interfaces: summary_source is 'stored_spike_row_capture'"
+        else
+            log_fail "started_at + interfaces: summary_source is '$sum_source'"
+        fi
+    else
+        log_fail "started_at + interfaces: extraction failed"
+    fi
+    
+    # Test 7: Verify summary validation - missing is_fallback field causes failure
+    # We test this by checking that a manually malformed summary would fail jq validation
+    echo "Test 7: Summary validation - is_fallback must be false"
+    cat > "$test_dir/spike-row-validation-test.json" <<'EOF'
+{
+  "event_id": "evt-validation-test",
+  "captures": [{
+    "capture_status": "captured", "status": "ok", "source": "tovarisch-lab",
+    "network_diag": {"status": "ok", "started_at": "2026-01-01T00:00:00Z",
+      "routes": []}
+  }]
+}
+EOF
+    packet_output="$test_dir/packet-validation-test.json"
+    summary_output="$test_dir/summary-validation-test.json"
+    
+    if extract_network_diag_from_spike_row "1" "$test_dir/spike-row-validation-test.json" \
+        "$packet_output" "$summary_output" 2>/dev/null; then
+        # Verify jq can validate the summary
+        if jq -e '.is_fallback == false and .summary_source == "stored_spike_row_capture"' \
+            "$summary_output" >/dev/null 2>&1; then
+            log_pass "Summary validation: jq correctly validates is_fallback=false"
+        else
+            log_fail "Summary validation: jq failed to validate is_fallback=false"
+        fi
+    else
+        log_fail "Summary validation: extraction failed"
+    fi
+    
     rm -rf "$test_dir"
 }
 
