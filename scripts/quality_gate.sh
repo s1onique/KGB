@@ -116,6 +116,7 @@ required=(
   scripts/install_git_safety_hooks.sh
   scripts/verify_git_history_safety_policy.sh
   scripts/verify_github_no_force_push_ruleset.sh
+  scripts/verify_workflow_release_safety.sh
 )
 
 for path in "${required[@]}"; do
@@ -207,6 +208,10 @@ echo "[gate] checking git history safety policy"
 echo "[gate] checking split test inventory drift"
 
 ./scripts/verify_split_test_inventory.sh
+
+echo "[gate] checking workflow release safety (no release-in-build)"
+
+./scripts/verify_workflow_release_safety.sh
 
 echo "[gate] checking forbidden Zig dev toolchain pin"
 

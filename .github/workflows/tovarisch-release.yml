@@ -1,3 +1,18 @@
+# =============================================================================
+# KGB Doctrine: Release barrier enforcement
+#
+# RULES (enforced by verify_workflow_release_safety.sh):
+#   1. Build jobs MUST NOT call gh release create, gh release upload, or gh release edit.
+#   2. Only ONE publish job per workflow has contents: write.
+#   3. Publish job MUST use `needs` to wait for all build jobs to complete.
+#   4. Build jobs upload workflow artifacts only.
+#   5. Publish job downloads artifacts, verifies asset set, then publishes.
+#
+# This workflow builds tovarisch binaries for Linux (amd64, arm64).
+# Tag namespace: tovarisch-build-{sha7}
+# Prereleases are created on every main push with unique per-SHA tags.
+# =============================================================================
+
 name: Build and publish tovarisch binaries
 
 on:
@@ -6,8 +21,13 @@ on:
       - main
   workflow_dispatch:
 
+# Prevent concurrent release publications for the same tag
+concurrency:
+  group: tovarisch-release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
-  contents: write
+  contents: read
 
 env:
   ZIG_VERSION: "0.16.0"
@@ -138,12 +158,25 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # =============================================================================
+  # RELEASE BARRIER JOB
+  # Only this job has contents: write permission.
+  # This job runs AFTER all build jobs complete successfully.
+  # Creates release as draft, uploads assets, verifies, then publishes.
+  # =============================================================================
   publish:
     name: Publish GitHub prerelease
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -153,9 +186,55 @@ jobs:
       - name: List release assets
         run: |
           set -euo pipefail
-          find dist-artifacts -maxdepth 2 -type f -print | sort
+          echo "=== Release assets ==="
+          find dist-artifacts -maxdepth 2 -type f | sort
 
-      - name: Create or update GitHub prerelease
+      - name: Verify release assets
+        run: |
+          set -euo pipefail
+
+          # Expected asset count based on matrix: 2 binaries + 2 checksums = 4 files
+          EXPECTED_COUNT=4
+          ACTUAL_COUNT=$(find dist-artifacts -type f | wc -l)
+
+          echo "Expected asset count: ${EXPECTED_COUNT}"
+          echo "Actual asset count: ${ACTUAL_COUNT}"
+
+          if [[ "${ACTUAL_COUNT}" -ne "${EXPECTED_COUNT}" ]]; then
+            echo "ERROR: Expected ${EXPECTED_COUNT} assets, found ${ACTUAL_COUNT}" >&2
+            echo "Missing assets - build jobs may have failed or not uploaded" >&2
+            exit 1
+          fi
+
+          # Verify both binaries exist
+          test -f dist-artifacts/tovarisch-linux-amd64
+          test -f dist-artifacts/tovarisch-linux-amd64.sha256
+          test -f dist-artifacts/tovarisch-linux-arm64
+          test -f dist-artifacts/tovarisch-linux-arm64.sha256
+
+          echo ""
+          echo "All expected binary assets present: OK"
+
+          # Verify SHA256 checksums are valid
+          for sha in dist-artifacts/*.sha256; do
+            if sha256sum -c "$sha"; then
+              echo "OK: $(basename "$sha")"
+            else
+              echo "FAIL: $(basename "$sha")" >&2
+              exit 1
+            fi
+          done
+
+          # Prevent cross-product asset leakage (no .deb or .ipk in binary release)
+          if find dist-artifacts -type f \( -name '*.deb' -o -name '*.ipk' \) | grep -q .; then
+            echo "ERROR: Package files found in binary release (cross-product asset leakage)" >&2
+            exit 1
+          fi
+
+          echo ""
+          echo "=== Asset verification PASSED ==="
+
+      - name: Create draft release with assets
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -163,21 +242,65 @@ jobs:
           set -euo pipefail
 
           SHORT_SHA="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
-          TAG_NAME="build-${SHORT_SHA}"
+          TAG_NAME="tovarisch-build-${SHORT_SHA}"
 
+          echo "=== Creating GitHub Release ==="
+          echo "Tag: $TAG_NAME"
+
+          # Check if release already exists - fail closed for deterministic per-SHA tags
           if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
-            echo "Release ${TAG_NAME} already exists"
-          else
-            gh release create "${TAG_NAME}" \
-              --target "${GITHUB_SHA}" \
-              --title "${TAG_NAME}" \
-              --notes "tovarisch build from ${GITHUB_SHA}" \
-              --prerelease
+            echo "ERROR: Release ${TAG_NAME} already exists." >&2
+            echo "This workflow uses unique per-SHA tags; existing release indicates a workflow bug." >&2
+            exit 1
           fi
 
-          gh release upload "${TAG_NAME}" \
+          echo "Creating new release ${TAG_NAME} with assets..."
+          gh release create "${TAG_NAME}" \
             dist-artifacts/tovarisch-linux-amd64 \
             dist-artifacts/tovarisch-linux-amd64.sha256 \
             dist-artifacts/tovarisch-linux-arm64 \
             dist-artifacts/tovarisch-linux-arm64.sha256 \
-            --clobber
+            --target "${GITHUB_SHA}" \
+            --title "${TAG_NAME}" \
+            --notes "tovarisch build from ${GITHUB_SHA}" \
+            --draft \
+            --prerelease \
+            --latest=false
+
+          echo ""
+          echo "=== Draft release created successfully ==="
+
+      - name: Verify draft release and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          SHORT_SHA="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
+          TAG_NAME="tovarisch-build-${SHORT_SHA}"
+
+          echo "=== Verifying draft release ==="
+
+          # Verify release exists and is draft
+          is_draft=$(gh release view "${TAG_NAME}" --json isDraft --jq '.isDraft')
+          if [[ "${is_draft}" != "true" ]]; then
+            echo "ERROR: Release ${TAG_NAME} is not a draft" >&2
+            exit 1
+          fi
+
+          # Verify assets are attached
+          asset_count=$(gh release view "${TAG_NAME}" --json assets --jq '.assets | length')
+          if [[ "${asset_count}" -ne 4 ]]; then
+            echo "ERROR: Expected 4 assets, found ${asset_count}" >&2
+            exit 1
+          fi
+
+          echo "Draft release verified: 4 assets attached"
+
+          echo ""
+          echo "=== Publishing release ${TAG_NAME} ==="
+          gh release edit "${TAG_NAME}" --draft=false
+
+          echo ""
+          echo "=== Release ${TAG_NAME} published successfully ==="
+          gh release view "${TAG_NAME}" --json tagName,name,isDraft,isPrerelease,url,assets

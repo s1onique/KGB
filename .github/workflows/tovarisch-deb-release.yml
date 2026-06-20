@@ -1,3 +1,17 @@
+# =============================================================================
+# KGB Doctrine: Release barrier enforcement
+#
+# RULES (enforced by verify_workflow_release_safety.sh):
+#   1. Build jobs MUST NOT call gh release create, gh release upload, or gh release edit.
+#   2. Only ONE publish job per workflow has contents: write.
+#   3. Publish job MUST use `needs` to wait for all build jobs to complete.
+#   4. Build jobs upload workflow artifacts only.
+#   5. Publish job downloads artifacts, verifies asset set, then publishes.
+#
+# This workflow produces Debian packages for Ubuntu 24.04.
+# Tag namespace: tovarisch-deb-v{version}
+# =============================================================================
+
 name: tovarisch-deb-release
 
 on:
@@ -5,9 +19,14 @@ on:
     branches:
       - main
     tags:
-      - "v*"
+      - "tovarisch-deb-v*"
   pull_request:
   workflow_dispatch:
+
+# Prevent concurrent release publications for the same tag
+concurrency:
+  group: deb-release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -148,8 +167,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            version="${GITHUB_REF_NAME#v}"
+          if [[ "${GITHUB_REF}" == refs/tags/tovarisch-deb-v* ]]; then
+            version="${GITHUB_REF_NAME#tovarisch-deb-v}"
           else
             version="0.0.0-ci.${GITHUB_RUN_NUMBER}"
           fi
@@ -176,20 +195,36 @@ jobs:
           tovarisch check
           tovarisch status --json
 
+      - name: Generate SHA256 checksum
+        run: |
+          set -euo pipefail
+          sha256sum dist/*.deb > dist/tovarisch_amd64.deb.sha256
+          cat dist/tovarisch_amd64.deb.sha256
+
       - name: Upload deb artifact
         uses: actions/upload-artifact@v4
         with:
           name: tovarisch-deb-amd64
-          path: dist/*.deb
+          path: |
+            dist/*.deb
+            dist/*.sha256
           if-no-files-found: error
           retention-days: 30
 
+  # =============================================================================
+  # RELEASE BARRIER JOB
+  # Only this job has contents: write permission.
+  # This job runs AFTER all build jobs complete successfully.
+  # Creates release as draft, uploads assets, verifies, then publishes.
+  # =============================================================================
   publish-release:
     name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
     needs:
+      - cross-platform-verify
       - build-deb
+    if: startsWith(github.ref, 'refs/tags/tovarisch-deb-v')
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
 
     permissions:
       contents: write
@@ -204,7 +239,62 @@ jobs:
           name: tovarisch-deb-amd64
           path: dist
 
-      - name: Publish release
+      - name: List release assets
+        run: |
+          set -euo pipefail
+          echo "=== Release assets ==="
+          ls -lh dist/
+
+      - name: Verify release assets
+        run: |
+          set -euo pipefail
+
+          # Expected assets: 1 .deb + 1 .sha256 = 2 files
+          EXPECTED_COUNT=2
+          ACTUAL_COUNT=$(find dist -type f \( -name '*.deb' -o -name '*.sha256' \) | wc -l)
+
+          echo "Expected asset count: ${EXPECTED_COUNT}"
+          echo "Actual asset count: ${ACTUAL_COUNT}"
+
+          if [[ "${ACTUAL_COUNT}" -ne "${EXPECTED_COUNT}" ]]; then
+            echo "ERROR: Expected ${EXPECTED_COUNT} assets, found ${ACTUAL_COUNT}" >&2
+            exit 1
+          fi
+
+          # Find the .deb file
+          deb_file=$(find dist -name '*.deb' -type f)
+          if [[ -z "${deb_file}" ]]; then
+            echo "ERROR: No .deb file found" >&2
+            exit 1
+          fi
+          echo "Found deb package: $(basename "${deb_file}")"
+
+          # Verify SHA256 checksum exists for the deb
+          sha_file=$(find dist -name '*.sha256' -type f)
+          if [[ -z "${sha_file}" ]]; then
+            echo "ERROR: No SHA256 checksum file found" >&2
+            exit 1
+          fi
+          echo "Found checksum: $(basename "${sha_file}")"
+
+          # Verify SHA256 checksum is valid
+          if sha256sum -c "${sha_file}"; then
+            echo "SHA256 checksum valid: OK"
+          else
+            echo "ERROR: SHA256 checksum mismatch" >&2
+            exit 1
+          fi
+
+          # Prevent cross-product asset leakage (no .ipk files in deb release)
+          if find dist -type f -name '*.ipk' | grep -q .; then
+            echo "ERROR: .ipk files found in deb release (cross-product asset leakage)" >&2
+            exit 1
+          fi
+
+          echo ""
+          echo "=== Asset verification PASSED ==="
+
+      - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -212,9 +302,59 @@ jobs:
 
           tag="${GITHUB_REF_NAME}"
 
+          echo "=== Creating GitHub Release ==="
+          echo "Tag: $tag"
+
+          # Check if release already exists (fail closed for tag pushes)
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            echo "ERROR: Release ${tag} already exists. Tag releases must be unique." >&2
+            echo "If this is a retry, delete the existing release first." >&2
+            exit 1
+          fi
+
           gh release create "${tag}" \
             dist/*.deb \
+            dist/*.sha256 \
             --title "tovarisch ${tag}" \
-            --notes "Rudimentary Ubuntu 24.04 amd64 Debian package for tovarisch." \
-          || gh release upload "${tag}" dist/*.deb --clobber
+            --notes "Ubuntu 24.04 amd64 Debian package for tovarisch." \
+            --verify-tag \
+            --draft \
+            --prerelease \
+            --latest=false
 
+          echo ""
+          echo "=== Draft release created successfully ==="
+
+      - name: Verify draft release and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+
+          echo "=== Verifying draft release ==="
+
+          # Verify release exists and is draft
+          is_draft=$(gh release view "${tag}" --json isDraft --jq '.isDraft')
+          if [[ "${is_draft}" != "true" ]]; then
+            echo "ERROR: Release ${tag} is not a draft" >&2
+            exit 1
+          fi
+
+          # Verify assets are attached
+          asset_count=$(gh release view "${tag}" --json assets --jq '.assets | length')
+          if [[ "${asset_count}" -ne 2 ]]; then
+            echo "ERROR: Expected 2 assets, found ${asset_count}" >&2
+            exit 1
+          fi
+
+          echo "Draft release verified: 2 assets attached"
+
+          echo ""
+          echo "=== Publishing release ${tag} ==="
+          gh release edit "${tag}" --draft=false
+
+          echo ""
+          echo "=== Release ${tag} published successfully ==="
+          gh release view "${tag}" --json tagName,name,isDraft,isPrerelease,url

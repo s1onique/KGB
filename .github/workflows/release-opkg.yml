@@ -1,9 +1,23 @@
+# =============================================================================
+# KGB Doctrine: Release barrier enforcement
+#
+# RULES (enforced by verify-workflow-release-safety.sh):
+#   1. Build jobs MUST NOT call gh release create, gh release upload, or gh release edit.
+#   2. Only ONE publish job per workflow has contents: write.
+#   3. Publish job MUST use `needs` to wait for all build jobs to complete.
+#   4. Build jobs upload workflow artifacts only.
+#   5. Publish job downloads artifacts, verifies asset set, then publishes.
+#
+# This workflow produces opkg packages for Entware/AsusWRT-Merlin.
+# Tag namespace: uvb76-opkg-v{version}
+# =============================================================================
+
 name: Build and publish UVB-76 opkg package
 
 on:
   push:
     tags:
-      - "v*"
+      - "uvb76-opkg-v*"
   workflow_dispatch:
     inputs:
       version:
@@ -11,13 +25,18 @@ on:
         required: false
 
 permissions:
-  contents: write
+  contents: read
   id-token: write
   attestations: write
 
 env:
   GO_VERSION_FILE: "uvb76/go.mod"
   PACKAGE_NAME: "uvb76"
+
+# Prevent concurrent release publications for the same tag
+concurrency:
+  group: opkg-release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-opkg:
@@ -141,34 +160,133 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish GitHub Release
-        if: github.ref_type == 'tag'
+  # =============================================================================
+  # RELEASE BARRIER JOB
+  # Only this job has contents: write permission.
+  # This job runs AFTER all build-opkg jobs complete successfully.
+  # =============================================================================
+  publish-opkg-release:
+    name: Publish opkg release
+    needs: build-opkg
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: List release assets
+        run: |
+          set -euo pipefail
+          echo "=== Release assets ==="
+          find release-assets -maxdepth 2 -type f | sort
+
+      - name: Verify complete release asset set
+        run: |
+          set -euo pipefail
+
+          # Verify manifest and release notes exist
+          test -f release-assets/manifest.txt
+          test -f release-assets/release-notes.md
+
+          echo "=== manifest.txt ==="
+          cat release-assets/manifest.txt
+
+          echo ""
+          echo "=== release-notes.md (first 50 lines) ==="
+          head -50 release-assets/release-notes.md
+
+          # Verify SHA256 checksums exist
+          sha_count=$(find release-assets -name '*.sha256' | wc -l)
+          if [[ "$sha_count" -eq 0 ]]; then
+            echo "ERROR: No SHA256 checksum files found" >&2
+            exit 1
+          fi
+          echo "Found $sha_count SHA256 checksum files"
+
+          # Verify at least one .ipk exists
+          ipk_count=$(find release-assets -name '*.ipk' | wc -l)
+          if [[ "$ipk_count" -eq 0 ]]; then
+            echo "ERROR: No .ipk packages found" >&2
+            exit 1
+          fi
+          echo "Found $ipk_count .ipk packages"
+
+          # Verify SHA256 checksums are valid
+          echo ""
+          echo "=== Verifying SHA256 checksums ==="
+          for sha in release-assets/*.sha256; do
+            if sha256sum -c "$sha"; then
+              echo "OK: $(basename "$sha")"
+            else
+              echo "FAIL: $(basename "$sha")" >&2
+              exit 1
+            fi
+          done
+
+          # Prevent cross-product asset leakage (no .deb files in opkg release)
+          if find release-assets -type f -name '*.deb' | grep -q .; then
+            echo "ERROR: .deb files found in opkg release (cross-product asset leakage)" >&2
+            find release-assets -type f -name '*.deb' >&2
+            exit 1
+          fi
+
+          echo ""
+          echo "=== Asset verification PASSED ==="
+
+      - name: Create draft release with assets
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          
+
           tag="${GITHUB_REF_NAME}"
-          
+
           echo "=== Creating GitHub Release ==="
           echo "Tag: $tag"
-          echo "Assets:"
-          ls -la dist/opkg/
-          
-          # Create or update release
+
+          # Check if release already exists (fail closed for tag pushes)
           if gh release view "${tag}" >/dev/null 2>&1; then
-            echo "Release ${tag} already exists, uploading assets..."
-            # For tag releases, fail closed - do not clobber existing releases
             echo "ERROR: Release ${tag} already exists. Tag releases must be unique." >&2
+            echo "If this is a retry, delete the existing release first." >&2
             exit 1
-          else
-            echo "Creating new release ${tag}..."
-            gh release create "${tag}" dist/opkg/*.ipk dist/opkg/*.sha256 dist/opkg/manifest.txt dist/opkg/release-notes.md \
-              --title "${tag}" \
-              --notes-file "dist/opkg/release-notes.md" \
-              --verify-tag
           fi
-          
+
+          echo "Creating new release ${tag}..."
+          gh release create "${tag}" \
+            release-assets/*.ipk \
+            release-assets/*.sha256 \
+            release-assets/manifest.txt \
+            release-assets/release-notes.md \
+            --title "uvb76 ${tag} opkg" \
+            --notes-file "release-assets/release-notes.md" \
+            --verify-tag \
+            --draft \
+            --prerelease \
+            --latest=false
+
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+
+          echo "=== Publishing release ${tag} ==="
+          gh release edit "${tag}" --draft=false
+
           echo ""
-          echo "=== Release published successfully ==="
+          echo "=== Release ${tag} published successfully ==="
+          gh release view "${tag}" --json tagName,name,isDraft,isPrerelease,url
