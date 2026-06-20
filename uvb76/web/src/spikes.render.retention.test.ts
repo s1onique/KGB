@@ -128,8 +128,8 @@ describe('spikes DOM renderer: retention summary and table', () => {
     mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
     await loadSpikeDiagnostics('test-target');
     
-    // Should show "ready" badge for ok capture with network_diag
-    expect(container.textContent).toContain('ready');
+    // Should show "captured" badge for ok capture with network_diag
+    expect(container.textContent).toContain('captured');
   });
 
   it('renders suppressed capture badge', async () => {
@@ -194,7 +194,10 @@ describe('spikes DOM renderer: retention summary and table', () => {
     mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
     await loadSpikeDiagnostics('test-target');
     
-    expect(container.textContent).toContain('error');
+    // Status 'error' maps to 'failed' badge
+    expect(container.textContent).toContain('failed');
+    // Error message is shown
+    expect(container.textContent).toContain('connection refused');
   });
 
   it('renders timeout capture status', async () => {
@@ -215,7 +218,8 @@ describe('spikes DOM renderer: retention summary and table', () => {
     mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
     await loadSpikeDiagnostics('test-target');
     
-    expect(container.textContent).toContain('timeout');
+    // timeout status is displayed as 'failed' in badge
+    expect(container.textContent).toContain('failed');
   });
 
   it('renders critical severity badge', async () => {

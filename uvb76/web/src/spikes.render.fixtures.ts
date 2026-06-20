@@ -4,7 +4,7 @@
 // NOTE: Mock setup must be done in each .test.ts file before importing loadSpikeDiagnostics.
 // See spikes.render.empty.test.ts for the correct pattern.
 
-import type { SpikeResponseWithCaptures, DiagCapture, TcpSocketDiagData, NetworkDiagData, SpikeRetentionStats } from './api';
+import type { SpikeResponseWithCaptures, DiagCapture, TcpSocketDiagData, NetworkDiagData, SpikeRetentionStats, CaptureCooldownInfo } from './api';
 
 // Default retention stats for tests
 export const defaultRetention: SpikeRetentionStats = {
@@ -135,7 +135,21 @@ export function spikeResponseWithErrorCapture(options: {
 export function spikeResponseWithSuppressedCapture(options: {
   latency_ms?: number;
   network_diag?: NetworkDiagData;
+  cooldown_info?: CaptureCooldownInfo;
 } = {}): SpikeResponseWithCaptures {
+  // Default cooldown_info for suppressed captures (visible anchor case)
+  const defaultCooldownInfo: CaptureCooldownInfo = {
+    scope: 'per_diagnostic_peer',
+    last_successful_capture_at: '2026-06-18T11:55:00Z',
+    next_capture_eligible_at: '2026-06-18T12:00:00Z',
+    remaining_cooldown_ms: 0,
+    cooldown_key: 'peer-1',
+    anchor_visible: true,
+    anchor_visibility_reason: 'retained_visible',
+    skipped_attempt_updates_cooldown: false,
+    cooldown_seconds: 300,
+  };
+  
   return createSpikeResponse(createSpike({
     latency_ms: options.latency_ms ?? 800,
     captures: [{
@@ -144,6 +158,7 @@ export function spikeResponseWithSuppressedCapture(options: {
       capture_started_at: '2026-06-18T12:00:00Z',
       status: 'ok',
       suppressed_by_cooldown: true,
+      cooldown_info: options.cooldown_info ?? defaultCooldownInfo,
       network_diag: options.network_diag ?? createNetworkDiag({
         underlay_tcp: [createTcpSocket({ rtt_ms: 50.0, rto_ms: 200, retransmits: 0 })],
       }),
@@ -183,5 +198,136 @@ export function createXrayTcpSpikeResponse(): SpikeResponseWithCaptures {
     network_diag: createNetworkDiag({
       underlay_tcp: [createTcpSocket()],
     }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Cooldown anchor fixtures
+// ---------------------------------------------------------------------------
+
+/** Create cooldown info for a hidden anchor (outside current view) */
+export function createHiddenAnchorCooldownInfo(overrides: Partial<CaptureCooldownInfo> = {}): CaptureCooldownInfo {
+  return {
+    scope: 'per_diagnostic_peer',
+    last_successful_capture_at: '2026-06-18T11:00:00Z',
+    next_capture_eligible_at: '2026-06-18T12:05:00Z',
+    remaining_cooldown_ms: 300000,
+    cooldown_key: 'peer-1',
+    anchor_visible: false,
+    anchor_visibility_reason: 'outside_filter_window',
+    skipped_attempt_updates_cooldown: false,
+    cooldown_seconds: 300,
+    ...overrides,
+  };
+}
+
+/** Create cooldown info for a visible anchor (retained and visible) */
+export function createVisibleAnchorCooldownInfo(overrides: Partial<CaptureCooldownInfo> = {}): CaptureCooldownInfo {
+  return {
+    scope: 'per_diagnostic_peer',
+    last_successful_capture_at: '2026-06-18T11:55:00Z',
+    next_capture_eligible_at: '2026-06-18T12:00:00Z',
+    remaining_cooldown_ms: 0,
+    cooldown_key: 'peer-1',
+    anchor_visible: true,
+    anchor_visibility_reason: 'retained_visible',
+    skipped_attempt_updates_cooldown: false,
+    cooldown_seconds: 300,
+    ...overrides,
+  };
+}
+
+/** Create a skipped cooldown capture with hidden anchor */
+export function createSkippedCooldownCaptureWithHiddenAnchor(overrides: Partial<DiagCapture> = {}): DiagCapture {
+  return {
+    source: 'peer-1',
+    base_url: 'http://10.0.0.1:8080',
+    capture_started_at: '2026-06-18T12:00:00Z',
+    status: 'ok',
+    suppressed_by_cooldown: true,
+    cooldown_info: createHiddenAnchorCooldownInfo(),
+    ...overrides,
+  };
+}
+
+/** Create a skipped cooldown capture with visible anchor */
+export function createSkippedCooldownCaptureWithVisibleAnchor(overrides: Partial<DiagCapture> = {}): DiagCapture {
+  return {
+    source: 'peer-1',
+    base_url: 'http://10.0.0.1:8080',
+    capture_started_at: '2026-06-18T12:00:00Z',
+    status: 'ok',
+    suppressed_by_cooldown: true,
+    cooldown_info: createVisibleAnchorCooldownInfo(),
+    ...overrides,
+  };
+}
+
+/** Create a skipped cooldown capture with missing cooldown_info */
+export function createSkippedCooldownCaptureMissingMetadata(overrides: Partial<DiagCapture> = {}): DiagCapture {
+  return {
+    source: 'peer-1',
+    base_url: 'http://10.0.0.1:8080',
+    capture_started_at: '2026-06-18T12:00:00Z',
+    status: 'ok',
+    suppressed_by_cooldown: true,
+    // cooldown_info is intentionally missing
+    ...overrides,
+  };
+}
+
+/** Create a spike response with hidden anchor cooldown */
+export function spikeResponseWithHiddenAnchorCooldown(overrides: Partial<{
+  latency_ms?: number;
+  cooldown_info?: Partial<CaptureCooldownInfo>;
+  retention?: Partial<SpikeRetentionStats>;
+}> = {}): SpikeResponseWithCaptures {
+  const cooldownInfo = overrides.cooldown_info 
+    ? createHiddenAnchorCooldownInfo(overrides.cooldown_info)
+    : createHiddenAnchorCooldownInfo();
+  
+  return createSpikeResponse(createSpike({
+    latency_ms: overrides.latency_ms ?? 800,
+    captures: [createSkippedCooldownCaptureWithHiddenAnchor({
+      cooldown_info: cooldownInfo,
+    })],
+  }), overrides.retention);
+}
+
+/** Create a spike response with visible anchor cooldown */
+export function spikeResponseWithVisibleAnchorCooldown(overrides: Partial<{
+  latency_ms?: number;
+  cooldown_info?: Partial<CaptureCooldownInfo>;
+  retention?: Partial<SpikeRetentionStats>;
+}> = {}): SpikeResponseWithCaptures {
+  const cooldownInfo = overrides.cooldown_info 
+    ? createVisibleAnchorCooldownInfo(overrides.cooldown_info)
+    : createVisibleAnchorCooldownInfo();
+  
+  return createSpikeResponse(createSpike({
+    latency_ms: overrides.latency_ms ?? 800,
+    captures: [createSkippedCooldownCaptureWithVisibleAnchor({
+      cooldown_info: cooldownInfo,
+    })],
+  }), overrides.retention);
+}
+
+/** Create a spike response with missing cooldown metadata */
+export function spikeResponseWithMissingCooldownMetadata(overrides: Partial<{
+  latency_ms?: number;
+  retention?: Partial<SpikeRetentionStats>;
+}> = {}): SpikeResponseWithCaptures {
+  return createSpikeResponse(createSpike({
+    latency_ms: overrides.latency_ms ?? 800,
+    captures: [createSkippedCooldownCaptureMissingMetadata()],
+  }), overrides.retention);
+}
+
+/** Create a spike response with XSS payload in cooldown_key */
+export function spikeResponseWithXssCooldownKey(xssPayload: string): SpikeResponseWithCaptures {
+  return spikeResponseWithHiddenAnchorCooldown({
+    cooldown_info: {
+      cooldown_key: xssPayload,
+    },
   });
 }

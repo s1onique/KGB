@@ -114,6 +114,35 @@ export interface SpikeResponse {
 // DiagCaptureStatus represents the status of a diagnostic capture.
 export type DiagCaptureStatus = 'ok' | 'unavailable' | 'timeout' | 'error' | 'disabled' | 'no_peer_mapping';
 
+// CaptureCooldownInfo holds metadata about why a spike was suppressed by cooldown.
+// This provides auditable context for UI display.
+export interface CaptureCooldownInfo {
+  // Scope indicates the cooldown scope: "global", "per_target", "per_probe", or "per_target_and_probe".
+  scope: string;
+  // LastSuccessfulCaptureAt is the timestamp of the successful capture that started the cooldown.
+  last_successful_capture_at?: string;
+  // NextCaptureEligibleAt is when the next capture will be eligible.
+  next_capture_eligible_at?: string;
+  // RemainingCooldownMs is the remaining cooldown in milliseconds.
+  remaining_cooldown_ms?: number;
+  // CooldownKey is the key used for cooldown state (typically peer/source name).
+  cooldown_key?: string;
+  // DecisionNowAt is the timestamp when the cooldown decision was made.
+  decision_now_at?: string;
+  // AnchorVisible indicates whether the successful capture anchor is visible in the current response scope.
+  // - true: anchor spike is retained and visible in current API response
+  // - false: anchor spike is not visible (outside filter window, evicted, or suppressed)
+  anchor_visible: boolean;
+  // AnchorVisibilityReason explains why anchor_visible is false.
+  // Empty when anchor_visible is true.
+  // Values: "retained_visible", "outside_filter_window", "evicted_from_retention", "suppressed_cooldown"
+  anchor_visibility_reason?: string;
+  // SkippedAttemptUpdatesCooldown documents the cooldown semantics.
+  skipped_attempt_updates_cooldown?: boolean;
+  // CooldownSeconds is the configured cooldown duration.
+  cooldown_seconds?: number;
+}
+
 // TcpSocketDiagData represents TCP socket diagnostic data from tovarisch.
 export interface TcpSocketDiagData {
   name: string;
@@ -193,6 +222,10 @@ export interface DiagCapture {
   network_diag?: NetworkDiagData;
   suppressed_by_cooldown?: boolean;
   referenced_capture_id?: string;
+  // Cooldown metadata if this capture was skipped due to cooldown.
+  cooldown_info?: CaptureCooldownInfo;
+  // Explicit capture status from backend (overrides legacy fields).
+  capture_status?: string;
 }
 
 // SpikeEventWithCaptures represents a spike event with diagnostic captures.

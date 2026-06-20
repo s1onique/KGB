@@ -30,11 +30,11 @@ describe('spikes DOM renderer: error capture rendering', () => {
     container.remove();
   });
 
-  it('renders "Capture: error" for error status', async () => {
+  it('renders "Capture: failed" for error status', async () => {
     const response = spikeResponseWithErrorCapture({ error: 'connection refused' });
     mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
     await loadSpikeDiagnostics('test-target');
-    expect(container.textContent).toContain('Capture: error');
+    expect(container.textContent).toContain('Capture: failed');
   });
 
   it('renders safe/truncated error text', async () => {

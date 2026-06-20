@@ -1,5 +1,5 @@
 // Spike diagnostics rendering module
-import { api, type SpikeEventWithCaptures, type DiagCapture, type TcpSocketDiagData, type NetworkDiagData, type SpikeRetentionStats } from './api';
+import { api, type SpikeEventWithCaptures, type DiagCapture, type TcpSocketDiagData, type NetworkDiagData, type SpikeRetentionStats, type CaptureCooldownInfo } from './api';
 import { formatSpikeTime, formatLatencyMs } from './format';
 
 // HTML escape helper for XSS protection
@@ -117,6 +117,103 @@ function formatTargetName(targetId: string): string {
     return escapeText(targetId.substring(0, 17)) + '…';
   }
   return escapeText(targetId);
+}
+
+// Format timestamp for display (ISO → human-readable)
+function formatAnchorTime(timestamp: string | undefined): string {
+  if (!timestamp) return '—';
+  // Parse ISO timestamp and format for display
+  try {
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) return '—';
+    return date.toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+  } catch {
+    return escapeText(timestamp);
+  }
+}
+
+// Render cooldown anchor explanation for a capture
+function renderCooldownAnchorExplanation(capture: DiagCapture): string {
+  const cooldownInfo = capture.cooldown_info;
+  const isSkippedCooldown = formatCaptureStatus(capture) === 'skipped_cooldown';
+  
+  if (!isSkippedCooldown) return '';
+  
+  // Case C: Missing cooldown metadata - render warning
+  if (!cooldownInfo) {
+    return '<div class="cooldown-warning">' +
+      '<span class="cooldown-warning-icon">⚠</span>' +
+      '<span class="cooldown-warning-text">Cooldown metadata missing</span>' +
+      '<div class="cooldown-warning-detail">Skipped by cooldown, but no prior capture anchor was provided</div>' +
+      '</div>';
+  }
+  
+  // Check if anchor is hidden (outside current view)
+  if (!cooldownInfo.anchor_visible) {
+    const reason = cooldownInfo.anchor_visibility_reason || 'unknown';
+    let reasonText = 'outside current view';
+    if (reason === 'outside_filter_window') {
+      reasonText = 'outside current view';
+    } else if (reason === 'evicted_from_retention') {
+      reasonText = 'anchor evicted from retention';
+    } else if (reason === 'suppressed_cooldown') {
+      reasonText = 'anchor also suppressed by cooldown';
+    }
+    
+    const anchorTime = formatAnchorTime(cooldownInfo.last_successful_capture_at);
+    const nextEligible = formatAnchorTime(cooldownInfo.next_capture_eligible_at);
+    const remainingMs = cooldownInfo.remaining_cooldown_ms;
+    const cooldownKey = escapeText(cooldownInfo.cooldown_key || '');
+    const scope = escapeText(cooldownInfo.scope || '');
+    
+    let html = '<div class="cooldown-anchor-explanation hidden-anchor">';
+    html += '<div class="cooldown-explanation-summary">Prior diagnostic capture is outside the current view</div>';
+    html += '<div class="cooldown-anchor-details">';
+    
+    if (anchorTime !== '—') {
+      html += '<div class="cooldown-detail-row"><span class="cooldown-detail-label">Anchor:</span> <span class="cooldown-detail-value">prior successful capture at ' + anchorTime + '</span></div>';
+    }
+    
+    if (scope) {
+      html += '<div class="cooldown-detail-row"><span class="cooldown-detail-label">Scope:</span> <span class="cooldown-detail-value">' + scope + '</span></div>';
+    }
+    
+    if (cooldownKey) {
+      html += '<div class="cooldown-detail-row"><span class="cooldown-detail-label">Cooldown key:</span> <span class="cooldown-detail-value">' + cooldownKey + '</span></div>';
+    }
+    
+    if (nextEligible !== '—') {
+      html += '<div class="cooldown-detail-row"><span class="cooldown-detail-label">Next eligible:</span> <span class="cooldown-detail-value">' + nextEligible + '</span></div>';
+    }
+    
+    if (remainingMs !== undefined && remainingMs > 0) {
+      html += '<div class="cooldown-detail-row"><span class="cooldown-detail-label">Remaining cooldown:</span> <span class="cooldown-detail-value">' + remainingMs + ' ms</span></div>';
+    }
+    
+    html += '<div class="cooldown-detail-row"><span class="cooldown-detail-label">Reason:</span> <span class="cooldown-detail-value">' + reasonText + '</span></div>';
+    
+    html += '</div></div>';
+    return html;
+  }
+  
+  // Case B: Visible anchor - render less alarming explanation
+  if (cooldownInfo.anchor_visible && cooldownInfo.anchor_visibility_reason === 'retained_visible') {
+    const anchorTime = formatAnchorTime(cooldownInfo.last_successful_capture_at);
+    let html = '<div class="cooldown-anchor-explanation visible-anchor">';
+    html += '<div class="cooldown-explanation-summary">Skipped because a recent diagnostic capture is already retained</div>';
+    if (anchorTime !== '—') {
+      html += '<div class="cooldown-anchor-time">Prior capture at ' + anchorTime + '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+  
+  return '';
+}
+
+// Check if any capture has hidden anchor (for summary context)
+function hasHiddenAnchor(cooldownInfo: CaptureCooldownInfo | undefined): boolean {
+  return cooldownInfo !== undefined && !cooldownInfo.anchor_visible;
 }
 
 // Default retention stats for backward compatibility
@@ -340,13 +437,24 @@ export async function loadSpikeDiagnostics(targetId: string): Promise<void> {
           }
 
           const errorText = formatError(capture.error);
+          // Render cooldown anchor explanation for skipped cooldown captures
+          const cooldownExplanation = renderCooldownAnchorExplanation(capture);
+          
+          // Enhanced network diag status with explanation when suppressed by cooldown
+          let enhancedNetworkDiagStatus = networkDiagStatus;
+          if (capture.suppressed_by_cooldown && capture.cooldown_info && !capture.cooldown_info.anchor_visible) {
+            enhancedNetworkDiagStatus = '<span class="diag-label">Network diag:</span> <span class="status-muted">suppressed</span> <span class="diag-suppressed-note">by cooldown</span>' +
+              '<div class="diag-suppressed-explanation">Prior capture anchor: outside current view</div>';
+          }
+          
           expandedCaptures += '<div class="capture-row">' +
             '<div class="capture-header">' +
             '<span class="capture-source">' + sourceName + duration + '</span>' +
             '<span class="capture-status ' + statusClass + '">Capture: ' + statusText + '</span>' +
             '</div>' +
             (errorText ? '<div class="capture-error">' + errorText + '</div>' : '') +
-            (networkDiagStatus ? '<div class="diag-row">' + networkDiagStatus + '</div>' : '') +
+            (enhancedNetworkDiagStatus ? '<div class="diag-row">' + enhancedNetworkDiagStatus + '</div>' : '') +
+            (cooldownExplanation ? '<div class="cooldown-explanation-row">' + cooldownExplanation + '</div>' : '') +
             '<div class="capture-actions">' +
             '<button type="button" class="view-details-btn" data-details-id="' + detailsId + '" data-spike-index="' + spikeIndex + '" data-capture-index="' + captureIndex + '" data-target-id="' + targetId + '">View details</button>' +
             '<button type="button" class="download-capture-btn" data-spike-index="' + spikeIndex + '" data-capture-index="' + captureIndex + '" data-target-id="' + targetId + '">Download capture JSON</button>' +

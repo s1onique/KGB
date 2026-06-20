@@ -66,15 +66,15 @@ describe('spikes DOM renderer: successful capture rendering', () => {
     expect(container.textContent).toContain('1.23 s');
   });
 
-  it('renders "Capture: ready" for successful capture', async () => {
+  it('renders "Capture: captured" for successful capture', async () => {
     const response = spikeResponseWithOkCapture({
       source: 'tovarisch-peer',
       duration_ms: 123,
     });
     mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
     await loadSpikeDiagnostics('test-target');
-    // Capture status is "ready" for status='ok'
-    expect(container.textContent).toContain('Capture: ready');
+    // Capture status is "captured" for status='ok'
+    expect(container.textContent).toContain('Capture: captured');
   });
 
   it('renders source peer name', async () => {

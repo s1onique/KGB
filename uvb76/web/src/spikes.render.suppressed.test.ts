@@ -30,11 +30,11 @@ describe('spikes DOM renderer: suppressed capture rendering', () => {
     container.remove();
   });
 
-  it('renders "suppressed by cooldown"', async () => {
+  it('renders "skipped: cooldown" for suppressed captures', async () => {
     const response = spikeResponseWithSuppressedCapture();
     mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
     await loadSpikeDiagnostics('test-target');
-    expect(container.textContent).toContain('suppressed by cooldown');
+    expect(container.textContent).toContain('skipped: cooldown');
   });
 
   it('shows suppressed status for network_diag on suppressed captures', async () => {
