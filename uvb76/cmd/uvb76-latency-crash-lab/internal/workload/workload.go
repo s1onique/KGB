@@ -19,7 +19,8 @@ import (
 // Result captures workload execution metrics.
 type Result struct {
 	SampleValid     bool `json:"sample_valid"`
-	SummaryValid    bool `json:"summary_valid"`
+	SummaryValid   bool `json:"summary_valid"`
+	SeriesValid     bool `json:"series_valid"`
 	SampleCount     int  `json:"sample_count"`
 	RequestsTotal   int  `json:"requests_total"`
 	RequestsFailed  int  `json:"requests_failed"`
@@ -55,6 +56,8 @@ func New(port, user, pass, targetID string, requestLimit int, artifactDir string
 
 // Run executes the workload continuously during the specified duration.
 // Queries are made throughout the duration, not just at the end.
+// This exercises the /latency/series endpoint specifically, which was the crash site
+// for the SIGSEGV at uvb76/server/latency.go:418.
 func (w *Workload) Run(durationSeconds int) Result {
 	result := Result{}
 
@@ -74,40 +77,59 @@ func (w *Workload) Run(durationSeconds int) Result {
 	sampleCount := 0
 	sampleValid := true
 	summaryValid := true
+	seriesValid := true
 	requestsTotal := 0
 	requestsFailed := 0
 
 	// Run requests continuously during the duration
+	// Mix of /latency/samples and /latency/series endpoint hits
 	interval := 500 * time.Millisecond // request every 500ms
 	numGoroutines := 4                 // 4 concurrent requesters
 
 	stopCh := make(chan struct{})
 	
-	// Start request goroutines
+	// Start request goroutines - alternating between samples and series endpoints
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
+			requestNum := 0
 
 			for {
 				select {
 				case <-stopCh:
 					return
 				case <-ticker.C:
-					count := w.querySamples(false)
-					mu.Lock()
-					requestsTotal++
-					if count < 0 {
-						requestsFailed++
-					} else {
-						sampleCount = count
-						if count > maxSampleCount {
-							maxSampleCount = count
+					requestNum++
+					// Alternate between endpoints to hit the crash path
+					// The series endpoint is the crash site
+					if requestNum%2 == 0 {
+						// Query series endpoint - this is the crash path from latency.go:418
+						seriesOK := w.querySeries()
+						mu.Lock()
+						requestsTotal++
+						if !seriesOK {
+							requestsFailed++
+							seriesValid = false
 						}
+						mu.Unlock()
+					} else {
+						// Query samples endpoint
+						count := w.querySamples(false)
+						mu.Lock()
+						requestsTotal++
+						if count < 0 {
+							requestsFailed++
+						} else {
+							sampleCount = count
+							if count > maxSampleCount {
+								maxSampleCount = count
+							}
+						}
+						mu.Unlock()
 					}
-					mu.Unlock()
 				}
 			}
 		}(i)
@@ -140,8 +162,10 @@ func (w *Workload) Run(durationSeconds int) Result {
 		summaryValid = false
 	}
 
-	// Query series
-	w.querySeries()
+	// Query series - this is the specific crash path
+	if !w.querySeries() {
+		seriesValid = false
+	}
 
 	// Query spikes
 	w.querySpikes()
@@ -149,17 +173,18 @@ func (w *Workload) Run(durationSeconds int) Result {
 	result = Result{
 		SampleValid:    sampleValid,
 		SummaryValid:   summaryValid,
+		SeriesValid:    seriesValid,
 		SampleCount:    sampleCount,
 		RequestsTotal:  requestsTotal,
-		RequestsFailed: requestsFailed,
-		MaxSampleCount: maxSampleCount,
+		RequestsFailed:  requestsFailed,
+		MaxSampleCount:  maxSampleCount,
 	}
 
 	// Write final artifacts
 	w.writeArtifacts(result)
 
-	log.Printf("Workload complete: %d requests, %d failed, max %d samples",
-		result.RequestsTotal, result.RequestsFailed, result.MaxSampleCount)
+	log.Printf("Workload complete: %d requests, %d failed, max %d samples, series_valid=%v",
+		result.RequestsTotal, result.RequestsFailed, result.MaxSampleCount, seriesValid)
 
 	return result
 }
