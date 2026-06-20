@@ -79,7 +79,9 @@ describe('spikes DOM renderer: cooldown anchor explanation', () => {
       await loadSpikeDiagnostics('test-target');
       expect(container.textContent).toContain('Next eligible:');
       expect(container.textContent).toContain('Remaining cooldown:');
-      expect(container.textContent).toContain('300000 ms');
+      // Remaining cooldown uses adaptive formatting: 300000ms = 300.0 s
+      expect(container.textContent).toContain('300.0 s');
+      expect(container.textContent).toContain('(at decision)');
     });
 
     it('does not render cooldown details as em dash for valid cooldown_info', async () => {

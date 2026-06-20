@@ -1,6 +1,7 @@
 // Spike diagnostics rendering module
 import { api, type SpikeEventWithCaptures, type DiagCapture, type TcpSocketDiagData, type NetworkDiagData, type SpikeRetentionStats, type CaptureCooldownInfo } from './api';
 import { formatSpikeTime, formatLatencyMs } from './format';
+import { formatUtcInstant, parseApiInstant, formatRemainingCooldown } from './time';
 
 // HTML escape helper for XSS protection
 function escapeText(s: string | null | undefined): string {
@@ -119,17 +120,15 @@ function formatTargetName(targetId: string): string {
   return escapeText(targetId);
 }
 
-// Format timestamp for display (ISO → human-readable)
+// Format timestamp for display using UTC instant formatting.
+// Uses parseApiInstant to validate explicit timezone, then formats as UTC.
 function formatAnchorTime(timestamp: string | undefined): string {
-  if (!timestamp) return '—';
-  // Parse ISO timestamp and format for display
-  try {
-    const date = new Date(timestamp);
-    if (isNaN(date.getTime())) return '—';
-    return date.toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
-  } catch {
-    return escapeText(timestamp);
-  }
+  // Use parseApiInstant which rejects timezone-less formats
+  const date = parseApiInstant(timestamp ?? null);
+  if (!date) return '—';
+
+  // Format using UTC instant formatting
+  return formatUtcInstant(timestamp);
 }
 
 // Render cooldown anchor explanation for a capture
@@ -187,7 +186,10 @@ function renderCooldownAnchorExplanation(capture: DiagCapture): string {
     }
     
     if (remainingMs !== undefined && remainingMs > 0) {
-      html += '<div class="cooldown-detail-row"><span class="cooldown-detail-label">Remaining cooldown:</span> <span class="cooldown-detail-value">' + remainingMs + ' ms</span></div>';
+      // Use formatRemainingCooldown for adaptive formatting (ms vs seconds)
+      // Label clarifies this is the value "at decision" time, not live
+      const formattedRemaining = formatRemainingCooldown(remainingMs);
+      html += '<div class="cooldown-detail-row"><span class="cooldown-detail-label">Remaining cooldown:</span> <span class="cooldown-detail-value">' + formattedRemaining + ' (at decision)</span></div>';
     }
     
     html += '<div class="cooldown-detail-row"><span class="cooldown-detail-label">Reason:</span> <span class="cooldown-detail-value">' + reasonText + '</span></div>';
