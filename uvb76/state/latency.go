@@ -225,34 +225,55 @@ func (lt *LatencyTracker) GetSummary(targetID string) LatencySummary {
 // GetRecentSamples returns the most recent `limit` latency samples in chronological order.
 // Thread-safe: acquires lock, clamps limit, and returns a defensive copy.
 // Never returns internal backing storage.
+//
+// INVARIANT: All ring-buffer state (head, count, maxSamples, samples) is read-only
+// while the lock is held. This prevents SIGSEGV from concurrent state mutation during
+// the makeslice/loop that would corrupt the slice header or array pointer.
 func (lt *LatencyTracker) GetRecentSamples(limit int) []LatencySample {
+	if lt == nil || limit <= 0 {
+		return nil
+	}
+
 	lt.mu.Lock()
 	defer lt.mu.Unlock()
 
-	// Clamp limit: must be positive and not exceed available samples
-	if limit <= 0 {
-		limit = lt.count
-	} else if limit > lt.count {
-		limit = lt.count
+	capacity := len(lt.recentSamples)
+	if capacity == 0 || lt.count <= 0 {
+		return nil
 	}
 
-	// Handle empty buffer
-	if limit == 0 {
-		return []LatencySample{}
+	count := lt.count
+	if count > capacity {
+		count = capacity
+	}
+	if limit < count {
+		count = limit
+	}
+	if count <= 0 {
+		return nil
 	}
 
-	// Calculate start position for the most recent `limit` samples
-	// Start from (head - limit) to get the limit most recent samples
-	startIdx := (lt.head - limit + lt.maxSamples) % lt.maxSamples
-
-	// Build result slice with explicit copy
-	samples := make([]LatencySample, limit)
-	for i := 0; i < limit; i++ {
-		idx := (startIdx + i) % lt.maxSamples
-		samples[i] = lt.recentSamples[idx]
+	head := lt.head
+	if head < 0 || head >= capacity {
+		// Crash containment: invariant violation at write time is preferred,
+		// but we return nil to avoid SIGSEGV during makeslice.
+		// This can only happen if state was corrupted by a writer bypassing the mutex.
+		return nil
 	}
 
-	return samples
+	// Clamp count to actual slice capacity (defensive)
+	if count > capacity {
+		count = capacity
+	}
+
+	out := make([]LatencySample, count)
+	start := (head - count + capacity) % capacity
+	for i := 0; i < count; i++ {
+		idx := (start + i) % capacity
+		out[i] = lt.recentSamples[idx]
+	}
+
+	return out
 }
 
 // GetSampleTimestamps returns the oldest and newest sample timestamps.

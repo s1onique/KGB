@@ -142,8 +142,8 @@ func TestLatencyTracker_GetRecentSamples_ClampValues(t *testing.T) {
 		limit       int
 		expectedMax int
 	}{
-		{"zero limit returns all", 0, 50},
-		{"negative limit returns all", -1, 50},
+		{"zero limit returns nil (safe)", 0, 0},
+		{"negative limit returns nil (safe)", -1, 0},
 		{"limit exceeds count returns all", 100, 50},
 		{"limit equals count", 50, 50},
 		{"limit less than count", 25, 25},
