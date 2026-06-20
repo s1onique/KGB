@@ -317,6 +317,26 @@ run_lab() {
     
     if wait_and_fetch_capture_with_defect_clear 3 "phase3" "PHASE3_EVENT_ID" "PHASE3_REASONS" "$PHASE_PHASE3_CURSOR" 30 15 "$DEFECT_MODE_LAB_PROBE"; then
         CONTRACT_PHASE3_CAPTURE_OK=true; CONTRACT_PHASE3_PACKET_OK=true
+    else
+        # Phase 3 failed - save decision metadata for debugging
+        log_error "[FAIL] Phase 3 capture failed - saving decision metadata for debugging"
+        if [[ -f "$PHASE3_SPIKE_ROW_FILE" ]]; then
+            # Save cooldown decision metadata
+            save_cooldown_decision_metadata 3 "$PHASE3_SPIKE_ROW_FILE" "$LAB_DIR/phase3-cooldown-decision.json" || true
+            
+            # Also save the raw spike row for debugging
+            cp "$PHASE3_SPIKE_ROW_FILE" "$LAB_DIR/phase3-spike-row-debug.json" 2>/dev/null || true
+            
+            # Log the capture status and cooldown info
+            local phase3_capture_status
+            phase3_capture_status=$(jq -r '.capture_status // "unknown"' "$PHASE3_SPIKE_ROW_FILE" 2>/dev/null || echo "unknown")
+            log_error "Phase 3 capture_status: $phase3_capture_status"
+            
+            if jq -e '.cooldown_info != null' "$PHASE3_SPIKE_ROW_FILE" >/dev/null 2>&1; then
+                log_error "Phase 3 cooldown_info present (showing cooldown decision at capture time)"
+                jq '.cooldown_info' "$PHASE3_SPIKE_ROW_FILE" 2>/dev/null || true
+            fi
+        fi
     fi
 
     # Run contract verification

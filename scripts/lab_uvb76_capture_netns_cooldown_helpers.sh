@@ -341,6 +341,73 @@ run_cooldown_helpers_selftest() {
     fi
 }
 
+# Save cooldown decision metadata from a spike row for debugging.
+# This extracts all cooldown-related fields for observability.
+#
+# Arguments:
+#   PHASE_NUM        - Phase number (e.g., "2" or "3")
+#   SPIKE_ROW_FILE   - Path to the spike row JSON file
+#   OUTPUT_FILE      - Path to save the cooldown decision metadata
+#
+# Returns 0 if cooldown info was extracted, 1 if not present or on error.
+save_cooldown_decision_metadata() {
+    local phase_num="$1"
+    local spike_row_file="$2"
+    local output_file="$3"
+    
+    if [[ ! -f "$spike_row_file" ]]; then
+        log_error "[FAIL] save_cooldown_decision_metadata: file not found: $spike_row_file"
+        return 1
+    fi
+    
+    # Check if cooldown_info exists
+    if ! jq -e '.cooldown_info != null' "$spike_row_file" >/dev/null 2>&1; then
+        log_warn "save_cooldown_decision_metadata: no cooldown_info in spike row"
+        return 1
+    fi
+    
+    # Extract all cooldown decision fields
+    local cooldown_key last_successful_capture_at next_capture_eligible_at
+    local cooldown_seconds remaining_cooldown_ms skipped_attempt_updates_cooldown
+    local decision_now_at
+    
+    cooldown_key=$(jq -r '.cooldown_info.cooldown_key // "null"' "$spike_row_file" 2>/dev/null)
+    last_successful_capture_at=$(jq -r '.cooldown_info.last_successful_capture_at // "null"' "$spike_row_file" 2>/dev/null)
+    next_capture_eligible_at=$(jq -r '.cooldown_info.next_capture_eligible_at // "null"' "$spike_row_file" 2>/dev/null)
+    cooldown_seconds=$(jq -r '.cooldown_info.cooldown_seconds // "null"' "$spike_row_file" 2>/dev/null)
+    remaining_cooldown_ms=$(jq -r '.cooldown_info.remaining_cooldown_ms // "null"' "$spike_row_file" 2>/dev/null)
+    skipped_attempt_updates_cooldown=$(jq -r '.cooldown_info.skipped_attempt_updates_cooldown // "null"' "$spike_row_file" 2>/dev/null)
+    decision_now_at=$(jq -r '.cooldown_info.decision_now_at // "null"' "$spike_row_file" 2>/dev/null)
+    
+    # Build output JSON
+    jq -n \
+        --arg phase "phase${phase_num}" \
+        --arg cooldown_key "$cooldown_key" \
+        --arg last_successful_capture_at "$last_successful_capture_at" \
+        --arg next_capture_eligible_at "$next_capture_eligible_at" \
+        --argjson cooldown_seconds "$([ "$cooldown_seconds" == "null" ] && echo "null" || echo "$cooldown_seconds")" \
+        --argjson remaining_cooldown_ms "$([ "$remaining_cooldown_ms" == "null" ] && echo "null" || echo "$remaining_cooldown_ms")" \
+        --argjson skipped_attempt_updates_cooldown "$([ "$skipped_attempt_updates_cooldown" == "null" ] && echo "null" || echo "$skipped_attempt_updates_cooldown")" \
+        --arg decision_now_at "$decision_now_at" \
+        --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{
+            phase: $phase,
+            cooldown: {
+                cooldown_key: $cooldown_key,
+                last_successful_capture_at: $last_successful_capture_at,
+                next_capture_eligible_at: $next_capture_eligible_at,
+                cooldown_seconds: $cooldown_seconds,
+                remaining_cooldown_ms: $remaining_cooldown_ms,
+                skipped_attempt_updates_cooldown: $skipped_attempt_updates_cooldown,
+                decision_now_at: $decision_now_at
+            },
+            timestamp: $timestamp
+        }' > "$output_file"
+    
+    log_info "Cooldown decision metadata saved: $output_file"
+    return 0
+}
+
 # Run self-test if executed directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     # Source minimal dependencies for self-test

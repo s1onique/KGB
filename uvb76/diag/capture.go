@@ -50,16 +50,20 @@ func (cs *CaptureService) TriggerCapture(eventID, targetID string) {
 		return
 	}
 
+	now := time.Now().UTC()
+
 	// Check in-flight reservation
 	if !cs.captures.ReserveInFlight(peer.Name) {
-		cs.recordSuppressedCapture(eventID, peer, targetID)
+		cs.recordSuppressedInFlight(eventID, peer, targetID, now)
 		return
 	}
 
-	// Check cooldown
-	if cs.captures.IsInCooldown(peer.Name, cs.cfg.CooldownSeconds) {
+	// Evaluate cooldown using the authoritative shared decision function.
+	// This ensures the skip decision AND the exported cooldown_info are consistent.
+	decision := cs.captures.EvaluateCooldown(now, peer.Name, cs.cfg.CooldownSeconds)
+	if decision.IsInCooldown {
 		cs.captures.ReleaseInFlight(peer.Name)
-		cs.recordSuppressedCapture(eventID, peer, targetID)
+		cs.recordSuppressedCooldown(eventID, peer, targetID, now, decision)
 		return
 	}
 
@@ -181,42 +185,26 @@ func (cs *CaptureService) recordNoPeerMappingCapture(eventID, targetID string) {
 	cs.captures.AddCapture(eventID, capture)
 }
 
-func (cs *CaptureService) recordSuppressedCapture(eventID string, peer *config.DiagPeerConfig, targetID string) {
-	now := time.Now().UTC()
-	
-	// Get cooldown info for auditable metadata
-	lastCaptureTime := cs.captures.GetLastCaptureTime(peer.Name)
-	
-	// Check if this is a valid cooldown suppression (prior successful capture exists)
-	// vs an in-flight race condition (another capture currently running)
-	isCooldownSuppression := !lastCaptureTime.IsZero()
-	
-	if !isCooldownSuppression {
-		// In-flight race condition: another capture is currently running.
-		// This is NOT a cooldown scenario - do NOT set SuppressedByCooldown flag.
-		// This prevents the API projection from returning skipped_cooldown.
-		capture := state.DiagCapture{
-			Source:           peer.Name,
-			BaseURL:          peer.BaseURL,
-			CaptureStartedAt: now,
-			Status:           state.DiagCaptureStatusUnavailable,
-			CaptureStatus:    state.CaptureStatusNotAttempted,
-		}
-		finishCapture(&capture)
-		cs.captures.AddCapture(eventID, capture)
-		return
+// recordSuppressedInFlight records an in-flight suppression (another capture currently running).
+// This is NOT a cooldown scenario, so it records not_attempted status.
+func (cs *CaptureService) recordSuppressedInFlight(eventID string, peer *config.DiagPeerConfig, targetID string, now time.Time) {
+	capture := state.DiagCapture{
+		Source:           peer.Name,
+		BaseURL:          peer.BaseURL,
+		CaptureStartedAt: now,
+		Status:           state.DiagCaptureStatusUnavailable,
+		CaptureStatus:    state.CaptureStatusNotAttempted,
 	}
-	
-	// Valid cooldown suppression: prior successful capture exists
-	cooldownSeconds := cs.cfg.CooldownSeconds
-	nextEligibleAt := lastCaptureTime.Add(time.Duration(cooldownSeconds) * time.Second)
-	cooldownInfo := &state.CaptureCooldownInfo{
-		Scope:                    "per_target",
-		LastSuccessfulCaptureAt: &lastCaptureTime,
-		NextCaptureEligibleAt:   &nextEligibleAt,
-		CooldownSeconds:         cooldownSeconds,
-		CooldownSourceRetained:  false,
-	}
+	finishCapture(&capture)
+	cs.captures.AddCapture(eventID, capture)
+}
+
+// recordSuppressedCooldown records a cooldown suppression using the authoritative decision.
+// The cooldown_info is built from the same decision that determined the skip,
+// ensuring metadata exactly matches the decision logic.
+func (cs *CaptureService) recordSuppressedCooldown(eventID string, peer *config.DiagPeerConfig, targetID string, now time.Time, decision state.CaptureCooldownDecision) {
+	// Build cooldown_info from the authoritative decision
+	cooldownInfo := state.BuildCooldownInfoFromDecision(decision, peer.Name)
 	
 	capture := state.DiagCapture{
 		Source:               peer.Name,
