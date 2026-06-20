@@ -89,6 +89,10 @@ func (cs *CaptureStore) EvaluateCooldown(now time.Time, peerName string, cooldow
 
 // BuildCooldownInfoFromDecision creates a CaptureCooldownInfo from a decision.
 // This ensures cooldown_info exactly matches the decision used for skip/capture.
+//
+// Anchor visibility defaults: When lastSuccessfulCaptureAt exists, the anchor capture
+// is assumed visible (AnchorVisible=true, reason="retained_visible"). The API layer
+// can override these defaults when the anchor spike is outside the response scope.
 func BuildCooldownInfoFromDecision(decision CaptureCooldownDecision, source string) *CaptureCooldownInfo {
 	if !decision.IsInCooldown {
 		return nil
@@ -104,6 +108,10 @@ func BuildCooldownInfoFromDecision(decision CaptureCooldownDecision, source stri
 		// CaptureKey is the peer.Name used for cooldown decision
 		CaptureKey:     decision.CooldownKey,
 		DecisionNowAt:  &decision.DecisionNowAt,
+		// Anchor visibility defaults: assume anchor is visible since lastCapture exists.
+		// API layer should override if anchor spike is outside response scope.
+		AnchorVisible:           !decision.LastSuccessfulCaptureAt.IsZero(),
+		AnchorVisibilityReason: "retained_visible",
 	}
 
 	return info
@@ -144,6 +152,14 @@ type CaptureCooldownInfo struct {
 	// DecisionNowAt is the timestamp when the cooldown decision was made.
 	// This proves the cooldown_info was computed at the same moment as the decision.
 	DecisionNowAt *time.Time `json:"decision_now_at,omitempty"`
+	// AnchorVisible indicates whether the successful capture anchor is visible in the current response scope.
+	// - true: anchor spike is retained and visible in current API response
+	// - false: anchor spike is not visible (outside filter window, evicted, or suppressed)
+	AnchorVisible bool `json:"anchor_visible"`
+	// AnchorVisibilityReason explains why anchor_visible is false.
+	// Empty when anchor_visible is true.
+	// Values: "retained_visible", "outside_filter_window", "evicted_from_retention", "suppressed_cooldown"
+	AnchorVisibilityReason string `json:"anchor_visibility_reason,omitempty"`
 }
 
 // =============================================================================
@@ -283,6 +299,18 @@ func (cs *CaptureStore) GetProtectionInfo(eventID string) (isProtected bool, has
 	default:
 		return false, capture.NetworkDiag != nil
 	}
+}
+
+// =============================================================================
+// Test Helpers
+// =============================================================================
+
+// SetLastCapture sets the lastCapture timestamp for a peer.
+// This is intended for test use only - production code should use AddCapture.
+func (cs *CaptureStore) SetLastCapture(peerName string, t time.Time) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.lastCapture[peerName] = t
 }
 
 // =============================================================================

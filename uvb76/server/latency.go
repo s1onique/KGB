@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/s1onique/KGB/uvb76/state"
@@ -193,11 +194,44 @@ func (s *Server) handleTargetLatencySpikes(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	if includeCaptures {
+		// Build set of visible anchor timestamps (from successful captures in displaySpikes)
+		visibleAnchorTimestamps := make(map[time.Time]bool)
+		for _, spike := range displaySpikes {
+			captures := captureStore.GetCaptures(spike.EventID)
+			for _, capture := range captures {
+				if capture.CaptureStatus == state.CaptureStatusCaptured && capture.CaptureStartedAt.After(time.Time{}) {
+					visibleAnchorTimestamps[capture.CaptureStartedAt] = true
+				}
+			}
+		}
+
 		spikesWithCaptures := make([]state.SpikeEventWithCaptures, len(displaySpikes))
 		for i, spike := range displaySpikes {
+			captures := captureStore.GetCaptures(spike.EventID)
+
+			// Override anchor visibility for skipped cooldown captures
+			for j := range captures {
+				capture := &captures[j]
+				if capture.SuppressedByCooldown && capture.CooldownInfo != nil {
+					// Check if the anchor timestamp is visible in current response
+					if capture.CooldownInfo.LastSuccessfulCaptureAt != nil {
+						anchorTime := *capture.CooldownInfo.LastSuccessfulCaptureAt
+						if !visibleAnchorTimestamps[anchorTime] {
+							// Anchor is not visible - override visibility metadata
+							capture.CooldownInfo.AnchorVisible = false
+							capture.CooldownInfo.AnchorVisibilityReason = "outside_filter_window"
+						} else {
+							// Anchor is visible - use state layer default
+							capture.CooldownInfo.AnchorVisible = true
+							capture.CooldownInfo.AnchorVisibilityReason = "retained_visible"
+						}
+					}
+				}
+			}
+
 			spikesWithCaptures[i] = state.SpikeEventWithCaptures{
 				SpikeEvent: spike,
-				Captures:   captureStore.GetCaptures(spike.EventID),
+				Captures:   captures,
 			}
 		}
 		json.NewEncoder(w).Encode(SpikeResponseWithCaptures{
