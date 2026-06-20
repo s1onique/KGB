@@ -373,7 +373,7 @@ assert_captured_row_contract() {
         ok=false
     fi
     
-    # Check packet exists and has network_diag
+    # Check packet exists and has network_diag (real diagnostic data)
     if [[ ! -f "$packet_file" ]]; then
         log_error "[FAIL] Phase $phase: capture packet file not found: $packet_file"
         ok=false

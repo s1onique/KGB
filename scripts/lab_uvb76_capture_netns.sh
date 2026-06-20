@@ -133,24 +133,74 @@ run_lab() {
         PHASE1_HAD_CAPTURE=true
         PHASE1_HAD_PACKET=true
         PHASE1_ROW_ASSERTION_OK=true
-        CONTRACT_PHASE1_CAPTURE_OK=true
-        CONTRACT_PHASE1_PACKET_OK=true
+        
+        # =============================================================================
+        # PHASE 1 HARDEN: Assert real capture requirements
+        # This prevents the "all-suppressed cooldown false green" scenario:
+        # - Must have capture_status=captured (not skipped_cooldown)
+        # - Must have real network_diag (not just suppressed metadata)
+        # - No prior phase should have consumed the only real capture
+        # =============================================================================
+        log_info ""
+        log_info "=== PHASE 1 HARDEN: Verifying Real Capture Requirements ==="
+        
+        if assert_phase1_real_capture 1 "$PHASE1_SPIKE_ROW_FILE" "$PHASE1_CAPTURE_PACKET_FILE"; then
+            log_info "[PASS] Phase 1 real capture verification passed"
+            CONTRACT_PHASE1_CAPTURE_OK=true
+            CONTRACT_PHASE1_PACKET_OK=true
+        else
+            log_error "[FAIL] Phase 1 real capture verification FAILED"
+            log_error "This indicates the 'all-suppressed cooldown false green' scenario:"
+            log_error "  - Phase 1 capture_status is NOT 'captured' (likely 'skipped_cooldown')"
+            log_error "  - OR network_diag is missing (only suppressed metadata present)"
+            log_error "  - Possible cause: warmup polling consumed the only real capture"
+            CONTRACT_PHASE1_CAPTURE_OK=false
+            CONTRACT_PHASE1_PACKET_OK=false
+            PHASE1_CAPTURED=false
+            
+            # Write failure artifact
+            jq -n \
+                --arg phase "phase1" \
+                --arg status "failure" \
+                --arg reason "hardened_real_capture_required" \
+                --arg event_id "$PHASE1_EVENT_ID" \
+                --arg reasons "$PHASE1_REASONS" \
+                --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                '{phase: $phase, status: $status, reason: $reason, event_id: $event_id, reasons: $reasons, timestamp: $timestamp}' \
+                > "$LAB_DIR/phase1-failure.json" 2>/dev/null || true
+        fi
         
         # CRITICAL: Clear defect immediately after Phase 1 success
         # This prevents the defect from persisting and causing skipped_cooldown spikes
         # during Phase 2 or Phase 3 waits
-        log_info "Phase 1 success: clearing defect before proceeding..."
+        log_info "Phase 1 completion: clearing defect before proceeding..."
         clear_defect
         
-        # Save Phase 1 success indicator
-        jq -n \
-            --arg phase "phase1" \
-            --arg event_id "$PHASE1_EVENT_ID" \
-            --arg reasons "$PHASE1_REASONS" \
-            --arg status "success" \
-            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{phase: $phase, event_id: $event_id, reasons: $reasons, status: $status, timestamp: $timestamp}' \
-            > "$LAB_DIR/phase1-success.json" 2>/dev/null || true
+        if [[ "$CONTRACT_PHASE1_CAPTURE_OK" == "true" ]]; then
+            # Save Phase 1 success indicator
+            jq -n \
+                --arg phase "phase1" \
+                --arg event_id "$PHASE1_EVENT_ID" \
+                --arg reasons "$PHASE1_REASONS" \
+                --arg status "success" \
+                --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                '{phase: $phase, event_id: $event_id, reasons: $reasons, status: $status, timestamp: $timestamp}' \
+                > "$LAB_DIR/phase1-success.json" 2>/dev/null || true
+        fi
+        
+        # =============================================================================
+        # FAIL-CLOSED: Exit if Phase 1 harden failed
+        # This ensures the lab fails hard when real capture requirements are not met,
+        # preventing the "all-suppressed cooldown false green" scenario.
+        # =============================================================================
+        if [[ "$PHASE1_HARDEN_FAILED" == "true" ]]; then
+            log_error "[FATAL] Phase 1 harden failed - exiting with failure"
+            log_error "This prevents the 'all-suppressed cooldown false green' scenario"
+            write_result
+            print_lab_result_summary
+            compute_lab_exit_code
+            exit 1
+        fi
     else
         # FAILURE: Phase 1 capture or packet fetch failed
         PHASE1_CAPTURED=false

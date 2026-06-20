@@ -37,6 +37,8 @@ source "${SCRIPT_DIR}/lab_uvb76_capture_netns_phase_capture_helpers.sh"
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_result_helpers.sh"
 # shellcheck source=lab_uvb76_capture_netns_cooldown_helpers.sh
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_cooldown_helpers.sh"
+# shellcheck source=lab_uvb76_capture_netns_phase1_harden.sh
+source "${SCRIPT_DIR}/lab_uvb76_capture_netns_phase1_harden.sh"
 
 # Global variables (set by main script)
 declare -g LAB_DIR=""
