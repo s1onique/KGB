@@ -35,6 +35,8 @@ source "${SCRIPT_DIR}/lab_uvb76_capture_netns_phase_helpers.sh"
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_phase_capture_helpers.sh"
 # shellcheck source=lab_uvb76_capture_netns_result_helpers.sh
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_result_helpers.sh"
+# shellcheck source=lab_uvb76_capture_netns_cooldown_helpers.sh
+source "${SCRIPT_DIR}/lab_uvb76_capture_netns_cooldown_helpers.sh"
 
 # Global variables (set by main script)
 declare -g LAB_DIR=""
@@ -85,6 +87,7 @@ declare -g PHASE3_SPIKE_EVENT_FILE=""
 declare -g PHASE3_SPIKE_ROW_FILE=""
 declare -g PHASE3_CAPTURE_PACKET_FILE=""
 declare -g PHASE3_CAPTURE_CONTRACT_FILE=""
+declare -g PHASE3_COOLDOWN_WAIT_SUMMARY_FILE=""
 declare -g CONTRACT_VERIFIER_OUTPUT_FILE=""
 
 # Lab result tracking
@@ -190,6 +193,7 @@ setup_temp_dir() {
     PHASE3_SPIKE_ROW_FILE="$LAB_DIR/${ARTIFACT_PHASE3_SPIKE_ROW}"
     PHASE3_CAPTURE_PACKET_FILE="$LAB_DIR/${ARTIFACT_PHASE3_CAPTURE_PACKET}"
     PHASE3_CAPTURE_CONTRACT_FILE="$LAB_DIR/${ARTIFACT_PHASE3_CAPTURE_CONTRACT}"
+    PHASE3_COOLDOWN_WAIT_SUMMARY_FILE="$LAB_DIR/phase3-cooldown-wait-summary.json"
     CONTRACT_VERIFIER_OUTPUT_FILE="$LAB_DIR/${ARTIFACT_CONTRACT_VERIFIER_OUTPUT}"
 }
 

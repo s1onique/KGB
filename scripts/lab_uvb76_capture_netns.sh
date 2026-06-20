@@ -285,11 +285,34 @@ run_lab() {
 
     # PHASE 3: Post-cooldown spike captured again
     log_info ""; log_info "=== PHASE 3: Post-Cooldown Spike Captured Again ==="
-    log_info "Waiting for cooldown to expire (8 seconds + buffer)..."; sleep 10
     PHASE3_CAPTURED=false; PHASE3_EVENT_ID=""; PHASE3_REASONS=""
+    
+    # CRITICAL: Wait for actual cooldown expiration using Phase 2 cooldown_info
+    # The hardcoded sleep 10 was a race condition - Phase 3 could start before cooldown expired.
+    # Now we read next_capture_eligible_at from Phase 2 and wait until that time + safety margin.
+    # FAIL-HARD policy: If Phase 2 row is missing or cooldown_info is invalid, return non-zero.
+    # We do NOT fall back to hardcoded sleep - that reintroduces the race condition.
+    if [[ ! -f "$PHASE2_SPIKE_ROW_FILE" ]]; then
+        log_error "[FAIL] Phase 2 row file not found; cannot prove cooldown eligibility"
+        CONTRACT_PHASE3_CAPTURE_OK=false
+        CONTRACT_PHASE3_PACKET_OK=false
+        return 1
+    fi
+
+    log_info "Phase 2 row file exists, waiting for actual cooldown expiration..."
+    COOLDOWN_WAIT_SUMMARY_FILE="$PHASE3_COOLDOWN_WAIT_SUMMARY_FILE"
+    if ! wait_until_cooldown_eligible "$PHASE2_SPIKE_ROW_FILE" 2; then
+        log_error "[FAIL] Failed to wait for cooldown expiration - cooldown_info missing or invalid"
+        CONTRACT_PHASE3_CAPTURE_OK=false
+        CONTRACT_PHASE3_PACKET_OK=false
+        return 1
+    fi
+
+    log_info "[PASS] Cooldown wait complete - Phase 3 eligible to capture"
+    
     clear_defect; sleep 2
     
-    # Set cursor BEFORE helper injection (helper owns defect injection, verification, capture wait, clear, fetch)
+    # Set cursor AFTER cooldown wait to ensure Phase 3 events are distinct
     set_phase_cursor "phase3"
     
     if wait_and_fetch_capture_with_defect_clear 3 "phase3" "PHASE3_EVENT_ID" "PHASE3_REASONS" "$PHASE_PHASE3_CURSOR" 30 15 "$DEFECT_MODE_LAB_PROBE"; then

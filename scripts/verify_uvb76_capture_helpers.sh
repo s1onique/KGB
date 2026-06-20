@@ -27,6 +27,7 @@ log_info() { [[ "$VERBOSE" == "true" ]] && echo "[INFO] $*" || true; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_capture_poll.sh"
 source "${SCRIPT_DIR}/lab_uvb76_capture_netns_contract_normalizers.sh"
+source "${SCRIPT_DIR}/lab_uvb76_capture_netns_cooldown_helpers.sh"
 
 # Mock log functions for self-test
 log_info() { [[ "${VERBOSE:-false}" == "true" ]] && echo "[INFO] $*" || true; }
