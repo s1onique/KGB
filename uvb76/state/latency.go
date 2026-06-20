@@ -53,9 +53,39 @@ func (lt *LatencyTracker) Record(latencyMs float64, reachable bool) {
 
 // RecordAt adds a latency sample with a specific timestamp.
 // This is intended for deterministic testing; prefer Record in production.
+//
+// FAIL-CLOSED INVARIANT GUARDS:
+// - Validates all ring buffer state before mutation
+// - Returns early without mutating state if invariants are violated
+// - This prevents heap corruption from propagating to makeslice/memclr paths
 func (lt *LatencyTracker) RecordAt(latencyMs float64, reachable bool, timestamp time.Time) {
 	lt.mu.Lock()
 	defer lt.mu.Unlock()
+
+	// FAIL-CLOSED: Validate invariant: maxSamples > 0
+	if lt.maxSamples <= 0 {
+		return // Cannot record: buffer size is invalid
+	}
+
+	// FAIL-CLOSED: Validate invariant: count >= 0 and count <= maxSamples
+	if lt.count < 0 || lt.count > lt.maxSamples {
+		lt.count = 0 // Recover by resetting count
+	}
+
+	// FAIL-CLOSED: Validate invariant: head >= 0 and head < maxSamples
+	if lt.head < 0 || lt.head >= lt.maxSamples {
+		lt.head = 0 // Recover by resetting head
+	}
+
+	// FAIL-CLOSED: Validate invariant: recentSamples length equals maxSamples
+	if len(lt.recentSamples) != lt.maxSamples {
+		// Buffer corrupted: resize to match maxSamples
+		lt.recentSamples = make([]LatencySample, lt.maxSamples)
+		lt.head = 0
+		lt.count = 0
+		lt.sum = 0
+		lt.errorCount = 0
+	}
 
 	// Store in ring buffer
 	sample := LatencySample{
@@ -80,7 +110,13 @@ func (lt *LatencyTracker) RecordAt(latencyMs float64, reachable bool, timestamp 
 		}
 	}
 
-	lt.recentSamples[lt.head] = sample
+	// Final bounds check before mutation
+	if lt.head >= 0 && lt.head < len(lt.recentSamples) {
+		lt.recentSamples[lt.head] = sample
+	} else {
+		return // Cannot write: head index out of bounds
+	}
+
 	lt.head = (lt.head + 1) % lt.maxSamples
 	if lt.count < lt.maxSamples {
 		lt.count++
