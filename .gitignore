@@ -15,3 +15,5 @@ uvb76/uvb76-linux-arm64
 uvb76/web/node_modules/
 uvb76/uvb76-latency-crash-lab
 uvb76/uvb76-latency-crash-verify
+uvb76/uvb76-targets-crash-lab
+uvb76/uvb76-targets-crash-verify

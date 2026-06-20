@@ -223,6 +223,19 @@ lab-uvb76-latency-crash:
 	@chmod +x uvb76/uvb76
 	@$(BASH) ./scripts/lab_uvb76_latency_crash.sh
 
+# === UVB-76 Targets Crash Lab ===
+# Crash/soak lab proving /api/v1/targets HTTPS surface does not crash under handler churn.
+# Tests with runtime-generated TLS certs (no inline blobs).
+# Primary execution: GitHub Actions (workflow_dispatch) or `make lab-uvb76-targets-crash`
+# NOT part of make gate
+
+BASH ?= bash
+
+lab-uvb76-targets-crash:
+	@$(MAKE) uvb76-build
+	@chmod +x uvb76/uvb76
+	@$(BASH) ./scripts/lab_uvb76_targets_crash.sh
+
 # === opkg Package Targets (Entware/AsusWRT-Merlin) ===
 
 # Build opkg package for Entware/AsusWRT-Merlin
