@@ -127,7 +127,27 @@ wait_and_fetch_capture_with_defect_clear() {
                     # Assert contract
                     if assert_captured_row_contract "$phase_num" "$phase_row_file" "$packet_file"; then
                         log_info "[PASS] Phase $phase_num contract assertions passed"
+                        # Write success artifact (for caller to detect success vs failure)
+                        touch "$LAB_DIR/phase${phase_num}-row-assertion-ok"
                         return 0
+                    else
+                        log_error "[FAIL] Phase $phase_num: row assertion FAILED"
+                        # Write failure artifact (for caller to detect assertion failure vs capture failure)
+                        touch "$LAB_DIR/phase${phase_num}-row-assertion-failed"
+                        # Write debug artifact with field paths read by assertion
+                        {
+                            echo "=== Phase $phase_num Row Assertion Debug ==="
+                            echo "timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                            echo "row_file: $phase_row_file"
+                            echo "packet_file: $packet_file"
+                            echo "--- Fields read by assert_captured_row_contract ---"
+                            echo "capture_status: $(jq -r '.capture_status // "unknown"' "$phase_row_file" 2>/dev/null)"
+                            echo "capture_exists: $(jq -r '.capture_exists // "unknown"' "$phase_row_file" 2>/dev/null)"
+                            echo "is_protected: $(jq -r '.is_protected // "unknown"' "$phase_row_file" 2>/dev/null)"
+                            echo "cooldown_info: $(jq -r '.cooldown_info // "null"' "$phase_row_file" 2>/dev/null)"
+                            echo "network_diag present: $(jq -r '.network_diag != null' "$packet_file" 2>/dev/null)"
+                        } > "$LAB_DIR/phase${phase_num}-row-assertion-debug.txt" 2>/dev/null || true
+                        return 1
                     fi
                 else
                     log_error "[FAIL] Phase $phase_num: failed to fetch diagnostic packet"

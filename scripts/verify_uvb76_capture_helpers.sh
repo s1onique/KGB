@@ -335,6 +335,11 @@ main() {
         ERRORS=$((ERRORS + 1))
     fi
     
+    # Run captured row assertion tests from split file (LLM-friendly: under 450 lines)
+    if ! bash "${SCRIPT_DIR}/verify_uvb76_captured_row_assertion_tests.sh" --self-test; then
+        ERRORS=$((ERRORS + 1))
+    fi
+    
     run_packet_extraction_tests
     
     echo ""

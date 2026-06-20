@@ -286,7 +286,17 @@ run_contract_verification() {
     log_info "Contract verification output: $output_file"
 }
 
-# Assert contract for a captured row
+# Assert contract for a captured row.
+#
+# Reads from the NORMALIZED row shape produced by normalize_spike_row_capture_contract().
+# The normalized row has root-level fields:
+#   - capture_status: must be "captured"
+#   - capture_exists: must be true
+#   - is_protected: must be true
+#   - cooldown_info: must be null (captured rows do NOT have cooldown info)
+#
+# IMPORTANT: DO NOT read from .captures[0] paths - those are raw API shapes.
+# The normalizer extracts and canonicalizes them to root-level for assertions.
 assert_captured_row_contract() {
     local phase="$1"
     local spike_row_file="$2"
@@ -296,12 +306,34 @@ assert_captured_row_contract() {
     
     log_info "Asserting captured row contract for phase $phase"
     
-    # Check spike row has capture_status == captured
+    # Check spike row has capture_status == captured (root-level normalized field)
     local capture_status
-    capture_status=$(jq '[.captures[] | select(.capture_status != null)] | .[0] | .capture_status // "unknown"' "$spike_row_file" 2>/dev/null || echo "unknown")
+    capture_status=$(jq -r '.capture_status // "unknown"' "$spike_row_file" 2>/dev/null || echo "unknown")
     
     if [[ "$capture_status" != "captured" ]]; then
         log_error "[FAIL] Phase $phase: expected capture_status=captured, got: $capture_status"
+        ok=false
+    fi
+    
+    # Check capture_exists == true (root-level normalized field)
+    local capture_exists
+    capture_exists=$(jq -r '.capture_exists // false' "$spike_row_file" 2>/dev/null || echo "false")
+    if [[ "$capture_exists" != "true" ]]; then
+        log_error "[FAIL] Phase $phase: expected capture_exists=true, got: $capture_exists"
+        ok=false
+    fi
+    
+    # Check is_protected == true (root-level normalized field)
+    local is_protected
+    is_protected=$(jq -r '.is_protected // false' "$spike_row_file" 2>/dev/null || echo "false")
+    if [[ "$is_protected" != "true" ]]; then
+        log_error "[FAIL] Phase $phase: expected is_protected=true, got: $is_protected"
+        ok=false
+    fi
+    
+    # Check cooldown_info is null (captured rows do NOT have cooldown info)
+    if jq -e '.cooldown_info != null' "$spike_row_file" >/dev/null 2>&1; then
+        log_error "[FAIL] Phase $phase: captured row must NOT have cooldown_info"
         ok=false
     fi
     

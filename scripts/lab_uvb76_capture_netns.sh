@@ -118,23 +118,129 @@ run_lab() {
     # PHASE 1: First eligible spike captured
     log_info ""; log_info "=== PHASE 1: First Eligible Spike Captured ==="
     PHASE1_CAPTURED=false; PHASE1_EVENT_ID=""; PHASE1_REASONS=""
+    PHASE1_ROW_ASSERTION_OK=false
     set_phase_cursor "phase1"
 
+    # Phase 1 result tracking
+    PHASE1_HAD_CAPTURE=false
+    PHASE1_HAD_PACKET=false
+    PHASE1_ASSERTION_FAILED=false
+
+    # Run Phase 1 capture with defect clear (trap/finally pattern)
     if wait_and_fetch_capture_with_defect_clear 1 "phase1" "PHASE1_EVENT_ID" "PHASE1_REASONS" "$PHASE_PHASE1_CURSOR" 30 15 "$DEFECT_MODE_LAB_PROBE"; then
-        CONTRACT_PHASE1_CAPTURE_OK=true; CONTRACT_PHASE1_PACKET_OK=true
+        # SUCCESS: Phase 1 capture succeeded and packet fetch succeeded
+        PHASE1_CAPTURED=true
+        PHASE1_HAD_CAPTURE=true
+        PHASE1_HAD_PACKET=true
+        PHASE1_ROW_ASSERTION_OK=true
+        CONTRACT_PHASE1_CAPTURE_OK=true
+        CONTRACT_PHASE1_PACKET_OK=true
+        
+        # CRITICAL: Clear defect immediately after Phase 1 success
+        # This prevents the defect from persisting and causing skipped_cooldown spikes
+        # during Phase 2 or Phase 3 waits
+        log_info "Phase 1 success: clearing defect before proceeding..."
+        clear_defect
+        
+        # Save Phase 1 success indicator
+        jq -n \
+            --arg phase "phase1" \
+            --arg event_id "$PHASE1_EVENT_ID" \
+            --arg reasons "$PHASE1_REASONS" \
+            --arg status "success" \
+            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{phase: $phase, event_id: $event_id, reasons: $reasons, status: $status, timestamp: $timestamp}' \
+            > "$LAB_DIR/phase1-success.json" 2>/dev/null || true
+    else
+        # FAILURE: Phase 1 capture or packet fetch failed
+        PHASE1_CAPTURED=false
+        
+        # CRITICAL: Clear defect immediately after Phase 1 failure
+        # This is the "finally" part of the trap - we must not leave the lab
+        # probe defect active while skipping phases or waiting
+        log_info "Phase 1 failure: clearing defect (trap/finally pattern)..."
+        clear_defect
+        
+        # Write failure artifact
+        jq -n \
+            --arg phase "phase1" \
+            --arg status "failure" \
+            --arg event_id "$PHASE1_EVENT_ID" \
+            --arg reasons "$PHASE1_REASONS" \
+            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{phase: $phase, status: $status, event_id: $event_id, reasons: $reasons, timestamp: $timestamp}' \
+            > "$LAB_DIR/phase1-failure.json" 2>/dev/null || true
+        
+        # Check if assertion failed vs. capture/packet failure
+        # The phase_capture_helpers writes phaseN-row-assertion-failed marker file
+        if [[ -f "$LAB_DIR/phase1-row-assertion-failed" ]]; then
+            PHASE1_ASSERTION_FAILED=true
+            log_error "[FAIL] Phase 1 row assertion FAILED - stopping lab (contract bug, not product)"
+            # Write contract failure artifact for debugging
+            if [[ -f "$PHASE1_SPIKE_ROW_FILE" ]]; then
+                cp "$PHASE1_SPIKE_ROW_FILE" "$LAB_DIR/phase1-spike-row-debug.json" 2>/dev/null || true
+            fi
+            jq -n \
+                --arg phase "phase1" \
+                --arg type "assertion_failure" \
+                --arg message "Row assertion failed - contract bug, not product behavior" \
+                --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                '{phase: $phase, type: $type, message: $message, timestamp: $timestamp}' \
+                > "$LAB_DIR/phase1-assertion-failure-summary.json" 2>/dev/null || true
+        fi
+        
+        # If Phase 1 failed (capture or packet), we cannot proceed to Phase 2/3
+        # Write skip artifacts for downstream phases
+        jq -n --arg phase "phase2" --arg reason "phase1_failed" \
+            --argjson phase1_captured "$PHASE1_CAPTURED" \
+            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{phase: $phase, status: "skipped", reason: $reason, phase1_captured: $phase1_captured, timestamp: $timestamp}' \
+            > "$PHASE2_SPIKE_ROW_FILE" 2>/dev/null || true
+        jq -n --arg phase "phase3" --arg reason "phase1_failed" \
+            --argjson phase1_captured "$PHASE1_CAPTURED" \
+            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{phase: $phase, status: "skipped", reason: $reason, phase1_captured: $phase1_captured, timestamp: $timestamp}' \
+            > "$PHASE3_SPIKE_ROW_FILE" 2>/dev/null || true
+        
+        # CONTRACT FAILURE: Stop the lab if Phase 1 failed
+        # We cannot validate Phase 2 (cooldown) or Phase 3 (re-capture) without Phase 1 success
+        if [[ "$PHASE1_ASSERTION_FAILED" == "true" ]]; then
+            log_error "[FATAL] Phase 1 assertion failed - stopping lab for contract fix"
+            log_error "This is a contract bug, not a product failure"
+            log_error "Artifacts saved for debugging:"
+            log_error "  - phase1-spike-row-debug.json"
+            log_error "  - phase1-assertion-failure-summary.json"
+            CONTRACT_PHASE1_CAPTURE_OK=false
+            CONTRACT_PHASE1_PACKET_OK=false
+            write_result
+            print_lab_result_summary
+            compute_lab_exit_code
+            exit 1
+        else
+            log_error "[FAIL] Phase 1 capture/packet failed - proceeding to Phase 3 for recovery test"
+            # Allow Phase 3 to run even if Phase 1 failed (for recovery testing)
+            # but mark Phase 2 as skipped
+            CONTRACT_PHASE1_CAPTURE_OK=false
+            CONTRACT_PHASE1_PACKET_OK=false
+        fi
     fi
 
     # PHASE 2: Inside-cooldown spike skipped
+    # Phase 2 gating: Run only if Phase 1 ACTUAL capture succeeded (not just row assertion)
+    # We require: CONTRACT_PHASE1_CAPTURE_OK == true AND CONTRACT_PHASE1_PACKET_OK == true
+    # This means Phase 1 capture metadata was captured AND packet fetch succeeded.
+    # We do NOT require PHASE1_ROW_ASSERTION_OK - that's a contract detail, not product behavior.
     log_info ""; log_info "=== PHASE 2: Inside-Cooldown Spike Skipped ==="
     PHASE2_SKIPPED=false; PHASE2_EVENT_ID=""; PHASE2_REASONS=""
 
     if [[ "$CONTRACT_PHASE1_CAPTURE_OK" != "true" || "$CONTRACT_PHASE1_PACKET_OK" != "true" ]]; then
-        log_error "[SKIP] Phase 2: skipped because Phase 1 capture failed (cooldown not armed)"
-        jq -n --arg phase "phase2" --arg reason "phase1_capture_failed" \
+        log_error "[SKIP] Phase 2: skipped because Phase 1 capture/packet failed (cooldown not armed)"
+        jq -n --arg phase "phase2" --arg reason "phase1_capture_or_packet_failed" \
             --argjson phase1_capture_ok "$CONTRACT_PHASE1_CAPTURE_OK" \
             --argjson phase1_packet_ok "$CONTRACT_PHASE1_PACKET_OK" \
+            --argjson phase1_row_assertion_ok "$PHASE1_ROW_ASSERTION_OK" \
             --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{phase: $phase, status: "skipped", reason: $reason, phase1_capture_ok: $phase1_capture_ok, phase1_packet_ok: $phase1_packet_ok, timestamp: $timestamp}' \
+            '{phase: $phase, status: "skipped", reason: $reason, phase1_capture_ok: $phase1_capture_ok, phase1_packet_ok: $phase1_packet_ok, phase1_row_assertion_ok: $phase1_row_assertion_ok, timestamp: $timestamp}' \
             > "$PHASE2_SPIKE_ROW_FILE" 2>/dev/null || true
         save_phase_contract_summary 2 "$PHASE2_CAPTURE_CONTRACT_FILE" "$PHASE2_SPIKE_ROW_FILE" ""
         log_info "Proceeding to Phase 3..."; CONTRACT_PHASE2_COOLDOWN_OK=false
