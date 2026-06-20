@@ -51,20 +51,22 @@ func (lt *LatencyTracker) Record(latencyMs float64, reachable bool) {
 	lt.RecordAt(latencyMs, reachable, time.Now().UTC())
 }
 
-// RecordAt adds a latency sample with a specific timestamp.
-// This is intended for deterministic testing; prefer Record in production.
+// validateAndRepairLocked validates and repairs LatencyTracker invariants under lock.
+// Returns true if the tracker is in a valid state.
+// Returns false ONLY if the tracker is unrecoverable.
 //
-// FAIL-CLOSED INVARIANT GUARDS:
-// - Validates all ring buffer state before mutation
-// - Returns early without mutating state if invariants are violated
-// - This prevents heap corruption from propagating to makeslice/memclr paths
-func (lt *LatencyTracker) RecordAt(latencyMs float64, reachable bool, timestamp time.Time) {
-	lt.mu.Lock()
-	defer lt.mu.Unlock()
-
+// INVARIANTS CHECKED AND REPAIRED:
+// - maxSamples > 0
+// - count >= 0 && count <= maxSamples
+// - head >= 0 && head < maxSamples
+// - len(recentSamples) == maxSamples
+//
+// Callers MUST hold lt.mu.
+func (lt *LatencyTracker) validateAndRepairLocked() bool {
 	// FAIL-CLOSED: Validate invariant: maxSamples > 0
 	if lt.maxSamples <= 0 {
-		return // Cannot record: buffer size is invalid
+		// Cannot operate with invalid buffer size - state is unrecoverable
+		return false
 	}
 
 	// FAIL-CLOSED: Validate invariant: count >= 0 and count <= maxSamples
@@ -85,6 +87,60 @@ func (lt *LatencyTracker) RecordAt(latencyMs float64, reachable bool, timestamp 
 		lt.count = 0
 		lt.sum = 0
 		lt.errorCount = 0
+	}
+
+	// Tracker is valid after any repairs
+	return true
+}
+
+// snapshotLimitLocked clamps the requested limit to valid bounds.
+// Ensures no allocation can exceed actual buffer capacity.
+//
+// Callers MUST hold lt.mu.
+func (lt *LatencyTracker) snapshotLimitLocked(requestedLimit int) int {
+	if requestedLimit <= 0 {
+		return 0
+	}
+
+	// Clamp to buffer capacity
+	capacity := len(lt.recentSamples)
+	if capacity == 0 {
+		return 0
+	}
+
+	// Clamp to actual count
+	count := lt.count
+	if count <= 0 {
+		return 0
+	}
+
+	// Return minimum of requested, count, and capacity
+	limit := requestedLimit
+	if limit > count {
+		limit = count
+	}
+	if limit > capacity {
+		limit = capacity
+	}
+
+	return limit
+}
+
+// RecordAt adds a latency sample with a specific timestamp.
+// This is intended for deterministic testing; prefer Record in production.
+//
+// FAIL-CLOSED INVARIANT GUARDS:
+// - Validates all ring buffer state before mutation
+// - Returns early without mutating state if invariants are violated
+// - This prevents heap corruption from propagating to makeslice/memclr paths
+func (lt *LatencyTracker) RecordAt(latencyMs float64, reachable bool, timestamp time.Time) {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+
+	// Validate and repair invariants before any mutation
+	if !lt.validateAndRepairLocked() {
+		// Invariants unrecoverable - state is corrupted
+		return
 	}
 
 	// Store in ring buffer
@@ -265,6 +321,12 @@ func (lt *LatencyTracker) GetSummary(targetID string) LatencySummary {
 // INVARIANT: All ring-buffer state (head, count, maxSamples, samples) is read-only
 // while the lock is held. This prevents SIGSEGV from concurrent state mutation during
 // the makeslice/loop that would corrupt the slice header or array pointer.
+//
+// FAIL-CLOSED: If tracker invariants are broken (corrupted head/count/capacity),
+// this returns nil instead of allocating from corrupt values. This prevents
+// SIGSEGV from heap/memory corruption on constrained routers.
+//
+// NOTE: This is a READ-ONLY operation. It does NOT repair tracker state.
 func (lt *LatencyTracker) GetRecentSamples(limit int) []LatencySample {
 	if lt == nil || limit <= 0 {
 		return nil
@@ -273,35 +335,42 @@ func (lt *LatencyTracker) GetRecentSamples(limit int) []LatencySample {
 	lt.mu.Lock()
 	defer lt.mu.Unlock()
 
+	// Validate read-path invariants (NO state modification)
 	capacity := len(lt.recentSamples)
-	if capacity == 0 || lt.count <= 0 {
+	if capacity == 0 || lt.maxSamples <= 0 {
 		return nil
 	}
 
-	count := lt.count
-	if count > capacity {
-		count = capacity
+	// FAIL-CLOSED: Verify buffer length matches declared maxSamples
+	// This catches corruption from external writes, bad type assertions, etc.
+	if capacity != lt.maxSamples {
+		return nil
 	}
-	if limit < count {
-		count = limit
+
+	if lt.count <= 0 {
+		return nil
 	}
+
+	// FAIL-CLOSED: Verify count is in valid range
+	if lt.count < 0 || lt.count > lt.maxSamples {
+		return nil
+	}
+
+	// Validate head is in valid range
+	head := lt.head
+	if head < 0 || head >= capacity {
+		// Crash containment: invariant violation indicates corruption
+		// Return nil to avoid SIGSEGV during makeslice
+		return nil
+	}
+
+	// Use shared helper for limit clamping
+	count := lt.snapshotLimitLocked(limit)
 	if count <= 0 {
 		return nil
 	}
 
-	head := lt.head
-	if head < 0 || head >= capacity {
-		// Crash containment: invariant violation at write time is preferred,
-		// but we return nil to avoid SIGSEGV during makeslice.
-		// This can only happen if state was corrupted by a writer bypassing the mutex.
-		return nil
-	}
-
-	// Clamp count to actual slice capacity (defensive)
-	if count > capacity {
-		count = capacity
-	}
-
+	// Allocate defensive copy (caller-owned, no shared backing array)
 	out := make([]LatencySample, count)
 	start := (head - count + capacity) % capacity
 	for i := 0; i < count; i++ {

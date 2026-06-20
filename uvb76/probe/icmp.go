@@ -27,6 +27,21 @@ const ICMPSampleKind = "icmp"
 // ICMPSampleKindHTTP is the probe kind identifier for HTTP samples.
 const ICMPSampleKindHTTP = "http"
 
+// MaxICMPSpikeDetectionSamples is the maximum number of samples used for spike detection
+// in the hot ICMP probe path.
+//
+// This is a SMALL BOUNDED WINDOW intentionally smaller than the full retention window
+// (3600 samples). Using a bounded window in the per-second probe hot path avoids:
+// - Excessive allocation churn on constrained routers (ARM, ~128MB RAM)
+// - Potential heap/memory corruption from concurrent makeslice on every probe tick
+// - Unnecessary CPU overhead copying large slices on each ICMP tick
+//
+// The spike detector only needs MinSamplesForMedian=20 samples to compute a reliable
+// rolling median. We use 120 to provide headroom for edge cases and future tuning.
+// The full 3600-sample history remains available for UI/API reads via
+// GetRecentICMPLatencySamples with explicit limit.
+const MaxICMPSpikeDetectionSamples = 120
+
 // ICMPSampleRecorder is the interface for recording ICMP samples and detecting spikes.
 type ICMPSampleRecorder interface {
 	RecordICMPLatency(targetID string, latencyMs float64, reachable bool)
@@ -150,12 +165,18 @@ func (c *ICMPClient) probeTarget(targetID string) {
 	}
 
 	// Get previous samples BEFORE recording (for spike detection)
-	// Use RecentSamplesMax from config, with a sensible minimum for spike detection
-	maxSamples := c.cfg.RecentSamplesMax
-	if maxSamples < 30 {
-		maxSamples = 30
-	}
-	previousSamples := c.state.GetRecentICMPLatencySamples(t.ID, maxSamples)
+	// Use the BOUNDED SPIKE WINDOW to avoid allocation churn on every ICMP tick.
+	// MaxICMPSpikeDetectionSamples=120 is intentionally smaller than the full
+	// retention window (3600 samples) to reduce:
+	// - Memory allocation pressure on constrained routers (ARM, ~128MB RAM)
+	// - Potential SIGSEGV from concurrent makeslice during heap pressure
+	// - CPU overhead from copying large slices on each probe tick
+	//
+	// The spike detector needs only MinSamplesForMedian=20 samples for reliable
+	// rolling median. 120 provides comfortable headroom.
+	//
+	// Full history is still available for UI/API via GetRecentICMPLatencySamples.
+	previousSamples := c.state.GetRecentICMPLatencySamples(t.ID, MaxICMPSpikeDetectionSamples)
 
 	// Extract hostname from base URL
 	host := extractHost(t.BaseURL)
