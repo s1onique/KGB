@@ -13,8 +13,8 @@ import (
 // TargetLatencyResponse represents the latency response for a single target.
 type TargetLatencyResponse struct {
 	TargetID string               `json:"target_id"`
-	HTTP     *state.LatencySummary `json:"http,omitempty"`
-	ICMP     *state.LatencySummary `json:"icmp,omitempty"`
+	HTTP    *state.LatencySummary `json:"http,omitempty"`
+	ICMP    *state.LatencySummary `json:"icmp,omitempty"`
 }
 
 // handleTargetLatency returns the latency summary for a specific target (both HTTP and ICMP).
@@ -126,6 +126,26 @@ type SpikeResponseWithCaptures struct {
 	Retention state.SpikeRetentionStats     `json:"retention"`
 }
 
+// anchorVisibleInProbeKind checks if an anchor timestamp is visible in the spike set
+// for a specific probe kind. This is used for cross-probe suppression to verify
+// the anchor spike exists in its own probe kind's spike set.
+func anchorVisibleInProbeKind(st *state.Manager, targetID, probeKind string, anchorTime time.Time) bool {
+	// Get all spikes for the anchor probe kind (no limit to check full retention)
+	anchorSpikes := st.GetSpikes(targetID, probeKind, 0)
+
+	// Check if any spike has a capture with the anchor timestamp
+	captureStore := st.GetCaptureStore()
+	for _, spike := range anchorSpikes {
+		captures := captureStore.GetCaptures(spike.EventID)
+		for _, capture := range captures {
+			if capture.CaptureStatus == state.CaptureStatusCaptured && capture.CaptureStartedAt.Equal(anchorTime) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // handleTargetLatencySpikes returns recent spike events for a target.
 func (s *Server) handleTargetLatencySpikes(w http.ResponseWriter, r *http.Request) {
 	targetID := r.URL.Query().Get("target_id")
@@ -196,11 +216,11 @@ func (s *Server) handleTargetLatencySpikes(w http.ResponseWriter, r *http.Reques
 	}
 
 	retention := state.SpikeRetentionStats{
-		RetainedSpikeCount:     retainedCount,
-		VisibleSpikeCount:      visibleCount,
+		RetainedSpikeCount:    retainedCount,
+		VisibleSpikeCount:     visibleCount,
 		ProtectedCaptureCount:  protectedCount,
-		PurgeEligibleCount:     purgeEligibleCount,
-		MaxUncapturedSpikes:    maxUncaptured,
+		PurgeEligibleCount:    purgeEligibleCount,
+		MaxUncapturedSpikes:   maxUncaptured,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -227,8 +247,26 @@ func (s *Server) handleTargetLatencySpikes(w http.ResponseWriter, r *http.Reques
 					// Check if the anchor timestamp is visible in current response
 					if capture.CooldownInfo.LastSuccessfulCaptureAt != nil {
 						anchorTime := *capture.CooldownInfo.LastSuccessfulCaptureAt
-						if !visibleAnchorTimestamps[anchorTime] {
-							// Anchor is not visible - override visibility metadata
+						if capture.CooldownInfo.IsCrossProbeSuppression {
+							// Cross-probe suppression: check visibility against the anchor probe's spike set.
+							anchorProbeKind := capture.CooldownInfo.AnchorProbeKind
+							if anchorProbeKind == "" {
+								capture.CooldownInfo.AnchorVisible = false
+								capture.CooldownInfo.AnchorVisibilityReason = "anchor_probe_kind_missing"
+							} else {
+								// Look up anchor visibility in the anchor probe's spike set
+								anchorVisible := anchorVisibleInProbeKind(s.state, targetID, anchorProbeKind, anchorTime)
+								if anchorVisible {
+									capture.CooldownInfo.AnchorVisible = true
+									capture.CooldownInfo.AnchorVisibilityReason = "retained_visible"
+								} else {
+									capture.CooldownInfo.AnchorVisible = false
+									capture.CooldownInfo.AnchorVisibilityReason = "outside_filter_window"
+								}
+							}
+						} else if !visibleAnchorTimestamps[anchorTime] {
+							// Same-probe suppression: anchor spike should be in this response.
+							// If not found, it's truly outside the filter window.
 							capture.CooldownInfo.AnchorVisible = false
 							capture.CooldownInfo.AnchorVisibilityReason = "outside_filter_window"
 						} else {
