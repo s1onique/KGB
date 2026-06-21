@@ -38,10 +38,24 @@ require_uvb76_polling_binary() {
     fi
 }
 
+# Run the polling binary, optionally inside the UVB-76 network namespace.
+# If NS_UVB76 is set, executes via: ip netns exec "$NS_UVB76" <binary> <args...>
+# If NS_UVB76 is empty, executes directly: <binary> <args...>
+# This ensures localhost:9999 resolves to the namespace where the API is running.
+run_uvb76_polling_binary() {
+    local args=("$@")
+    if [[ -n "$NS_UVB76" ]]; then
+        ip netns exec "$NS_UVB76" "$UVB76_POLLING_BINARY" "${args[@]}"
+    else
+        "$UVB76_POLLING_BINARY" "${args[@]}"
+    fi
+}
+
 # Configuration from environment or defaults
 UVB76_API_URL="${UVB76_API_URL:-http://localhost:9999}"
 UVB76_API_USER="${UVB76_API_USER:-lab-admin}"
 UVB76_API_PASS="${UVB76_API_PASS:-testpass123}"
+UVB76_COOKIE_JAR="${UVB76_COOKIE_JAR:-/tmp/uvb76-cookies.txt}"
 
 # Wait for probe samples to prove the HTTP probe loop is running.
 # Uses the Go binary to poll the /api/v1/latency/series endpoint.
@@ -72,13 +86,14 @@ wait_for_probe_samples_after_cursor() {
         "--timeout" "${timeout}s"
         "--username" "$UVB76_API_USER"
         "--password" "$UVB76_API_PASS"
+        "--cookie-jar" "$UVB76_COOKIE_JAR"
     )
 
     if [[ -n "$artifact_file" ]]; then
         args+=("--output" "$artifact_file")
     fi
 
-    "$UVB76_POLLING_BINARY" "${args[@]}"
+    run_uvb76_polling_binary "${args[@]}"
     return $?
 }
 
@@ -105,6 +120,7 @@ wait_for_capture_after_cursor() {
         "--timeout" "${timeout}s"
         "--username" "$UVB76_API_USER"
         "--password" "$UVB76_API_PASS"
+        "--cookie-jar" "$UVB76_COOKIE_JAR"
     )
 
     if [[ -n "$cursor" ]]; then
@@ -115,9 +131,9 @@ wait_for_capture_after_cursor() {
         spike_args+=("--output" "$artifact_file")
     fi
 
-    # Execute and capture output
+    # Execute and capture output (inside namespace if NS_UVB76 is set)
     local output
-    output=$("$UVB76_POLLING_BINARY" "${spike_args[@]}" 2>&1)
+    output=$(run_uvb76_polling_binary "${spike_args[@]}" 2>&1)
     local exit_code=$?
 
     if [[ $exit_code -ne 0 ]]; then
@@ -155,6 +171,7 @@ wait_for_spike_event_after_cursor() {
         "--timeout" "${timeout}s"
         "--username" "$UVB76_API_USER"
         "--password" "$UVB76_API_PASS"
+        "--cookie-jar" "$UVB76_COOKIE_JAR"
     )
 
     if [[ -n "$cursor" ]]; then
@@ -165,9 +182,9 @@ wait_for_spike_event_after_cursor() {
         args+=("--output" "$artifact_file")
     fi
 
-    # Execute and capture output
+    # Execute and capture output (inside namespace if NS_UVB76 is set)
     local output
-    output=$("$UVB76_POLLING_BINARY" "${args[@]}" 2>&1)
+    output=$(run_uvb76_polling_binary "${args[@]}" 2>&1)
     local exit_code=$?
 
     if [[ $exit_code -ne 0 ]]; then

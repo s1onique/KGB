@@ -113,6 +113,7 @@ type ProbePollResult struct {
 	PointCount      int
 	Timeout         bool
 	LastResponse    *LatencySeries
+	LastError       error // last fetch error encountered during polling
 	Error           error
 }
 
@@ -123,6 +124,7 @@ type SpikeEventResult struct {
 	Reasons      []string
 	Timeout      bool
 	LastResponse *SpikesResponse
+	LastError    error // last fetch error encountered during polling
 	Error        error
 }
 
@@ -136,6 +138,7 @@ type CaptureResult struct {
 	Timeout         bool
 	LastResponse    *SpikesResponse
 	FailureReason   string
+	LastError       error // last fetch error encountered during polling
 	Error           error
 }
 

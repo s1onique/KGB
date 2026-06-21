@@ -122,6 +122,7 @@ Flags:
 	rangeSeconds := fs.Int("range-seconds", 120, "Time range for latency series")
 	username := fs.String("username", "lab-admin", "API username")
 	password := fs.String("password", "testpass123", "API password")
+	cookieJar := fs.String("cookie-jar", "", "Path to cookie jar file for session persistence (optional)")
 	output := fs.String("output", "", "Output file for artifact (optional)")
 
 	if err := fs.Parse(args); err != nil {
@@ -130,6 +131,9 @@ Flags:
 
 	// Create API client
 	client := polling.NewAPIClient(*baseURL, *username, *password)
+	if *cookieJar != "" {
+		client.Cookies = *cookieJar
+	}
 
 	// Create artifact writer if output specified
 	var writer polling.ArtifactWriter
@@ -161,7 +165,11 @@ Flags:
 		return 3
 	}
 	if result.Timeout {
-		log.Printf("ERROR: probe-samples: timeout after %v", *timeout)
+		if result.LastError != nil {
+			log.Printf("ERROR: probe-samples: timeout after %v (last API error: %v)", *timeout, result.LastError)
+		} else {
+			log.Printf("ERROR: probe-samples: timeout after %v", *timeout)
+		}
 		return 1
 	}
 	if !result.OK {
@@ -194,6 +202,7 @@ Flags:
 	timeout := fs.Duration("timeout", 30*time.Second, "Poll timeout")
 	username := fs.String("username", "lab-admin", "API username")
 	password := fs.String("password", "testpass123", "API password")
+	cookieJar := fs.String("cookie-jar", "", "Path to cookie jar file for session persistence (optional)")
 	output := fs.String("output", "", "Output file for artifact (optional)")
 
 	if err := fs.Parse(args); err != nil {
@@ -202,6 +211,9 @@ Flags:
 
 	// Create API client
 	client := polling.NewAPIClient(*baseURL, *username, *password)
+	if *cookieJar != "" {
+		client.Cookies = *cookieJar
+	}
 
 	// Create artifact writer if output specified
 	var writer polling.ArtifactWriter
@@ -233,7 +245,11 @@ Flags:
 		return 3
 	}
 	if result.Timeout {
-		log.Printf("ERROR: spike-event: timeout after %v", *timeout)
+		if result.LastError != nil {
+			log.Printf("ERROR: spike-event: timeout after %v (last API error: %v)", *timeout, result.LastError)
+		} else {
+			log.Printf("ERROR: spike-event: timeout after %v", *timeout)
+		}
 		return 1
 	}
 	if !result.OK {
@@ -269,6 +285,7 @@ Flags:
 	timeout := fs.Duration("timeout", 30*time.Second, "Poll timeout")
 	username := fs.String("username", "lab-admin", "API username")
 	password := fs.String("password", "testpass123", "API password")
+	cookieJar := fs.String("cookie-jar", "", "Path to cookie jar file for session persistence (optional)")
 	output := fs.String("output", "", "Output file for artifact (optional)")
 
 	if err := fs.Parse(args); err != nil {
@@ -282,6 +299,9 @@ Flags:
 
 	// Create API client
 	client := polling.NewAPIClient(*baseURL, *username, *password)
+	if *cookieJar != "" {
+		client.Cookies = *cookieJar
+	}
 
 	// Create artifact writer if output specified
 	var writer polling.ArtifactWriter
@@ -313,7 +333,11 @@ Flags:
 		return 3
 	}
 	if result.Timeout {
-		log.Printf("ERROR: capture: timeout after %v", *timeout)
+		if result.LastError != nil {
+			log.Printf("ERROR: capture: timeout after %v (last API error: %v)", *timeout, result.LastError)
+		} else {
+			log.Printf("ERROR: capture: timeout after %v", *timeout)
+		}
 		return 1
 	}
 	if !result.OK {

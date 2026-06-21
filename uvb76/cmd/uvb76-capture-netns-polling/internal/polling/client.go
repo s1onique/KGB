@@ -208,21 +208,23 @@ func NewPoller(client *APIClient, writer ArtifactWriter) *Poller {
 func (p *Poller) PollProbeSamples(ctx context.Context, targetID, probeKind string, rangeSeconds int, cfg PollConfig) ProbePollResult {
 	deadline := p.Clock.Now().Add(cfg.Timeout)
 	interval := cfg.Interval
+	var lastErr error
 
 	for {
 		select {
 		case <-ctx.Done():
-			return ProbePollResult{Timeout: true, Error: ctx.Err()}
+			return ProbePollResult{Timeout: true, LastError: lastErr, Error: ctx.Err()}
 		default:
 		}
 
 		if p.Clock.Now().After(deadline) {
-			return ProbePollResult{Timeout: true}
+			return ProbePollResult{Timeout: true, LastError: lastErr}
 		}
 
 		series, err := p.APIClient.FetchLatencySeries(ctx, targetID, probeKind, rangeSeconds)
 		if err != nil {
-			// Log and continue polling
+			lastErr = err
+			fmt.Fprintf(os.Stderr, "[WARN] probe polling API error: %v\n", err)
 			p.Clock.Sleep(interval)
 			continue
 		}
@@ -256,6 +258,7 @@ func (p *Poller) PollProbeSamples(ctx context.Context, targetID, probeKind strin
 func (p *Poller) PollSpikeEvent(ctx context.Context, targetID, cursor, reasonRegex string, cfg SpikeEventConfig) SpikeEventResult {
 	deadline := p.Clock.Now().Add(cfg.Timeout)
 	interval := cfg.Interval
+	var lastErr error
 
 	reasonRe, err := regexp.Compile(reasonRegex)
 	if err != nil {
@@ -265,16 +268,18 @@ func (p *Poller) PollSpikeEvent(ctx context.Context, targetID, cursor, reasonReg
 	for {
 		select {
 		case <-ctx.Done():
-			return SpikeEventResult{Timeout: true, Error: ctx.Err()}
+			return SpikeEventResult{Timeout: true, LastError: lastErr, Error: ctx.Err()}
 		default:
 		}
 
 		if p.Clock.Now().After(deadline) {
-			return SpikeEventResult{Timeout: true}
+			return SpikeEventResult{Timeout: true, LastError: lastErr}
 		}
 
 		spikes, err := p.APIClient.FetchSpikes(ctx, targetID, true, 20)
 		if err != nil {
+			lastErr = err
+			fmt.Fprintf(os.Stderr, "[WARN] spike polling API error: %v\n", err)
 			p.Clock.Sleep(interval)
 			continue
 		}
@@ -313,20 +318,23 @@ func (p *Poller) PollSpikeEvent(ctx context.Context, targetID, cursor, reasonReg
 func (p *Poller) PollCaptureForEvent(ctx context.Context, targetID, eventID string, cfg CapturePollConfig) CaptureResult {
 	deadline := p.Clock.Now().Add(cfg.Timeout)
 	interval := cfg.Interval
+	var lastErr error
 
 	for {
 		select {
 		case <-ctx.Done():
-			return CaptureResult{Timeout: true, Error: ctx.Err()}
+			return CaptureResult{Timeout: true, LastError: lastErr, Error: ctx.Err()}
 		default:
 		}
 
 		if p.Clock.Now().After(deadline) {
-			return CaptureResult{Timeout: true}
+			return CaptureResult{Timeout: true, LastError: lastErr}
 		}
 
 		spikes, err := p.APIClient.FetchSpikes(ctx, targetID, true, 20)
 		if err != nil {
+			lastErr = err
+			fmt.Fprintf(os.Stderr, "[WARN] capture polling API error: %v\n", err)
 			p.Clock.Sleep(interval)
 			continue
 		}
