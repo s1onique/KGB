@@ -129,49 +129,6 @@ func (c *APIClient) get(ctx context.Context, url string) ([]byte, error) {
 	return body, nil
 }
 
-func (c *APIClient) loadCookies(req *http.Request) {
-	if c.Cookies == "" {
-		return
-	}
-	data, err := os.ReadFile(c.Cookies)
-	if err != nil {
-		return
-	}
-	// Parse Netscape cookie format
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		parts := strings.Split(line, "\t")
-		if len(parts) < 7 {
-			continue
-		}
-		// parts[0]=domain, parts[1]=tailmatch, parts[2]=path, parts[3]=secure, parts[4]=expires, parts[5]=name, parts[6]=value
-		cookie := &http.Cookie{
-			Name:  parts[5],
-			Value: parts[6],
-		}
-		req.AddCookie(cookie)
-	}
-}
-
-func (c *APIClient) saveCookies(resp *http.Response) {
-	if c.Cookies == "" || len(resp.Cookies()) == 0 {
-		return
-	}
-	// Append cookies to existing file
-	f, err := os.OpenFile(c.Cookies, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	for _, cookie := range resp.Cookies() {
-		// Write in Netscape cookie format
-		fmt.Fprintf(f, ".uvb76\tTRUE\t/\tFALSE\t%d\t%s\t%s\n",
-			time.Now().Add(24*time.Hour).Unix(), cookie.Name, cookie.Value)
-	}
-}
 
 // Poller provides the polling logic with injectable clock for testing.
 type Poller struct {
