@@ -28,8 +28,8 @@ Canonical reference for gate scripts and tooling in KGB.
 ## Verification Scripts
 
 | Script | Purpose | Entry Point |
-|--------|--------|-------------|
-| `scripts/verify_tovarisch_status_contract.sh` | Validates status JSON contract | `make verify-status-contract` |
+|--------|---------|-------------|
+| `scripts/verify_tovarisch_status_contract.py` | Validates status JSON contract | `make verify-status-contract` |
 | `scripts/verify_status_json.sh` | JSON schema validation for status output | auto-invoked |
 | `scripts/verify_structured_logs.sh` | Verifies no prose runtime logs; uses structured logging | `make verify-structured-logs` |
 | `scripts/verify_manifesto_axiom_coverage.py` | Validates manifesto axiom matrix schema and coverage | auto-invoked |

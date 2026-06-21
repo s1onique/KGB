@@ -46,7 +46,6 @@ These scripts contain risky tokens and are grandfathered pending migration:
 | `scripts/verify_uvb76_capture_netns_lab.sh` | 189 | 10 | 0 | 0 | jq | grandfathered_needs_owner | TBD |
 | `scripts/lab_uvb76_capture_netns_fetch_helpers.sh` | 187 | 17 | 0 | 0 | jq | grandfathered_needs_owner | TBD |
 | `scripts/lab_uvb76_capture_netns_phase_capture_helpers.sh` | 171 | 7 | 0 | 0 | jq | grandfathered_needs_owner | TBD |
-| `scripts/verify_tovarisch_status_contract.sh` | 167 | 16 | 0 | 0 | jq | grandfathered_needs_owner | TBD |
 | `scripts/lab_uvb76_capture_netns_capture_poll.sh` | 157 | 17 | 0 | 0 | jq, polling | grandfathered_needs_owner | TBD |
 | `scripts/lab_uvb76_capture_netns_result.sh` | 85 | 3 | 0 | 0 | jq | grandfathered_needs_owner | TBD |
 
@@ -109,14 +108,12 @@ Gate and verification scripts that are explicitly allowed:
 
 Recommended first ports (high-impact, well-scoped):
 
-1. **`scripts/verify_tovarisch_status_contract.sh`** (167 lines, jq)
-   - Port to: Python
-   - Reason: JSON validation is core Python use case
-   
+1. ~~**`scripts/verify_tovarisch_status_contract.sh`**~~ ✅ **MIGRATED** to `scripts/verify_tovarisch_status_contract.py`
+
 2. **`scripts/verify_uvb76_capture_helpers.sh`** (360 lines, jq)
    - Port to: Python
    - Reason: Capture data parsing, clear boundaries
-   
+
 3. **`scripts/lab_uvb76_capture_netns_poll.sh`** (337 lines, jq + polling)
    - Port to: Go lab harness
    - Reason: Polling state machine, type safety critical

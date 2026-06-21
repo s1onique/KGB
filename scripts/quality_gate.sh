@@ -101,7 +101,7 @@ required=(
   docs/coverage/tovarisch-coverage.md
   docs/contracts/tovarisch-status-v0.md
   docs/contracts/examples/tovarisch-status-v0.json
-  scripts/verify_tovarisch_status_contract.sh
+  scripts/verify_tovarisch_status_contract.py
   scripts/verify_manifesto_axiom_coverage.py
   scripts/verify_repo_local_memory.py
   scripts/verify_cold_resume_checkpoints.py
@@ -275,7 +275,7 @@ fi
 echo ""
 echo "[gate] checking status contract"
 
-./scripts/verify_tovarisch_status_contract.sh
+python3 scripts/verify_tovarisch_status_contract.py
 
 echo "[gate] checking structured logs"
 

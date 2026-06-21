@@ -18,7 +18,7 @@ hygiene-gate:
 test-gate:
 	cd tovarisch && zig build
 	cd tovarisch && zig build test
-	./scripts/verify_tovarisch_status_contract.sh
+	python3 scripts/verify_tovarisch_status_contract.py
 
 # === Coverage Gate (local only) ===
 
@@ -95,7 +95,7 @@ cross-platform-gate: tovarisch-compile-linux
 	@echo "=== Cross-platform compile gate passed ==="
 
 verify-status-contract:
-	./scripts/verify_tovarisch_status_contract.sh
+	python3 scripts/verify_tovarisch_status_contract.py
 
 test-final-newlines-regression:
 	./scripts/check_final_newlines_regression.sh

@@ -28,7 +28,6 @@ scripts/lab_bgp_bfd_netns_tovarisch_diag.sh,grandfathered_needs_owner,jq,TBD,Boo
 scripts/verify_uvb76_capture_netns_lab.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
 scripts/lab_uvb76_capture_netns_fetch_helpers.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
 scripts/lab_uvb76_capture_netns_phase_capture_helpers.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
-scripts/verify_tovarisch_status_contract.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
 scripts/lab_uvb76_capture_netns_capture_poll.sh,grandfathered_needs_owner,"jq,polling",TBD,Bootstrap inventory
 scripts/lab_uvb76_capture_netns_result.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
 scripts/verify_uvb76_diag_packet_contract_lib.sh,grandfathered_needs_owner,trap,TBD,Bootstrap inventory
