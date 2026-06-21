@@ -5,6 +5,7 @@ import { initTargets, setupGraphControls } from './targets';
 import { loadLatencyForTarget } from './latency';
 import { loadSpikeDiagnostics } from './spikes';
 import { formatStartTime } from './format';
+import { renderThemeToggle } from './themeToggle';
 
 // DOM Elements
 const authForm = document.getElementById('auth-form');
@@ -152,6 +153,9 @@ async function handleLogout(): Promise<void> {
 
 // Initialize
 function init(): void {
+  // Render theme toggle in header
+  renderThemeToggle('theme-toggle-container');
+
   // Setup graph controls event listeners
   setupGraphControls();
 

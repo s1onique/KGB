@@ -1,21 +1,127 @@
+/* ====== Semantic CSS Variables - Dark Theme (default) ====== */
+:root,
+[data-theme="dark"] {
+  /* App frame */
+  --color-bg: #0d1117;
+  --color-surface: #161b22;
+  --color-overlay: #21262d;
+
+  /* Borders and dividers */
+  --color-border: #30363d;
+  --color-border-muted: #21262d;
+
+  /* Text */
+  --color-text: #c9d1d9;
+  --color-text-secondary: #8b949e;
+  --color-text-muted: #6e7681;
+
+  /* Primary accent (header title, links) */
+  --color-accent: #58a6ff;
+
+  /* Status colors */
+  --color-ok: #3fb950;
+  --color-warn: #9e6a03;
+  --color-error: #f85149;
+  --color-unknown: #484f58;
+
+  /* Status backgrounds */
+  --color-ok-bg: rgba(63, 185, 80, 0.2);
+  --color-warn-bg: rgba(210, 153, 34, 0.2);
+  --color-error-bg: rgba(248, 81, 73, 0.2);
+  --color-unknown-bg: rgba(110, 118, 129, 0.2);
+  --color-warn-solid-bg: #9e6a03;
+  --color-error-solid-bg: #da3633;
+  --color-ok-solid-bg: #238636;
+  --color-unknown-solid-bg: #484f58;
+
+  /* Status text colors for solid backgrounds */
+  --color-ok-solid-text: #ffffff;
+  --color-warn-solid-text: #ffffff;
+  --color-error-solid-text: #ffffff;
+  --color-unknown-solid-text: #ffffff;
+
+  /* Chart percentile colors */
+  --color-p50: #3fb950;
+  --color-p90: #58a6ff;
+  --color-p95: #a371f7;
+  --color-p99: #f0883e;
+
+  /* Spinner */
+  --color-spinner-border: #30363d;
+  --color-spinner-accent: #58a6ff;
+}
+
+/* ====== Rose Pine Theme ====== */
+[data-theme="rose-pine"] {
+  /* App frame */
+  --color-bg: #191724;
+  --color-surface: #1f1d2e;
+  --color-overlay: #26233a;
+
+  /* Borders and dividers */
+  --color-border: #524f67;
+  --color-border-muted: #403d52;
+
+  /* Text */
+  --color-text: #e0def4;
+  --color-text-secondary: #908caa;
+  --color-text-muted: #6e6a86;
+
+  /* Primary accent (header title, links) */
+  --color-accent: #c4a7e7;
+
+  /* Status colors */
+  --color-ok: #9ccfd8;
+  --color-warn: #f6c177;
+  --color-error: #eb6f92;
+  --color-unknown: #6e6a86;
+
+  /* Status backgrounds */
+  --color-ok-bg: rgba(156, 207, 216, 0.2);
+  --color-warn-bg: rgba(246, 193, 119, 0.2);
+  --color-error-bg: rgba(235, 111, 146, 0.2);
+  --color-unknown-bg: rgba(110, 118, 129, 0.2);
+  --color-warn-solid-bg: #f6c177;
+  --color-error-solid-bg: #eb6f92;
+  --color-ok-solid-bg: #31748f;
+  --color-unknown-solid-bg: #6e6a86;
+
+  /* Chart percentile colors - stable, readable */
+  --color-p50: #9ccfd8;
+  --color-p90: #c4a7e7;
+  --color-p95: #ebbcba;
+  --color-p99: #f6c177;
+
+  /* Spinner */
+  --color-spinner-border: #524f67;
+  --color-spinner-accent: #c4a7e7;
+
+  /* Status text colors - dark text on light status backgrounds for WCAG AA */
+  --color-ok-solid-text: #ffffff;
+  --color-warn-solid-text: #191724;
+  --color-error-solid-text: #191724;
+  --color-unknown-solid-text: #ffffff;
+}
+
+/* ====== Base Styles ====== */
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--color-bg); color: var(--color-text); min-height: 100vh; }
 .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
-h1 { color: #58a6ff; margin-bottom: 1rem; font-weight: 600; }
-h2 { color: #8b949e; margin: 1.5rem 0 1rem; font-weight: 500; }
-.card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 1.5rem; margin-bottom: 1rem; }
-.target { border-left: 4px solid #58a6ff; }
-.target.reachable { border-left-color: #3fb950; }
-.target.unreachable { border-left-color: #f85149; }
+h1 { color: var(--color-accent); margin-bottom: 1rem; font-weight: 600; }
+h2 { color: var(--color-text-secondary); margin: 1.5rem 0 1rem; font-weight: 500; }
+.card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 6px; padding: 1.5rem; margin-bottom: 1rem; }
+.target { border-left: 4px solid var(--color-accent); }
+.target.reachable { border-left-color: var(--color-ok); }
+.target.unreachable { border-left-color: var(--color-error); }
 .status { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.875rem; font-weight: 500; }
-.status.ok { background: #238636; color: #ffffff; }
-.status.warn { background: #9e6a03; color: #ffffff; }
-.status.error { background: #da3633; color: #ffffff; }
-.status.unknown { background: #484f58; color: #ffffff; }
+.status.ok, .status.okay { background: var(--color-ok-solid-bg); color: var(--color-ok-solid-text); }
+.status.warn, .status.warning { background: var(--color-warn-solid-bg); color: var(--color-warn-solid-text); }
+.status.error { background: var(--color-error-solid-bg); color: var(--color-error-solid-text); }
+.status.unknown { background: var(--color-unknown-solid-bg); color: var(--color-unknown-solid-text); }
 .checks { margin-top: 1rem; }
-.check { padding: 0.5rem; background: #0d1117; border-radius: 4px; margin-top: 0.5rem; }
-.meta { color: #8b949e; font-size: 0.875rem; margin-top: 0.5rem; }
-.error-text { color: #f85149; }
+.check { padding: 0.5rem; background: var(--color-bg); border-radius: 4px; margin-top: 0.5rem; }
+.meta { color: var(--color-text-secondary); font-size: 0.875rem; margin-top: 0.5rem; }
+.error-text { color: var(--color-error); }
 
 /* Target header row - compact single-line layout */
 .target-header-row {
@@ -28,7 +134,7 @@ h2 { color: #8b949e; margin: 1.5rem 0 1rem; font-weight: 500; }
 }
 
 .target-name {
-    color: #c9d1d9;
+    color: var(--color-text);
     font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
@@ -38,7 +144,7 @@ h2 { color: #8b949e; margin: 1.5rem 0 1rem; font-weight: 500; }
 }
 
 .target-id {
-    color: #8b949e;
+    color: var(--color-text-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -47,12 +153,12 @@ h2 { color: #8b949e; margin: 1.5rem 0 1rem; font-weight: 500; }
 }
 
 .target-header-sep {
-    color: #6e7681;
+    color: var(--color-text-muted);
     flex-shrink: 0;
 }
 
 .target-url {
-    color: #8b949e;
+    color: var(--color-text-secondary);
     font-family: monospace;
     font-size: 0.75rem;
     white-space: nowrap;
@@ -72,7 +178,7 @@ h2 { color: #8b949e; margin: 1.5rem 0 1rem; font-weight: 500; }
 }
 
 .peer-version {
-    color: #8b949e;
+    color: var(--color-text-secondary);
     font-size: 0.75rem;
     white-space: nowrap;
     overflow: hidden;
@@ -1111,4 +1217,59 @@ h2 { color: #8b949e; margin: 1.5rem 0 1rem; font-weight: 500; }
 
 .close-anchor-modal-btn:hover {
     background: #4b5563;
+}
+
+/* ====== Theme Toggle Styles ====== */
+#theme-toggle-container {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+#theme-toggle {
+    padding: 0.5rem 0.75rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: all 0.2s;
+}
+
+#theme-toggle:hover {
+    background: var(--color-overlay);
+    border-color: var(--color-text-secondary);
+}
+
+#theme-toggle:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+/* Header alignment - ensure controls are centered vertically */
+.header > * {
+    display: flex;
+    align-items: center;
+}
+
+/* Ensure proper layout for header elements */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    gap: 1rem;
+}
+
+.header h1 {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+.header-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-shrink: 0;
 }
