@@ -1,0 +1,31 @@
+{
+  "source": "test-peer",
+  "base_url": "http://localhost:18317",
+  "capture_started_at": "2026-06-21T10:00:00Z",
+  "capture_finished_at": "2026-06-21T10:00:01Z",
+  "duration_ms": 1000,
+  "status": "ok",
+  "network_diag": {
+    "started_at": "2026-06-21T10:00:00Z",
+    "status": "ok",
+    "interfaces": [
+      {
+        "name": "eth0",
+        "operstate": "up",
+        "rx_bytes": 1000,
+        "tx_bytes": 500,
+        "rx_packets": 10,
+        "tx_packets": 5,
+        "rx_errors": 0,
+        "tx_errors": 0,
+        "rx_dropped": 0,
+        "tx_dropped": 0
+      }
+    ],
+    "routes": [],
+    "underlay_tcp": [],
+    "events": []
+  },
+  "effective_capture_url": "http://localhost:18317/status.json?include=network_diag",
+  "http_status_code": 200
+}

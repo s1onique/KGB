@@ -1,0 +1,10 @@
+{
+  "ok": false,
+  "mode": "hermetic-diagnostic-peer",
+  "requested_path": "/status.json?include=network_diag",
+  "capture_packet_count": 1,
+  "tcp_telemetry_packet_count": 0,
+  "tcp_event_count": 0,
+  "tcp_telemetry_exercised": false,
+  "artifact_dir": "testdata/fail_wrong_location"
+}

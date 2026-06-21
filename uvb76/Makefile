@@ -120,3 +120,19 @@ lab-run: build lab-build
 # Verify an artifact directory (pass artifact dir as argument)
 lab-verify: lab-build
 	./uvb76-latency-crash-verify $(ARTIFACT_DIR)
+
+# === UVB-76 TCP Diagnostic Telemetry Lab ===
+# Builds and runs the Go lab that proves TCP telemetry is collected in diagnostic packets.
+# Primary execution: `make lab-uvb76-tcp-diag-telemetry` or `make -C uvb76 lab-tcp-diag-telemetry`
+# NOT part of make gate (requires hermetic diagnostic peer)
+
+lab-tcp-diag-telemetry-build:
+	cd cmd/uvb76-tcp-diag-telemetry-lab && go build -o ../../../uvb76-tcp-diag-telemetry-lab .
+
+# Run the TCP diagnostic telemetry lab
+lab-tcp-diag-telemetry: lab-tcp-diag-telemetry-build
+	./uvb76-tcp-diag-telemetry-lab
+
+# Run the verifier on an artifact directory
+lab-tcp-diag-telemetry-verify: lab-tcp-diag-telemetry-build
+	./uvb76-tcp-diag-telemetry-lab --verify --artifact-dir "$(ARTIFACT_DIR)"

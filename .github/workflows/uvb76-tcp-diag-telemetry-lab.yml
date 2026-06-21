@@ -1,0 +1,137 @@
+name: UVB-76 TCP Diagnostic Telemetry Lab
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_retention_days:
+        description: 'Days to retain artifacts'
+        required: false
+        default: '7'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  tcp-diag-telemetry-lab:
+    name: TCP Diagnostic Telemetry Lab
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache-dependency-path: uvb76/go.sum
+
+      - name: Build lab binary
+        run: |
+          cd uvb76/cmd/uvb76-tcp-diag-telemetry-lab
+          go mod download
+          go build -o ../../../uvb76-tcp-diag-telemetry-lab .
+
+      - name: Run TCP Diagnostic Telemetry Lab
+        id: lab
+        run: |
+          ARTIFACT_DIR="/tmp/uvb76-tcp-diag-telemetry-lab-$(date +%Y%m%d-%H%M%S)"
+          mkdir -p "$ARTIFACT_DIR"
+          
+          echo "artifact_dir=$ARTIFACT_DIR" >> $GITHUB_OUTPUT
+          
+          # Run the lab with the artifact directory
+          ./uvb76-tcp-diag-telemetry-lab --artifact-dir "$ARTIFACT_DIR" || {
+            echo "Lab failed with exit code $?"
+            echo "Checking for artifacts..."
+            if [ -d "$ARTIFACT_DIR" ]; then
+              echo "Artifacts in: $ARTIFACT_DIR"
+              ls -la "$ARTIFACT_DIR"
+              if [ -f "$ARTIFACT_DIR/lab-result.json" ]; then
+                echo "=== lab-result.json ==="
+                cat "$ARTIFACT_DIR/lab-result.json"
+              fi
+            fi
+            exit 1
+          }
+          
+          echo "Lab completed successfully"
+
+      - name: Verify and display lab artifacts
+        run: |
+          ARTIFACT_DIR="${{ steps.lab.outputs.artifact_dir }}"
+          
+          if [ ! -d "$ARTIFACT_DIR" ]; then
+            echo "Error: Artifact directory not found: $ARTIFACT_DIR"
+            exit 1
+          fi
+          
+          echo "=== Lab Artifacts ==="
+          ls -la "$ARTIFACT_DIR"
+          
+          echo ""
+          echo "=== capture-request.json ==="
+          if [ -f "$ARTIFACT_DIR/capture-request.json" ]; then
+            cat "$ARTIFACT_DIR/capture-request.json"
+          else
+            echo "(not found)"
+          fi
+          
+          echo ""
+          echo "=== captured-diagnostic-packet.json ==="
+          if [ -f "$ARTIFACT_DIR/captured-diagnostic-packet.json" ]; then
+            cat "$ARTIFACT_DIR/captured-diagnostic-packet.json"
+          else
+            echo "(not found)"
+          fi
+          
+          echo ""
+          echo "=== verifier-result.json ==="
+          if [ -f "$ARTIFACT_DIR/verifier-result.json" ]; then
+            cat "$ARTIFACT_DIR/verifier-result.json"
+          else
+            echo "(not found)"
+          fi
+          
+          echo ""
+          echo "=== lab-result.json ==="
+          if [ -f "$ARTIFACT_DIR/lab-result.json" ]; then
+            cat "$ARTIFACT_DIR/lab-result.json"
+          else
+            echo "Error: lab-result.json not found"
+            exit 1
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tcp-diag-telemetry-lab-artifacts-${{ github.run_number }}
+          path: ${{ steps.lab.outputs.artifact_dir }}/*
+          retention-days: ${{ inputs.artifact_retention_days || '7' }}
+
+      - name: Report success
+        if: success()
+        run: |
+          echo "=== Lab Passed ==="
+          echo "TCP telemetry was successfully verified in diagnostic packets."
+          echo "Artifact directory: ${{ steps.lab.outputs.artifact_dir }}"
+          echo ""
+          echo "Key results from lab-result.json:"
+          if [ -f "${{ steps.lab.outputs.artifact_dir }}/lab-result.json" ]; then
+            cat "${{ steps.lab.outputs.artifact_dir }}/lab-result.json"
+          fi
+
+      - name: Report failure
+        if: failure()
+        run: |
+          echo "=== Lab Failed ==="
+          echo "TCP telemetry exercise requires:"
+          echo "  - Hermetic diagnostic peer serving /status.json?include=network_diag"
+          echo "  - Response containing underlay_tcp array with records"
+          echo "  - Records must have required fields: name, state, local, remote"
+          echo "  - Structural verification of captured-diagnostic-packet.json"
+          echo ""
+          echo "Check the uploaded artifacts for diagnostic details."

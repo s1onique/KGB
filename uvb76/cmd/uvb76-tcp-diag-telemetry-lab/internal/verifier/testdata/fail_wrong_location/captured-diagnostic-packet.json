@@ -1,0 +1,25 @@
+{
+  "source": "test-peer",
+  "base_url": "http://localhost:18317",
+  "capture_started_at": "2026-06-21T10:00:00Z",
+  "capture_finished_at": "2026-06-21T10:00:01Z",
+  "duration_ms": 1000,
+  "status": "ok",
+  "network_diag": {
+    "started_at": "2026-06-21T10:00:00Z",
+    "status": "ok",
+    "interfaces": [],
+    "routes": [],
+    "underlay_tcp": [],
+    "events": [
+      {
+        "ts": "2026-06-21T10:00:00Z",
+        "severity": "info",
+        "source": "tcp_diagnostics",
+        "message": "TCP info found but in wrong location"
+      }
+    ]
+  },
+  "effective_capture_url": "http://localhost:18317/status.json?include=network_diag",
+  "http_status_code": 200
+}

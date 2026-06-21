@@ -255,6 +255,17 @@ lab-uvb76-targets-crash:
 	@chmod +x uvb76/uvb76
 	@$(BASH) ./scripts/lab_uvb76_targets_crash.sh
 
+# === UVB-76 TCP Diagnostic Telemetry Lab ===
+# Proves TCP telemetry is collected in diagnostic packets using hermetic diagnostic peer.
+# Artifact-backed proof: verifies underlay_tcp in captured-diagnostic-packet.json.
+# Primary execution: `make lab-uvb76-tcp-diag-telemetry`
+# NOT part of make gate
+
+BASH ?= bash
+
+lab-uvb76-tcp-diag-telemetry:
+	@$(MAKE) -C uvb76 lab-tcp-diag-telemetry
+
 # === opkg Package Targets (Entware/AsusWRT-Merlin) ===
 
 # Build opkg package for Entware/AsusWRT-Merlin
