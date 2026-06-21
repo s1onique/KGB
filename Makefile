@@ -231,6 +231,17 @@ lab-uvb76-latency-crash:
 	@chmod +x uvb76/uvb76
 	@$(BASH) ./scripts/lab_uvb76_latency_crash.sh
 
+# === UVB-76 ICMP OS Ping Soak Lab ===
+# Soak lab proving UVB-76 stays alive under continuous ICMP ping probe runs.
+# Result honestly shows icmp_probe_exercised=false until daemon counters are exposed.
+# Primary execution: GitHub Actions (workflow_dispatch)
+# NOT part of make gate
+
+BASH ?= bash
+
+lab-uvb76-icmp-os-ping-soak: uvb76-build
+	@UVB76_BINARY="$(CURDIR)/uvb76/uvb76" $(BASH) ./scripts/lab_uvb76_icmp_os_ping_soak.sh
+
 # === UVB-76 Targets Crash Lab ===
 # Crash/soak lab proving /api/v1/targets HTTPS surface does not crash under handler churn.
 # Tests with runtime-generated TLS certs (no inline blobs).

@@ -1,0 +1,80 @@
+name: UVB-76 ICMP OS Ping Soak Lab
+
+on:
+  workflow_dispatch:
+    inputs:
+      soak_duration_seconds:
+        description: "Soak duration in seconds"
+        required: false
+        default: "120"
+  push:
+    branches: [main]
+    paths:
+      - "uvb76/probe/**"
+      - "uvb76/config/**"
+      - "uvb76/cmd/uvb76-icmp-os-ping-soak/**"
+      - "scripts/lab_uvb76_icmp_os_ping_soak.sh"
+      - "Makefile"
+      - ".github/workflows/uvb76-icmp-os-ping-soak.yml"
+  pull_request:
+    paths:
+      - "uvb76/probe/**"
+      - "uvb76/config/**"
+      - "uvb76/cmd/uvb76-icmp-os-ping-soak/**"
+      - "scripts/lab_uvb76_icmp_os_ping_soak.sh"
+      - "Makefile"
+      - ".github/workflows/uvb76-icmp-os-ping-soak.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  icmp-os-ping-soak:
+    name: UVB-76 ICMP OS ping soak
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: uvb76/go.mod
+          cache: true
+
+      - name: Build web UI
+        run: |
+          cd uvb76/web
+          npm ci
+          npm run build
+
+      - name: Build UVB-76
+        run: |
+          cd uvb76
+          go build -o uvb76 .
+
+      - name: Run ICMP OS ping soak lab
+        env:
+          SOAK_DURATION_SECONDS: ${{ github.event.inputs.soak_duration_seconds || '120' }}
+        run: make lab-uvb76-icmp-os-ping-soak
+
+      - name: Show artifacts
+        run: |
+          ls -la /tmp/kgb-uvb76-icmp-os-ping-soak-*/ 2>/dev/null || echo "No artifacts found"
+          find /tmp/kgb-uvb76-icmp-os-ping-soak-* -type f 2>/dev/null || true
+
+      - name: Make artifacts readable
+        if: always()
+        run: |
+          chmod -R a+rX /tmp/kgb-uvb76-icmp-os-ping-soak-* 2>/dev/null || true
+
+      - name: Upload lab artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uvb76-icmp-os-ping-soak-artifacts
+          path: /tmp/kgb-uvb76-icmp-os-ping-soak-*
+          if-no-files-found: warn
+          retention-days: 7
