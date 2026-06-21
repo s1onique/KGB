@@ -4,7 +4,8 @@
   "requested_path": "/status.json?include=network_diag",
   "capture_packet_count": 1,
   "tcp_telemetry_packet_count": 1,
-  "tcp_event_count": 1,
+  "tcp_record_count": 1,
+  "tcp_event_count": 0,
   "tcp_telemetry_exercised": true,
   "artifact_dir": "testdata/fail_summary_lies"
 }

@@ -294,6 +294,51 @@ func TestSanitizePath(t *testing.T) {
 	}
 }
 
+// TestAllFixturesHaveTCPRecordCount is a regression test to ensure all fixture
+// lab-result.json files use the current schema with tcp_record_count field.
+// This test does not verify acceptance semantics - it only enforces fixture hygiene.
+func TestAllFixturesHaveTCPRecordCount(t *testing.T) {
+	testdataDir := filepath.Join(".", "testdata")
+	entries, err := os.ReadDir(testdataDir)
+	if err != nil {
+		t.Fatalf("failed to read testdata directory: %v", err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		fixtureName := entry.Name()
+		labResultPath := filepath.Join(testdataDir, fixtureName, "lab-result.json")
+
+		// Skip if no lab-result.json exists in this fixture directory
+		if _, err := os.Stat(labResultPath); os.IsNotExist(err) {
+			continue
+		}
+
+		data, err := os.ReadFile(labResultPath)
+		if err != nil {
+			t.Errorf("fixture %s: failed to read lab-result.json: %v", fixtureName, err)
+			continue
+		}
+
+		// Unmarshal into a minimal struct to check for tcp_record_count presence
+		var result struct {
+			OK                    bool   `json:"ok"`
+			TCPRecordCount        *int   `json:"tcp_record_count"`
+			TCPTelemetryExercised bool   `json:"tcp_telemetry_exercised"`
+		}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Errorf("fixture %s: failed to parse lab-result.json: %v", fixtureName, err)
+			continue
+		}
+
+		if result.TCPRecordCount == nil {
+			t.Errorf("fixture %s: lab-result.json is missing tcp_record_count field", fixtureName)
+		}
+	}
+}
+
 func TestVerifyArtifacts_FailMissingInclude(t *testing.T) {
 	// Create a temp directory with wrong path (missing include param)
 	tmpDir, err := os.MkdirTemp("", "uvb76-verifier-missing-include-*")
