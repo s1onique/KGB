@@ -13,6 +13,7 @@ const bgp_serve = @import("bgp_serve.zig");
 const bgp_status = @import("../bgp/status.zig");
 const test_helpers = @import("commands_test_helpers.zig");
 const config = @import("../config.zig");
+const net_diag_config = @import("net_diag_config.zig");
 
 pub const ExitCode = enum(u8) {
     ok = 0,
@@ -163,9 +164,6 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
             };
             logging.logBgpLoadResult(&bgp_log_buf, result_tag, "") catch {};
             stderr.writeAll(bgp_log_buf.slice()) catch {};
-
-// Preserve full BgpLoadResult for status derivation.
-            // BGP failures (.failed) must be visible in /status, not silently collapsed.
             const bgp_bundle: ?*bgp_serve.BgpServeBundle = switch (bgp_result) {
                 .configured => |bundle| bundle,
                 else => null,
@@ -191,18 +189,24 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
             else
                 .no_config;
 
-            // Parse lab config if provided.
+            // Parse lab config and network diag config.
             var lab_cfg: config.LabConfig = .{};
+            var net_diag_cfg: net_diag_config.NetworkDiagConfig = .{};
             if (serve_config.config_path) |path| {
                 var raw = wg_args.readConfig(path, std.heap.page_allocator) catch |e| {
-                    stderr.print("error: failed to read config for [lab]: {s}\n", .{@errorName(e)}) catch {};
+                    stderr.print("error: failed to read config: {s}\n", .{@errorName(e)}) catch {};
                     return .serve_error;
                 };
                 defer raw.deinit(std.heap.page_allocator);
+
+                // Parse lab config
                 lab_cfg = config.parseLabConfig(&raw) catch |e| {
                     stderr.print("error: failed to parse [lab]: {s}\n", .{@errorName(e)}) catch {};
                     return .serve_error;
                 };
+
+                // Parse network diagnostics config - this is the key fix for TCP diag config wiring
+                net_diag_cfg = net_diag_config.parseNetworkDiagConfig(&raw);
             }
 
             // Clean up BFD bundle on any exit
@@ -212,7 +216,7 @@ fn serveCommand(serve_args: []const []const u8, stdout: anytype, stderr: anytype
                 .bfd_runtime = bfd_rt,
                 .config_check = config_check,
                 .bgp_result = bgp_result,
-            }, lab_cfg, stdout) catch |err| {
+            }, lab_cfg, net_diag_cfg, stdout) catch |err| {
                 var log_buf = logging.BufferedWriter.init();
                 logging.emit(.server_error, &log_buf, &.{
                     .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(err) } },

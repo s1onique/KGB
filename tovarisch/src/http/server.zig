@@ -9,6 +9,7 @@ const bfd_status = @import("../bfd/status.zig");
 const status = @import("../status.zig");
 const serve_context = @import("serve_context.zig");
 const tovarisch_config = @import("../config.zig");
+const network_diag_config = @import("../net/network_diag_config.zig");
 
 // Re-export ServeContext for external use
 pub const ServeContext = serve_context.ServeContext;
@@ -287,7 +288,7 @@ pub fn serveForeverWithContext(
     inputs: status.RuntimeStatusInputs,
     out_writer: anytype,
 ) !void {
-    try serveForeverWithContextAndLab(config, inputs, .{}, out_writer);
+    try serveForeverWithContextAndLab(config, inputs, .{}, .{}, out_writer);
 }
 
 /// Daemon-style serve loop with full runtime inputs and lab config.
@@ -297,12 +298,13 @@ pub fn serveForeverWithContextAndLab(
     config: Config,
     inputs: status.RuntimeStatusInputs,
     lab_config: tovarisch_config.LabConfig,
+    network_diag_cfg: network_diag_config.NetworkDiagConfig,
     out_writer: anytype,
 ) !void {
     var server = Server.init(config);
     defer server.deinit();
 
-    // Initialize serve context with full runtime inputs (BFD + config check + BGP bundle + lab config).
+    // Initialize serve context with full runtime inputs (BFD + config check + BGP bundle + lab config + network diag config).
     // MemoryOwnership: Startup-only one-time allocation at daemon init.
     // The ServeContext allocator is used once at serve startup, not per-request.
     // This is a single allocation that persists for daemon lifetime (acceptable).
@@ -312,6 +314,7 @@ pub fn serveForeverWithContextAndLab(
         inputs.config_check,
         inputs.bgp_result,
         lab_config,
+        network_diag_cfg,
     );
     defer serve_ctx.deinit();
 

@@ -98,6 +98,7 @@ test "ServeContext.initWithContext accepts lab_config" {
             .lab_mode = true,
             .lab_probe_failure_file = "/tmp/test-failure",
         },
+        .{}, // network_diag_config
     );
     defer serve_ctx.deinit();
     try std.testing.expect(serve_ctx.lab_config.lab_mode);

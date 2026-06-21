@@ -269,3 +269,7 @@ test { std.testing.refAllDecls(@import("status_network_diag_events.zig")); }
 test { std.testing.refAllDecls(@import("status_network_diag_tcp.zig")); }
 test { std.testing.refAllDecls(@import("status_network_diag_tests.zig")); }
 test { std.testing.refAllDecls(@import("status_network_diag_ownership_tests.zig")); }
+
+// Network diagnostics config wiring regression tests
+// ACT: Wire parsed tovarisch network diagnostics config into HTTP status path
+test { std.testing.refAllDecls(@import("status_network_diag_wiring_tests.zig")); }

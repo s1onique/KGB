@@ -203,6 +203,9 @@ pub const RuntimeStatusInputs = struct {
     bfd_runtime: ?*const bfd_status.BfdRuntime = null,
     config_check: ConfigCheckState = .no_config,
     bgp_result: bgp_serve.BgpLoadResult = .{ .no_config = {} },
+    /// Network diagnostics configuration parsed from daemon config.
+    /// When null, network diagnostics are not included in status response.
+    network_diag_config: network_diag_config.NetworkDiagConfig = .{},
 };
 
 // Status building
@@ -337,9 +340,9 @@ pub fn renderPayloadWithContextAndDiag(
     // Collect network diagnostics if requested
     var network_diag_opt: ?status_network_diag.NetworkDiag = null;
     if (include_network_diag) {
-        // Use default disabled config - this ensures we return a valid structured
-        // response even without explicit network_diag configuration.
-        const diag_cfg = network_diag_config.NetworkDiagConfig{ .enabled = true };
+        // Use the parsed daemon config from RuntimeStatusInputs.
+        // This honors the operator's [network_diagnostics] config for underlay TCP.
+        const diag_cfg = inputs.network_diag_config;
         network_diag_opt = status_network_diag.collectNetworkDiag(allocator, diag_cfg) catch null;
     }
     defer {

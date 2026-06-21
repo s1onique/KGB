@@ -14,6 +14,7 @@ const bgp_serve = @import("../cli/bgp_serve.zig");
 const bgp_status = @import("../bgp/status.zig");
 const status = @import("../status.zig");
 const config = @import("../config.zig");
+const network_diag_config = @import("../net/network_diag_config.zig");
 
 /// Context passed to HTTP route handlers.
 ///
@@ -50,6 +51,11 @@ pub const ServeContext = struct {
     /// When lab_mode is false, /lab/probe returns 404 (not a production control surface).
     lab_config: config.LabConfig = .{},
 
+    /// Network diagnostics configuration parsed from daemon config.
+    /// This config is passed to the /status endpoint for network diagnostics collection.
+    /// Default-initialized to disabled state when no config is provided.
+    network_diag_config: network_diag_config.NetworkDiagConfig = .{},
+
     /// Initialize serve context with allocator.
     /// Uses default no_config state since no config path is available.
     pub fn init(allocator: std.mem.Allocator) Self {
@@ -72,7 +78,7 @@ pub const ServeContext = struct {
         };
     }
 
-    /// Initialize serve context with full runtime inputs (BFD + config check + BGP).
+    /// Initialize serve context with full runtime inputs (BFD + config check + BGP + network diag config).
     /// This is the primary init path for production serve with config.
     pub fn initWithContext(
         allocator: std.mem.Allocator,
@@ -80,6 +86,7 @@ pub const ServeContext = struct {
         config_check: status.ConfigCheckState,
         bgp_result: bgp_serve.BgpLoadResult,
         lab_config: config.LabConfig,
+        network_diag_cfg: network_diag_config.NetworkDiagConfig,
     ) Self {
         return .{
             .metrics = metrics_state.MetricsState.init(allocator),
@@ -87,6 +94,7 @@ pub const ServeContext = struct {
             .config_check = config_check,
             .bgp_result = bgp_result,
             .lab_config = lab_config,
+            .network_diag_config = network_diag_cfg,
         };
     }
 
