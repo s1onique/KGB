@@ -28,7 +28,7 @@ const COMMAND_PATHS = .{
     .{ AllowedCommand.wg_show, "/usr/bin/wg" },
     .{ AllowedCommand.wg_show_dump, "/usr/bin/wg" },
     .{ AllowedCommand.ip_route_get, "/sbin/ip" },
-    .{ AllowedCommand.ss_tin, "/usr/sbin/ss" },
+    .{ AllowedCommand.ss_tin, "/usr/bin/ss" },
 };
 
 /// Command runner configuration.
