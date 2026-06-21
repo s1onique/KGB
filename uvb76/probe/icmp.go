@@ -68,7 +68,8 @@ type ICMPClient struct {
 func NewICMPClient(cfg *config.ICMPProbeConfig, st ICMPSampleRecorder, targets []*config.TargetConfig) *ICMPClient {
 	var backend ICMPProbeBackend
 	if cfg.IsEnabled() {
-		backend = NewOSPingBackend()
+		// Use bounded backend with configured concurrency limit
+		backend = NewOSPingBackendWithLimit(cfg.MaxConcurrentOSPing)
 	}
 
 	client := &ICMPClient{

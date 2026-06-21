@@ -25,13 +25,14 @@ type HTTPProbeConfig struct {
 
 // ICMPProbeConfig holds ICMP ping latency measurement settings.
 type ICMPProbeConfig struct {
-	Enabled             *bool  `json:"enabled"` // pointer so we can distinguish unset from false
-	IntervalSeconds     int    `json:"interval_seconds"`
-	TimeoutSeconds         int    `json:"timeout_seconds"`
-	HistogramBucketsMS  []int64 `json:"histogram_buckets_ms"`
-	RecentSamplesMax    int    `json:"recent_samples_max"`
-	WindowSeconds       int    `json:"window_seconds"`
-	RetainedRangeSeconds int   `json:"retained_range_seconds"`
+	Enabled              *bool  `json:"enabled"` // pointer so we can distinguish unset from false
+	IntervalSeconds      int    `json:"interval_seconds"`
+	TimeoutSeconds      int    `json:"timeout_seconds"`
+	MaxConcurrentOSPing  int    `json:"max_concurrent_os_ping"` // bounds concurrent os/exec ping processes
+	HistogramBucketsMS   []int64 `json:"histogram_buckets_ms"`
+	RecentSamplesMax     int    `json:"recent_samples_max"`
+	WindowSeconds        int    `json:"window_seconds"`
+	RetainedRangeSeconds int    `json:"retained_range_seconds"`
 }
 
 // HTTP defaults
@@ -60,6 +61,9 @@ const (
 	DefaultICMPIntervalSeconds = 1
 	// DefaultICMPTimeoutSeconds is the default timeout for ICMP ping probes.
 	DefaultICMPTimeoutSeconds = 3
+	// DefaultICMPMaxConcurrentOSPing is the default max concurrent OS ping processes.
+	// Default to 1 for router safety - OS ping is diagnostic, not forwarding path.
+	DefaultICMPMaxConcurrentOSPing = 1
 	// DefaultICMPWindowSeconds is the default trailing window for ICMP latency aggregation.
 	DefaultICMPWindowSeconds = 60
 	// DefaultICMPRetainedRangeSeconds is the default retained range for ICMP latency (60 minutes).
@@ -141,6 +145,9 @@ func (c *ICMPProbeConfig) ApplyDefaults() {
 	}
 	if c.TimeoutSeconds <= 0 {
 		c.TimeoutSeconds = DefaultICMPTimeoutSeconds
+	}
+	if c.MaxConcurrentOSPing <= 0 {
+		c.MaxConcurrentOSPing = DefaultICMPMaxConcurrentOSPing
 	}
 	if c.WindowSeconds <= 0 {
 		c.WindowSeconds = DefaultICMPWindowSeconds

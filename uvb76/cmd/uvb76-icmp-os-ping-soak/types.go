@@ -1,0 +1,99 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+)
+
+// Result captures the lab outcome for machine-readable output.
+type Result struct {
+	OK                   bool     `json:"ok"`
+	LabName              string   `json:"lab_name"`
+	DurationSeconds      int      `json:"duration_seconds"`
+	ICMPEnabled          bool     `json:"icmp_enabled"`
+	ICMPIntervalSeconds  int      `json:"icmp_interval_seconds"`
+	ICMPTimeoutSeconds   int      `json:"icmp_timeout_seconds"`
+	ICMPMaxConcurrent    int      `json:"icmp_max_concurrent"`
+	DaemonStarted         bool     `json:"daemon_started"`
+	DaemonExitedEarly    bool     `json:"daemon_exited_early"`
+	DaemonExitCode       *int     `json:"daemon_exit_code,omitempty"`
+	PIDStable            bool     `json:"pid_stable"`
+	FatalLogPatternsFound []string `json:"fatal_log_patterns_found"`
+
+	// Lab-process counters (not daemon-sourced; see icmp_probe_exercised)
+	PingStartedTotal    uint64 `json:"ping_started_total"`
+	PingCompletedTotal  uint64 `json:"ping_completed_total"`
+	PingInflight        int64  `json:"ping_inflight"`
+
+	// ICMP probe was exercised in the daemon (requires daemon HTTP API in follow-up ACT)
+	ICMPProbeExercised   bool    `json:"icmp_probe_exercised"`
+	ICMPProbeExercisedReason string `json:"icmp_probe_exercised_reason,omitempty"`
+
+	// Memory stats
+	MemStatsBefore string `json:"memstats_before"`
+	MemStatsAfter  string `json:"memstats_after"`
+
+	// Goroutine stats
+	GoroutinesBefore int  `json:"goroutines_before"`
+	GoroutinesAfter  int  `json:"goroutines_after"`
+	GoroutineLeaked  bool `json:"goroutine_leaked"`
+
+	// Health checks
+	HealthEndpointValid bool `json:"health_endpoint_valid"`
+	StatusEndpointValid bool `json:"status_endpoint_valid"`
+
+	ArtifactDir string `json:"artifact_dir"`
+}
+
+// MemStats holds runtime memory statistics for JSON serialization.
+type MemStats struct {
+	Alloc      uint64 `json:"alloc_bytes"`
+	TotalAlloc uint64 `json:"total_alloc_bytes"`
+	Sys        uint64 `json:"sys_bytes"`
+	NumGC      uint32 `json:"num_gc"`
+	GoVersion  string `json:"go_version"`
+}
+
+// captureMemStats captures current runtime memory statistics.
+func captureMemStats() MemStats {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return MemStats{
+		Alloc:      m.Alloc,
+		TotalAlloc: m.TotalAlloc,
+		Sys:        m.Sys,
+		NumGC:      m.NumGC,
+		GoVersion:  runtime.Version(),
+	}
+}
+
+// WriteArtifacts writes all result and artifact files to the artifact directory.
+func WriteArtifacts(artifactDir string, result Result, memBefore, memAfter MemStats, goroutinesBefore, goroutinesAfter int) error {
+	resultBytes, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "result.json"), resultBytes, 0644); err != nil {
+		return err
+	}
+
+	memstats := map[string]interface{}{
+		"before": memBefore,
+		"after":  memAfter,
+	}
+	memstatsBytes, _ := json.MarshalIndent(memstats, "", "  ")
+	if err := os.WriteFile(filepath.Join(artifactDir, "memstats.json"), memstatsBytes, 0644); err != nil {
+		return err
+	}
+
+	goroutinesContent := fmt.Sprintf("before: %d\nafter: %d\nleaked: %v\n",
+		goroutinesBefore, goroutinesAfter, result.GoroutineLeaked)
+	if err := os.WriteFile(filepath.Join(artifactDir, "goroutines.txt"), []byte(goroutinesContent), 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
