@@ -16,8 +16,13 @@
 # MigrationPlan: All JSON parsing and polling state machine moved to
 #   uvb76-capture-netns-polling Go package; shell retained as thin launcher
 
-# Ensure Go binary path is set (deterministic - built artifact path)
-UVB76_POLLING_BINARY="${UVB76_POLLING_BINARY:-./uvb76/cmd/uvb76-capture-netns-polling/uvb76-capture-netns-polling}"
+# Derive repo root from script location for robust path resolution
+# This ensures the wrapper works even when sourced from a different working directory
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_REPO_ROOT="$(cd "${_SCRIPT_DIR}/.." && pwd)"
+
+# Ensure Go binary path is set (repo-root-relative for safety)
+UVB76_POLLING_BINARY="${UVB76_POLLING_BINARY:-${_REPO_ROOT}/uvb76/cmd/uvb76-capture-netns-polling/uvb76-capture-netns-polling}"
 
 # Require the binary before polling operations (call this from sourced functions, not at top level)
 # Uses return for sourced contexts, exit for direct execution

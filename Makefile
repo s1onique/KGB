@@ -216,7 +216,7 @@ lab-uvb76-capture-url:
 
 BASH ?= bash
 
-lab-uvb76-capture-netns:
+lab-uvb76-capture-netns: uvb76-polling-build
 	@$(BASH) ./scripts/lab_uvb76_capture_netns.sh
 
 # === UVB-76 Latency Crash Lab ===
