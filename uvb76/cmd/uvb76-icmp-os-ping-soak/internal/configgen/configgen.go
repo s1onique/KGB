@@ -52,8 +52,7 @@ func Generate(adminUser, adminPass, targetID string, icmpIntervalSecs, icmpTimeo
 			},
 		},
 		Diagnostics: config.DiagnosticsConfig{
-			Enabled:    boolPtr(false),
-			Endpoints:  []config.DiagEndpointConfig{},
+			Enabled: false,
 		},
 	}
 
