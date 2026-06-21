@@ -149,6 +149,7 @@ python3 scripts/verify_cold_resume_checkpoints.py --self-test
 
 echo "[gate] checking UVB-76 capture helpers self-test"
 bash scripts/verify_uvb76_capture_helpers.sh --self-test
+python3 scripts/verify_uvb76_capture_helpers.py --self-test
 
 echo "[gate] checking UVB-76 diag packet contract self-test"
 bash scripts/verify_uvb76_diag_packet_contract.sh --self-test

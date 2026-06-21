@@ -25,7 +25,7 @@ These scripts contain risky tokens and are grandfathered pending migration:
 | `scripts/lab_bgp_bfd_reconnect_lib.sh` | 383 | 2 | 1 | 0 | jq, curl | grandfathered_needs_owner | TBD |
 | `scripts/lab_bgp_bfd_reconnect_bgp_reset.sh` | 380 | 7 | 0 | 0 | jq | grandfathered_needs_owner | TBD |
 | `scripts/lab_uvb76_capture_netns_contract_normalizers.sh` | 370 | 37 | 0 | 0 | jq | grandfathered_needs_owner | TBD |
-| `scripts/verify_uvb76_capture_helpers.sh` | 360 | 8 | 0 | 0 | jq | grandfathered_needs_owner | TBD |
+| `scripts/verify_uvb76_capture_helpers.sh` | 87 | 0 | 0 | 0 | none | keep_wrapper | none |
 | `scripts/verify_uvb76_diag_packet_contract.sh` | 358 | 39 | 0 | 0 | jq | grandfathered_needs_owner | TBD |
 | `scripts/verify_uvb76_row_normalization_tests.sh` | 355 | 15 | 0 | 0 | jq | grandfathered_needs_owner | TBD |
 | `scripts/lab_uvb76_capture_netns_diag.sh` | 341 | 23 | 0 | 0 | jq | grandfathered_needs_owner | TBD |
@@ -110,9 +110,9 @@ Recommended first ports (high-impact, well-scoped):
 
 1. ~~**`scripts/verify_tovarisch_status_contract.sh`**~~ ✅ **MIGRATED** to `scripts/verify_tovarisch_status_contract.py`
 
-2. **`scripts/verify_uvb76_capture_helpers.sh`** (360 lines, jq)
-   - Port to: Python
-   - Reason: Capture data parsing, clear boundaries
+2. ~~**`scripts/verify_uvb76_capture_helpers.sh`**~~ ✅ **PORTED** to thin wrapper + Python spec mirror
+   - Shell: `keep_wrapper` (thin delegation only)
+   - Python: `migrated_to_python` (specification mirror)
 
 3. **`scripts/lab_uvb76_capture_netns_poll.sh`** (337 lines, jq + polling)
    - Port to: Go lab harness
