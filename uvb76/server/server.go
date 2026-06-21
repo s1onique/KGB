@@ -89,6 +89,10 @@ func (s *Server) Start() error {
 
 	// Diagnostics API endpoints
 	protected.Handle("/diagnostics/capture-cooldown", http.HandlerFunc(s.handleCaptureCooldownDiagnostics)).Methods(http.MethodGet)
+	protected.Handle("/diagnostics/cooldown/anchors/{peer_name}", http.HandlerFunc(s.handleGetCooldownAnchorForPeer)).Methods(http.MethodGet)
+	
+	// Capture lookup endpoints
+	protected.Handle("/captures/{capture_id}/anchor", http.HandlerFunc(s.handleGetAnchorCapture)).Methods(http.MethodGet)
 
 	// Web UI - serve from embedded filesystem
 	// Assets are served from /assets/* path

@@ -141,6 +141,12 @@ export interface CaptureCooldownInfo {
   skipped_attempt_updates_cooldown?: boolean;
   // CooldownSeconds is the configured cooldown duration.
   cooldown_seconds?: number;
+  // AnchorCaptureID is the event ID of the anchor capture (for lookup).
+  anchor_capture_id?: string;
+  // AnchorTargetID is the target ID of the anchor capture.
+  anchor_target_id?: string;
+  // AnchorProbeKind is the probe kind of the anchor capture.
+  anchor_probe_kind?: string;
 }
 
 // TcpSocketDiagData represents TCP socket diagnostic data from tovarisch.
@@ -276,6 +282,60 @@ export interface SpikeResponseWithCaptures {
   retention: SpikeRetentionStats;
 }
 
+// AnchorStatus represents the availability status of an anchor capture.
+export type AnchorStatus =
+  | 'available'
+  | 'artifact_missing'
+  | 'metadata_only'
+  | 'not_an_anchor_capture'
+  | 'not_found';
+
+// AnchorDegradationReason explains why degraded=true.
+export type AnchorDegradationReason =
+  | 'artifact_purged'
+  | 'spike_event_evicted'
+  | 'missing_provenance'
+  | 'partial_metadata';
+
+// AnchorCaptureResponse represents the response from the anchor capture lookup endpoint.
+export interface AnchorCaptureResponse {
+  // Capture is the full capture record if available.
+  capture?: DiagCapture;
+  // SpikeEvent is the spike event associated with the capture if available.
+  spike_event?: SpikeEvent;
+  // Anchor is the cooldown anchor metadata that justified the suppression.
+  anchor?: CaptureCooldownAnchor;
+  // Status indicates the availability state of the anchor.
+  status: AnchorStatus;
+  // Message provides human-readable context about availability.
+  message?: string;
+  // Degraded indicates the response has reduced information (artifact or spike missing).
+  degraded: boolean;
+  // DegradationReason explains why degraded=true.
+  degradation_reason?: AnchorDegradationReason;
+}
+
+// CaptureCooldownAnchor represents the provenance of the successful capture that started a cooldown.
+export interface CaptureCooldownAnchor {
+  anchor_capture_id?: string;
+  anchor_target_id?: string;
+  anchor_probe_kind?: string;
+  anchor_source?: string;
+  anchor_created_at?: string;
+  anchor_completed_at?: string;
+  anchor_updated_by_status?: string;
+  created_from?: string;
+  is_warmup_anchor?: boolean;
+}
+
+// CooldownAnchorResponse represents the response from the peer cooldown anchor endpoint.
+export interface CooldownAnchorResponse {
+  anchor: CaptureCooldownAnchor;
+  capture_exists: boolean;
+  degraded: boolean;
+  checked_at: string;
+}
+
 export interface AuthCheckResponse {
   authenticated: boolean;
   username?: string;
@@ -398,6 +458,23 @@ class ApiClient {
     return this.fetch<SpikeResponseWithCaptures>(
       `/api/v1/latency/spikes?target_id=${encodeURIComponent(targetId)}&include_captures=true&limit=${limit}`
     );
+  }
+
+  /**
+   * Get the anchor capture details for a skipped cooldown spike.
+   * This allows operators to inspect the prior successful capture that justified suppression,
+   * even when the anchor spike is outside the current visible window.
+   */
+  async getAnchorCapture(captureId: string): Promise<AnchorCaptureResponse> {
+    return this.fetch<AnchorCaptureResponse>(`/api/v1/captures/${encodeURIComponent(captureId)}/anchor`);
+  }
+
+  /**
+   * Get the cooldown anchor for a specific peer.
+   * This allows operators to see what capture started the current cooldown for a peer.
+   */
+  async getCooldownAnchorForPeer(peerName: string): Promise<CooldownAnchorResponse> {
+    return this.fetch<CooldownAnchorResponse>(`/api/v1/diagnostics/cooldown/anchors/${encodeURIComponent(peerName)}`);
   }
 }
 

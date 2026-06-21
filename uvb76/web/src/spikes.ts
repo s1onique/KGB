@@ -1,5 +1,5 @@
 // Spike diagnostics rendering module
-import { api, type SpikeEventWithCaptures, type DiagCapture, type TcpSocketDiagData, type NetworkDiagData, type SpikeRetentionStats, type CaptureCooldownInfo, type TcpAbsenceEvent } from './api';
+import { api, type SpikeEventWithCaptures, type DiagCapture, type TcpSocketDiagData, type NetworkDiagData, type SpikeRetentionStats, type CaptureCooldownInfo, type TcpAbsenceEvent, type AnchorCaptureResponse } from './api';
 import { formatSpikeTime, formatLatencyMs } from './format';
 import { formatLocalDateTime, parseApiInstant, formatRemainingCooldown } from './time';
 
@@ -437,6 +437,222 @@ function downloadSpikeBundle(spike: SpikeEventWithCaptures): void {
   downloadJson(exportData, filename);
 }
 
+// Helper to create a styled div with text content safely
+function createDivWithStyle(className: string, style: string, textContent?: string): HTMLDivElement {
+  const div = document.createElement('div');
+  div.className = className;
+  div.style.cssText = style;
+  if (textContent !== undefined) {
+    div.textContent = textContent;
+  }
+  return div;
+}
+
+// Helper to create a key-value row with safe text content
+function createDetailRow(label: string, value: string): HTMLDivElement {
+  const row = document.createElement('div');
+  row.style.cssText = 'margin-bottom:8px;';
+
+  const labelSpan = document.createElement('strong');
+  labelSpan.textContent = label;
+  row.appendChild(labelSpan);
+
+  const valueSpan = document.createElement('span');
+  valueSpan.textContent = value;
+  row.appendChild(valueSpan);
+
+  return row;
+}
+
+// Display anchor capture details in a modal dialog using DOM APIs for XSS safety
+function displayAnchorCaptureModal(anchorResponse: AnchorCaptureResponse, targetId: string): void {
+  // Create modal overlay
+  const overlay = document.createElement('div');
+  overlay.className = 'anchor-modal-overlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;';
+
+  // Create modal content
+  const modal = document.createElement('div');
+  modal.className = 'anchor-modal-content';
+  modal.style.cssText = 'background:white;border-radius:8px;max-width:600px;max-height:80vh;overflow:auto;padding:24px;';
+
+  // === Header Section ===
+  const headerDiv = document.createElement('div');
+  headerDiv.className = 'anchor-modal-header';
+
+  const title = document.createElement('h3');
+  title.style.cssText = 'margin:0 0 16px 0;';
+  title.textContent = 'Anchor Capture Details';
+  headerDiv.appendChild(title);
+
+  // Show status badge
+  if (anchorResponse.degraded) {
+    const statusBadge = document.createElement('div');
+    statusBadge.className = 'anchor-modal-status degraded';
+    statusBadge.style.cssText = 'background:#fff3cd;color:#856404;padding:8px 12px;border-radius:4px;margin-bottom:16px;';
+
+    const warnText = document.createElement('strong');
+    warnText.textContent = '⚠ Degraded: ';
+    statusBadge.appendChild(warnText);
+
+    const msgText = document.createElement('span');
+    msgText.textContent = anchorResponse.message || 'Anchor metadata retained but capture artifact is missing';
+    statusBadge.appendChild(msgText);
+
+    headerDiv.appendChild(statusBadge);
+  } else if (anchorResponse.status === 'available') {
+    const statusBadge = document.createElement('div');
+    statusBadge.className = 'anchor-modal-status available';
+    statusBadge.style.cssText = 'background:#d4edda;color:#155724;padding:8px 12px;border-radius:4px;margin-bottom:16px;';
+
+    const okText = document.createElement('strong');
+    okText.textContent = '✓ Available: ';
+    statusBadge.appendChild(okText);
+
+    const msgText = document.createElement('span');
+    msgText.textContent = 'Anchor capture artifact is available';
+    statusBadge.appendChild(msgText);
+
+    headerDiv.appendChild(statusBadge);
+  }
+  modal.appendChild(headerDiv);
+
+  // === Anchor Metadata Section ===
+  if (anchorResponse.anchor) {
+    const anchor = anchorResponse.anchor;
+
+    const metadataDiv = document.createElement('div');
+    metadataDiv.className = 'anchor-metadata';
+    metadataDiv.style.cssText = 'background:#f8f9fa;padding:16px;border-radius:4px;margin-bottom:16px;';
+
+    const metadataTitle = document.createElement('h4');
+    metadataTitle.style.cssText = 'margin:0 0 12px 0;';
+    metadataTitle.textContent = 'Cooldown Anchor Provenance';
+    metadataDiv.appendChild(metadataTitle);
+
+    // Build metadata rows with safe textContent
+    if (anchor.anchor_capture_id) {
+      metadataDiv.appendChild(createDetailRow('Capture ID: ', anchor.anchor_capture_id));
+    }
+    if (anchor.anchor_source) {
+      metadataDiv.appendChild(createDetailRow('Source: ', anchor.anchor_source));
+    }
+    if (anchor.anchor_target_id) {
+      metadataDiv.appendChild(createDetailRow('Target: ', anchor.anchor_target_id));
+    }
+    if (anchor.anchor_probe_kind) {
+      metadataDiv.appendChild(createDetailRow('Probe: ', anchor.anchor_probe_kind));
+    }
+    if (anchor.anchor_created_at) {
+      metadataDiv.appendChild(createDetailRow('Started: ', formatAnchorTime(anchor.anchor_created_at)));
+    }
+    if (anchor.created_from) {
+      metadataDiv.appendChild(createDetailRow('Created from: ', anchor.created_from));
+    }
+    if (anchor.is_warmup_anchor) {
+      const warmupNote = document.createElement('div');
+      warmupNote.style.cssText = 'margin-bottom:8px;color:#6c757d;';
+      const warmupEm = document.createElement('em');
+      warmupEm.textContent = 'Warmup capture (startup diagnostic)';
+      warmupNote.appendChild(warmupEm);
+      metadataDiv.appendChild(warmupNote);
+    }
+
+    modal.appendChild(metadataDiv);
+  }
+
+  // === Capture Details Section ===
+  if (anchorResponse.capture) {
+    const capture = anchorResponse.capture;
+
+    const captureDiv = document.createElement('div');
+    captureDiv.className = 'anchor-capture-details';
+    captureDiv.style.cssText = 'margin-bottom:16px;';
+
+    const captureTitle = document.createElement('h4');
+    captureTitle.style.cssText = 'margin:0 0 12px 0;';
+    captureTitle.textContent = 'Capture Artifact';
+    captureDiv.appendChild(captureTitle);
+
+    const captureContent = document.createElement('div');
+    captureContent.style.cssText = 'background:#e9ecef;padding:16px;border-radius:4px;';
+
+    captureContent.appendChild(createDetailRow('Status: ', capture.capture_status || capture.status));
+    captureContent.appendChild(createDetailRow('Source: ', capture.source));
+    captureContent.appendChild(createDetailRow('Started: ', capture.capture_started_at));
+
+    if (capture.capture_finished_at) {
+      captureContent.appendChild(createDetailRow('Finished: ', capture.capture_finished_at));
+    }
+    if (capture.duration_ms !== undefined) {
+      captureContent.appendChild(createDetailRow('Duration: ', capture.duration_ms.toString() + ' ms'));
+    }
+    if (capture.network_diag) {
+      captureContent.appendChild(createDetailRow('Network diag: ', capture.network_diag.status));
+    }
+    if (capture.error) {
+      captureContent.appendChild(createDetailRow('Error: ', formatError(capture.error)));
+    }
+
+    captureDiv.appendChild(captureContent);
+    modal.appendChild(captureDiv);
+  }
+
+  // === Footer Section ===
+  const footerDiv = document.createElement('div');
+  footerDiv.className = 'anchor-modal-footer';
+  footerDiv.style.cssText = 'display:flex;gap:12px;justify-content:flex-end;';
+
+  // Download button (if capture available)
+  let downloadBtn: HTMLButtonElement | null = null;
+  if (anchorResponse.capture) {
+    downloadBtn = document.createElement('button');
+    downloadBtn.type = 'button';
+    downloadBtn.className = 'download-anchor-btn';
+    downloadBtn.style.cssText = 'padding:8px 16px;background:#007bff;color:white;border:none;border-radius:4px;cursor:pointer;';
+    downloadBtn.textContent = 'Download anchor JSON';
+    footerDiv.appendChild(downloadBtn);
+  }
+
+  // Close button
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'close-anchor-modal-btn';
+  closeBtn.style.cssText = 'padding:8px 16px;background:#6c757d;color:white;border:none;border-radius:4px;cursor:pointer;';
+  closeBtn.textContent = 'Close';
+  footerDiv.appendChild(closeBtn);
+
+  modal.appendChild(footerDiv);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  // === Event Handlers ===
+  closeBtn.addEventListener('click', () => {
+    document.body.removeChild(overlay);
+  });
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      document.body.removeChild(overlay);
+    }
+  });
+
+  // Download handler
+  if (downloadBtn && anchorResponse.capture) {
+    downloadBtn.addEventListener('click', () => {
+      const exportData = {
+        export_kind: 'uvb76_anchor_capture',
+        exported_at: new Date().toISOString(),
+        target_id: targetId,
+        anchor: anchorResponse.anchor,
+        capture: anchorResponse.capture,
+        degraded: anchorResponse.degraded,
+      };
+      const filename = 'uvb76-anchor-' + sanitizeFilename(targetId) + '-' + (anchorResponse.anchor?.anchor_capture_id || 'unknown') + '.json';
+      downloadJson(exportData, filename);
+    });
+  }
+}
+
 // Render spike diagnostics for a target as a semantic table
 export async function loadSpikeDiagnostics(targetId: string): Promise<void> {
   const container = document.getElementById('spike-diag-' + targetId);
@@ -527,6 +743,60 @@ export async function loadSpikeDiagnostics(targetId: string): Promise<void> {
               '<div class="diag-suppressed-explanation">Prior capture anchor: outside current view</div>';
           }
           
+          // Build action buttons using DOM APIs for XSS safety
+          const actionsDiv = document.createElement('div');
+          actionsDiv.className = 'capture-actions';
+          
+          // View details button
+          const viewDetailsBtn = document.createElement('button');
+          viewDetailsBtn.type = 'button';
+          viewDetailsBtn.className = 'view-details-btn';
+          viewDetailsBtn.dataset.detailsId = detailsId;
+          viewDetailsBtn.dataset.spikeIndex = String(spikeIndex);
+          viewDetailsBtn.dataset.captureIndex = String(captureIndex);
+          viewDetailsBtn.dataset.targetId = targetId;
+          viewDetailsBtn.textContent = 'View details';
+          actionsDiv.appendChild(viewDetailsBtn);
+          
+          // Download capture JSON button
+          const downloadCaptureBtn = document.createElement('button');
+          downloadCaptureBtn.type = 'button';
+          downloadCaptureBtn.className = 'download-capture-btn';
+          downloadCaptureBtn.dataset.spikeIndex = String(spikeIndex);
+          downloadCaptureBtn.dataset.captureIndex = String(captureIndex);
+          downloadCaptureBtn.dataset.targetId = targetId;
+          downloadCaptureBtn.textContent = 'Download capture JSON';
+          actionsDiv.appendChild(downloadCaptureBtn);
+          
+          // Download spike bundle button
+          const downloadSpikeBtn = document.createElement('button');
+          downloadSpikeBtn.type = 'button';
+          downloadSpikeBtn.className = 'download-spike-btn';
+          downloadSpikeBtn.dataset.spikeIndex = String(spikeIndex);
+          downloadSpikeBtn.textContent = 'Download spike bundle';
+          actionsDiv.appendChild(downloadSpikeBtn);
+          
+          // Add "View anchor capture" button ONLY if real anchor_capture_id exists
+          // Without a durable anchor ID, we cannot look up the anchor
+          if (capture.suppressed_by_cooldown && capture.cooldown_info && !capture.cooldown_info.anchor_visible && capture.cooldown_info.anchor_capture_id) {
+            const anchorCaptureBtn = document.createElement('button');
+            anchorCaptureBtn.type = 'button';
+            anchorCaptureBtn.className = 'view-anchor-capture-btn';
+            anchorCaptureBtn.dataset.anchorCaptureId = capture.cooldown_info.anchor_capture_id;
+            anchorCaptureBtn.dataset.targetId = targetId;
+            anchorCaptureBtn.textContent = 'View anchor capture';
+            actionsDiv.appendChild(anchorCaptureBtn);
+          }
+          
+          // If anchor timestamp exists but no durable ID, show degraded message instead of button
+          if (capture.suppressed_by_cooldown && capture.cooldown_info && !capture.cooldown_info.anchor_visible && 
+              capture.cooldown_info.last_successful_capture_at && !capture.cooldown_info.anchor_capture_id) {
+            const degradedNote = document.createElement('div');
+            degradedNote.className = 'cooldown-degraded-note';
+            degradedNote.textContent = 'Cooldown anchor timestamp exists, but durable anchor ID is missing from retention';
+            actionsDiv.appendChild(degradedNote);
+          }
+          
           expandedCaptures += '<div class="capture-row">' +
             '<div class="capture-header">' +
             '<span class="capture-source">' + sourceName + duration + '</span>' +
@@ -535,11 +805,7 @@ export async function loadSpikeDiagnostics(targetId: string): Promise<void> {
             (errorText ? '<div class="capture-error">' + errorText + '</div>' : '') +
             (enhancedNetworkDiagStatus ? '<div class="diag-row">' + enhancedNetworkDiagStatus + '</div>' : '') +
             (cooldownExplanation ? '<div class="cooldown-explanation-row">' + cooldownExplanation + '</div>' : '') +
-            '<div class="capture-actions">' +
-            '<button type="button" class="view-details-btn" data-details-id="' + detailsId + '" data-spike-index="' + spikeIndex + '" data-capture-index="' + captureIndex + '" data-target-id="' + targetId + '">View details</button>' +
-            '<button type="button" class="download-capture-btn" data-spike-index="' + spikeIndex + '" data-capture-index="' + captureIndex + '" data-target-id="' + targetId + '">Download capture JSON</button>' +
-            '<button type="button" class="download-spike-btn" data-spike-index="' + spikeIndex + '">Download spike bundle</button>' +
-            '</div>' +
+            '<div class="capture-actions-row">' + actionsDiv.outerHTML + '</div>' +
             '<div class="capture-details" id="' + detailsId + '" style="display: none;">' +
             renderCaptureDetails(capture) +
             '</div>' +
@@ -601,6 +867,33 @@ export async function loadSpikeDiagnostics(targetId: string): Promise<void> {
         const spike = responseData.spikes[index];
         if (spike) {
           downloadSpikeBundle(spike);
+        }
+      });
+    });
+
+    // Handle "View anchor capture" button for skipped cooldown with hidden anchor
+    container.querySelectorAll('.view-anchor-capture-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const target = e.target as HTMLButtonElement;
+        const anchorCaptureId = target.dataset.anchorCaptureId;
+        const tgtId = target.dataset.targetId;
+        if (!anchorCaptureId || !tgtId) return;
+
+        // Disable button while loading
+        target.disabled = true;
+        const originalText = target.textContent;
+        target.textContent = 'Loading...';
+
+        try {
+          const anchorResponse = await api.getAnchorCapture(anchorCaptureId);
+          displayAnchorCaptureModal(anchorResponse, tgtId);
+        } catch (err) {
+          console.error('Failed to fetch anchor capture:', err);
+          // Show error in a simple alert (could be improved with a modal)
+          alert('Failed to fetch anchor capture details. The anchor may have been purged from retention.');
+        } finally {
+          target.disabled = false;
+          target.textContent = originalText;
         }
       });
     });
