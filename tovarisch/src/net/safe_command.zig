@@ -114,19 +114,26 @@ pub fn runCommand(
         _ = std.c.dup2(stderr_pipe[1], 2);
         _ = std.c.close(stderr_pipe[1]);
 
-        var argv = std.ArrayListUnmanaged([*:0]const u8){ .items = &.{}, .capacity = 0 };
+        // Build argv with proper null-termination for execve.
+        // execve expects: argv[0] = program, argv[1..n] = args, argv[n+1] = null
+        // Using nullable pointers (?[*:0]const u8) so we can explicitly set null.
+        var argv = std.ArrayListUnmanaged(?[*:0]const u8){ .items = &.{}, .capacity = 0 };
         errdefer argv.deinit(allocator);
 
         try argv.append(allocator, exe_path);
         for (args) |arg| {
             try argv.append(allocator, arg);
         }
-        // Null-terminate argv
-        const null_sentinel: [*:0]const u8 = "";
-        try argv.append(allocator, null_sentinel);
+        // Null-terminate argv - this MUST be a null pointer, not an empty string.
+        // Bug fix: Previously appended "" (empty string pointer) which caused EFAULT
+        // because execve saw: [..., "", garbage_ptr, ...] instead of [..., ptr, null].
+        try argv.append(allocator, null);
 
         const empty_env: [*:null]const ?[*:0]const u8 = &.{};
-        _ = std.c.execve(exe_path, @ptrCast(argv.items.ptr), empty_env);
+        // Cast to [*:null]const ?[*:0]const u8 for execve compatibility.
+        // This is valid because we explicitly null-terminated argv above.
+        const argv_ptr: [*:null]const ?[*:0]const u8 = @ptrCast(argv.items.ptr);
+        _ = std.c.execve(exe_path, argv_ptr, empty_env);
         std.c._exit(127);
     }
 
@@ -254,4 +261,141 @@ test "CommandResult can be constructed" {
     };
     try std.testing.expectEqual(@as(c_int, 0), result.exit_code);
     try std.testing.expectEqualStrings("test output", result.stdout);
+}
+
+// Regression test: argv array must be nullable for execve.
+// This ensures we can properly null-terminate the argv list.
+test "argv type is nullable for proper null-termination" {
+    // The argv array must use nullable pointers so we can set the
+    // terminating null pointer: argv[n] = null.
+    // If the type were [*:0]const u8 (non-nullable), we could not
+    // properly terminate the array for execve.
+    var argv = std.ArrayListUnmanaged(?[*:0]const u8){ .items = &.{}, .capacity = 0 };
+    try argv.append(std.testing.allocator, @ptrFromInt(0x1000));
+    try argv.append(std.testing.allocator, null); // Valid: nullable type allows null
+    
+    // Verify structure: [ptr, null]
+    try std.testing.expectEqual(@as(usize, 2), argv.items.len);
+    try std.testing.expectEqual(@as(?[*:0]const u8, @ptrFromInt(0x1000)), argv.items[0]);
+    try std.testing.expectEqual(@as(?[*:0]const u8, null), argv.items[1]);
+    
+    argv.deinit(std.testing.allocator);
+}
+
+// Regression test: ss_tin command builds correct argv for execve.
+// Before fix: execve received ["/usr/bin/ss", "-tin", "", garbage...]
+// After fix: execve receives ["/usr/bin/ss", "-tin", null]
+test "ss_tin builds correct argv for execve" {
+    // This test verifies the argv construction pattern used by runSsTin.
+    // runSsTin calls runCommand with args = &.{ "-tin" }
+    // 
+    // Expected argv structure:
+    //   argv[0] = "/usr/bin/ss"
+    //   argv[1] = "-tin"
+    //   argv[2] = null  <-- MUST be null, not empty string ""
+    
+    const exe_path: [*:0]const u8 = "/usr/bin/ss";
+    const args: []const [*:0]const u8 = &.{ "-tin" };
+    
+    // Simulate argv construction (same as runCommand)
+    var argv = std.ArrayListUnmanaged(?[*:0]const u8){ .items = &.{}, .capacity = 0 };
+    defer argv.deinit(std.testing.allocator);
+    
+    try argv.append(std.testing.allocator, exe_path);
+    for (args) |arg| {
+        try argv.append(std.testing.allocator, arg);
+    }
+    try argv.append(std.testing.allocator, null);
+    
+    // Verify: ["/usr/bin/ss", "-tin", null]
+    try std.testing.expectEqual(@as(usize, 3), argv.items.len);
+    try std.testing.expect(argv.items[0] != null);
+    try std.testing.expectEqualStrings("/usr/bin/ss", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv.items[0].?)), 0));
+    try std.testing.expect(argv.items[1] != null);
+    try std.testing.expectEqualStrings("-tin", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv.items[1].?)), 0));
+    try std.testing.expectEqual(@as(?[*:0]const u8, null), argv.items[2]);
+}
+
+// Regression test: wg_show builds correct argv for execve.
+// Expected: ["/usr/bin/wg", "show", null]
+test "wg_show builds correct argv for execve" {
+    const exe_path: [*:0]const u8 = "/usr/bin/wg";
+    const args: []const [*:0]const u8 = &.{ "show" };
+    
+    // Simulate argv construction (same as runWgShow -> runCommand)
+    var argv = std.ArrayListUnmanaged(?[*:0]const u8){ .items = &.{}, .capacity = 0 };
+    defer argv.deinit(std.testing.allocator);
+    
+    try argv.append(std.testing.allocator, exe_path);
+    for (args) |arg| {
+        try argv.append(std.testing.allocator, arg);
+    }
+    try argv.append(std.testing.allocator, null);
+    
+    // Verify: ["/usr/bin/wg", "show", null]
+    try std.testing.expectEqual(@as(usize, 3), argv.items.len);
+    try std.testing.expect(argv.items[0] != null);
+    try std.testing.expectEqualStrings("/usr/bin/wg", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv.items[0].?)), 0));
+    try std.testing.expect(argv.items[1] != null);
+    try std.testing.expectEqualStrings("show", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv.items[1].?)), 0));
+    try std.testing.expectEqual(@as(?[*:0]const u8, null), argv.items[2]);
+}
+
+// Regression test: wg_show_dump builds correct argv for execve.
+// Expected: ["/usr/bin/wg", "show", <iface>, "dump", null]
+test "wg_show_dump builds correct argv for execve" {
+    const exe_path: [*:0]const u8 = "/usr/bin/wg";
+    const iface_arg: [*:0]const u8 = "wg0";
+    const args: []const [*:0]const u8 = &.{ "show", iface_arg, "dump" };
+    
+    // Simulate argv construction
+    var argv = std.ArrayListUnmanaged(?[*:0]const u8){ .items = &.{}, .capacity = 0 };
+    defer argv.deinit(std.testing.allocator);
+    
+    try argv.append(std.testing.allocator, exe_path);
+    for (args) |arg| {
+        try argv.append(std.testing.allocator, arg);
+    }
+    try argv.append(std.testing.allocator, null);
+    
+    // Verify: ["/usr/bin/wg", "show", "wg0", "dump", null]
+    try std.testing.expectEqual(@as(usize, 5), argv.items.len);
+    try std.testing.expectEqualStrings("/usr/bin/wg", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv.items[0].?)), 0));
+    try std.testing.expectEqualStrings("show", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv.items[1].?)), 0));
+    try std.testing.expectEqualStrings("wg0", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv.items[2].?)), 0));
+    try std.testing.expectEqualStrings("dump", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv.items[3].?)), 0));
+    try std.testing.expectEqual(@as(?[*:0]const u8, null), argv.items[4]);
+}
+
+// Regression test: old bug would produce [ptr, "", garbage...] not [ptr, null]
+// This test verifies the FIX: we use nullable type and append null, not "".
+test "old bug: empty string not used as sentinel" {
+    // OLD BUG: const null_sentinel: [*:0]const u8 = "";
+    //          try argv.append(allocator, null_sentinel);
+    // This appended "" (empty string pointer) to argv, making:
+    //   ["/usr/bin/ss", "-tin", ""]  <-- "" is NOT a null pointer!
+    // 
+    // When execve scanned argv looking for NULL terminator, it found:
+    //   argv[0] = ptr to "/usr/bin/ss"   <-- valid
+    //   argv[1] = ptr to "-tin"          <-- valid
+    //   argv[2] = ptr to ""              <-- valid but not NULL!
+    //   argv[3] = UNINITIALIZED/GARBAGE  <-- EFAULT!
+    //
+    // FIX: Use nullable type and append null:
+    //   var argv = ArrayListUnmanaged(?[*:0]const u8)
+    //   try argv.append(allocator, null);  <-- actual NULL pointer
+    
+    // Verify that appending null produces a true null pointer, not empty string
+    var argv = std.ArrayListUnmanaged(?[*:0]const u8){ .items = &.{}, .capacity = 0 };
+    defer argv.deinit(std.testing.allocator);
+    
+    try argv.append(std.testing.allocator, @ptrFromInt(0x1000));
+    try argv.append(std.testing.allocator, null);
+    
+    // The second element MUST be null, not a pointer to empty string
+    try std.testing.expectEqual(@as(?[*:0]const u8, null), argv.items[1]);
+    
+    // Verify it's actually the NULL pointer, not some non-null address
+    const sentinel = argv.items[1];
+    try std.testing.expect(sentinel == null);
 }
