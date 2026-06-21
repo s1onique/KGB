@@ -5,8 +5,10 @@ import (
 	"flag"
 	"io/fs"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/s1onique/KGB/uvb76/config"
@@ -30,6 +32,13 @@ func main() {
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.SetOutput(os.Stdout)
+
+	// Diagnostics startup logger: uses slog text handler for structured key=value output.
+	// We create a local logger rather than calling slog.SetDefault to avoid changing
+	// the behavior of existing log.Printf/log.Println calls used elsewhere in main().
+	diagLogger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
 
 	// Set the embedded web filesystem for the server
 	webContent, err := fs.Sub(webDist, "web/dist")
@@ -99,8 +108,11 @@ func main() {
 		diagCaptureService = diag.NewCaptureService(&cfg.Diagnostics, captureStore)
 		// Enable capture-aware spike retention with configured cap
 		stateManager.EnableCaptureAwareSpikeRetentionWithCap(cfg.Diagnostics.MaxUncapturedSpikes)
-		log.Printf("Diagnostic capture enabled (timeout: %dms, cooldown: %ds, max_uncaptured_spikes: %d)",
-			cfg.Diagnostics.TimeoutMs, cfg.Diagnostics.CooldownSeconds, cfg.Diagnostics.MaxUncapturedSpikes)
+
+		// Log diagnostics config with structured fields for grep/journal compatibility.
+		// This proves UVB parsed its peer config correctly; it does NOT claim TCP diagnostics
+		// are enabled on the peer side (that is controlled by tovarisch).
+		logDiagnosticsStartup(diagLogger, &cfg.Diagnostics)
 	}
 
 	// Wire diagnostic capture service into HTTP and ICMP probe clients
@@ -131,4 +143,43 @@ func main() {
 	icmpProbeClient.Stop()
 	srv.Stop()
 	log.Println("Shutdown complete.")
+}
+
+// sanitizeBaseURLForLog returns the base_url with scheme stripped for logging.
+// The scheme is excluded because it adds no diagnostic value and keeping it
+// consistent simplifies log parsing (always host:port/path format).
+// base_url validation rejects userinfo, so no credentials are present.
+func sanitizeBaseURLForLog(baseURL string) string {
+	if baseURL == "" {
+		return ""
+	}
+	// Strip scheme:// prefix (validation ensures http:// or https://)
+	withoutScheme := strings.TrimPrefix(baseURL, "http://")
+	withoutScheme = strings.TrimPrefix(withoutScheme, "https://")
+	return withoutScheme
+}
+
+// logDiagnosticsStartup logs the diagnostics configuration at startup with structured
+// key=value fields for grep/journal compatibility. This proves UVB parsed its peer
+// config correctly; it does NOT claim TCP diagnostics are enabled on the peer side
+// (that is controlled by tovarisch).
+func logDiagnosticsStartup(logger *slog.Logger, cfg *config.DiagnosticsConfig) {
+	logger.Info("uvb76 diagnostics configured",
+		"enabled", cfg.Enabled,
+		"peer_count", len(cfg.Peers),
+		"capture_on_spike", cfg.CaptureOnSpike,
+		"timeout_ms", cfg.TimeoutMs,
+		"cooldown_seconds", cfg.CooldownSeconds,
+	)
+
+	for _, peer := range cfg.Peers {
+		logger.Info("uvb76 diagnostics peer configured",
+			"name", peer.Name,
+			"base_url", sanitizeBaseURLForLog(peer.BaseURL),
+			"targets", strings.Join(peer.Targets, ","),
+			"capture_on_spike", cfg.CaptureOnSpike,
+			"timeout_ms", cfg.TimeoutMs,
+			"cooldown_seconds", cfg.CooldownSeconds,
+		)
+	}
 }
