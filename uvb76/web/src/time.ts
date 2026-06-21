@@ -140,3 +140,92 @@ export function toUTCInstant(value: string | null | undefined): Date | null {
   const date = parseApiInstant(value);
   return date; // Already normalized by parseApiInstant
 }
+
+// ---------------------------------------------------------------------------
+// Local timezone formatters (for consistent user-facing display)
+// ---------------------------------------------------------------------------
+
+/**
+ * Options for local timezone formatters.
+ * timeZone defaults to browser/runtime timezone when undefined.
+ */
+export interface LocalFormatterOptions {
+  /** IANA timezone (e.g., "Europe/Helsinki"). Defaults to browser timezone. */
+  timeZone?: string;
+}
+
+/**
+ * Format a UTC instant as a full date-time string in local/browser timezone.
+ *
+ * Output format: "2026-06-21 11:39:56" (no UTC suffix)
+ *
+ * Uses Intl.DateTimeFormat with formatToParts for deterministic output.
+ * Tests can pass explicit timeZone for deterministic expectations.
+ *
+ * @param value - RFC3339 timestamp string
+ * @param options - Optional timeZone override (for testing)
+ * @returns Formatted date-time or "—" for invalid/missing input
+ */
+export function formatLocalDateTime(
+  value: string | null | undefined,
+  options: LocalFormatterOptions = {}
+): string {
+  const date = parseApiInstant(value);
+  if (!date) return '—';
+
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: options.timeZone, // undefined = browser default
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(date);
+  const year = parts.find(p => p.type === 'year')?.value ?? '????';
+  const month = parts.find(p => p.type === 'month')?.value ?? '??';
+  const day = parts.find(p => p.type === 'day')?.value ?? '??';
+  const hour = parts.find(p => p.type === 'hour')?.value ?? '??';
+  const minute = parts.find(p => p.type === 'minute')?.value ?? '??';
+  const second = parts.find(p => p.type === 'second')?.value ?? '??';
+
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+
+/**
+ * Format a UTC instant as a time-only string in local/browser timezone.
+ *
+ * Output format: "11:39:56" (no UTC suffix)
+ *
+ * Uses Intl.DateTimeFormat with formatToParts for deterministic output.
+ * Tests can pass explicit timeZone for deterministic expectations.
+ *
+ * @param value - RFC3339 timestamp string
+ * @param options - Optional timeZone override (for testing)
+ * @returns Formatted time or "—" for invalid/missing input
+ */
+export function formatLocalTime(
+  value: string | null | undefined,
+  options: LocalFormatterOptions = {}
+): string {
+  const date = parseApiInstant(value);
+  if (!date) return '—';
+
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: options.timeZone, // undefined = browser default
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(date);
+  const hour = parts.find(p => p.type === 'hour')?.value ?? '??';
+  const minute = parts.find(p => p.type === 'minute')?.value ?? '??';
+  const second = parts.find(p => p.type === 'second')?.value ?? '??';
+
+  return `${hour}:${minute}:${second}`;
+}

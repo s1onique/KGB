@@ -1,7 +1,7 @@
 // Spike diagnostics rendering module
 import { api, type SpikeEventWithCaptures, type DiagCapture, type TcpSocketDiagData, type NetworkDiagData, type SpikeRetentionStats, type CaptureCooldownInfo, type TcpAbsenceEvent } from './api';
 import { formatSpikeTime, formatLatencyMs } from './format';
-import { formatUtcInstant, parseApiInstant, formatRemainingCooldown } from './time';
+import { formatLocalDateTime, parseApiInstant, formatRemainingCooldown } from './time';
 
 // HTML escape helper for XSS protection
 function escapeText(s: string | null | undefined): string {
@@ -120,15 +120,15 @@ function formatTargetName(targetId: string): string {
   return escapeText(targetId);
 }
 
-// Format timestamp for display using UTC instant formatting.
-// Uses parseApiInstant to validate explicit timezone, then formats as UTC.
+// Format timestamp for display using local timezone (consistent with table).
+// Uses parseApiInstant to validate explicit timezone, then formats as local time.
 function formatAnchorTime(timestamp: string | undefined): string {
   // Use parseApiInstant which rejects timezone-less formats
   const date = parseApiInstant(timestamp ?? null);
   if (!date) return '—';
 
-  // Format using UTC instant formatting
-  return formatUtcInstant(timestamp);
+  // Format using local timezone (same as table timestamps)
+  return formatLocalDateTime(timestamp);
 }
 
 // Render cooldown anchor explanation for a capture

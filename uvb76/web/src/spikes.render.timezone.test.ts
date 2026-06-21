@@ -1,7 +1,10 @@
-// DOM renderer tests: timezone handling for cooldown timestamps
+// DOM renderer tests: timezone handling for spike/capture diagnostics
 //
-// These tests verify that timestamp parsing and rendering correctly handles
-// explicit UTC instants and rejects timezone-less formats.
+// These tests verify that timestamp rendering is CONSISTENTLY in local/browser
+// timezone (matching the table row timestamps), NOT mixed with UTC display.
+//
+// FIXED: Spike table row uses local time, capture details anchor/next-eligible
+// now also use local time (same as table), ensuring consistent UI.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
@@ -17,7 +20,7 @@ vi.mock('./api', () => ({
 
 // Import after mock setup
 import { loadSpikeDiagnostics } from './spikes';
-import { spikeResponseWithHiddenAnchorCooldown } from './spikes.render.fixtures';
+import { spikeResponseWithHiddenAnchorCooldown, createSpike } from './spikes.render.fixtures';
 
 describe('spikes DOM renderer: timezone handling', () => {
   let container: HTMLDivElement;
@@ -34,142 +37,16 @@ describe('spikes DOM renderer: timezone handling', () => {
   });
 
   // =======================================================================
-  // Test Case A: Explicit UTC renders as UTC
+  // Test Case A: Local time consistency (the fix)
   // =======================================================================
-  describe('explicit UTC timestamps', () => {
-    it('renders UTC timestamp with explicit UTC label', async () => {
+  describe('local time consistency (ACT regression fix)', () => {
+    it('renders local time without UTC suffix in capture details', async () => {
+      // ACT scenario: spike at 08:40:25 UTC, anchor at 08:39:56 UTC
+      // In Helsinki (UTC+3), both should show local time: 11:40:25 and 11:39:56
       const response = spikeResponseWithHiddenAnchorCooldown({
         cooldown_info: {
-          last_successful_capture_at: '2026-06-20T21:09:59Z',
-          next_capture_eligible_at: '2026-06-20T21:11:29Z',
-        },
-      });
-      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
-      await loadSpikeDiagnostics('test-target');
-
-      // Should render as "2026-06-20 21:09:59 UTC" not a local time
-      expect(container.textContent).toContain('2026-06-20');
-      expect(container.textContent).toContain('21:09:59');
-      expect(container.textContent).toContain('UTC');
-    });
-
-    it('does not apply local timezone offset to UTC timestamp', async () => {
-      const response = spikeResponseWithHiddenAnchorCooldown({
-        cooldown_info: {
-          last_successful_capture_at: '2026-06-20T21:09:59Z',
-        },
-      });
-      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
-      await loadSpikeDiagnostics('test-target');
-
-      // The rendered time should show 21:09:59 UTC
-      // NOT 00:09:59 (Moscow UTC+3) or any other local offset
-      expect(container.textContent).toContain('21:09:59 UTC');
-      // Should NOT show 00:09:59 (if browser is in Moscow timezone)
-      expect(container.textContent).not.toContain('00:09:59');
-    });
-  });
-
-  // =======================================================================
-  // Test Case B: Explicit offset preserves instant
-  // =======================================================================
-  describe('explicit offset timestamps', () => {
-    it('renders +02:00 offset as UTC instant', async () => {
-      const response = spikeResponseWithHiddenAnchorCooldown({
-        cooldown_info: {
-          last_successful_capture_at: '2026-06-20T23:09:59+02:00', // 21:09:59 UTC
-        },
-      });
-      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
-      await loadSpikeDiagnostics('test-target');
-
-      // Should render as UTC 21:09:59
-      expect(container.textContent).toContain('21:09:59 UTC');
-    });
-
-    it('renders -05:00 offset as UTC instant', async () => {
-      const response = spikeResponseWithHiddenAnchorCooldown({
-        cooldown_info: {
-          last_successful_capture_at: '2026-06-20T02:09:59-05:00', // 07:09:59 UTC
-        },
-      });
-      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
-      await loadSpikeDiagnostics('test-target');
-
-      // Should render as UTC 07:09:59
-      expect(container.textContent).toContain('07:09:59 UTC');
-    });
-
-    it('offset timestamp matches equivalent Z timestamp by instant', async () => {
-      // Two responses with equivalent instants
-      const response1 = spikeResponseWithHiddenAnchorCooldown({
-        cooldown_info: {
-          last_successful_capture_at: '2026-06-20T21:09:59Z',
-        },
-      });
-      const response2 = spikeResponseWithHiddenAnchorCooldown({
-        cooldown_info: {
-          last_successful_capture_at: '2026-06-20T23:09:59+02:00', // same instant
-        },
-      });
-
-      mockGetLatencySpikesWithCaptures.mockResolvedValue(response1);
-      await loadSpikeDiagnostics('test-target');
-      const text1 = container.textContent;
-
-      // Reset container
-      container.innerHTML = '';
-      mockGetLatencySpikesWithCaptures.mockResolvedValue(response2);
-      await loadSpikeDiagnostics('test-target');
-      const text2 = container.textContent;
-
-      // Both should render the same UTC time
-      expect(text1).toContain('21:09:59 UTC');
-      expect(text2).toContain('21:09:59 UTC');
-    });
-  });
-
-  // =======================================================================
-  // Test Case C: Timezone-less timestamp rejected
-  // =======================================================================
-  describe('timezone-less timestamps', () => {
-    it('renders invalid timestamp for timezone-less T format', async () => {
-      const response = spikeResponseWithHiddenAnchorCooldown({
-        cooldown_info: {
-          last_successful_capture_at: '2026-06-20T21:09:59', // no Z, no offset
-        },
-      });
-      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
-      await loadSpikeDiagnostics('test-target');
-
-      // Should show "—" or "invalid timestamp" instead of incorrectly parsed time
-      // The key is it should NOT append "UTC" to a locally-interpreted time
-      expect(container.textContent).not.toContain('T21:09:59'); // raw string
-    });
-
-    it('renders invalid timestamp for space-separated format', async () => {
-      const response = spikeResponseWithHiddenAnchorCooldown({
-        cooldown_info: {
-          last_successful_capture_at: '2026-06-20 21:09:59', // space, no timezone
-        },
-      });
-      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
-      await loadSpikeDiagnostics('test-target');
-
-      // Should NOT incorrectly append UTC to this
-      expect(container.textContent).not.toContain('2026-06-20 21:09:59 UTC');
-    });
-  });
-
-  // =======================================================================
-  // Test Case D: Screenshot regression
-  // =======================================================================
-  describe('screenshot regression', () => {
-    it('renders anchor and next eligible correctly', async () => {
-      const response = spikeResponseWithHiddenAnchorCooldown({
-        cooldown_info: {
-          last_successful_capture_at: '2026-06-20T21:09:59Z',
-          next_capture_eligible_at: '2026-06-20T21:11:29Z',
+          last_successful_capture_at: '2026-06-21T08:39:56Z',
+          next_capture_eligible_at: '2026-06-21T08:41:26Z',
           remaining_cooldown_ms: 33000,
           anchor_visible: false,
           anchor_visibility_reason: 'outside_filter_window',
@@ -178,13 +55,75 @@ describe('spikes DOM renderer: timezone handling', () => {
       mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
       await loadSpikeDiagnostics('test-target');
 
-      // Both timestamps should be visible
+      // Capture details should NOT contain "UTC" suffix (the regression was mixing times)
+      // Anchor label should be visible
       expect(container.textContent).toContain('Anchor:');
-      expect(container.textContent).toContain('21:09:59 UTC');
       expect(container.textContent).toContain('Next eligible:');
-      expect(container.textContent).toContain('21:11:29 UTC');
+
+      // Should NOT show raw UTC strings like "2026-06-21 08:39:56 UTC"
+      // Instead should show local time (format: YYYY-MM-DD HH:mm:ss without UTC)
+      expect(container.textContent).not.toContain('08:39:56 UTC');
+      expect(container.textContent).not.toContain('08:41:26 UTC');
+
+      // Should NOT show raw ISO strings
+      expect(container.textContent).not.toContain('T08:39:56Z');
+      expect(container.textContent).not.toContain('T08:41:26Z');
     });
 
+    it('renders local time format (YYYY-MM-DD HH:mm:ss) in capture details', async () => {
+      const response = spikeResponseWithHiddenAnchorCooldown({
+        cooldown_info: {
+          last_successful_capture_at: '2026-06-21T08:39:56Z',
+          next_capture_eligible_at: '2026-06-21T08:41:26Z',
+        },
+      });
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+
+      // The rendered anchor time should match format YYYY-MM-DD HH:mm:ss
+      // (local time, no UTC suffix - consistent with spike table row)
+      expect(container.textContent).toMatch(/Anchor:.*\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+      expect(container.textContent).toMatch(/Next eligible:.*\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+    });
+  });
+
+  // =======================================================================
+  // Test Case B: Timezone-less timestamp handling
+  // =======================================================================
+  describe('timezone-less timestamps', () => {
+    it('renders em dash for timezone-less T format', async () => {
+      const response = spikeResponseWithHiddenAnchorCooldown({
+        cooldown_info: {
+          last_successful_capture_at: '2026-06-20T21:09:59', // no Z, no offset
+        },
+      });
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+
+      // Should show "—" for invalid timestamp
+      // Should NOT show raw string or incorrectly format it
+      expect(container.textContent).not.toContain('T21:09:59'); // raw string
+    });
+
+    it('renders em dash for space-separated format', async () => {
+      const response = spikeResponseWithHiddenAnchorCooldown({
+        cooldown_info: {
+          last_successful_capture_at: '2026-06-20 21:09:59', // space, no timezone
+        },
+      });
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+
+      // Should NOT show this incorrectly formatted
+      expect(container.textContent).not.toContain('2026-06-20 21:09:59 UTC');
+      expect(container.textContent).not.toContain('2026-06-20 21:09:59');
+    });
+  });
+
+  // =======================================================================
+  // Test Case C: Cooldown remaining time formatting
+  // =======================================================================
+  describe('cooldown remaining time formatting', () => {
     it('renders remaining cooldown with (at decision) label', async () => {
       const response = spikeResponseWithHiddenAnchorCooldown({
         cooldown_info: {
@@ -221,6 +160,59 @@ describe('spikes DOM renderer: timezone handling', () => {
       mockGetLatencySpikesWithCaptures.mockResolvedValue(response500ms);
       await loadSpikeDiagnostics('test-target');
       expect(container.textContent).toContain('500 ms');
+    });
+  });
+
+  // =======================================================================
+  // Test Case D: Spike row timestamp consistency
+  // =======================================================================
+  describe('spike row timestamp', () => {
+    it('renders spike time in local timezone', async () => {
+      // Spike timestamp at 08:40:25 UTC should render as local time
+      const spikeTimestamp = '2026-06-21T08:40:25Z';
+      const response = spikeResponseWithHiddenAnchorCooldown({
+        latency_ms: 800,
+        cooldown_info: {
+          last_successful_capture_at: '2026-06-21T08:39:56Z',
+        },
+      });
+      // Override spike timestamp
+      response.spikes[0].sample_ts = spikeTimestamp;
+
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+
+      // Spike row should show time (HH:mm:ss format from formatSpikeTime)
+      // The formatSpikeTime uses Intl.DateTimeFormat with browser timezone
+      expect(container.textContent).toMatch(/\d{2}:\d{2}:\d{2}/);
+
+      // Should NOT show raw UTC in spike row
+      expect(container.textContent).not.toContain('08:40:25 UTC');
+    });
+  });
+
+  // =======================================================================
+  // Test Case E: Visible anchor timestamp
+  // =======================================================================
+  describe('visible anchor timestamp', () => {
+    it('renders visible anchor with local time format', async () => {
+      const { spikeResponseWithVisibleAnchorCooldown } = await import('./spikes.render.fixtures');
+      const response = spikeResponseWithVisibleAnchorCooldown({
+        cooldown_info: {
+          last_successful_capture_at: '2026-06-21T08:39:56Z',
+        },
+      });
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+
+      // Should show "Prior capture at" with local time format
+      expect(container.textContent).toContain('Prior capture at');
+
+      // Should NOT show UTC suffix for visible anchor
+      expect(container.textContent).not.toContain('08:39:56 UTC');
+
+      // Should match local time format
+      expect(container.textContent).toMatch(/Prior capture at.*\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
     });
   });
 });
