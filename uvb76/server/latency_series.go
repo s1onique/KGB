@@ -124,42 +124,46 @@ func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Reques
 		windowSeconds = 300 // default fallback
 	}
 
-	// Get samples based on probe_kind. This handler makes an explicit copy of the
-	// samples slice before aggregation to harden against stale/shared slice ownership.
-	// The crash at line 418 (series.Points = append(...)) during growslice suggested
-	// potential aliasing with mutable ring buffer state. This defensive copy ensures
-	// the handler owns its backing array independently of concurrent tracker writes.
-	var samples []state.LatencySample
+	// Get atomic snapshot of tracker state. The Snapshot primitive provides
+	// a single locked operation that returns samples, timestamps, and metadata
+	// in one consistent snapshot. This replaces the previous pattern of
+	// composing responses from separate tracker reads (GetRecentSamples +
+	// GetSampleTimestamps), which could observe inconsistent state under
+	// concurrent writes.
+	var snap *state.LatencySnapshot
 	var intervalSeconds int
 	var windowSec int
 	var retainedRange int
 	var probeURL string
-	var oldestTs, newestTs *time.Time
-	var sampleCount int
 
 	if probeKind == "http" {
 		maxSamples := s.state.GetMaxSamples()
-		rawSamples := s.state.GetRecentLatencySamples(targetID, maxSamples)
-		// Defensive copy: ensures our backing array is owned and stable
-		samples = append([]state.LatencySample(nil), rawSamples...)
+		// GetHTTPSnapshot provides samples + timestamps + metadata in one locked operation
+		snap = s.state.GetHTTPSnapshot(targetID, maxSamples)
 		intervalSeconds = s.cfg.Latency.HTTP.IntervalSeconds
 		windowSec = s.cfg.Latency.HTTP.WindowSeconds
 		retainedRange = s.cfg.Latency.HTTP.RetainedRangeSeconds
 		probeURL = config.TargetStatusURL(targetCfg.BaseURL)
-		oldestTs, newestTs = s.state.GetLatencySampleTimestamps(targetID)
-		sampleCount = len(samples)
 	} else {
 		maxSamples := s.state.GetICMPMaxSamples()
-		rawSamples := s.state.GetRecentICMPLatencySamples(targetID, maxSamples)
-		// Defensive copy: ensures our backing array is owned and stable
-		samples = append([]state.LatencySample(nil), rawSamples...)
+		// GetICMPSnapshot provides samples + timestamps + metadata in one locked operation
+		snap = s.state.GetICMPSnapshot(targetID, maxSamples)
 		intervalSeconds = s.cfg.Latency.ICMP.IntervalSeconds
 		windowSec = s.cfg.Latency.ICMP.WindowSeconds
 		retainedRange = s.cfg.Latency.ICMP.RetainedRangeSeconds
 		probeURL = targetCfg.BaseURL
-		oldestTs, newestTs = s.state.GetICMPLatencySampleTimestamps(targetID)
-		sampleCount = len(samples)
 	}
+
+	// Handle nil snapshot (should not happen but be defensive)
+	if snap == nil {
+		snap = &state.LatencySnapshot{}
+	}
+
+	// Extract snapshot data - samples are already caller-owned copies
+	samples := snap.Samples
+	oldestTs := snap.OldestSampleTs
+	newestTs := snap.NewestSampleTs
+	sampleCount := snap.Count
 
 	// Override window if provided in query
 	if windowSeconds <= 0 {

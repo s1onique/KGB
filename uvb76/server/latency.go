@@ -18,6 +18,9 @@ type TargetLatencyResponse struct {
 }
 
 // handleTargetLatency returns the latency summary for a specific target (both HTTP and ICMP).
+// Note: This handler uses GetSummary() which is already race-safe with proper RLock.
+// The GetSummary method computes percentiles from a locked snapshot of the ring buffer,
+// so it doesn't need the Snapshot primitive.
 func (s *Server) handleTargetLatency(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	targetID := vars["id"]
@@ -57,6 +60,7 @@ func (s *Server) handleTargetLatency(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleTargetLatencySamples returns recent latency samples for a specific target.
+// Uses the Snapshot primitive for consistent atomic read of tracker state.
 func (s *Server) handleTargetLatencySamples(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	targetID := vars["id"]
@@ -84,10 +88,17 @@ func (s *Server) handleTargetLatencySamples(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	samples := s.state.GetRecentLatencySamples(targetID, limit)
+	// Use snapshot for atomic read - samples are already caller-owned copies
+	snap := s.state.GetHTTPSnapshot(targetID, limit)
+	if snap == nil {
+		samples := []state.LatencySample{}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(samples)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(samples)
+	json.NewEncoder(w).Encode(snap.Samples)
 }
 
 // handleAllLatency returns latency summaries for all configured targets.
