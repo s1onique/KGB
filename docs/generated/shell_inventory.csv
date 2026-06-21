@@ -12,7 +12,7 @@ scripts/verify_uvb76_capture_helpers.py,migrated_to_python,none,none,Specificati
 scripts/verify_uvb76_diag_packet_contract.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
 scripts/verify_uvb76_row_normalization_tests.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
 scripts/lab_uvb76_capture_netns_diag.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
-scripts/lab_uvb76_capture_netns_poll.sh,grandfathered_needs_owner,"jq,polling",TBD,Bootstrap inventory
+scripts/lab_uvb76_capture_netns_poll.sh,grandfathered_needs_owner,"delegates_to_go,stdout_parse",KGB/platform,Migrated polling to Go; compatibility wrapper retained temporarily
 scripts/lab_bgp_bfd_reconnect.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
 scripts/verify_bgp_reconnect_artifact.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
 scripts/verify_uvb76_extract_network_diag_tests.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory

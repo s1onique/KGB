@@ -154,6 +154,9 @@ python3 scripts/verify_uvb76_capture_helpers.py --self-test
 echo "[gate] checking UVB-76 diag packet contract self-test"
 bash scripts/verify_uvb76_diag_packet_contract.sh --self-test
 
+echo "[gate] checking UVB-76 polling (nested Go module)"
+(cd uvb76/cmd/uvb76-capture-netns-polling && go build -o uvb76-capture-netns-polling . && go test ./...)
+
 echo "[gate] checking forbidden generic naming"
 
 # Use git grep to search tracked file contents (not filenames) with timeout
