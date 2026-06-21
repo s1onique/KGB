@@ -8,9 +8,13 @@ import (
 
 // LatencyTracker tracks latency data for a single target.
 // Memory is bounded: only stores maxSamples samples in ring buffer.
+//
+// Thread-safety: All exported methods are safe for concurrent use.
+// Writers (RecordAt) hold an exclusive lock.
+// Readers (GetSummary, GetRecentSamples, GetSampleTimestamps) hold shared read locks.
 type LatencyTracker struct {
-	mu            sync.Mutex
-	buckets       []int64         // sorted bucket boundaries in ms
+	mu            sync.RWMutex
+	buckets       []int64         // sorted bucket boundaries in ms (read-only after init)
 	recentSamples []LatencySample // ring buffer
 	maxSamples   int              // max capacity
 	head          int              // next write position
@@ -187,9 +191,10 @@ func (lt *LatencyTracker) RecordAt(latencyMs float64, reachable bool, timestamp 
 // GetSummary returns a latency summary for graph display.
 // Stats are derived from the current ring buffer contents only (bounded).
 // Failed probes are counted separately but excluded from percentile calculations.
+// Thread-safe: holds read lock, allowing concurrent readers while writers are excluded.
 func (lt *LatencyTracker) GetSummary(targetID string) LatencySummary {
-	lt.mu.Lock()
-	defer lt.mu.Unlock()
+	lt.mu.RLock()
+	defer lt.mu.RUnlock()
 
 	summary := LatencySummary{
 		TargetID:  targetID,
@@ -315,7 +320,7 @@ func (lt *LatencyTracker) GetSummary(targetID string) LatencySummary {
 }
 
 // GetRecentSamples returns the most recent `limit` latency samples in chronological order.
-// Thread-safe: acquires lock, clamps limit, and returns a defensive copy.
+// Thread-safe: acquires read lock, clamps limit, and returns a defensive copy.
 // Never returns internal backing storage.
 //
 // INVARIANT: All ring-buffer state (head, count, maxSamples, samples) is read-only
@@ -332,8 +337,8 @@ func (lt *LatencyTracker) GetRecentSamples(limit int) []LatencySample {
 		return nil
 	}
 
-	lt.mu.Lock()
-	defer lt.mu.Unlock()
+	lt.mu.RLock()
+	defer lt.mu.RUnlock()
 
 	// Validate read-path invariants (NO state modification)
 	capacity := len(lt.recentSamples)
@@ -383,9 +388,10 @@ func (lt *LatencyTracker) GetRecentSamples(limit int) []LatencySample {
 
 // GetSampleTimestamps returns the oldest and newest sample timestamps.
 // Returns copies to avoid returning pointers into mutable ring buffer storage.
+// Thread-safe: holds read lock, allowing concurrent readers while writers are excluded.
 func (lt *LatencyTracker) GetSampleTimestamps() (oldest, newest *time.Time) {
-	lt.mu.Lock()
-	defer lt.mu.Unlock()
+	lt.mu.RLock()
+	defer lt.mu.RUnlock()
 
 	if lt.count == 0 {
 		return nil, nil

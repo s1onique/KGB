@@ -1,10 +1,7 @@
 package diag
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/s1onique/KGB/uvb76/config"
 	"github.com/s1onique/KGB/uvb76/state"

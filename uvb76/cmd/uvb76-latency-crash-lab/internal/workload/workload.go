@@ -56,8 +56,18 @@ func New(port, user, pass, targetID string, requestLimit int, artifactDir string
 
 // Run executes the workload continuously during the specified duration.
 // Queries are made throughout the duration, not just at the end.
-// This exercises the /latency/series endpoint specifically, which was the crash site
-// for the SIGSEGV at uvb76/server/latency.go:418.
+//
+// This exercises the concurrent latency endpoint crash scenario:
+//   - /latency (summary endpoint via GetSummary)
+//   - /latency/series (series endpoint via GetRecentSamples + GetSampleTimestamps)
+//   - /latency/samples (samples endpoint via GetRecentSamples)
+//
+// The crash stack showed:
+//   goroutine 9070: /latency/series JSON encode
+//   goroutine 9069: /latency summary
+//
+// Both handlers racing on the same LatencyTracker without proper read-write
+// synchronization caused SIGSEGV during concurrent HTTP/2 requests.
 func (w *Workload) Run(durationSeconds int) Result {
 	result := Result{}
 
@@ -82,31 +92,46 @@ func (w *Workload) Run(durationSeconds int) Result {
 	requestsFailed := 0
 
 	// Run requests continuously during the duration
-	// Mix of /latency/samples and /latency/series endpoint hits
+	// MIXED ENDPOINT WORKLOAD: hits all three latency endpoints concurrently
+	// This is the key to reproducing the SIGSEGV crash:
+	// concurrent HTTP/2 handlers racing on /latency and /latency/series
+	// while probes are recording samples
 	interval := 500 * time.Millisecond // request every 500ms
-	numGoroutines := 4                 // 4 concurrent requesters
+	numGoroutines := 6                 // 6 concurrent requesters (2 per endpoint type)
 
 	stopCh := make(chan struct{})
 	
-	// Start request goroutines - alternating between samples and series endpoints
+	// Start request goroutines - round-robin between all three endpoints
+	// This maximizes the chance of triggering the race condition
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
-			requestNum := 0
 
 			for {
 				select {
 				case <-stopCh:
 					return
 				case <-ticker.C:
-					requestNum++
-					// Alternate between endpoints to hit the crash path
-					// The series endpoint is the crash site
-					if requestNum%2 == 0 {
-						// Query series endpoint - this is the crash path from latency.go:418
+					// Round-robin through all three endpoints
+					// This ensures mixed endpoint workload during the entire run
+					switch id % 3 {
+					case 0:
+						// /latency (summary) - was only queried once at the end before
+						// Now hammered continuously to hit the crash path:
+						// goroutine 9069: /latency summary
+						summaryOK := w.querySummary()
+						mu.Lock()
+						requestsTotal++
+						if !summaryOK {
+							requestsFailed++
+							summaryValid = false
+						}
+						mu.Unlock()
+					case 1:
+						// /latency/series - this is the crash site from latency.go:418
 						seriesOK := w.querySeries()
 						mu.Lock()
 						requestsTotal++
@@ -115,8 +140,8 @@ func (w *Workload) Run(durationSeconds int) Result {
 							seriesValid = false
 						}
 						mu.Unlock()
-					} else {
-						// Query samples endpoint
+					case 2:
+						// /latency/samples
 						count := w.querySamples(false)
 						mu.Lock()
 						requestsTotal++
