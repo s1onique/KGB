@@ -226,7 +226,7 @@ describe('spikes DOM renderer: TCP absence events', () => {
     }
     
     expect(container.textContent).toContain('permission denied for diagnostic commands');
-    expect(container.textContent).toContain('tool: ss');
+    expect(container.textContent).toContain('Tool: ss');
   });
 
   it('renders target_mapping_missing absence reason', async () => {

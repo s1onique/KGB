@@ -284,12 +284,13 @@ function formatTcpAbsenceReason(reasonCode: string): string {
     'no_matching_socket': 'no matching socket found',
     'socket_closed_before_capture': 'socket closed before capture',
     'command_failed': 'diagnostic command failed',
-    'not_configured': 'TCP diagnostics not configured',
+    'not_configured': 'TCP diagnostics are disabled for this peer',
     'permission_denied': 'permission denied for diagnostic commands',
     'target_not_tcp': 'probe path is not TCP',
     'target_mapping_missing': 'target peer mapping not found',
     'parse_failed': 'failed to parse diagnostic output',
     'unsupported_platform': 'platform does not support TCP diagnostics',
+    'underlay_tcp_disabled': 'underlay TCP diagnostics disabled by config',
   };
   return reasons[reasonCode] || reasonCode;
 }
@@ -301,35 +302,49 @@ function renderTcpAbsenceExplanation(absenceEvents: TcpAbsenceEvent[]): string {
   const html = absenceEvents.map(event => {
     const reason = formatTcpAbsenceReason(event.reason_code);
     const source = escapeText(event.source);
-    const details: string[] = [];
     
+    // Build structured rows for operator-friendly display
+    const rows: string[] = [];
+    
+    // First row: the main reason (prominent)
+    rows.push('<div class="tcp-absence-reason-row"><span class="tcp-absence-reason">' + reason + '</span></div>');
+    
+    // Expected peer row (if present)
     if (event.expected_peer) {
-      details.push('expected peer: ' + escapeText(event.expected_peer));
+      rows.push('<div class="tcp-absence-detail-row"><span class="tcp-absence-label">Expected peer:</span> <span class="tcp-absence-value">' + escapeText(event.expected_peer) + '</span></div>');
     }
+    
+    // Expected port row (if present)
     if (event.expected_port !== undefined) {
-      details.push('expected port: ' + event.expected_port);
+      rows.push('<div class="tcp-absence-detail-row"><span class="tcp-absence-label">Expected port:</span> <span class="tcp-absence-value">' + event.expected_port + '</span></div>');
     }
+    
+    // Probe kind row (if present)
     if (event.probe_kind) {
-      details.push('probe: ' + escapeText(event.probe_kind));
+      rows.push('<div class="tcp-absence-detail-row"><span class="tcp-absence-label">Probe:</span> <span class="tcp-absence-value">' + escapeText(event.probe_kind) + '</span></div>');
     }
+    
+    // Namespace row (if present)
     if (event.namespace) {
-      details.push('namespace: ' + escapeText(event.namespace));
+      rows.push('<div class="tcp-absence-detail-row"><span class="tcp-absence-label">Namespace:</span> <span class="tcp-absence-value">' + escapeText(event.namespace) + '</span></div>');
     }
+    
+    // Tool/command row (if present)
     if (event.command_tool) {
-      details.push('tool: ' + escapeText(event.command_tool));
+      rows.push('<div class="tcp-absence-detail-row"><span class="tcp-absence-label">Tool:</span> <span class="tcp-absence-value">' + escapeText(event.command_tool) + '</span></div>');
     }
+    
+    // Raw match count row (if present)
     if (event.raw_match_count !== undefined) {
-      details.push('raw matches: ' + event.raw_match_count);
+      rows.push('<div class="tcp-absence-detail-row"><span class="tcp-absence-label">Raw matches:</span> <span class="tcp-absence-value">' + event.raw_match_count + '</span></div>');
     }
+    
+    // Detail row (if present and not already covered)
     if (event.detail) {
-      details.push(escapeText(event.detail));
+      rows.push('<div class="tcp-absence-detail-row"><span class="tcp-absence-label">Detail:</span> <span class="tcp-absence-value">' + escapeText(event.detail) + '</span></div>');
     }
     
-    const detailsHtml = details.length > 0 
-      ? '<div class="tcp-absence-details">' + details.map(d => '<span class="tcp-absence-detail">' + d + '</span>').join('') + '</div>'
-      : '';
-    
-    return '<div class="tcp-absence-event"><span class="tcp-absence-source">[' + source + ']</span> <span class="tcp-absence-reason">' + reason + '</span>' + detailsHtml + '</div>';
+    return '<div class="tcp-absence-event"><span class="tcp-absence-source">[' + source + ']</span><div class="tcp-absence-rows">' + rows.join('') + '</div></div>';
   }).join('');
   
   return '<div class="tcp-absence-explanation">' + html + '</div>';

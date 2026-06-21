@@ -748,3 +748,57 @@ h2 { color: #8b949e; margin: 1.5rem 0 1rem; font-weight: 500; }
     color: #6e7681;
     font-style: italic;
 }
+
+/* TCP absence explanation - structured rows */
+.tcp-absence-explanation {
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: 4px;
+}
+
+.tcp-absence-event {
+    margin-bottom: 0.5rem;
+}
+
+.tcp-absence-event:last-child {
+    margin-bottom: 0;
+}
+
+.tcp-absence-source {
+    display: none;
+}
+
+.tcp-absence-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.tcp-absence-reason-row {
+    font-size: 0.75rem;
+    color: #c9d1d9;
+    font-weight: 500;
+}
+
+.tcp-absence-reason {
+    color: #d29922;
+}
+
+.tcp-absence-detail-row {
+    font-size: 0.6875rem;
+    color: #8b949e;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    padding-left: 0.5rem;
+}
+
+.tcp-absence-label {
+    color: #6e7681;
+}
+
+.tcp-absence-value {
+    color: #c9d1d9;
+}

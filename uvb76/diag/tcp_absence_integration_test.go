@@ -157,3 +157,135 @@ func TestTriggerCapture_MalformedEventFields_ProducesParseFailed(t *testing.T) {
 		t.Errorf("expected detail 'socket parsing failed', got '%s'", event.Detail)
 	}
 }
+
+func TestTriggerCapture_TcpDiagnosticsDisabledByConfig_PopulatesUnderlayTcpDisabled(t *testing.T) {
+	// Simulate a tovarisch response with underlay_tcp disabled by config
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/status.json" {
+			t.Errorf("expected /status.json, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		// Response with empty underlay_tcp and event indicating diagnostics are disabled
+		w.Write([]byte(`{
+			"network_diag": {
+				"started_at": "2024-01-01T00:00:00Z",
+				"status": "warning",
+				"interfaces": [],
+				"routes": [],
+				"underlay_tcp": [],
+				"events": [
+					{
+						"source": "underlay_tcp",
+						"message": "underlay TCP diagnostics disabled by config",
+						"fields": "{\"reason\":\"underlay_tcp_disabled\",\"expected_peer\":\"kamatera-tovarisch\"}"
+					}
+				]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &config.DiagnosticsConfig{
+		Enabled:         true,
+		CaptureOnSpike:  true,
+		TimeoutMs:       1000,
+		CooldownSeconds: 90,
+		Peers:           []config.DiagPeerConfig{{Name: "kamatera-tovarisch", BaseURL: server.URL, Targets: []string{"target-1"}}},
+	}
+	cfg.ApplyDefaults()
+	store := state.NewCaptureStore()
+	svc := NewCaptureService(cfg, store)
+
+	svc.TriggerCapture("event-1", "target-1", "http")
+	time.Sleep(100 * time.Millisecond)
+
+	captures := store.GetCaptures("event-1")
+	if len(captures) != 1 {
+		t.Fatalf("expected 1 capture, got %d", len(captures))
+	}
+	capture := captures[0]
+
+	// Verify TcpAbsenceEvents is populated
+	if len(capture.TcpAbsenceEvents) != 1 {
+		t.Fatalf("expected 1 TcpAbsenceEvent, got %d", len(capture.TcpAbsenceEvents))
+	}
+
+	event := capture.TcpAbsenceEvents[0]
+
+	// Verify reason code is underlay_tcp_disabled
+	if event.ReasonCode != "underlay_tcp_disabled" {
+		t.Errorf("expected reason_code 'underlay_tcp_disabled', got '%s'", event.ReasonCode)
+	}
+
+	// Verify expected peer is preserved
+	if event.ExpectedPeer != "kamatera-tovarisch" {
+		t.Errorf("expected expected_peer 'kamatera-tovarisch', got '%s'", event.ExpectedPeer)
+	}
+
+	// Verify source is underlay_tcp
+	if event.Source != "underlay_tcp" {
+		t.Errorf("expected source 'underlay_tcp', got '%s'", event.Source)
+	}
+}
+
+func TestTriggerCapture_NotConfigured_PopulatesNotConfigured(t *testing.T) {
+	// Simulate a tovarisch response with TCP diagnostics not configured
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		// Response with empty underlay_tcp and not_configured event
+		w.Write([]byte(`{
+			"network_diag": {
+				"started_at": "2024-01-01T00:00:00Z",
+				"status": "warning",
+				"interfaces": [],
+				"routes": [],
+				"underlay_tcp": [],
+				"events": [
+					{
+						"source": "underlay_tcp",
+						"message": "TCP diagnostics not configured",
+						"fields": "{\"reason\":\"not_configured\",\"expected_peer\":\"test-peer\"}"
+					}
+				]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := &config.DiagnosticsConfig{
+		Enabled:         true,
+		CaptureOnSpike:  true,
+		TimeoutMs:       1000,
+		CooldownSeconds: 90,
+		Peers:           []config.DiagPeerConfig{{Name: "test-peer", BaseURL: server.URL, Targets: []string{"target-1"}}},
+	}
+	cfg.ApplyDefaults()
+	store := state.NewCaptureStore()
+	svc := NewCaptureService(cfg, store)
+
+	svc.TriggerCapture("event-1", "target-1", "http")
+	time.Sleep(100 * time.Millisecond)
+
+	captures := store.GetCaptures("event-1")
+	if len(captures) != 1 {
+		t.Fatalf("expected 1 capture, got %d", len(captures))
+	}
+	capture := captures[0]
+
+	// Verify TcpAbsenceEvents is populated
+	if len(capture.TcpAbsenceEvents) != 1 {
+		t.Fatalf("expected 1 TcpAbsenceEvent, got %d", len(capture.TcpAbsenceEvents))
+	}
+
+	event := capture.TcpAbsenceEvents[0]
+
+	// Verify reason code is not_configured
+	if event.ReasonCode != "not_configured" {
+		t.Errorf("expected reason_code 'not_configured', got '%s'", event.ReasonCode)
+	}
+
+	// Verify expected peer is preserved
+	if event.ExpectedPeer != "test-peer" {
+		t.Errorf("expected expected_peer 'test-peer', got '%s'", event.ExpectedPeer)
+	}
+}
