@@ -45,6 +45,35 @@ type DiagCapture struct {
 	CaptureStatus CaptureStatus `json:"capture_status"`
 	// CooldownInfo provides auditable metadata when capture was skipped due to cooldown.
 	CooldownInfo *CaptureCooldownInfo `json:"cooldown_info,omitempty"`
+	// TcpAbsenceEvents contains TCP absence explanations when underlay_tcp is empty.
+	// This field is populated by the capture service based on network_diag.events.
+	TcpAbsenceEvents []TcpAbsenceEvent `json:"tcp_absence_events,omitempty"`
+}
+
+// TcpAbsenceEvent explains why TCP diagnostics were absent from a successful capture.
+// This provides machine-readable context for the UI when underlay_tcp is empty.
+type TcpAbsenceEvent struct {
+	// ReasonCode is a machine-readable reason code from the TcpAbsenceReason enum.
+	// Values: no_matching_socket, socket_closed_before_capture, command_failed,
+	// not_configured, permission_denied, target_not_tcp, target_mapping_missing,
+	// parse_failed, unsupported_platform
+	ReasonCode string `json:"reason_code"`
+	// Source indicates the diagnostic component that generated this event.
+	Source string `json:"source"`
+	// ExpectedPeer is the peer/endpoint that was expected to match (if known).
+	ExpectedPeer string `json:"expected_peer,omitempty"`
+	// ExpectedPort is the port that was expected to match (if known).
+	ExpectedPort *int `json:"expected_port,omitempty"`
+	// ProbeKind indicates which probe triggered the capture (http/icmp).
+	ProbeKind string `json:"probe_kind,omitempty"`
+	// CommandTool is the tool/command that was attempted (e.g., "ss", "tcpdiag").
+	CommandTool string `json:"command_tool,omitempty"`
+	// RawMatchCount is the number of sockets that were found but did not match filters.
+	RawMatchCount *int `json:"raw_match_count,omitempty"`
+	// Namespace indicates the network namespace scope (if known).
+	Namespace string `json:"namespace,omitempty"`
+	// Detail provides additional context about the absence.
+	Detail string `json:"detail,omitempty"`
 }
 
 // =============================================================================

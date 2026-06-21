@@ -160,6 +160,12 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig) state.Diag
 	if tovarischResp.NetworkDiag != nil {
 		capture.NetworkDiag = tovarischResp.NetworkDiag
 		capture.CaptureStatus = state.CaptureStatusCaptured
+		
+		// Populate TcpAbsenceEvents when underlay_tcp is empty but events exist.
+		// This provides machine-readable explanations for why TCP diagnostics were absent.
+		if len(tovarischResp.NetworkDiag.UnderlayTCP) == 0 && len(tovarischResp.NetworkDiag.Events) > 0 {
+			capture.TcpAbsenceEvents = buildTcpAbsenceEvents(tovarischResp.NetworkDiag.Events, peer)
+		}
 	}
 
 	finishCapture(&capture)
@@ -238,4 +244,99 @@ func SafeErrorMessage(raw string) *string {
 
 type TovarischStatusResponse struct {
 	NetworkDiag *state.NetworkDiagData `json:"network_diag,omitempty"`
+}
+
+// tcpAbsenceEventFields is the internal struct for parsing JSON fields from tovarisch.
+// This allows safe, typed JSON decoding that handles spaces, escapes, and field ordering.
+type tcpAbsenceEventFields struct {
+	Reason        string `json:"reason"`
+	Detail        string `json:"detail,omitempty"`
+	ExpectedPeer  string `json:"expected_peer,omitempty"`
+	ExpectedPort  *int   `json:"expected_port,omitempty"`
+	ProbeKind     string `json:"probe_kind,omitempty"`
+	CommandTool   string `json:"command_tool,omitempty"`
+	RawMatchCount *int   `json:"raw_match_count,omitempty"`
+	Namespace     string `json:"namespace,omitempty"`
+	ExitCode      *int   `json:"exit_code,omitempty"`
+}
+
+// buildTcpAbsenceEvents converts tovarisch events into structured TcpAbsenceEvents.
+// It parses the JSON fields from tovarisch events and enriches them with context.
+func buildTcpAbsenceEvents(events []state.DiagEventData, peer *config.DiagPeerConfig) []state.TcpAbsenceEvent {
+	var absenceEvents []state.TcpAbsenceEvent
+	
+	for _, event := range events {
+		// Only process underlay_tcp events
+		if event.Source != "underlay_tcp" {
+			continue
+		}
+		
+		absenceEvent := parseEventFields(event, peer)
+		absenceEvents = append(absenceEvents, absenceEvent)
+	}
+	
+	return absenceEvents
+}
+
+// parseEventFields parses the JSON fields from a tovarisch event into a structured TcpAbsenceEvent.
+// It uses json.Unmarshal for safe, typed decoding that handles escaped characters and field ordering.
+func parseEventFields(event state.DiagEventData, peer *config.DiagPeerConfig) state.TcpAbsenceEvent {
+	absenceEvent := state.TcpAbsenceEvent{
+		Source: event.Source,
+		Detail: event.Message,
+	}
+	
+	// Enrich with peer context if available (fallback defaults)
+	if peer != nil {
+		absenceEvent.ExpectedPeer = peer.Name
+	}
+	
+	// Parse the fields JSON safely
+	if event.Fields == nil || *event.Fields == "" {
+		// No fields provided - set default reason code; message becomes the detail
+		absenceEvent.ReasonCode = "no_matching_socket" // default reason
+		return absenceEvent
+	}
+	
+	var fields tcpAbsenceEventFields
+	if err := json.Unmarshal([]byte(*event.Fields), &fields); err != nil {
+		// Malformed JSON - record parse_failed but preserve the raw detail
+		absenceEvent.ReasonCode = "parse_failed"
+		if absenceEvent.Detail == "" {
+			absenceEvent.Detail = "failed to parse underlay_tcp event fields"
+		}
+		return absenceEvent
+	}
+	
+	// Map parsed fields to the absence event
+	if fields.Reason != "" {
+		absenceEvent.ReasonCode = fields.Reason
+	}
+	if fields.Detail != "" {
+		absenceEvent.Detail = fields.Detail
+	}
+	if fields.ExpectedPeer != "" {
+		absenceEvent.ExpectedPeer = fields.ExpectedPeer
+	}
+	if fields.ExpectedPort != nil {
+		absenceEvent.ExpectedPort = fields.ExpectedPort
+	}
+	if fields.ProbeKind != "" {
+		absenceEvent.ProbeKind = fields.ProbeKind
+	}
+	if fields.Namespace != "" {
+		absenceEvent.Namespace = fields.Namespace
+	}
+	if fields.RawMatchCount != nil {
+		absenceEvent.RawMatchCount = fields.RawMatchCount
+	}
+	
+	// Handle command_tool: if explicit, use it; otherwise derive from exit_code
+	if fields.CommandTool != "" {
+		absenceEvent.CommandTool = fields.CommandTool
+	} else if fields.ExitCode != nil {
+		absenceEvent.CommandTool = fmt.Sprintf("ss (exit=%d)", *fields.ExitCode)
+	}
+	
+	return absenceEvent
 }

@@ -226,6 +226,33 @@ export interface DiagCapture {
   cooldown_info?: CaptureCooldownInfo;
   // Explicit capture status from backend (overrides legacy fields).
   capture_status?: string;
+  // TCP absence events explaining why underlay_tcp was empty.
+  tcp_absence_events?: TcpAbsenceEvent[];
+}
+
+// TcpAbsenceEvent explains why TCP diagnostics were absent from a successful capture.
+export interface TcpAbsenceEvent {
+  // Machine-readable reason code from TcpAbsenceReason enum.
+  // Values: no_matching_socket, socket_closed_before_capture, command_failed,
+  // not_configured, permission_denied, target_not_tcp, target_mapping_missing,
+  // parse_failed, unsupported_platform
+  reason_code: string;
+  // Source indicates the diagnostic component that generated this event.
+  source: string;
+  // Expected peer/endpoint that was expected to match (if known).
+  expected_peer?: string;
+  // Port that was expected to match (if known).
+  expected_port?: number;
+  // Probe kind that triggered the capture (http/icmp).
+  probe_kind?: string;
+  // Tool/command that was attempted (e.g., "ss", "tcpdiag").
+  command_tool?: string;
+  // Number of sockets found but did not match filters.
+  raw_match_count?: number;
+  // Network namespace scope (if known).
+  namespace?: string;
+  // Additional context about the absence.
+  detail?: string;
 }
 
 // SpikeEventWithCaptures represents a spike event with diagnostic captures.

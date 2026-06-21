@@ -17,3 +17,4 @@ uvb76/uvb76-latency-crash-lab
 uvb76/uvb76-latency-crash-verify
 uvb76/uvb76-targets-crash-lab
 uvb76/uvb76-targets-crash-verify
+scripts/verify_shell_containment/__pycache__/

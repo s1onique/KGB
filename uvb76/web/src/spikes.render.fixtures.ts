@@ -4,7 +4,7 @@
 // NOTE: Mock setup must be done in each .test.ts file before importing loadSpikeDiagnostics.
 // See spikes.render.empty.test.ts for the correct pattern.
 
-import type { SpikeResponseWithCaptures, DiagCapture, TcpSocketDiagData, NetworkDiagData, SpikeRetentionStats, CaptureCooldownInfo } from './api';
+import type { SpikeResponseWithCaptures, DiagCapture, TcpSocketDiagData, NetworkDiagData, SpikeRetentionStats, CaptureCooldownInfo, TcpAbsenceEvent } from './api';
 
 // Default retention stats for tests
 export const defaultRetention: SpikeRetentionStats = {
@@ -99,6 +99,15 @@ export function createTcpSocket(overrides: Partial<TcpSocketDiagData> = {}): Tcp
     unacked: 3,
     cwnd: 10,
     status: 'ok',
+    ...overrides,
+  };
+}
+
+/** Create a TCP absence event with the given overrides */
+export function createTcpAbsenceEvent(overrides: Partial<TcpAbsenceEvent> = {}): TcpAbsenceEvent {
+  return {
+    reason_code: 'no_matching_socket',
+    source: 'tovarisch',
     ...overrides,
   };
 }

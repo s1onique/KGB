@@ -1,5 +1,5 @@
 // Spike diagnostics rendering module
-import { api, type SpikeEventWithCaptures, type DiagCapture, type TcpSocketDiagData, type NetworkDiagData, type SpikeRetentionStats, type CaptureCooldownInfo } from './api';
+import { api, type SpikeEventWithCaptures, type DiagCapture, type TcpSocketDiagData, type NetworkDiagData, type SpikeRetentionStats, type CaptureCooldownInfo, type TcpAbsenceEvent } from './api';
 import { formatSpikeTime, formatLatencyMs } from './format';
 import { formatUtcInstant, parseApiInstant, formatRemainingCooldown } from './time';
 
@@ -278,15 +278,78 @@ function formatTcpDetails(sockets: TcpSocketDiagData[]): string {
   }).join('');
 }
 
+// Format TCP absence reason for display
+function formatTcpAbsenceReason(reasonCode: string): string {
+  const reasons: Record<string, string> = {
+    'no_matching_socket': 'no matching socket found',
+    'socket_closed_before_capture': 'socket closed before capture',
+    'command_failed': 'diagnostic command failed',
+    'not_configured': 'TCP diagnostics not configured',
+    'permission_denied': 'permission denied for diagnostic commands',
+    'target_not_tcp': 'probe path is not TCP',
+    'target_mapping_missing': 'target peer mapping not found',
+    'parse_failed': 'failed to parse diagnostic output',
+    'unsupported_platform': 'platform does not support TCP diagnostics',
+  };
+  return reasons[reasonCode] || reasonCode;
+}
+
+// Render TCP absence explanation
+function renderTcpAbsenceExplanation(absenceEvents: TcpAbsenceEvent[]): string {
+  if (!absenceEvents || absenceEvents.length === 0) return '';
+  
+  const html = absenceEvents.map(event => {
+    const reason = formatTcpAbsenceReason(event.reason_code);
+    const source = escapeText(event.source);
+    const details: string[] = [];
+    
+    if (event.expected_peer) {
+      details.push('expected peer: ' + escapeText(event.expected_peer));
+    }
+    if (event.expected_port !== undefined) {
+      details.push('expected port: ' + event.expected_port);
+    }
+    if (event.probe_kind) {
+      details.push('probe: ' + escapeText(event.probe_kind));
+    }
+    if (event.namespace) {
+      details.push('namespace: ' + escapeText(event.namespace));
+    }
+    if (event.command_tool) {
+      details.push('tool: ' + escapeText(event.command_tool));
+    }
+    if (event.raw_match_count !== undefined) {
+      details.push('raw matches: ' + event.raw_match_count);
+    }
+    if (event.detail) {
+      details.push(escapeText(event.detail));
+    }
+    
+    const detailsHtml = details.length > 0 
+      ? '<div class="tcp-absence-details">' + details.map(d => '<span class="tcp-absence-detail">' + d + '</span>').join('') + '</div>'
+      : '';
+    
+    return '<div class="tcp-absence-event"><span class="tcp-absence-source">[' + source + ']</span> <span class="tcp-absence-reason">' + reason + '</span>' + detailsHtml + '</div>';
+  }).join('');
+  
+  return '<div class="tcp-absence-explanation">' + html + '</div>';
+}
+
 // Render network diagnostics details
-function renderNetworkDiagDetails(diag: NetworkDiagData): string {
+function renderNetworkDiagDetails(diag: NetworkDiagData, tcpAbsenceEvents?: TcpAbsenceEvent[]): string {
   const diagStatus = escapeText(diag.status) || 'unknown';
   const statusClass = diag.status === 'ok' ? 'status-ok' : 'status-warn';
   let html = '<div class="detail-section"><div class="detail-label">Network diagnostics:</div><div class="detail-value"><span class="' + statusClass + '">' + diagStatus + '</span></div></div>';
   if (diag.underlay_tcp && diag.underlay_tcp.length > 0) {
     html += '<div class="detail-section"><div class="detail-label">Underlay TCP:</div><div class="detail-tcp">' + formatTcpDetails(diag.underlay_tcp) + '</div></div>';
   } else {
-    html += '<div class="detail-section"><div class="detail-label">Underlay TCP:</div><div class="detail-value"><span class="diag-muted">No TCP diagnostics captured</span></div></div>';
+    // Show absence explanation if available, otherwise generic message
+    if (tcpAbsenceEvents && tcpAbsenceEvents.length > 0) {
+      html += '<div class="detail-section"><div class="detail-label">Underlay TCP:</div><div class="detail-value"><span class="diag-muted">No TCP diagnostics captured</span></div></div>';
+      html += renderTcpAbsenceExplanation(tcpAbsenceEvents);
+    } else {
+      html += '<div class="detail-section"><div class="detail-label">Underlay TCP:</div><div class="detail-value"><span class="diag-muted">No TCP diagnostics captured</span></div></div>';
+    }
   }
   return html;
 }
@@ -310,7 +373,7 @@ function renderCaptureDetails(capture: DiagCapture): string {
     html += '<div class="detail-section"><div class="detail-label">Error:</div><div class="detail-value capture-error">' + formatError(capture.error) + '</div></div>';
   }
   if (capture.network_diag && !capture.suppressed_by_cooldown) {
-    html += renderNetworkDiagDetails(capture.network_diag);
+    html += renderNetworkDiagDetails(capture.network_diag, capture.tcp_absence_events);
   }
   return html;
 }
