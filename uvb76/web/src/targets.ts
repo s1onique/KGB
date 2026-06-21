@@ -34,6 +34,11 @@ function escapeText(s: string): string {
   return div.innerHTML;
 }
 
+// HTML attribute escape helper - escapes text for use in HTML attributes
+function escapeAttr(s: string): string {
+  return escapeText(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // Whitelist of allowed CSS classes for status to prevent XSS
 const statusClasses = new Set(['up', 'down', 'unknown', 'error', 'degraded', 'warning']);
 
@@ -219,9 +224,14 @@ function createTargetsRenderer(container: HTMLElement): TargetsRenderer {
       .map(
         (t) => `
       <div class="card target" id="target-${escapeText(t.id)}">
-          <strong>${escapeText(t.name)}</strong> (${escapeText(t.id)})
-          <br><span class="meta">${escapeText(t.base_url)}</span>
-          <div class="meta" id="status-${escapeText(t.id)}">Loading...</div>
+          <div class="target-header-row" data-testid="target-header-${escapeText(t.id)}">
+              <strong class="target-name" title="${escapeAttr(t.name)}">${escapeText(t.name)}</strong>
+              <span class="target-id" title="${escapeAttr(t.id)}">(${escapeText(t.id)})</span>
+              <span class="target-header-sep">·</span>
+              <span class="target-url" title="${escapeAttr(t.base_url)}">${escapeText(t.base_url)}</span>
+              <span class="target-header-sep">·</span>
+              <span class="target-status-meta" id="status-${escapeText(t.id)}">Loading...</span>
+          </div>
           <div class="latency-card" id="latency-${escapeText(t.id)}">
               ${latencySectionHTML(t.id, 'http', 'HTTP Status Probe Latency')}
               ${latencySectionHTML(t.id, 'icmp', 'ICMP Ping Latency')}
@@ -256,7 +266,7 @@ function createTargetsRenderer(container: HTMLElement): TargetsRenderer {
           ? trimmedVersion.substring(0, 64) + '…' 
           : trimmedVersion;
         const displayVersion = safeVersion || 'unknown';
-        el.innerHTML = `<span class="status ${safeStatusClass}">${escapeText(safeStatus)}</span> Node: ${safeNodeId} <span class="peer-version" data-testid="target-peer-version">Peer: tovarisch ${escapeText(displayVersion)}</span>`;
+        el.innerHTML = `<span class="status ${safeStatusClass}">${escapeText(safeStatus)}</span><span class="target-header-sep">·</span>Node: ${safeNodeId}<span class="target-header-sep">·</span><span class="peer-version" data-testid="target-peer-version">Peer: tovarisch ${escapeText(displayVersion)}</span>`;
       } else {
         const safeError = escapeText(snap.error || '');
         el.innerHTML = `<span class="status error">unreachable</span> ${safeError}`;

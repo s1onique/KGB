@@ -17,6 +17,68 @@ h2 { color: #8b949e; margin: 1.5rem 0 1rem; font-weight: 500; }
 .meta { color: #8b949e; font-size: 0.875rem; margin-top: 0.5rem; }
 .error-text { color: #f85149; }
 
+/* Target header row - compact single-line layout */
+.target-header-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 0.375rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.875rem;
+}
+
+.target-name {
+    color: #c9d1d9;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 180px;
+    flex-shrink: 1;
+}
+
+.target-id {
+    color: #8b949e;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100px;
+    flex-shrink: 1;
+}
+
+.target-header-sep {
+    color: #6e7681;
+    flex-shrink: 0;
+}
+
+.target-url {
+    color: #8b949e;
+    font-family: monospace;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 80px;
+    flex: 1 1 0;
+}
+
+.target-status-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.peer-version {
+    color: #8b949e;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 /* Login Form Styles */
 #auth-form { max-width: 400px; margin: 4rem auto; text-align: center; }
 #auth-form h2 { color: #c9d1d9; font-size: 1.5rem; margin-bottom: 0.5rem; }
