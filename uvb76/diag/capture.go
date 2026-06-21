@@ -65,7 +65,7 @@ func (cs *CaptureService) TriggerCapture(eventID, targetID, probeKind string) {
 	decision := cs.captures.EvaluateCooldown(now, peer.Name, cs.cfg.CooldownSeconds)
 	if decision.IsInCooldown {
 		cs.captures.ReleaseInFlight(peer.Name)
-		cs.recordSuppressedCooldown(eventID, peer, targetID, now, decision)
+		cs.recordSuppressedCooldown(eventID, peer, targetID, now, decision, probeKind)
 		return
 	}
 
@@ -214,9 +214,22 @@ func (cs *CaptureService) recordSuppressedInFlight(eventID string, peer *config.
 // recordSuppressedCooldown records a cooldown suppression using the authoritative decision.
 // The cooldown_info is built from the same decision that determined the skip,
 // ensuring metadata exactly matches the decision logic.
-func (cs *CaptureService) recordSuppressedCooldown(eventID string, peer *config.DiagPeerConfig, targetID string, now time.Time, decision state.CaptureCooldownDecision) {
+//
+// probeKind is the probe kind of the suppressed spike ("http" or "icmp"), used to
+// detect cross-probe suppression for UI clarity.
+func (cs *CaptureService) recordSuppressedCooldown(eventID string, peer *config.DiagPeerConfig, targetID string, now time.Time, decision state.CaptureCooldownDecision, probeKind string) {
 	// Build cooldown_info from the authoritative decision
 	cooldownInfo := state.BuildCooldownInfoFromDecision(decision, peer.Name)
+	
+	// Track the suppressed probe kind for cross-probe detection in UI.
+	// This allows the UI to show "HTTP spike suppressed by ICMP capture" when applicable.
+	if cooldownInfo != nil {
+		cooldownInfo.SuppressedProbeKind = probeKind
+		// Compute cross-probe suppression flag
+		if cooldownInfo.AnchorProbeKind != "" && probeKind != "" && cooldownInfo.AnchorProbeKind != probeKind {
+			cooldownInfo.IsCrossProbeSuppression = true
+		}
+	}
 	
 	capture := state.DiagCapture{
 		Source:               peer.Name,

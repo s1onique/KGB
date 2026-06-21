@@ -247,6 +247,14 @@ type CaptureCooldownInfo struct {
 	AnchorProbeKind string `json:"anchor_probe_kind,omitempty"`
 	// AnchorSource is the diagnostic peer/source that performed the anchor capture.
 	AnchorSource string `json:"anchor_source,omitempty"`
+
+	// SuppressedProbeKind is the probe kind of the spike that was suppressed by cooldown.
+	// This is used by the UI to detect and explain cross-probe suppression scenarios.
+	SuppressedProbeKind string `json:"suppressed_probe_kind,omitempty"`
+
+	// IsCrossProbeSuppression indicates the suppressed spike's probe kind differs from
+	// the anchor capture's probe kind.
+	IsCrossProbeSuppression bool `json:"is_cross_probe_suppression,omitempty"`
 	// AnchorCreatedAt is when the anchor capture was started.
 	AnchorCreatedAt *time.Time `json:"anchor_created_at,omitempty"`
 	// AnchorUpdatedByStatus describes what status updated this anchor.
