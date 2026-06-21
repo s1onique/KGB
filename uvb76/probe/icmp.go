@@ -46,7 +46,7 @@ const MaxICMPSpikeDetectionSamples = 120
 type ICMPSampleRecorder interface {
 	RecordICMPLatency(targetID string, latencyMs float64, reachable bool)
 	GetRecentICMPLatencySamples(targetID string, limit int) []state.LatencySample
-	DetectAndRecordSpike(targetID, kind string, latencyMs float64, sampleTs time.Time, reachable bool, schedulerDelayMs *float64, httpStatus *int, probeError *string, previousSamples []state.LatencySample) *state.SpikeEvent
+	DetectAndRecordSpike(targetID, kind string, latencyMs float64, sampleTs time.Time, reachable bool, schedulerDelayMs *float64, httpStatus *int, probeError *string, previousSamples []state.LatencySample, httpTrace *state.HTTPTrace) *state.SpikeEvent
 }
 
 // ICMPClient performs independent ICMP ping probes against tovarisch targets.
@@ -185,7 +185,7 @@ func (c *ICMPClient) probeTarget(targetID string) {
 		sampleTs := time.Now().UTC()
 		c.state.RecordICMPLatency(t.ID, float64(c.cfg.TimeoutSeconds*1000), false)
 		errStr := "failed to extract host from base_url"
-		if spike := c.state.DetectAndRecordSpike(t.ID, "icmp", float64(c.cfg.TimeoutSeconds*1000), sampleTs, false, nil, nil, &errStr, previousSamples); spike != nil {
+		if spike := c.state.DetectAndRecordSpike(t.ID, "icmp", float64(c.cfg.TimeoutSeconds*1000), sampleTs, false, nil, nil, &errStr, previousSamples, nil); spike != nil {
 			c.triggerDiagCapture(spike.EventID, t.ID, "icmp")
 		}
 		return
@@ -204,7 +204,7 @@ func (c *ICMPClient) probeTarget(targetID string) {
 		// Record failure - timeout or unreachable
 		c.state.RecordICMPLatency(t.ID, latencyMs, false)
 		errStr := fmt.Sprintf("ping failed: %v", err)
-		if spike := c.state.DetectAndRecordSpike(t.ID, "icmp", latencyMs, sampleTs, false, nil, nil, &errStr, previousSamples); spike != nil {
+		if spike := c.state.DetectAndRecordSpike(t.ID, "icmp", latencyMs, sampleTs, false, nil, nil, &errStr, previousSamples, nil); spike != nil {
 			c.triggerDiagCapture(spike.EventID, t.ID, "icmp")
 		}
 		return
@@ -214,7 +214,7 @@ func (c *ICMPClient) probeTarget(targetID string) {
 	c.state.RecordICMPLatency(t.ID, latencyMs, true)
 
 	// Spike detection for successful ICMP
-	if spike := c.state.DetectAndRecordSpike(t.ID, "icmp", latencyMs, sampleTs, true, nil, nil, nil, previousSamples); spike != nil {
+	if spike := c.state.DetectAndRecordSpike(t.ID, "icmp", latencyMs, sampleTs, true, nil, nil, nil, previousSamples, nil); spike != nil {
 		c.triggerDiagCapture(spike.EventID, t.ID, "icmp")
 	}
 }

@@ -40,6 +40,7 @@ func TestSpikeDetector_HTTP503ProbeFailure(t *testing.T) {
 		false, // reachable = false
 		nil, &httpStatus, &errStr,
 		prevSamples,
+		nil, // httpTrace
 	)
 
 	if event == nil {
@@ -112,6 +113,7 @@ func TestSpikeDetector_HTTP5xxProbeFailure(t *testing.T) {
 				false, // reachable = false
 				nil, &httpStatus, &tc.errStr,
 				prevSamples,
+				nil, // httpTrace
 			)
 
 			if event == nil {
@@ -164,6 +166,7 @@ func TestSpikeDetector_HTTP4xxProbeFailure(t *testing.T) {
 		false, // reachable = false
 		nil, &httpStatus, &errStr,
 		prevSamples,
+		nil, // httpTrace
 	)
 
 	if event == nil {
@@ -215,6 +218,7 @@ func TestSpikeDetector_TransportFailureVsHTTP5xx(t *testing.T) {
 		false,
 		nil, &httpStatus, &http503Err,
 		prevSamples,
+		nil, // httpTrace
 	)
 
 	if httpEvent == nil {
@@ -238,6 +242,7 @@ func TestSpikeDetector_TransportFailureVsHTTP5xx(t *testing.T) {
 		false,
 		nil, transportHttpStatus, &transportErr,
 		prevSamples,
+		nil, // httpTrace
 	)
 
 	if transportEvent == nil {

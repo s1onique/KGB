@@ -79,6 +79,7 @@ func TestManager_ICMP_SpikeDetection_Integration(t *testing.T) {
 						nil,
 						nil,
 						samples,
+							nil, // httpTrace
 					)
 
 					runtime.Gosched()

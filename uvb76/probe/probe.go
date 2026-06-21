@@ -5,7 +5,9 @@ package probe
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptrace"
 	"sync"
 	"time"
 
@@ -197,7 +199,26 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 		c.state.RecordLatency(t.ID, float64(c.cfg.TimeoutMilliseconds), false)
 		// Spike detection for failed request
 		var errStr string = fmt.Sprintf("request creation failed: %v", err)
-		if spike := c.state.DetectAndRecordSpike(t.ID, "http", float64(c.cfg.TimeoutMilliseconds), sampleTs, false, nil, nil, &errStr, previousSamples); spike != nil {
+		if spike := c.state.DetectAndRecordSpike(t.ID, "http", float64(c.cfg.TimeoutMilliseconds), sampleTs, false, nil, nil, &errStr, previousSamples, nil); spike != nil {
+			c.triggerDiagCapture(spike.EventID, t.ID, "http")
+		}
+		return
+	}
+
+	// Create HTTP trace collector for per-phase timing attribution
+	urlHost := ExtractHost(probeURL)
+	traceCollector := newHTTPTraceCollector(urlHost)
+
+	// Attach trace hooks to context using httptrace
+	traceCtx := httptrace.WithClientTrace(ctx, traceCollector.getTraceHooks())
+
+	// Create request with trace context
+	req, err = http.NewRequestWithContext(traceCtx, http.MethodGet, probeURL, nil)
+	if err != nil {
+		sampleTs := time.Now().UTC()
+		c.state.RecordLatency(t.ID, float64(c.cfg.TimeoutMilliseconds), false)
+		var errStr string = fmt.Sprintf("request creation failed: %v", err)
+		if spike := c.state.DetectAndRecordSpike(t.ID, "http", float64(c.cfg.TimeoutMilliseconds), sampleTs, false, nil, nil, &errStr, previousSamples, nil); spike != nil {
 			c.triggerDiagCapture(spike.EventID, t.ID, "http")
 		}
 		return
@@ -218,14 +239,28 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 		c.lastReachability[t.ID] = state.ReachabilityUnreachable
 		c.mu.Unlock()
 		
+		// Build HTTP trace for failed request (no body read possible)
+		httpTrace := traceCollector.BuildHTTPTrace(latencyMs, 0, err, false)
+		
 		// Spike detection for failed request - this now creates diagnostic events for failures
 		errStr := fmt.Sprintf("request failed: %v", err)
-		if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, false, nil, nil, &errStr, previousSamples); spike != nil {
+		if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, false, nil, nil, &errStr, previousSamples, httpTrace); spike != nil {
 			c.triggerDiagCapture(spike.EventID, t.ID, "http")
 		}
 		return
 	}
-	defer resp.Body.Close()
+
+	// Read response body with bounded consumption to prevent unbounded downloads.
+	// Wrap body reader to track bytes read, limit to prevent router/memory exhaustion.
+	const maxTraceBodyReadBytes = 64 * 1024 // 64KB max for trace attribution
+	wrappedBody := newTraceReadCloser(resp.Body, traceCollector)
+	resp.Body = wrappedBody
+	limited := io.LimitReader(wrappedBody, maxTraceBodyReadBytes+1)
+	_, bodyReadErr := io.Copy(io.Discard, limited)
+	resp.Body.Close()
+	
+	// Finalize trace collector AFTER body read to capture body_read_ms accurately
+	traceCollector.Finalize()
 
 	// Classify HTTP response status code
 	httpStatus := resp.StatusCode
@@ -244,27 +279,42 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 	// Record latency measurement with proper reachability based on HTTP status classification
 	c.state.RecordLatency(t.ID, latencyMs, classification.Reachable)
 
+	// Compute total_ms from request start to body read complete (includes body_read_ms)
+	totalMs := float64(time.Since(start).Milliseconds())
+	
+	// Check if body was truncated
+	bodyTruncated := traceCollector.BytesRead() > maxTraceBodyReadBytes
+	
+	// Capture body read error if any
+	var traceErr error
+	if bodyReadErr != nil {
+		traceErr = bodyReadErr
+	}
+	
+	// Build HTTP trace for this request
+	httpTrace := traceCollector.BuildHTTPTrace(totalMs, httpStatus, traceErr, bodyTruncated)
+
 	if !classification.Reachable {
 		// HTTP 5xx or other unhealthy status - treat as probe failure
 		// Include canonical reason in error string for spike detector to recognize
 		errStr := fmt.Sprintf("%s: HTTP %d", classification.Reason, httpStatus)
 		
 		// Spike detection for unhealthy HTTP response
-		if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, false, nil, &httpStatus, &errStr, previousSamples); spike != nil {
+		if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, false, nil, &httpStatus, &errStr, previousSamples, httpTrace); spike != nil {
 			c.triggerDiagCapture(spike.EventID, t.ID, "http")
 		}
 		return
 	}
 
 	// Spike detection for successful request (latency spikes)
-	if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, true, nil, &httpStatus, nil, previousSamples); spike != nil {
+	if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, true, nil, &httpStatus, nil, previousSamples, httpTrace); spike != nil {
 		c.triggerDiagCapture(spike.EventID, t.ID, "http")
 	}
 	
 	// Recovery detection: if we were unreachable and now succeeded, trigger a recovery capture
 	// Use dedicated RecordRecoveryEvent() instead of fake error injection
 	if wasUnreachable {
-		if recoverySpike := c.state.RecordRecoveryEvent(t.ID, "http", latencyMs, sampleTs, &httpStatus, previousSamples); recoverySpike != nil {
+		if recoverySpike := c.state.RecordRecoveryEvent(t.ID, "http", latencyMs, sampleTs, &httpStatus, previousSamples, httpTrace); recoverySpike != nil {
 			c.triggerDiagCapture(recoverySpike.EventID, t.ID, "http")
 		}
 	}

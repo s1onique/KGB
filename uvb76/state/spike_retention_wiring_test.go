@@ -90,6 +90,7 @@ func TestCaptureAwareSpikeRetention_ProtectedSpikesNotEvicted(t *testing.T) {
 			nil,    // http status
 			nil,    // probe error
 			previousSamples,
+				nil, // httpTrace
 		)
 		
 		if spike != nil {
@@ -133,6 +134,7 @@ func TestCaptureAwareSpikeRetention_ProtectedSpikesNotEvicted(t *testing.T) {
 			nil,
 			nil,
 			previousSamples,
+				nil, // httpTrace
 		)
 	}
 
@@ -184,6 +186,7 @@ func TestCaptureAwareSpikeRetention_UncapturedSpikesEvicted(t *testing.T) {
 			nil,
 			nil,
 			previousSamples,
+				nil, // httpTrace
 		)
 	}
 

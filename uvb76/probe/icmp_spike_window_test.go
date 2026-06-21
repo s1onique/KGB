@@ -64,7 +64,7 @@ func (m *mockICMPSampleRecorder) GetRecentICMPLatencySamples(targetID string, li
 	return result
 }
 
-func (m *mockICMPSampleRecorder) DetectAndRecordSpike(targetID, kind string, latencyMs float64, sampleTs time.Time, reachable bool, schedulerDelayMs *float64, httpStatus *int, probeError *string, previousSamples []state.LatencySample) *state.SpikeEvent {
+func (m *mockICMPSampleRecorder) DetectAndRecordSpike(targetID, kind string, latencyMs float64, sampleTs time.Time, reachable bool, schedulerDelayMs *float64, httpStatus *int, probeError *string, previousSamples []state.LatencySample, httpTrace *state.HTTPTrace) *state.SpikeEvent {
 	// Minimal implementation for testing - just return nil
 	return nil
 }

@@ -66,6 +66,7 @@ func TestSpikeDetector_ICMPWarningThreshold(t *testing.T) {
 		true,
 		nil, nil, nil,
 		prevSamples,
+		nil,
 	)
 
 	if event == nil {
@@ -113,6 +114,7 @@ func TestSpikeDetector_ICMPCriticalThreshold(t *testing.T) {
 		true,
 		nil, nil, nil,
 		prevSamples,
+		nil,
 	)
 
 	if event == nil {
@@ -158,6 +160,7 @@ func TestSpikeDetector_RelativeThresholdOnly(t *testing.T) {
 		true,
 		nil, nil, nil,
 		prevSamples,
+		nil,
 	)
 
 	if event == nil {
@@ -204,6 +207,7 @@ func TestSpikeDetector_RelativeThreshold_TooFewSamples(t *testing.T) {
 		true,
 		nil, nil, nil,
 		prevSamples,
+		nil,
 	)
 
 	if event == nil {
@@ -245,6 +249,7 @@ func TestSpikeDetector_NoSpikeBelowThresholds(t *testing.T) {
 		true,
 		nil, nil, nil,
 		prevSamples,
+		nil,
 	)
 
 	if event != nil {
@@ -252,7 +257,6 @@ func TestSpikeDetector_NoSpikeBelowThresholds(t *testing.T) {
 	}
 }
 
-// TestSpikeDetector_HTTPKind tests HTTP spike detection with HTTP thresholds.
 func TestSpikeDetector_HTTPKind(t *testing.T) {
 	config := SpikeConfig{
 		ICMPWarningMs:        500,
@@ -283,6 +287,7 @@ func TestSpikeDetector_HTTPKind(t *testing.T) {
 		true,
 		nil, nil, nil,
 		prevSamples,
+		nil,
 	)
 
 	if event == nil {
@@ -296,7 +301,6 @@ func TestSpikeDetector_HTTPKind(t *testing.T) {
 	}
 }
 
-// TestSpikeDetector_RollingMedianCalculation tests median calculation accuracy.
 func TestSpikeDetector_RollingMedianCalculation(t *testing.T) {
 	config := SpikeConfig{
 		ICMPWarningMs:        1000,
@@ -328,6 +332,7 @@ func TestSpikeDetector_RollingMedianCalculation(t *testing.T) {
 		true,
 		nil, nil, nil,
 		prevSamples,
+		nil,
 	)
 
 	if event == nil {
@@ -375,6 +380,7 @@ func TestSpikeDetector_FailedSamplesExcludedFromMedian(t *testing.T) {
 		true,
 		nil, nil, nil,
 		prevSamples,
+		nil,
 	)
 
 	if event == nil {
@@ -404,6 +410,7 @@ func TestSpikeDetector_UnknownKindReturnsNil(t *testing.T) {
 		true,
 		nil, nil, nil,
 		prevSamples,
+		nil,
 	)
 
 	if event != nil {
@@ -420,7 +427,6 @@ func TestSpikeDetector_SchedulerDelayIncluded(t *testing.T) {
 	prevSamples = append(prevSamples, LatencySample{
 		Timestamp: now,
 		LatencyMs: 50.0,
-		Reachable: true,
 	})
 
 	delayMs := 350.0
@@ -431,6 +437,7 @@ func TestSpikeDetector_SchedulerDelayIncluded(t *testing.T) {
 		true,
 		&delayMs, nil, nil,
 		prevSamples,
+		nil,
 	)
 
 	if event == nil {

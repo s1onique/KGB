@@ -18,12 +18,15 @@ const (
 // RecordRecoveryEvent explicitly records a recovery event when a target becomes
 // reachable again after being unreachable. This is separate from latency spike
 // detection because recovery is about state transition, not latency magnitude.
+//
+// The httpTrace parameter provides per-phase HTTP timing for HTTP spikes.
 func (sd *SpikeDetector) RecordRecoveryEvent(
 	targetID, kind string,
 	latencyMs float64,
 	sampleTs time.Time,
 	httpStatus *int,
 	previousSamples []LatencySample,
+	httpTrace *HTTPTrace,
 ) *SpikeEvent {
 	if kind != "http" {
 		return nil
@@ -56,8 +59,9 @@ func (sd *SpikeDetector) RecordRecoveryEvent(
 			RelativeMultiplier:  sd.config.RelativeMultiplier,
 		},
 		PreviousSamples: spikePrevSamples,
-		HTTPStatus:     httpStatus,
-		CollectedAt:    time.Now().UTC(),
+		HTTPStatus:      httpStatus,
+		HTTPTrace:       httpTrace,
+		CollectedAt:     time.Now().UTC(),
 	}
 
 	sd.mu.RLock()

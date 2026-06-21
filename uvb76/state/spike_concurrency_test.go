@@ -64,6 +64,7 @@ func TestSpikeDetector_DetectAndRecord_ConcurrentSameTargetICMP(t *testing.T) {
 						nil,
 						nil,
 						prevSamples,
+						nil, // httpTrace
 					)
 					i++
 					runtime.Gosched()
@@ -131,6 +132,7 @@ func TestSpikeDetector_DetectAndRecord_ConcurrentMixedTargetsAndKinds(t *testing
 							nil,
 							nil,
 							prevSamples,
+							nil, // httpTrace
 						)
 						i++
 						runtime.Gosched()
@@ -197,6 +199,7 @@ func TestSpikeDetector_ConcurrentReadWriteSpikeEvents(t *testing.T) {
 						nil,
 						nil,
 						prevSamples,
+						nil, // httpTrace
 					)
 					runtime.Gosched()
 				}
@@ -304,6 +307,7 @@ func TestSpikeDetector_SpikeDetectionStillWorksAfterConcurrentAccess(t *testing.
 		nil,
 		nil,
 		normalSamples,
+		nil, // httpTrace
 	)
 
 	if spike == nil {
@@ -329,6 +333,7 @@ func TestSpikeDetector_SpikeDetectionStillWorksAfterConcurrentAccess(t *testing.
 		nil,
 		nil,
 		normalSamples,
+		nil, // httpTrace
 	)
 
 	if noSpike != nil {

@@ -18,6 +18,7 @@ func (m *Manager) GetSpikes(targetID, kind string, limit int) []SpikeEvent {
 }
 
 // DetectAndRecordSpike checks a sample for spike conditions and records if detected.
+// The httpTrace parameter provides per-phase HTTP timing for HTTP spikes.
 func (m *Manager) DetectAndRecordSpike(
 	targetID, kind string,
 	latencyMs float64,
@@ -27,10 +28,11 @@ func (m *Manager) DetectAndRecordSpike(
 	httpStatus *int,
 	probeError *string,
 	previousSamples []LatencySample,
+	httpTrace *HTTPTrace,
 ) *SpikeEvent {
 	return m.spikeDetector.DetectAndRecord(
 		targetID, kind, latencyMs, sampleTs, reachable,
-		schedulerDelayMs, httpStatus, probeError, previousSamples,
+		schedulerDelayMs, httpStatus, probeError, previousSamples, httpTrace,
 	)
 }
 
@@ -42,8 +44,9 @@ func (m *Manager) RecordRecoveryEvent(
 	sampleTs time.Time,
 	httpStatus *int,
 	previousSamples []LatencySample,
+	httpTrace *HTTPTrace,
 ) *SpikeEvent {
 	return m.spikeDetector.RecordRecoveryEvent(
-		targetID, kind, latencyMs, sampleTs, httpStatus, previousSamples,
+		targetID, kind, latencyMs, sampleTs, httpStatus, previousSamples, httpTrace,
 	)
 }

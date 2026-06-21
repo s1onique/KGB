@@ -39,6 +39,7 @@ func TestSpikeDetector_HTTPProbeFailure(t *testing.T) {
 		false, // reachable = false - THIS IS THE KEY
 		nil, nil, &errStr,
 		prevSamples,
+		nil, // httpTrace
 	)
 
 	if event == nil {
@@ -98,6 +99,7 @@ func TestSpikeDetector_HTTPProbeTimeout(t *testing.T) {
 		false, // failed
 		nil, nil, &errStr,
 		prevSamples,
+		nil, // httpTrace
 	)
 
 	if event == nil {
@@ -143,6 +145,7 @@ func TestSpikeDetector_HTTPProbeConnectionRefused(t *testing.T) {
 		false,
 		nil, nil, &errStr,
 		prevSamples,
+		nil, // httpTrace
 	)
 
 	if event == nil {
@@ -191,6 +194,7 @@ func TestSpikeDetector_FailedProbeCreatesSpikeEvenWithLowLatency(t *testing.T) {
 		false, // reachable = false
 		nil, nil, &errStr,
 		prevSamples,
+		nil, // httpTrace
 	)
 
 	// SHOULD still create a spike because failure is a diagnostic event
@@ -224,6 +228,7 @@ func TestSpikeDetector_FailedProbeWithNoPreviousSamples(t *testing.T) {
 		false,
 		nil, nil, &errStr,
 		prevSamples,
+		nil, // httpTrace
 	)
 
 	if event == nil {
@@ -261,6 +266,7 @@ func TestSpikeDetector_FailedProbeWithNilError(t *testing.T) {
 		false, // failed
 		nil, nil, nil, // nil error
 		prevSamples,
+		nil, // httpTrace
 	)
 
 	if event == nil {
@@ -303,6 +309,7 @@ func TestSpikeDetector_ICMPProbeFailure(t *testing.T) {
 		false, // unreachable
 		nil, nil, nil,
 		prevSamples,
+		nil, // httpTrace
 	)
 
 	// ICMP failures should NOT create HTTP-style spike events
@@ -348,6 +355,7 @@ func TestSpikeDetector_SuccessfulProbeDoesNotTriggerFailureEvent(t *testing.T) {
 		true, // reachable = true
 		nil, nil, nil,
 		prevSamples,
+		nil, // httpTrace
 	)
 
 	// Should NOT create a failure event

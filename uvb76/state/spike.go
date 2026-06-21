@@ -26,6 +26,7 @@ type SpikeEvent struct {
 	SchedulerDelayMs *float64          `json:"scheduler_delay_ms,omitempty"` // scheduler delay at spike time
 	HTTPStatus       *int              `json:"http_status,omitempty"`        // HTTP status code if HTTP probe
 	ProbeError       *string           `json:"probe_error,omitempty"`        // error string if probe failed
+	HTTPTrace        *HTTPTrace        `json:"http_trace,omitempty"`         // per-phase HTTP timing (HTTP spikes only)
 	CollectedAt      time.Time         `json:"collected_at"`      // when spike was recorded
 }
 
@@ -140,6 +141,9 @@ func (sd *SpikeDetector) getTracker(targetID, kind string) *spikeTracker {
 // HTTP probe failures (reachable=false) are treated as first-class failure events,
 // not just latency anomalies. This ensures diagnostic captures are triggered
 // for hard failures like timeouts, connection refused, HTTP 5xx errors, etc.
+//
+// The httpTrace parameter provides per-phase HTTP timing for HTTP spikes, enabling
+// attribution of total latency to DNS, TCP connect, TLS handshake, etc.
 func (sd *SpikeDetector) DetectAndRecord(
 	targetID, kind string,
 	latencyMs float64,
@@ -149,6 +153,7 @@ func (sd *SpikeDetector) DetectAndRecord(
 	httpStatus *int,
 	probeError *string,
 	previousSamples []LatencySample,
+	httpTrace *HTTPTrace,
 ) *SpikeEvent {
 	// Determine thresholds based on probe kind
 	var warningMs, criticalMs float64
@@ -283,6 +288,7 @@ func (sd *SpikeDetector) DetectAndRecord(
 		SchedulerDelayMs:  schedulerDelayMs,
 		HTTPStatus:        httpStatus,
 		ProbeError:        probeError,
+		HTTPTrace:         httpTrace,
 		CollectedAt:       time.Now().UTC(),
 	}
 
