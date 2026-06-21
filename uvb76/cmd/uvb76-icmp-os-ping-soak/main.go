@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/s1onique/KGB/uvb76/cmd/uvb76-icmp-os-ping-soak/internal/configgen"
+	"github.com/s1onique/KGB/uvb76/cmd/uvb76-icmp-os-ping-soak/internal/verifier"
 )
 
 const (
@@ -29,17 +31,33 @@ const (
 
 var (
 	artifactDir string
-	configFile string
-	logFile    string
-	pidFile    string
-	uvb76PID   int
-	procState  ProcessState
+	configFile  string
+	logFile     string
+	pidFile     string
+	uvb76PID    int
+	procState   ProcessState
 )
 
 type ProcessState struct {
 	exited   bool
 	exitCode int
 	mu       sync.Mutex
+}
+
+// DaemonStatus represents the structure of the daemon's /api/v1/status endpoint.
+type DaemonStatus struct {
+	StartedAt  string `json:"started_at"`
+	ICMPOSPing *ICMPOSPingTelemetry `json:"icmp_os_ping,omitempty"`
+}
+
+// ICMPOSPingTelemetry represents the ICMP OS ping telemetry from the daemon.
+type ICMPOSPingTelemetry struct {
+	Enabled       bool   `json:"enabled"`
+	Attempts      uint64 `json:"attempts"`
+	Successes     uint64 `json:"successes"`
+	Failures      uint64 `json:"failures"`
+	LastError     string `json:"last_error,omitempty"`
+	MaxConcurrent int    `json:"max_concurrent"`
 }
 
 func main() {
@@ -120,10 +138,20 @@ func main() {
 	goroutinesAfter := runtime.NumGoroutine()
 	memAfterJSON, _ := json.MarshalIndent(memAfter, "", "  ")
 
-	// NOTE: Cannot assert icmp_probe_exercised until daemon exposes ICMP counters via HTTP API.
-	// Setting to false until follow-up ACT implements daemon telemetry.
-	icmpExercised := false
-	exercisedReason := "pending daemon-sourced ICMP counters (follow-up ACT required)"
+	// Poll daemon status to get authoritative ICMP telemetry
+	var daemonStatus DaemonStatus
+	var daemonStatusRaw string
+	var icmpExercised bool
+	var exercisedReason string
+	var evidenceSource string
+
+	if daemonStarted {
+		daemonStatus, daemonStatusRaw, icmpExercised, exercisedReason, evidenceSource = pollDaemonStatus()
+	} else {
+		icmpExercised = false
+		exercisedReason = "daemon did not start"
+		evidenceSource = ""
+	}
 
 	procState.mu.Lock()
 	exitedEarly := procState.exited
@@ -151,31 +179,35 @@ func main() {
 	statusValid := checkEndpoint("/api/v1/status")
 	goroutineLeaked := goroutinesAfter > goroutinesBefore+5
 
+	// Build result - lab passes only if daemon-sourced ICMP attempts > 0
 	result := Result{
-		OK:                      daemonStarted && !exitedEarly && pidStable && len(fatalPatterns) == 0 && !goroutineLeaked && healthValid,
-		LabName:                 LabName,
-		DurationSeconds:          actualDuration,
-		ICMPEnabled:             cfg.Latency.ICMP.Enabled == nil || *cfg.Latency.ICMP.Enabled,
-		ICMPIntervalSeconds:      ICMPIntervalSeconds,
-		ICMPTimeoutSeconds:       ICMPTimeoutSeconds,
-		ICMPMaxConcurrent:       ICMPMaxConcurrent,
-		DaemonStarted:           daemonStarted,
-		DaemonExitedEarly:       exitedEarly,
-		DaemonExitCode:          exitCode,
+		OK:                     daemonStarted && !exitedEarly && pidStable && len(fatalPatterns) == 0 && !goroutineLeaked && healthValid && icmpExercised,
+		LabName:                LabName,
+		DurationSeconds:        actualDuration,
+		ICMPEnabled:            cfg.Latency.ICMP.Enabled == nil || *cfg.Latency.ICMP.Enabled,
+		ICMPIntervalSeconds:    ICMPIntervalSeconds,
+		ICMPTimeoutSeconds:     ICMPTimeoutSeconds,
+		ICMPMaxConcurrent:      ICMPMaxConcurrent,
+		DaemonStarted:          daemonStarted,
+		DaemonExitedEarly:      exitedEarly,
+		DaemonExitCode:         exitCode,
 		PIDStable:              pidStable,
 		FatalLogPatternsFound:  fatalPatterns,
-		PingStartedTotal:        0,
-		PingCompletedTotal:      0,
-		PingInflight:           0,
-		ICMPProbeExercised:      icmpExercised,
+		DaemonICMPAttempts:     func() uint64 { if daemonStatus.ICMPOSPing != nil { return daemonStatus.ICMPOSPing.Attempts }; return 0 }(),
+		DaemonICMPSuccesses:    func() uint64 { if daemonStatus.ICMPOSPing != nil { return daemonStatus.ICMPOSPing.Successes }; return 0 }(),
+		DaemonICMPFailures:     func() uint64 { if daemonStatus.ICMPOSPing != nil { return daemonStatus.ICMPOSPing.Failures }; return 0 }(),
+		DaemonICMPLastError:    func() string { if daemonStatus.ICMPOSPing != nil { return daemonStatus.ICMPOSPing.LastError }; return "" }(),
+		DaemonStatusRaw:        daemonStatusRaw,
+		ICMPProbeExercised:     icmpExercised,
 		ICMPProbeExercisedReason: exercisedReason,
-		MemStatsBefore:          string(memBeforeJSON),
-		MemStatsAfter:           string(memAfterJSON),
-		GoroutinesBefore:        goroutinesBefore,
-		GoroutinesAfter:         goroutinesAfter,
-		GoroutineLeaked:         goroutineLeaked,
-		HealthEndpointValid:      healthValid,
-		StatusEndpointValid:      statusValid,
+		ICMPEvidenceSource:     evidenceSource,
+		MemStatsBefore:         string(memBeforeJSON),
+		MemStatsAfter:          string(memAfterJSON),
+		GoroutinesBefore:       goroutinesBefore,
+		GoroutinesAfter:        goroutinesAfter,
+		GoroutineLeaked:        goroutineLeaked,
+		HealthEndpointValid:    healthValid,
+		StatusEndpointValid:    statusValid,
 		ArtifactDir:            artifactDir,
 	}
 
@@ -187,12 +219,46 @@ func main() {
 	log.Printf("=== Lab Result ===")
 	log.Printf("OK: %v", result.OK)
 	log.Printf("ICMP Probe Exercised: %v (%s)", result.ICMPProbeExercised, result.ICMPProbeExercisedReason)
+	log.Printf("ICMP Evidence Source: %s", result.ICMPEvidenceSource)
+	log.Printf("Daemon ICMP Attempts: %d", result.DaemonICMPAttempts)
 	log.Printf("Goroutines: before=%d, after=%d, leaked=%v",
 		result.GoroutinesBefore, result.GoroutinesAfter, result.GoroutineLeaked)
 
 	if !result.OK {
 		log.Fatalf("Lab failed")
 	}
+}
+
+// pollDaemonStatus fetches the daemon status endpoint and derives ICMP exercise status.
+// Uses the canonical verifier to ensure consistent acceptance logic with tests.
+func pollDaemonStatus() (DaemonStatus, string, bool, string, string) {
+	statusURL := fmt.Sprintf("http://localhost:%s/api/v1/status", LabPort)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(statusURL)
+	if err != nil {
+		return DaemonStatus{}, "", false, fmt.Sprintf("failed to fetch daemon status: %v", err), ""
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return DaemonStatus{}, "", false, fmt.Sprintf("daemon status returned %d", resp.StatusCode), ""
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 65536)) // 64KB limit for safety
+	if err != nil {
+		return DaemonStatus{}, "", false, fmt.Sprintf("failed to read daemon status: %v", err), ""
+	}
+	rawJSON := string(body)
+
+	// Use the canonical verifier for acceptance logic
+	verifyResult := verifier.VerifyDaemonStatus(rawJSON)
+
+	// Parse status for artifact fields
+	var status DaemonStatus
+	_ = json.Unmarshal(body, &status)
+
+	return status, rawJSON, verifyResult.ICMPExercised, verifyResult.Reason, verifyResult.EvidenceSource
 }
 
 func monitorProcess(cmd *exec.Cmd, state *ProcessState, done chan struct{}) {

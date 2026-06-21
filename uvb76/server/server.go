@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/s1onique/KGB/uvb76/auth"
 	"github.com/s1onique/KGB/uvb76/config"
+	"github.com/s1onique/KGB/uvb76/probe"
 	"github.com/s1onique/KGB/uvb76/scraper"
 	"github.com/s1onique/KGB/uvb76/state"
 )
@@ -65,6 +66,8 @@ func (s *Server) Start() error {
 
 	// Public endpoints (no auth required)
 	router.Handle("/api/v1/healthz", http.HandlerFunc(s.handleHealthz)).Methods(http.MethodGet)
+	// Status endpoint is public - it only exposes telemetry, no sensitive data
+	router.Handle("/api/v1/status", http.HandlerFunc(s.handleStatus)).Methods(http.MethodGet)
 
 	// Auth endpoints (public, but create/clear sessions)
 	router.Handle("/api/v1/auth/login", http.HandlerFunc(s.handleLogin)).Methods(http.MethodPost)
@@ -74,7 +77,6 @@ func (s *Server) Start() error {
 	// Protected API endpoints - use session auth
 	protected := router.PathPrefix("/api/v1").Subrouter()
 	protected.Use(s.sessionAuthMw())
-	protected.Handle("/status", http.HandlerFunc(s.handleStatus)).Methods(http.MethodGet)
 	protected.Handle("/targets", http.HandlerFunc(s.handleTargets)).Methods(http.MethodGet)
 	protected.Handle("/targets/{id}/snapshot", http.HandlerFunc(s.handleTargetSnapshot)).Methods(http.MethodGet)
 
@@ -354,15 +356,25 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 
 // ServerStatus represents the runtime status of the UVB-76 server.
 type ServerStatus struct {
-	StartedAt string `json:"started_at"`
+	StartedAt    string                            `json:"started_at"`
+	ICMPOSPing   *probe.ICMPPingTelemetrySnapshot `json:"icmp_os_ping,omitempty"`
 }
 
-// handleStatus returns server runtime status including start time.
+// handleStatus returns server runtime status including start time and ICMP telemetry.
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ServerStatus{
+
+	status := ServerStatus{
 		StartedAt: s.startedAt.Format(time.RFC3339),
-	})
+	}
+
+	// Include ICMP OS ping telemetry if available
+	if tm := probe.GetGlobalICMPTelemetry(); tm != nil {
+		snap := tm.Snapshot()
+		status.ICMPOSPing = &snap
+	}
+
+	json.NewEncoder(w).Encode(status)
 }
 
 // handleTargetSnapshot returns the latest snapshot for a specific target.

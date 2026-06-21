@@ -178,9 +178,18 @@ func (r *BoundedCommandRunner) copyBounded(reader io.Reader, limit int) ([]byte,
 
 // PingOSWithRunner runs a ping using the provided CommandRunner.
 // This replaces PingOS for bounded command execution.
+// It records telemetry to the global ICMP ping telemetry for daemon HTTP API exposure.
 func PingOSWithRunner(ctx context.Context, host string, timeout time.Duration, runner CommandRunner) (time.Duration, error) {
 	IncPingStarted()
 	defer IncPingCompleted()
+
+	// Record attempt in daemon telemetry
+	if tm := GetGlobalICMPTelemetry(); tm != nil {
+		tm.RecordAttempt()
+	}
+
+	var latency time.Duration
+	var err error
 
 	timeoutSecs := int(timeout.Seconds())
 	if timeoutSecs < 1 {
@@ -195,6 +204,9 @@ func PingOSWithRunner(ctx context.Context, host string, timeout time.Duration, r
 
 	if result.TimedOut {
 		IncPingTimeout()
+		if tm := GetGlobalICMPTelemetry(); tm != nil {
+			tm.RecordFailure("timeout")
+		}
 		return 0, ErrPingTimeout
 	}
 
@@ -208,17 +220,33 @@ func PingOSWithRunner(ctx context.Context, host string, timeout time.Duration, r
 		if strings.Contains(outputStr, "Destination Host Unreachable") ||
 			strings.Contains(outputStr, "Request timeout") ||
 			strings.Contains(outputStr, "100% packet loss") {
+			if tm := GetGlobalICMPTelemetry(); tm != nil {
+				tm.RecordFailure("unreachable")
+			}
 			return 0, ErrPingUnreachable
 		}
 		IncPingError()
+		errMsg := result.Err.Error()
+		if tm := GetGlobalICMPTelemetry(); tm != nil {
+			tm.RecordFailure(errMsg)
+		}
 		return 0, result.Err
 	}
 
 	// Parse the output to extract RTT
-	latency, err := parsePingOutput(string(result.Stdout))
+	latency, err = parsePingOutput(string(result.Stdout))
 	if err != nil {
 		IncPingError()
+		if tm := GetGlobalICMPTelemetry(); tm != nil {
+			tm.RecordFailure(err.Error())
+		}
 		return 0, err
 	}
+
+	// Record success in daemon telemetry
+	if tm := GetGlobalICMPTelemetry(); tm != nil {
+		tm.RecordSuccess()
+	}
+
 	return latency, nil
 }

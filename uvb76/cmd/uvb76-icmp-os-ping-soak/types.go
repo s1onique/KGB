@@ -23,14 +23,17 @@ type Result struct {
 	PIDStable            bool     `json:"pid_stable"`
 	FatalLogPatternsFound []string `json:"fatal_log_patterns_found"`
 
-	// Lab-process counters (not daemon-sourced; see icmp_probe_exercised)
-	PingStartedTotal    uint64 `json:"ping_started_total"`
-	PingCompletedTotal  uint64 `json:"ping_completed_total"`
-	PingInflight        int64  `json:"ping_inflight"`
+	// Daemon-sourced ICMP telemetry
+	DaemonICMPAttempts      uint64 `json:"daemon_icmp_attempts"`
+	DaemonICMPSuccesses     uint64 `json:"daemon_icmp_successes"`
+	DaemonICMPFailures      uint64 `json:"daemon_icmp_failures"`
+	DaemonICMPLastError     string `json:"daemon_icmp_last_error,omitempty"`
+	DaemonStatusRaw         string `json:"daemon_status_raw,omitempty"`
 
-	// ICMP probe was exercised in the daemon (requires daemon HTTP API in follow-up ACT)
-	ICMPProbeExercised   bool    `json:"icmp_probe_exercised"`
-	ICMPProbeExercisedReason string `json:"icmp_probe_exercised_reason,omitempty"`
+	// ICMP probe was exercised in the daemon (requires daemon HTTP API)
+	ICMPProbeExercised        bool   `json:"icmp_probe_exercised"`
+	ICMPProbeExercisedReason  string `json:"icmp_probe_exercised_reason,omitempty"`
+	ICMPEvidenceSource        string `json:"icmp_evidence_source,omitempty"`
 
 	// Memory stats
 	MemStatsBefore string `json:"memstats_before"`

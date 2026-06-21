@@ -85,6 +85,8 @@ func main() {
 	if icmpProbeClient.IsEnabled() {
 		log.Printf("ICMP ping probe enabled (interval: %ds, timeout: %ds)",
 			cfg.Latency.ICMP.IntervalSeconds, cfg.Latency.ICMP.TimeoutSeconds)
+		// Initialize daemon-owned ICMP telemetry for HTTP status API exposure
+		probe.InitGlobalICMPTelemetry(true, cfg.Latency.ICMP.MaxConcurrentOSPing)
 	} else {
 		log.Println("ICMP ping probe disabled")
 	}
