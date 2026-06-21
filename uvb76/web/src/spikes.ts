@@ -699,19 +699,20 @@ function displayAnchorCaptureModal(anchorResponse: AnchorCaptureResponse, target
 }
 
 // Render spike diagnostics for a target as a semantic table
-export async function loadSpikeDiagnostics(targetId: string): Promise<void> {
-  const container = document.getElementById('spike-diag-' + targetId);
+export async function loadSpikeDiagnostics(targetId: string, kind: 'http' | 'icmp' = 'http'): Promise<void> {
+  const container = document.getElementById('spike-diag-' + kind + '-' + targetId);
   if (!container) return;
 
   try {
-    const response = await api.getLatencySpikesWithCaptures(targetId, 10);
+    const response = await api.getLatencySpikesWithCaptures(targetId, kind, 10);
     const responseData = response;
     const retention = response.retention || defaultRetentionStats;
 
     if (!response.spikes || response.spikes.length === 0) {
+      const emptyMessage = container.dataset.emptyMessage || 'No recent spikes';
       container.innerHTML = '<div class="spike-diag-header"><span class="spike-diag-title">Spike diagnostics</span></div>' +
         renderRetentionSummary(retention) +
-        '<div class="spike-diag-empty">No recent spikes</div>';
+        '<div class="spike-diag-empty">' + emptyMessage + '</div>';
       return;
     }
 

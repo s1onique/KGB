@@ -458,10 +458,11 @@ class ApiClient {
 
   async getLatencySpikesWithCaptures(
     targetId: string,
+    kind: 'http' | 'icmp' = 'http',
     limit: number = 10
   ): Promise<SpikeResponseWithCaptures> {
     return this.fetch<SpikeResponseWithCaptures>(
-      `/api/v1/latency/spikes?target_id=${encodeURIComponent(targetId)}&include_captures=true&limit=${limit}`
+      `/api/v1/latency/spikes?target_id=${encodeURIComponent(targetId)}&kind=${kind}&include_captures=true&limit=${limit}`
     );
   }
 

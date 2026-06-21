@@ -26,16 +26,40 @@ describe('spike diagnostics API', () => {
   });
 
   describe('getLatencySpikesWithCaptures calls', () => {
-    it('should call API with correct target_id', async () => {
+    it('should call API with correct target_id and kind=http', async () => {
       const { api } = await import('./api');
       mockGetLatencySpikesWithCaptures.mockResolvedValue({
         spikes: [],
         count: 0,
       });
       
-      await api.getLatencySpikesWithCaptures('test-target-123', 10);
+      await api.getLatencySpikesWithCaptures('test-target-123', 'http', 10);
       
-      expect(mockGetLatencySpikesWithCaptures).toHaveBeenCalledWith('test-target-123', 10);
+      expect(mockGetLatencySpikesWithCaptures).toHaveBeenCalledWith('test-target-123', 'http', 10);
+    });
+
+    it('should call API with correct target_id and kind=icmp', async () => {
+      const { api } = await import('./api');
+      mockGetLatencySpikesWithCaptures.mockResolvedValue({
+        spikes: [],
+        count: 0,
+      });
+      
+      await api.getLatencySpikesWithCaptures('test-target-456', 'icmp', 10);
+      
+      expect(mockGetLatencySpikesWithCaptures).toHaveBeenCalledWith('test-target-456', 'icmp', 10);
+    });
+
+    it('should use default kind=http when not specified', async () => {
+      const { api } = await import('./api');
+      mockGetLatencySpikesWithCaptures.mockResolvedValue({
+        spikes: [],
+        count: 0,
+      });
+      
+      await api.getLatencySpikesWithCaptures('test-target', 'http', 10);
+      
+      expect(mockGetLatencySpikesWithCaptures).toHaveBeenCalledWith('test-target', 'http', 10);
     });
 
     it('should pass limit parameter to API', async () => {
@@ -45,9 +69,9 @@ describe('spike diagnostics API', () => {
         count: 0,
       });
       
-      await api.getLatencySpikesWithCaptures('test-target', 5);
+      await api.getLatencySpikesWithCaptures('test-target', 'http', 5);
       
-      expect(mockGetLatencySpikesWithCaptures).toHaveBeenCalledWith('test-target', 5);
+      expect(mockGetLatencySpikesWithCaptures).toHaveBeenCalledWith('test-target', 'http', 5);
     });
 
     it('should handle empty spikes response', async () => {

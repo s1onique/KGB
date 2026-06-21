@@ -22,7 +22,7 @@ describe('spikes DOM renderer: edge cases', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     container = document.createElement('div');
-    container.id = 'spike-diag-test-target';
+    container.id = 'spike-diag-http-test-target';
     document.body.appendChild(container);
   });
 

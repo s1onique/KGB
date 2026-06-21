@@ -96,6 +96,24 @@ function latencySectionHTML(targetId: string, kind: 'http' | 'icmp', title: stri
   `;
 }
 
+// Spike diagnostics section HTML template - probe-kind aware
+function spikeDiagSectionHTML(targetId: string, kind: 'http' | 'icmp'): string {
+  const title = kind === 'http' ? 'HTTP Spike Diagnostics' : 'ICMP Spike Diagnostics';
+  const emptyMsg = kind === 'http' 
+    ? 'No retained HTTP spikes in the selected range.' 
+    : 'No retained ICMP spikes in the selected range.';
+  return `
+      <div class="spike-diag-section" id="spike-diag-section-${kind}-${escapeText(targetId)}">
+          <div class="spike-diag-section-header">
+              <span class="spike-diag-section-title">${escapeText(title)}</span>
+          </div>
+          <div class="spike-diag-card" id="spike-diag-${kind}-${escapeText(targetId)}" data-kind="${kind}">
+              <div class="spike-diag-loading" data-empty-message="${escapeAttr(emptyMsg)}">Loading spike diagnostics...</div>
+          </div>
+      </div>
+  `;
+}
+
 // Handle graph control action
 function handleGraphControl(targetId: string, kind: string, action: string, retainedRangeSeconds: number): void {
   const viewport = getOrCreateViewport(targetId, kind);
@@ -236,8 +254,9 @@ function createTargetsRenderer(container: HTMLElement): TargetsRenderer {
               ${latencySectionHTML(t.id, 'http', 'HTTP Status Probe Latency')}
               ${latencySectionHTML(t.id, 'icmp', 'ICMP Ping Latency')}
           </div>
-          <div class="spike-diag-card" id="spike-diag-${escapeText(t.id)}">
-              <div class="spike-diag-loading">Loading spike diagnostics...</div>
+          <div class="spike-diagnostics-container">
+              ${spikeDiagSectionHTML(t.id, 'http')}
+              ${spikeDiagSectionHTML(t.id, 'icmp')}
           </div>
       </div>
     `

@@ -29,7 +29,7 @@ describe('spikes DOM renderer: View details expand/collapse', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     container = document.createElement('div');
-    container.id = 'spike-diag-test-target';
+    container.id = 'spike-diag-http-test-target';
     document.body.appendChild(container);
   });
 
@@ -276,7 +276,7 @@ describe('spikes DOM renderer: XSS safety with special source characters', () =>
   beforeEach(() => {
     vi.clearAllMocks();
     container = document.createElement('div');
-    container.id = 'spike-diag-test-target';
+    container.id = 'spike-diag-http-test-target';
     document.body.appendChild(container);
   });
 
