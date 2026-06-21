@@ -164,13 +164,36 @@ function renderCooldownAnchorExplanation(capture: DiagCapture): string {
     const remainingMs = cooldownInfo.remaining_cooldown_ms;
     const cooldownKey = escapeText(cooldownInfo.cooldown_key || '');
     const scope = escapeText(cooldownInfo.scope || '');
+    const anchorProbeKind = escapeText(cooldownInfo.anchor_probe_kind || '');
+    const suppressedProbeKind = escapeText(cooldownInfo.suppressed_probe_kind || '');
+    const anchorCaptureId = escapeText(cooldownInfo.anchor_capture_id || '');
+    const isCrossProbe = cooldownInfo.is_cross_probe_suppression;
     
     let html = '<div class="cooldown-anchor-explanation hidden-anchor">';
-    html += '<div class="cooldown-explanation-summary">Prior diagnostic capture is outside the current view</div>';
+    
+    // Cross-probe suppression message: explain what happened clearly
+    if (isCrossProbe && anchorProbeKind && suppressedProbeKind) {
+      html += '<div class="cooldown-explanation-summary">';
+      html += '<span class="cross-probe-suppression">' + suppressedProbeKind.toUpperCase() + ' spike suppressed by prior ' + anchorProbeKind.toUpperCase() + ' diagnostic capture due to source-level cooldown</span>';
+      html += '</div>';
+    } else {
+      html += '<div class="cooldown-explanation-summary">Prior diagnostic capture is outside the current view</div>';
+    }
+    
     html += '<div class="cooldown-anchor-details">';
+    
+    // Show anchor probe kind and suppressed probe kind for cross-probe cases
+    if (isCrossProbe) {
+      html += '<div class="cooldown-detail-row"><span class="cooldown-detail-label">Suppressed probe:</span> <span class="cooldown-detail-value">' + suppressedProbeKind.toUpperCase() + '</span></div>';
+      html += '<div class="cooldown-detail-row"><span class="cooldown-detail-label">Anchor probe:</span> <span class="cooldown-detail-value">' + anchorProbeKind.toUpperCase() + '</span></div>';
+    }
     
     if (anchorTime !== '—') {
       html += '<div class="cooldown-detail-row"><span class="cooldown-detail-label">Anchor:</span> <span class="cooldown-detail-value">prior successful capture at ' + anchorTime + '</span></div>';
+    }
+    
+    if (anchorCaptureId) {
+      html += '<div class="cooldown-detail-row"><span class="cooldown-detail-label">Capture ID:</span> <span class="cooldown-detail-value capture-id">' + anchorCaptureId + '</span></div>';
     }
     
     if (scope) {
@@ -194,6 +217,15 @@ function renderCooldownAnchorExplanation(capture: DiagCapture): string {
     
     html += '<div class="cooldown-detail-row"><span class="cooldown-detail-label">Reason:</span> <span class="cooldown-detail-value">' + reasonText + '</span></div>';
     
+    // Show degraded message when anchor spike event is outside retention or view
+    // evicted_from_retention: spike event was purged from retention entirely
+    if (reason === 'evicted_from_retention') {
+      html += '<div class="cooldown-detail-row anchor-degraded-message">Anchor capture artifact is available; original ' + anchorProbeKind.toUpperCase() + ' spike event is outside retention</div>';
+    } else if (reason === 'outside_filter_window') {
+      // outside_filter_window: spike event exists but is outside the current view/filter window
+      html += '<div class="cooldown-detail-row anchor-degraded-message">Anchor capture artifact is available; original ' + anchorProbeKind.toUpperCase() + ' spike event is outside the current view/filter window</div>';
+    }
+    
     html += '</div></div>';
     return html;
   }
@@ -201,8 +233,21 @@ function renderCooldownAnchorExplanation(capture: DiagCapture): string {
   // Case B: Visible anchor - render less alarming explanation
   if (cooldownInfo.anchor_visible && cooldownInfo.anchor_visibility_reason === 'retained_visible') {
     const anchorTime = formatAnchorTime(cooldownInfo.last_successful_capture_at);
+    const anchorProbeKind = escapeText(cooldownInfo.anchor_probe_kind || '');
+    const suppressedProbeKind = escapeText(cooldownInfo.suppressed_probe_kind || '');
+    const isCrossProbe = cooldownInfo.is_cross_probe_suppression;
+    
     let html = '<div class="cooldown-anchor-explanation visible-anchor">';
-    html += '<div class="cooldown-explanation-summary">Skipped because a recent diagnostic capture is already retained</div>';
+    
+    // Cross-probe suppression message
+    if (isCrossProbe && anchorProbeKind && suppressedProbeKind) {
+      html += '<div class="cooldown-explanation-summary">';
+      html += '<span class="cross-probe-suppression">' + suppressedProbeKind.toUpperCase() + ' spike suppressed by prior ' + anchorProbeKind.toUpperCase() + ' diagnostic capture</span>';
+      html += '</div>';
+    } else {
+      html += '<div class="cooldown-explanation-summary">Skipped because a recent diagnostic capture is already retained</div>';
+    }
+    
     if (anchorTime !== '—') {
       html += '<div class="cooldown-anchor-time">Prior capture at ' + anchorTime + '</div>';
     }

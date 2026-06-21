@@ -147,6 +147,11 @@ export interface CaptureCooldownInfo {
   anchor_target_id?: string;
   // AnchorProbeKind is the probe kind of the anchor capture.
   anchor_probe_kind?: string;
+  // SuppressedProbeKind is the probe kind of the spike that was suppressed by cooldown.
+  suppressed_probe_kind?: string;
+  // IsCrossProbeSuppression indicates the suppressed spike's probe kind differs from
+  // the anchor capture's probe kind.
+  is_cross_probe_suppression?: boolean;
 }
 
 // TcpSocketDiagData represents TCP socket diagnostic data from tovarisch.

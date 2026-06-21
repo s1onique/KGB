@@ -20,6 +20,9 @@ import {
   spikeResponseWithMissingCooldownMetadata,
   spikeResponseWithXssCooldownKey,
   spikeResponseWithOkCapture,
+  spikeResponseWithHttpSuppressedByIcmpHiddenAnchor,
+  spikeResponseWithHttpSuppressedByIcmpVisibleAnchor,
+  spikeResponseWithEvictedAnchor,
 } from './spikes.render.fixtures';
 
 describe('spikes DOM renderer: cooldown anchor explanation', () => {
@@ -306,11 +309,29 @@ describe('spikes DOM renderer: cooldown anchor explanation', () => {
       const response = spikeResponseWithHiddenAnchorCooldown({
         cooldown_info: {
           anchor_visibility_reason: 'evicted_from_retention',
+          anchor_probe_kind: 'icmp',
         },
       });
       mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
       await loadSpikeDiagnostics('test-target');
       expect(container.textContent).toContain('anchor evicted from retention');
+      expect(container.textContent).toContain('original ICMP spike event is outside retention');
+      expect(container.textContent).not.toContain('outside the current view/filter window');
+    });
+
+    it('renders outside_filter_window reason correctly with separate messaging', async () => {
+      const response = spikeResponseWithHiddenAnchorCooldown({
+        cooldown_info: {
+          anchor_visibility_reason: 'outside_filter_window',
+          anchor_probe_kind: 'icmp',
+        },
+      });
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+      expect(container.textContent).toContain('outside current view');
+      // Should say "outside the current view/filter window" NOT "outside retention"
+      expect(container.textContent).toContain('outside the current view/filter window');
+      expect(container.textContent).not.toContain('is outside retention');
     });
 
     it('renders suppressed_cooldown reason correctly', async () => {
@@ -322,6 +343,112 @@ describe('spikes DOM renderer: cooldown anchor explanation', () => {
       mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
       await loadSpikeDiagnostics('test-target');
       expect(container.textContent).toContain('anchor also suppressed by cooldown');
+    });
+  });
+
+  // =======================================================================
+  // Test Case F: Cross-probe suppression (ICMP→HTTP)
+  // =======================================================================
+  describe('cross-probe suppression (ICMP→HTTP)', () => {
+    it('renders cross-probe suppression message for hidden anchor', async () => {
+      const response = spikeResponseWithHttpSuppressedByIcmpHiddenAnchor();
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+      // Should show ICMP→HTTP cross-probe message
+      expect(container.textContent).toContain('HTTP spike suppressed by prior ICMP diagnostic capture');
+      expect(container.textContent).toContain('due to source-level cooldown');
+    });
+
+    it('shows suppressed probe and anchor probe kind for hidden anchor', async () => {
+      const response = spikeResponseWithHttpSuppressedByIcmpHiddenAnchor();
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+      // Should show both probe kinds
+      expect(container.textContent).toContain('Suppressed probe:');
+      expect(container.textContent).toContain('HTTP');
+      expect(container.textContent).toContain('Anchor probe:');
+      expect(container.textContent).toContain('ICMP');
+    });
+
+    it('renders cross-probe suppression message for visible anchor', async () => {
+      const response = spikeResponseWithHttpSuppressedByIcmpVisibleAnchor();
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+      // Should show cross-probe message without "due to source-level cooldown"
+      expect(container.textContent).toContain('HTTP spike suppressed by prior ICMP diagnostic capture');
+      expect(container.textContent).not.toContain('due to source-level cooldown');
+    });
+
+    it('shows anchor capture ID for cross-probe suppression', async () => {
+      const response = spikeResponseWithHttpSuppressedByIcmpHiddenAnchor({
+        cooldown_info: {
+          anchor_capture_id: 'icmp-anchor-event-001',
+        },
+      });
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+      expect(container.textContent).toContain('Capture ID:');
+      expect(container.textContent).toContain('icmp-anchor-event-001');
+    });
+
+    it('shows View anchor capture button for cross-probe suppression', async () => {
+      const response = spikeResponseWithHttpSuppressedByIcmpHiddenAnchor();
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+      // Should have the view anchor capture button
+      expect(container.textContent).toContain('View anchor capture');
+    });
+
+    it('does not show generic "outside current view" message for cross-probe', async () => {
+      const response = spikeResponseWithHttpSuppressedByIcmpHiddenAnchor();
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+      // Should show cross-probe specific message, not generic one
+      expect(container.textContent).toContain('HTTP spike suppressed by prior ICMP');
+    });
+  });
+
+  // =======================================================================
+  // Test Case G: Evicted anchor (spike event outside retention)
+  // =======================================================================
+  describe('evicted anchor (spike event purged, artifact available)', () => {
+    it('renders evicted anchor message', async () => {
+      const response = spikeResponseWithEvictedAnchor();
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+      // Should show that spike event is outside retention
+      expect(container.textContent).toContain('anchor evicted from retention');
+    });
+
+    it('shows degraded message explaining artifact availability', async () => {
+      const response = spikeResponseWithEvictedAnchor();
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+      // Should explain that capture artifact is available but spike event is outside retention
+      expect(container.textContent).toContain('Anchor capture artifact is available');
+      expect(container.textContent).toContain('original ICMP spike event is outside retention');
+    });
+
+    it('shows anchor probe kind in degraded message', async () => {
+      const response = spikeResponseWithEvictedAnchor();
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+      expect(container.textContent).toContain('original ICMP spike event');
+    });
+
+    it('shows View anchor capture button for evicted anchor', async () => {
+      const response = spikeResponseWithEvictedAnchor();
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+      // Should still have the view anchor capture button
+      expect(container.textContent).toContain('View anchor capture');
+    });
+
+    it('shows anchor capture ID for evicted anchor', async () => {
+      const response = spikeResponseWithEvictedAnchor();
+      mockGetLatencySpikesWithCaptures.mockResolvedValue(response);
+      await loadSpikeDiagnostics('test-target');
+      expect(container.textContent).toContain('evicted-anchor-event-001');
     });
   });
 });

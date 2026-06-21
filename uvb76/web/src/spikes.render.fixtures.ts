@@ -340,3 +340,161 @@ export function spikeResponseWithXssCooldownKey(xssPayload: string): SpikeRespon
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Cross-probe suppression fixtures
+// ---------------------------------------------------------------------------
+
+/** Create cooldown info for ICMP→HTTP cross-probe suppression (hidden anchor) */
+export function createIcmpToHttpCrossProbeCooldownInfo(overrides: Partial<CaptureCooldownInfo> = {}): CaptureCooldownInfo {
+  return {
+    scope: 'per_diagnostic_peer',
+    last_successful_capture_at: '2026-06-18T11:00:00Z',
+    next_capture_eligible_at: '2026-06-18T12:05:00Z',
+    remaining_cooldown_ms: 300000,
+    cooldown_key: 'peer-1',
+    anchor_visible: false,
+    anchor_visibility_reason: 'outside_filter_window',
+    skipped_attempt_updates_cooldown: false,
+    cooldown_seconds: 300,
+    anchor_capture_id: 'icmp-anchor-event-001',
+    anchor_target_id: 'test-target',
+    anchor_probe_kind: 'icmp',
+    anchor_source: 'peer-1',
+    suppressed_probe_kind: 'http',
+    is_cross_probe_suppression: true,
+    ...overrides,
+  };
+}
+
+/** Create cooldown info for ICMP→HTTP cross-probe suppression (visible anchor) */
+export function createIcmpToHttpCrossProbeVisibleCooldownInfo(overrides: Partial<CaptureCooldownInfo> = {}): CaptureCooldownInfo {
+  return {
+    scope: 'per_diagnostic_peer',
+    last_successful_capture_at: '2026-06-18T11:55:00Z',
+    next_capture_eligible_at: '2026-06-18T12:00:00Z',
+    remaining_cooldown_ms: 0,
+    cooldown_key: 'peer-1',
+    anchor_visible: true,
+    anchor_visibility_reason: 'retained_visible',
+    skipped_attempt_updates_cooldown: false,
+    cooldown_seconds: 300,
+    anchor_capture_id: 'icmp-anchor-event-001',
+    anchor_target_id: 'test-target',
+    anchor_probe_kind: 'icmp',
+    anchor_source: 'peer-1',
+    suppressed_probe_kind: 'http',
+    is_cross_probe_suppression: true,
+    ...overrides,
+  };
+}
+
+/** Create a skipped HTTP spike suppressed by ICMP anchor (hidden anchor) */
+export function createHttpSpikeSuppressedByIcmpCaptureWithHiddenAnchor(overrides: Partial<DiagCapture> = {}): DiagCapture {
+  return {
+    source: 'peer-1',
+    base_url: 'http://10.0.0.1:8080',
+    capture_started_at: '2026-06-18T12:00:00Z',
+    status: 'ok',
+    suppressed_by_cooldown: true,
+    cooldown_info: createIcmpToHttpCrossProbeCooldownInfo(),
+    ...overrides,
+  };
+}
+
+/** Create a skipped HTTP spike suppressed by ICMP anchor (visible anchor) */
+export function createHttpSpikeSuppressedByIcmpCaptureWithVisibleAnchor(overrides: Partial<DiagCapture> = {}): DiagCapture {
+  return {
+    source: 'peer-1',
+    base_url: 'http://10.0.0.1:8080',
+    capture_started_at: '2026-06-18T12:00:00Z',
+    status: 'ok',
+    suppressed_by_cooldown: true,
+    cooldown_info: createIcmpToHttpCrossProbeVisibleCooldownInfo(),
+    ...overrides,
+  };
+}
+
+/** Create a spike response with HTTP spike suppressed by ICMP anchor (hidden anchor) */
+export function spikeResponseWithHttpSuppressedByIcmpHiddenAnchor(overrides: Partial<{
+  latency_ms?: number;
+  cooldown_info?: Partial<CaptureCooldownInfo>;
+  retention?: Partial<SpikeRetentionStats>;
+}> = {}): SpikeResponseWithCaptures {
+  const cooldownInfo = overrides.cooldown_info
+    ? createIcmpToHttpCrossProbeCooldownInfo(overrides.cooldown_info)
+    : createIcmpToHttpCrossProbeCooldownInfo();
+  
+  return createSpikeResponse(createSpike({
+    kind: 'http',  // HTTP spike was suppressed
+    latency_ms: overrides.latency_ms ?? 800,
+    captures: [createHttpSpikeSuppressedByIcmpCaptureWithHiddenAnchor({
+      cooldown_info: cooldownInfo,
+    })],
+  }), overrides.retention);
+}
+
+/** Create a spike response with HTTP spike suppressed by ICMP anchor (visible anchor) */
+export function spikeResponseWithHttpSuppressedByIcmpVisibleAnchor(overrides: Partial<{
+  latency_ms?: number;
+  cooldown_info?: Partial<CaptureCooldownInfo>;
+  retention?: Partial<SpikeRetentionStats>;
+}> = {}): SpikeResponseWithCaptures {
+  const cooldownInfo = overrides.cooldown_info
+    ? createIcmpToHttpCrossProbeVisibleCooldownInfo(overrides.cooldown_info)
+    : createIcmpToHttpCrossProbeVisibleCooldownInfo();
+  
+  return createSpikeResponse(createSpike({
+    kind: 'http',  // HTTP spike was suppressed
+    latency_ms: overrides.latency_ms ?? 800,
+    captures: [createHttpSpikeSuppressedByIcmpCaptureWithVisibleAnchor({
+      cooldown_info: cooldownInfo,
+    })],
+  }), overrides.retention);
+}
+
+/** Create cooldown info for evicted anchor scenario */
+export function createEvictedAnchorCooldownInfo(overrides: Partial<CaptureCooldownInfo> = {}): CaptureCooldownInfo {
+  return {
+    scope: 'per_diagnostic_peer',
+    last_successful_capture_at: '2026-06-17T11:00:00Z',  // Older than retention window
+    next_capture_eligible_at: '2026-06-17T12:05:00Z',
+    remaining_cooldown_ms: 0,
+    cooldown_key: 'peer-1',
+    anchor_visible: false,
+    anchor_visibility_reason: 'evicted_from_retention',
+    skipped_attempt_updates_cooldown: false,
+    cooldown_seconds: 300,
+    anchor_capture_id: 'evicted-anchor-event-001',
+    anchor_target_id: 'test-target',
+    anchor_probe_kind: 'icmp',
+    anchor_source: 'peer-1',
+    suppressed_probe_kind: 'http',
+    is_cross_probe_suppression: true,
+    ...overrides,
+  };
+}
+
+/** Create a spike response with evicted anchor (spike event purged, capture artifact still exists) */
+export function spikeResponseWithEvictedAnchor(overrides: Partial<{
+  latency_ms?: number;
+  cooldown_info?: Partial<CaptureCooldownInfo>;
+  retention?: Partial<SpikeRetentionStats>;
+}> = {}): SpikeResponseWithCaptures {
+  const cooldownInfo = overrides.cooldown_info
+    ? createEvictedAnchorCooldownInfo(overrides.cooldown_info)
+    : createEvictedAnchorCooldownInfo();
+  
+  return createSpikeResponse(createSpike({
+    kind: 'http',
+    latency_ms: overrides.latency_ms ?? 800,
+    captures: [{
+      source: 'peer-1',
+      base_url: 'http://10.0.0.1:8080',
+      capture_started_at: '2026-06-18T12:00:00Z',
+      status: 'ok',
+      suppressed_by_cooldown: true,
+      cooldown_info: cooldownInfo,
+    }],
+  }), overrides.retention);
+}
