@@ -48,6 +48,10 @@ type DiagCapture struct {
 	// TcpAbsenceEvents contains TCP absence explanations when underlay_tcp is empty.
 	// This field is populated by the capture service based on network_diag.events.
 	TcpAbsenceEvents []TcpAbsenceEvent `json:"tcp_absence_events,omitempty"`
+	// ProbeRoute contains route lookup evidence for the probe destination.
+	// This provides evidence of which kernel route was selected for the exact
+	// probe destination at capture time. Route lookup failures do not block capture.
+	ProbeRoute *ProbeRoute `json:"probe_route,omitempty"`
 }
 
 // TcpAbsenceEvent explains why TCP diagnostics were absent from a successful capture.

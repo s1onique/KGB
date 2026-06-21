@@ -15,12 +15,13 @@ import (
 )
 
 type CaptureService struct {
-	cfg         *config.DiagnosticsConfig
-	captures    *state.CaptureStore
-	httpClient  *http.Client
-	targetPeers map[string]*config.DiagPeerConfig
-	stopCh      chan struct{}
-	wg          sync.WaitGroup
+	cfg            *config.DiagnosticsConfig
+	captures       *state.CaptureStore
+	httpClient     *http.Client
+	targetPeers    map[string]*config.DiagPeerConfig
+	routeCollector *RouteCollector
+	stopCh         chan struct{}
+	wg             sync.WaitGroup
 }
 
 func NewCaptureService(cfg *config.DiagnosticsConfig, captureStore *state.CaptureStore) *CaptureService {
@@ -30,11 +31,12 @@ func NewCaptureService(cfg *config.DiagnosticsConfig, captureStore *state.Captur
 	}
 
 	return &CaptureService{
-		cfg:         cfg,
-		captures:    captureStore,
-		httpClient:  &http.Client{Timeout: time.Duration(timeout) * time.Millisecond},
-		targetPeers: cfg.TargetToDiagPeers(),
-		stopCh:      make(chan struct{}),
+		cfg:            cfg,
+		captures:       captureStore,
+		httpClient:     &http.Client{Timeout: time.Duration(timeout) * time.Millisecond},
+		targetPeers:    cfg.TargetToDiagPeers(),
+		routeCollector: NewRouteCollector(),
+		stopCh:         make(chan struct{}),
 	}
 }
 
@@ -61,7 +63,6 @@ func (cs *CaptureService) TriggerCapture(eventID, targetID, probeKind string) {
 	}
 
 	// Evaluate cooldown using the authoritative shared decision function.
-	// This ensures the skip decision AND the exported cooldown_info are consistent.
 	decision := cs.captures.EvaluateCooldown(now, peer.Name, cs.cfg.CooldownSeconds)
 	if decision.IsInCooldown {
 		cs.captures.ReleaseInFlight(peer.Name)
@@ -70,20 +71,28 @@ func (cs *CaptureService) TriggerCapture(eventID, targetID, probeKind string) {
 	}
 
 	// Trigger async capture
-	// Capture variables for the goroutine to avoid closure issues
 	targetIDForCapture := targetID
 	probeKindForCapture := probeKind
 	cs.wg.Add(1)
 	go func() {
 		defer cs.wg.Done()
-		capture := cs.performCapture(peer)
-		// Use AddCaptureWithProvenance to include target/probe context for root-cause analysis
+		capture := cs.performCapture(peer, probeKindForCapture)
 		cs.captures.AddCaptureWithProvenance(eventID, capture, targetIDForCapture, probeKindForCapture)
 		cs.captures.ReleaseInFlight(peer.Name)
 	}()
 }
 
-func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig) state.DiagCapture {
+// probeKindToRouteKind converts a probe kind string to a ProbeRouteKind.
+func probeKindToRouteKind(probeKind string) state.ProbeRouteKind {
+	switch strings.ToLower(probeKind) {
+	case "icmp":
+		return state.ProbeRouteKindICMP
+	default:
+		return state.ProbeRouteKindHTTP
+	}
+}
+
+func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig, probeKind string) state.DiagCapture {
 	capture := state.DiagCapture{
 		Source:               peer.Name,
 		BaseURL:              peer.BaseURL,
@@ -106,6 +115,12 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig) state.Diag
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cs.cfg.TimeoutMs)*time.Millisecond)
 	defer cancel()
+
+	// Collect route evidence early, before the HTTP request.
+	// Route lookup failures do NOT block the diagnostic capture.
+	// This is valuable even when the diagnostic endpoint is unreachable.
+	routeKind := probeKindToRouteKind(probeKind)
+	capture.ProbeRoute = cs.collectProbeRoute(ctx, peer, routeKind)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
 	if err != nil {
@@ -131,7 +146,6 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig) state.Diag
 	}
 	defer resp.Body.Close()
 
-	// Record HTTP status code for all responses (including errors)
 	capture.HTTPStatusCode = &resp.StatusCode
 
 	if resp.StatusCode != http.StatusOK {
@@ -155,14 +169,10 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig) state.Diag
 		return capture
 	}
 
-	// Only set CaptureStatusCaptured AFTER successful network diag attachment
-	// This ensures we don't claim success prematurely
 	if tovarischResp.NetworkDiag != nil {
 		capture.NetworkDiag = tovarischResp.NetworkDiag
 		capture.CaptureStatus = state.CaptureStatusCaptured
-		
-		// Populate TcpAbsenceEvents when underlay_tcp is empty but events exist.
-		// This provides machine-readable explanations for why TCP diagnostics were absent.
+
 		if len(tovarischResp.NetworkDiag.UnderlayTCP) == 0 && len(tovarischResp.NetworkDiag.Events) > 0 {
 			capture.TcpAbsenceEvents = buildTcpAbsenceEvents(tovarischResp.NetworkDiag.Events, peer)
 		}
@@ -170,6 +180,35 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig) state.Diag
 
 	finishCapture(&capture)
 	return capture
+}
+
+// collectProbeRoute performs a route lookup for the probe destination.
+func (cs *CaptureService) collectProbeRoute(ctx context.Context, peer *config.DiagPeerConfig, routeKind state.ProbeRouteKind) *state.ProbeRoute {
+	// Use the host from BaseURL as the probe destination for route lookup.
+	// BaseURL contains the actual probe endpoint (e.g., http://10.0.0.5:8080).
+	// The route lookup should answer: "Which path would this packet take from the router to 10.0.0.5?"
+	host := extractHostFromURL(peer.BaseURL)
+	if host == "" {
+		return &state.ProbeRoute{
+			Kind:        routeKind,
+			Ok:          false,
+			ErrorKind:   state.RouteLookupErrorUnavailable,
+			Error:       "cannot extract host from peer base_url",
+			CollectedAt: time.Now().UTC().Format(time.RFC3339),
+		}
+	}
+
+	// RouteCollector is always wired in NewCaptureService
+	return cs.routeCollector.CollectRouteLookup(ctx, routeKind, host, host)
+}
+
+// extractHostFromURL extracts the hostname from a URL string.
+func extractHostFromURL(baseURL string) string {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }
 
 func finishCapture(capture *state.DiagCapture) {
@@ -197,8 +236,6 @@ func (cs *CaptureService) recordNoPeerMappingCapture(eventID, targetID string) {
 	cs.captures.AddCapture(eventID, capture)
 }
 
-// recordSuppressedInFlight records an in-flight suppression (another capture currently running).
-// This is NOT a cooldown scenario, so it records not_attempted status.
 func (cs *CaptureService) recordSuppressedInFlight(eventID string, peer *config.DiagPeerConfig, targetID string, now time.Time) {
 	capture := state.DiagCapture{
 		Source:           peer.Name,
@@ -211,30 +248,20 @@ func (cs *CaptureService) recordSuppressedInFlight(eventID string, peer *config.
 	cs.captures.AddCapture(eventID, capture)
 }
 
-// recordSuppressedCooldown records a cooldown suppression using the authoritative decision.
-// The cooldown_info is built from the same decision that determined the skip,
-// ensuring metadata exactly matches the decision logic.
-//
-// probeKind is the probe kind of the suppressed spike ("http" or "icmp"), used to
-// detect cross-probe suppression for UI clarity.
 func (cs *CaptureService) recordSuppressedCooldown(eventID string, peer *config.DiagPeerConfig, targetID string, now time.Time, decision state.CaptureCooldownDecision, probeKind string) {
-	// Build cooldown_info from the authoritative decision
 	cooldownInfo := state.BuildCooldownInfoFromDecision(decision, peer.Name)
-	
-	// Track the suppressed probe kind for cross-probe detection in UI.
-	// This allows the UI to show "HTTP spike suppressed by ICMP capture" when applicable.
+
 	if cooldownInfo != nil {
 		cooldownInfo.SuppressedProbeKind = probeKind
-		// Compute cross-probe suppression flag
 		if cooldownInfo.AnchorProbeKind != "" && probeKind != "" && cooldownInfo.AnchorProbeKind != probeKind {
 			cooldownInfo.IsCrossProbeSuppression = true
 		}
 	}
-	
+
 	capture := state.DiagCapture{
 		Source:               peer.Name,
 		BaseURL:              peer.BaseURL,
-		CaptureStartedAt:     now,
+		CaptureStartedAt:      now,
 		Status:               state.DiagCaptureStatusOK,
 		SuppressedByCooldown: true,
 		CaptureStatus:        state.CaptureStatusSkippedCooldown,
@@ -249,7 +276,6 @@ func SafeErrorMessage(raw string) *string {
 	if len(safe) > 200 {
 		safe = safe[:200]
 	}
-	// Remove any potential sensitive patterns
 	safe = strings.ReplaceAll(safe, "\n", " ")
 	safe = strings.ReplaceAll(safe, "\r", "")
 	return &safe
@@ -259,8 +285,6 @@ type TovarischStatusResponse struct {
 	NetworkDiag *state.NetworkDiagData `json:"network_diag,omitempty"`
 }
 
-// tcpAbsenceEventFields is the internal struct for parsing JSON fields from tovarisch.
-// This allows safe, typed JSON decoding that handles spaces, escapes, and field ordering.
 type tcpAbsenceEventFields struct {
 	Reason        string `json:"reason"`
 	Detail        string `json:"detail,omitempty"`
@@ -273,55 +297,45 @@ type tcpAbsenceEventFields struct {
 	ExitCode      *int   `json:"exit_code,omitempty"`
 }
 
-// buildTcpAbsenceEvents converts tovarisch events into structured TcpAbsenceEvents.
-// It parses the JSON fields from tovarisch events and enriches them with context.
 func buildTcpAbsenceEvents(events []state.DiagEventData, peer *config.DiagPeerConfig) []state.TcpAbsenceEvent {
 	var absenceEvents []state.TcpAbsenceEvent
-	
+
 	for _, event := range events {
-		// Only process underlay_tcp events
 		if event.Source != "underlay_tcp" {
 			continue
 		}
-		
+
 		absenceEvent := parseEventFields(event, peer)
 		absenceEvents = append(absenceEvents, absenceEvent)
 	}
-	
+
 	return absenceEvents
 }
 
-// parseEventFields parses the JSON fields from a tovarisch event into a structured TcpAbsenceEvent.
-// It uses json.Unmarshal for safe, typed decoding that handles escaped characters and field ordering.
 func parseEventFields(event state.DiagEventData, peer *config.DiagPeerConfig) state.TcpAbsenceEvent {
 	absenceEvent := state.TcpAbsenceEvent{
 		Source: event.Source,
 		Detail: event.Message,
 	}
-	
-	// Enrich with peer context if available (fallback defaults)
+
 	if peer != nil {
 		absenceEvent.ExpectedPeer = peer.Name
 	}
-	
-	// Parse the fields JSON safely
+
 	if event.Fields == nil || *event.Fields == "" {
-		// No fields provided - set default reason code; message becomes the detail
-		absenceEvent.ReasonCode = "no_matching_socket" // default reason
+		absenceEvent.ReasonCode = "no_matching_socket"
 		return absenceEvent
 	}
-	
+
 	var fields tcpAbsenceEventFields
 	if err := json.Unmarshal([]byte(*event.Fields), &fields); err != nil {
-		// Malformed JSON - record parse_failed but preserve the raw detail
 		absenceEvent.ReasonCode = "parse_failed"
 		if absenceEvent.Detail == "" {
 			absenceEvent.Detail = "failed to parse underlay_tcp event fields"
 		}
 		return absenceEvent
 	}
-	
-	// Map parsed fields to the absence event
+
 	if fields.Reason != "" {
 		absenceEvent.ReasonCode = fields.Reason
 	}
@@ -343,13 +357,12 @@ func parseEventFields(event state.DiagEventData, peer *config.DiagPeerConfig) st
 	if fields.RawMatchCount != nil {
 		absenceEvent.RawMatchCount = fields.RawMatchCount
 	}
-	
-	// Handle command_tool: if explicit, use it; otherwise derive from exit_code
+
 	if fields.CommandTool != "" {
 		absenceEvent.CommandTool = fields.CommandTool
 	} else if fields.ExitCode != nil {
 		absenceEvent.CommandTool = fmt.Sprintf("ss (exit=%d)", *fields.ExitCode)
 	}
-	
+
 	return absenceEvent
 }
