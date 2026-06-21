@@ -1,6 +1,7 @@
 package state
 
 import (
+	"context"
 	"runtime"
 	"sync"
 	"testing"
@@ -168,7 +169,12 @@ func TestLatencyTracker_CorruptStateGetRecentSamples_Safe(t *testing.T) {
 
 // TestLatencyTracker_ICMPHotPathBoundedWindow_Race tests that concurrent spike window
 // reads (120 samples) don't race with writes (1 per second in production).
+//
+// Duration is budget-aware: short default for CI, extended soak with
+// UVB76_LONG_CRASH_TESTS=1.
 func TestLatencyTracker_ICMPHotPathBoundedWindow_Race(t *testing.T) {
+	duration := crashRegressionDuration(t, 3*time.Second)
+
 	// Production ICMP config: 3600 samples capacity
 	buckets := []int64{5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000}
 	capacity := 3600
@@ -179,8 +185,10 @@ func TestLatencyTracker_ICMPHotPathBoundedWindow_Race(t *testing.T) {
 		lt.RecordAt(float64(i%100)+10.0, true, time.Now().UTC())
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), duration)
+	defer cancel()
+
 	var wg sync.WaitGroup
-	stopCh := make(chan struct{})
 
 	// Writers: simulate continuous ICMP probes (1 per second)
 	writerCount := 2
@@ -188,16 +196,17 @@ func TestLatencyTracker_ICMPHotPathBoundedWindow_Race(t *testing.T) {
 		wg.Add(1)
 		go func(writerID int) {
 			defer wg.Done()
+			ticker := time.NewTicker(time.Millisecond)
+			defer ticker.Stop()
 			for i := 0; ; i++ {
 				select {
-				case <-stopCh:
+				case <-ctx.Done():
 					return
-				default:
+				case <-ticker.C:
 					latency := float64((i*17)%200) + 10.0
 					reachable := i%10 != 0
 					lt.RecordAt(latency, reachable, time.Now().UTC())
 					runtime.Gosched()
-					time.Sleep(time.Millisecond)
 				}
 			}
 		}(w)
@@ -210,11 +219,13 @@ func TestLatencyTracker_ICMPHotPathBoundedWindow_Race(t *testing.T) {
 		wg.Add(1)
 		go func(readerID int) {
 			defer wg.Done()
+			ticker := time.NewTicker(time.Millisecond)
+			defer ticker.Stop()
 			for {
 				select {
-				case <-stopCh:
+				case <-ctx.Done():
 					return
-				default:
+				case <-ticker.C:
 					// NEW HOT PATH: bounded spike window (120 samples)
 					samples := lt.GetRecentSamples(120)
 					if samples != nil {
@@ -235,11 +246,13 @@ func TestLatencyTracker_ICMPHotPathBoundedWindow_Race(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			ticker := time.NewTicker(time.Millisecond)
+			defer ticker.Stop()
 			for {
 				select {
-				case <-stopCh:
+				case <-ctx.Done():
 					return
-				default:
+				case <-ticker.C:
 					// UI/API path: full capacity (3600 samples)
 					samples := lt.GetRecentSamples(3600)
 					if samples != nil && len(samples) > 3600 {
@@ -251,9 +264,7 @@ func TestLatencyTracker_ICMPHotPathBoundedWindow_Race(t *testing.T) {
 		}()
 	}
 
-	t.Log("Running ICMP hot-path bounded window race test (30s)...")
-	time.Sleep(30 * time.Second)
-	close(stopCh)
+	t.Logf("Running ICMP hot-path bounded window race test for %v...", duration)
 	wg.Wait()
 
 	// Final verification

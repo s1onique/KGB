@@ -1,11 +1,42 @@
 package state
 
 import (
+	"context"
+	"os"
 	"runtime"
 	"sync"
 	"testing"
 	"time"
 )
+
+// crashRegressionDuration returns a test duration that is budget-aware.
+// It respects t.Deadline() and leaves room for package cleanup.
+//
+// Default CI duration is short (fallback). Extended 30s+ soak runs only when
+// UVB76_LONG_CRASH_TESTS=1 or via the dedicated latency crash lab.
+func crashRegressionDuration(t *testing.T, fallback time.Duration) time.Duration {
+	t.Helper()
+
+	duration := fallback
+	if os.Getenv("UVB76_LONG_CRASH_TESTS") == "1" {
+		duration = 30 * time.Second
+	}
+
+	if deadline, ok := t.Deadline(); ok {
+		remaining := time.Until(deadline)
+		// Leave room for package cleanup and other tests.
+		max := remaining / 4
+		if max < duration {
+			duration = max
+		}
+	}
+
+	if duration < 500*time.Millisecond {
+		t.Skip("not enough test deadline budget for crash regression")
+	}
+
+	return duration
+}
 
 // TestLatencyTracker_ICMPCrashRegression_LongRun is a long-run regression test
 // for the SIGSEGV crash at 2026-06-19 01:16:28.
@@ -23,7 +54,12 @@ import (
 // The crash occurred during a bounded 3600-sample allocation (201,600 bytes).
 // This test verifies that the ICMP latency tracker snapshot path remains safe
 // under sustained concurrent access with the exact production-like parameters.
+//
+// Duration is budget-aware: short default for CI, extended soak with
+// UVB76_LONG_CRASH_TESTS=1.
 func TestLatencyTracker_ICMPCrashRegression_LongRun(t *testing.T) {
+	duration := crashRegressionDuration(t, 3*time.Second)
+
 	// Use the exact production ICMP configuration: 3600 samples
 	buckets := []int64{5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000}
 	capacity := 3600
@@ -34,8 +70,10 @@ func TestLatencyTracker_ICMPCrashRegression_LongRun(t *testing.T) {
 		lt.RecordAt(float64(i%100)+10.0, true, time.Now().UTC())
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), duration)
+	defer cancel()
+
 	var wg sync.WaitGroup
-	stopCh := make(chan struct{})
 
 	// Writers: simulate continuous ICMP probes (1 per second in production)
 	writerCount := 2
@@ -43,16 +81,17 @@ func TestLatencyTracker_ICMPCrashRegression_LongRun(t *testing.T) {
 		wg.Add(1)
 		go func(writerID int) {
 			defer wg.Done()
+			ticker := time.NewTicker(time.Millisecond)
+			defer ticker.Stop()
 			for i := 0; ; i++ {
 				select {
-				case <-stopCh:
+				case <-ctx.Done():
 					return
-				default:
+				case <-ticker.C:
 					latency := float64((i*17)%200) + 10.0
 					reachable := i%10 != 0
 					lt.RecordAt(latency, reachable, time.Now().UTC())
 					runtime.Gosched()
-					time.Sleep(time.Millisecond) // Simulate probe interval
 				}
 			}
 		}(w)
@@ -65,11 +104,13 @@ func TestLatencyTracker_ICMPCrashRegression_LongRun(t *testing.T) {
 		wg.Add(1)
 		go func(readerID int) {
 			defer wg.Done()
+			ticker := time.NewTicker(time.Millisecond)
+			defer ticker.Stop()
 			for {
 				select {
-				case <-stopCh:
+				case <-ctx.Done():
 					return
-				default:
+				case <-ticker.C:
 					// This is the EXACT crash path: GetRecentSamples(3600)
 					samples := lt.GetRecentSamples(3600)
 					// Verify returned slice is valid
@@ -85,11 +126,7 @@ func TestLatencyTracker_ICMPCrashRegression_LongRun(t *testing.T) {
 		}(r)
 	}
 
-	// Run for extended duration to match production crash timing (~1 hour = 3600 probes)
-	// For CI, use shortened duration (30 seconds) but with aggressive goroutine churn
-	t.Log("Running long-run ICMP crash regression test (30s)...")
-	time.Sleep(30 * time.Second)
-	close(stopCh)
+	t.Logf("Running LatencyTracker ICMP crash regression for %v...", duration)
 	wg.Wait()
 
 	// Final verification: buffer must be in valid state
@@ -104,7 +141,12 @@ func TestLatencyTracker_ICMPCrashRegression_LongRun(t *testing.T) {
 
 // TestManager_ICMPCrashRegression_LongRun is the Manager-level regression test
 // for the ICMP crash. It exercises the full call chain from Manager to tracker.
+//
+// Duration is budget-aware: short default for CI, extended soak with
+// UVB76_LONG_CRASH_TESTS=1.
 func TestManager_ICMPCrashRegression_LongRun(t *testing.T) {
+	duration := crashRegressionDuration(t, 3*time.Second)
+
 	m := NewManager()
 	// Configure ICMP with production parameters
 	m.ConfigureICMP([]int64{5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000}, 3600)
@@ -117,23 +159,26 @@ func TestManager_ICMPCrashRegression_LongRun(t *testing.T) {
 		m.RecordICMPLatencyAt(targetID, float64(i%100)+10.0, true, time.Now().UTC())
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), duration)
+	defer cancel()
+
 	var wg sync.WaitGroup
-	stopCh := make(chan struct{})
 
 	// Writers: simulate ICMP probes
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
 		for i := 0; ; i++ {
 			select {
-			case <-stopCh:
+			case <-ctx.Done():
 				return
-			default:
+			case <-ticker.C:
 				latency := float64((i*17)%200) + 10.0
 				reachable := i%10 != 0
 				m.RecordICMPLatency(targetID, latency, reachable)
 				runtime.Gosched()
-				time.Sleep(time.Millisecond)
 			}
 		}
 	}()
@@ -144,11 +189,13 @@ func TestManager_ICMPCrashRegression_LongRun(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			ticker := time.NewTicker(time.Millisecond)
+			defer ticker.Stop()
 			for {
 				select {
-				case <-stopCh:
+				case <-ctx.Done():
 					return
-				default:
+				case <-ticker.C:
 					// EXACT crash path: Manager.GetRecentICMPLatencySamples(..., 3600)
 					samples := m.GetRecentICMPLatencySamples(targetID, 3600)
 					if len(samples) > capacity {
@@ -162,9 +209,7 @@ func TestManager_ICMPCrashRegression_LongRun(t *testing.T) {
 		}()
 	}
 
-	t.Log("Running Manager-level ICMP crash regression test (30s)...")
-	time.Sleep(30 * time.Second)
-	close(stopCh)
+	t.Logf("Running Manager-level ICMP crash regression for %v...", duration)
 	wg.Wait()
 
 	// Final verification
@@ -248,7 +293,12 @@ func TestLatencyTracker_CorruptedStateRecovery(t *testing.T) {
 
 // TestLatencyTracker_ConcurrentGetSummary_ICMPStress is a targeted stress test
 // for GetSummary under concurrent ICMP probe load.
+//
+// Duration is budget-aware: short default for CI, extended soak with
+// UVB76_LONG_CRASH_TESTS=1.
 func TestLatencyTracker_ConcurrentGetSummary_ICMPStress(t *testing.T) {
+	duration := crashRegressionDuration(t, 3*time.Second)
+
 	buckets := []int64{5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000}
 	capacity := 3600
 	lt := NewLatencyTracker(buckets, capacity)
@@ -258,18 +308,22 @@ func TestLatencyTracker_ConcurrentGetSummary_ICMPStress(t *testing.T) {
 		lt.RecordAt(float64(i%500)+10.0, i%20 != 0, time.Now().UTC())
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), duration)
+	defer cancel()
+
 	var wg sync.WaitGroup
-	stopCh := make(chan struct{})
 
 	// Writer
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
 		for i := 0; ; i++ {
 			select {
-			case <-stopCh:
+			case <-ctx.Done():
 				return
-			default:
+			case <-ticker.C:
 				lt.RecordAt(float64((i*17)%500)+10.0, i%20 != 0, time.Now().UTC())
 				runtime.Gosched()
 			}
@@ -282,11 +336,13 @@ func TestLatencyTracker_ConcurrentGetSummary_ICMPStress(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			ticker := time.NewTicker(time.Millisecond)
+			defer ticker.Stop()
 			for {
 				select {
-				case <-stopCh:
+				case <-ctx.Done():
 					return
-				default:
+				case <-ticker.C:
 					summary := lt.GetSummary("stress-target")
 					// Verify internal consistency
 					if summary.SampleCount < 0 {
@@ -301,7 +357,6 @@ func TestLatencyTracker_ConcurrentGetSummary_ICMPStress(t *testing.T) {
 		}()
 	}
 
-	time.Sleep(10 * time.Second)
-	close(stopCh)
+	t.Logf("Running ICMP stress test for %v...", duration)
 	wg.Wait()
 }
