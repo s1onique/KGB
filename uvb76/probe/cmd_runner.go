@@ -40,6 +40,10 @@ const (
 // Uses StdoutPipe/StderrPipe with explicit bounded reads instead of
 // setting cmd.Stdout/cmd.Stderr to custom writers, which would trigger
 // os/exec writerDescriptor goroutines.
+//
+// BoundedCommandRunner is safe for concurrent use. All mutable state is
+// confined to each Run() call via local variables. The runner itself
+// holds only immutable configuration (maxStdoutBytes, maxStderrBytes).
 type BoundedCommandRunner struct {
 	maxStdoutBytes int
 	maxStderrBytes int
@@ -57,6 +61,13 @@ func NewBoundedCommandRunner() *BoundedCommandRunner {
 // Uses StdoutPipe/StderrPipe with explicit bounded copy loops.
 // This avoids os/exec writerDescriptor goroutines that could cause
 // SIGSEGV during io.copyBuffer on constrained routers.
+//
+// Thread-safe: all mutable state is local to this call.
+// The runner's maxStdoutBytes/maxStderrBytes fields are read-only.
+//
+// Pipe ordering: reads complete before Wait. The child process closes
+// its stdout/stderr when it exits, which causes EOF on our read end.
+// After both reads return, we call Wait to reap the process.
 func (r *BoundedCommandRunner) Run(ctx context.Context, name string, args ...string) CommandResult {
 	cmd := exec.CommandContext(ctx, name, args...)
 
@@ -78,35 +89,48 @@ func (r *BoundedCommandRunner) Run(ctx context.Context, name string, args ...str
 		return CommandResult{Err: err}
 	}
 
-	// Bounded copy buffers - caller-owned to avoid heap pressure
-	stdoutBuf := make([]byte, 0, r.maxStdoutBytes)
-	stderrBuf := make([]byte, 0, r.maxStderrBytes)
-	var stdoutTruncated, stderrTruncated bool
+	// Channel for stdout goroutine result - safe for cross-goroutine communication.
+	stdoutCh := make(chan struct {
+		data      []byte
+		truncated bool
+	}, 1)
 
-	// Read stdout with bounded copy
-	done := make(chan struct{})
+	// Separate read buffers for each pipe to avoid races.
+	// Each buffer is confined to its own goroutine.
+	stderrReadBuf := make([]byte, 256)
+
+	// Read stdout with bounded copy in separate goroutine.
+	// Uses a channel to safely pass result back.
 	go func() {
-		defer close(done)
-		stdoutBuf, stdoutTruncated = r.copyBounded(stdoutPipe, r.maxStdoutBytes)
+		stdoutBuf, truncated := r.copyBoundedWithBuf(stdoutPipe, r.maxStdoutBytes, make([]byte, 256))
+		stdoutCh <- struct {
+			data      []byte
+			truncated bool
+		}{stdoutBuf, truncated}
 	}()
 
-	// Read stderr with bounded copy
-	stderrBuf, stderrTruncated = r.copyBounded(stderrPipe, r.maxStderrBytes)
+	// Read stderr with bounded copy - runs in this goroutine.
+	stderrResult, stderrTruncated := r.copyBoundedWithBuf(stderrPipe, r.maxStderrBytes, stderrReadBuf)
 
-	// Wait for stdout to finish
-	<-done
+	// Wait for stdout goroutine to finish and collect result.
+	// The channel send happens when the goroutine's copyBoundedWithBuf returns.
+	// That occurs when: (a) we've read maxStdoutBytes, or (b) EOF is observed.
+	// EOF is observed when the child process exits and closes its stdout,
+	// which happens independently of our cmd.Wait() call.
+	stdoutRes := <-stdoutCh
 
-	// Wait for process to complete
-	waitErr := cmd.Wait()
-
-	// Close pipes
+	// Close pipes after reads complete.
+	// Most callers need not close these explicitly, but we do so defensively.
 	stdoutPipe.Close()
 	stderrPipe.Close()
 
+	// Reap the process and release resources.
+	waitErr := cmd.Wait()
+
 	result := CommandResult{
-		Stdout:    stdoutBuf,
-		Stderr:    stderrBuf,
-		Truncated: stdoutTruncated || stderrTruncated,
+		Stdout:    stdoutRes.data,
+		Stderr:    stderrResult,
+		Truncated: stdoutRes.truncated || stderrTruncated,
 		Err:       waitErr,
 	}
 
@@ -124,15 +148,15 @@ func (r *BoundedCommandRunner) Run(ctx context.Context, name string, args ...str
 	return result
 }
 
-// copyBounded reads from reader until limit is reached or context expires.
+// copyBoundedWithBuf reads from reader until limit is reached or EOF.
+// Uses a caller-provided read buffer to avoid per-read allocation overhead.
 // Returns captured bytes and whether truncation occurred.
 // After hitting the limit, continues draining to prevent blocking the child process.
-func (r *BoundedCommandRunner) copyBounded(reader io.Reader, limit int) ([]byte, bool) {
+func (r *BoundedCommandRunner) copyBoundedWithBuf(reader io.Reader, limit int, readBuf []byte) ([]byte, bool) {
 	buf := make([]byte, 0, limit)
 	truncated := false
 
 	// Read into bounded buffer
-	readBuf := make([]byte, 256)
 	for len(buf) < limit {
 		n, err := reader.Read(readBuf)
 		if n > 0 {
@@ -174,6 +198,14 @@ func (r *BoundedCommandRunner) copyBounded(reader io.Reader, limit int) ([]byte,
 	}
 
 	return buf, truncated
+}
+
+// copyBounded reads from reader until limit is reached or context expires.
+// Returns captured bytes and whether truncation occurred.
+// After hitting the limit, continues draining to prevent blocking the child process.
+// DEPRECATED: Use copyBoundedWithBuf for better allocation efficiency.
+func (r *BoundedCommandRunner) copyBounded(reader io.Reader, limit int) ([]byte, bool) {
+	return r.copyBoundedWithBuf(reader, limit, make([]byte, 256))
 }
 
 // PingOSWithRunner runs a ping using the provided CommandRunner.
