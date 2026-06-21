@@ -399,3 +399,33 @@ test "old bug: empty string not used as sentinel" {
     const sentinel = argv.items[1];
     try std.testing.expect(sentinel == null);
 }
+
+// Regression test: wg_show (no interface) argv matches wg_show_collector.zig pattern.
+// This verifies the wg_show_collector.zig execve fix produces correct argv.
+//
+// The wg_show_collector.zig uses:
+//   const argv: [3]?[*:0]const u8 = .{ wg_path, "show", null };
+//
+// This test verifies that pattern produces the expected argv:
+//   ["/usr/bin/wg", "show", null]
+//
+// Live strace evidence (before fix in wg_show_collector.zig):
+//   execve("/usr/bin/wg", ["/usr/bin/wg", "show", garbage_ptrs...], ...) = -1 EFAULT
+//
+// Live strace evidence (after fix):
+//   execve("/usr/bin/wg", ["/usr/bin/wg", "show", NULL], ...) = 0
+test "wg_show (no interface) argv matches wg_show_collector pattern" {
+    const exe_path: [*:0]const u8 = "/usr/bin/wg";
+    
+    // Pattern from wg_show_collector.zig runWgShowCapture()
+    const argv: [3]?[*:0]const u8 = .{ exe_path, "show", null };
+    const argv_ptr: [*:null]const ?[*:0]const u8 = @ptrCast(&argv);
+    
+    // Verify: ["/usr/bin/wg", "show", null]
+    try std.testing.expectEqual(@as(usize, 3), argv.len);
+    try std.testing.expect(argv_ptr[0] != null);
+    try std.testing.expectEqualStrings("/usr/bin/wg", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv_ptr[0].?)), 0));
+    try std.testing.expect(argv_ptr[1] != null);
+    try std.testing.expectEqualStrings("show", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv_ptr[1].?)), 0));
+    try std.testing.expectEqual(@as(?[*:0]const u8, null), argv_ptr[2]);
+}

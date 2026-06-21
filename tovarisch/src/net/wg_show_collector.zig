@@ -183,8 +183,24 @@ fn runWgShowCapture(allocator: std.mem.Allocator) CollectError!CommandResult {
         // acceptable; future hardening could redirect to /dev/null instead.
         _ = std.c.close(2);
 
-        // Execute wg show with fixed argv (no shell)
-        const argv = [_][*:0]const u8{ wg_path, "show" };
+        // Execute wg show with fixed argv (no shell).
+        //
+        // BUG FIX: The argv array MUST be null-terminated for execve().
+        //
+        // Previous bug: const argv = [_][*:0]const u8{ wg_path, "show" };
+        // This had only 2 elements with NO null terminator. When execve() scanned
+        // past the 2 valid elements, it read garbage pointers from stack memory,
+        // causing EFAULT (Bad address).
+        //
+        // Fix: Explicitly include null terminator as 3rd element:
+        //   const argv: [3]?[*:0]const u8 = .{ wg_path, "show", null };
+        //
+        // Live strace before fix:
+        //   execve("/usr/bin/wg", ["/usr/bin/wg", "show", garbage_ptrs...], ...) = -1 EFAULT
+        //
+        // Live strace after fix:
+        //   execve("/usr/bin/wg", ["/usr/bin/wg", "show", NULL], ...) = 0
+        const argv: [3]?[*:0]const u8 = .{ wg_path, "show", null };
         const argv_null: [*:null]const ?[*:0]const u8 = @ptrCast(&argv);
         _ = std.c.execve(wg_path, argv_null, EMPTY_ENV);
 

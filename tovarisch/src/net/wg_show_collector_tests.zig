@@ -369,3 +369,4 @@ test "Multiple peers aggregate correctly" {
     try testing.expectEqual(@as(u64, 2500), result.rx_bytes);
     try testing.expectEqual(@as(u64, 3000), result.tx_bytes);
 }
+
