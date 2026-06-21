@@ -76,6 +76,29 @@ func waitForCaptures(store *state.CaptureStore, eventID string, timeout time.Dur
 	return store.GetCaptures(eventID)
 }
 
+// RecordSpikeForTest is a test helper that wraps state.Manager.DetectAndRecordSpike
+// with nil HTTP trace. Use this in tests where HTTP phase timing is irrelevant.
+// This centralizes the test API so future signature changes only need one place updated.
+func RecordSpikeForTest(
+	st *state.Manager,
+	targetID, kind string,
+	latencyMs float64,
+	sampleTs time.Time,
+	reachable bool,
+	schedulerDelayMs *float64,
+	httpStatus *int,
+	probeError *string,
+	previousSamples []state.LatencySample,
+) *state.SpikeEvent {
+	return st.DetectAndRecordSpike(
+		targetID, kind,
+		latencyMs, sampleTs, reachable,
+		schedulerDelayMs, httpStatus, probeError,
+		previousSamples,
+		nil, // httpTrace
+	)
+}
+
 // setupTestServer creates a test server with spike API and capture service.
 func setupTestServer(t *testing.T, tovarischServerURL string) (*Server, *state.Manager, *diag.CaptureService, string) {
 	salt := []byte("1234567890abcdef")

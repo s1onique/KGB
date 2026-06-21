@@ -38,7 +38,7 @@ func TestSpikeCaptureAPI_CooldownSuppression(t *testing.T) {
 		}
 	}
 
-	spike1 := st.DetectAndRecordSpike("test-target", "http", 1500.0, now.Add(-time.Second), true, nil, nil, nil, previousSamples)
+	spike1 := RecordSpikeForTest(st, "test-target", "http", 1500.0, now.Add(-time.Second), true, nil, nil, nil, previousSamples)
 	if spike1 == nil {
 		t.Fatal("expected first spike to be detected")
 	}
@@ -48,7 +48,7 @@ func TestSpikeCaptureAPI_CooldownSuppression(t *testing.T) {
 	waitForCaptures(st.GetCaptureStore(), spike1.EventID, 2*time.Second)
 
 	// Create second spike immediately (within cooldown)
-	spike2 := st.DetectAndRecordSpike("test-target", "http", 2000.0, now, true, nil, nil, nil, previousSamples)
+	spike2 := RecordSpikeForTest(st, "test-target", "http", 2000.0, now, true, nil, nil, nil, previousSamples)
 	if spike2 == nil {
 		t.Fatal("expected second spike to be detected")
 	}

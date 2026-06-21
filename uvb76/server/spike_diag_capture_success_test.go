@@ -40,7 +40,7 @@ func TestSpikeCaptureAPI_SuccessPath(t *testing.T) {
 	}
 
 	// Trigger a spike (1000ms should trigger HTTP warning threshold of 1000ms)
-	spikeEvent := st.DetectAndRecordSpike("test-target", "http", 1500.0, sampleTs, true, nil, nil, nil, previousSamples)
+	spikeEvent := RecordSpikeForTest(st, "test-target", "http", 1500.0, sampleTs, true, nil, nil, nil, previousSamples)
 	if spikeEvent == nil {
 		t.Fatal("expected spike to be detected")
 	}
@@ -159,7 +159,7 @@ func TestSpikeCaptureAPI_ExcludeCaptures(t *testing.T) {
 		}
 	}
 
-	spikeEvent := st.DetectAndRecordSpike("test-target", "http", 1500.0, now.Add(-time.Second), true, nil, nil, nil, previousSamples)
+	spikeEvent := RecordSpikeForTest(st, "test-target", "http", 1500.0, now.Add(-time.Second), true, nil, nil, nil, previousSamples)
 	if spikeEvent == nil {
 		t.Fatal("expected spike to be detected")
 	}

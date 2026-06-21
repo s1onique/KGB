@@ -70,7 +70,7 @@ func TestSpikeAPI_AllSuppressedFromStart_AnchorRequired(t *testing.T) {
 	}
 
 	// First spike - successful capture at t=0
-	spike1 := st.DetectAndRecordSpike("test-target", "http", 1500.0, now.Add(-time.Second), true, nil, nil, nil, previousSamples)
+	spike1 := RecordSpikeForTest(st, "test-target", "http", 1500.0, now.Add(-time.Second), true, nil, nil, nil, previousSamples)
 	if spike1 == nil {
 		t.Fatal("expected first spike to be detected")
 	}
@@ -84,7 +84,7 @@ func TestSpikeAPI_AllSuppressedFromStart_AnchorRequired(t *testing.T) {
 	})
 
 	// Create second spike immediately (within cooldown)
-	spike2 := st.DetectAndRecordSpike("test-target", "http", 2000.0, now, true, nil, nil, nil, previousSamples)
+	spike2 := RecordSpikeForTest(st, "test-target", "http", 2000.0, now, true, nil, nil, nil, previousSamples)
 	if spike2 == nil {
 		t.Fatal("expected second spike to be detected")
 	}
@@ -182,7 +182,7 @@ func TestSpikeAPI_CooldownInfo_AllRequiredFields(t *testing.T) {
 	}
 
 	// First spike
-	spike1 := st.DetectAndRecordSpike("test-target", "http", 1500.0, now.Add(-time.Second), true, nil, nil, nil, previousSamples)
+	spike1 := RecordSpikeForTest(st, "test-target", "http", 1500.0, now.Add(-time.Second), true, nil, nil, nil, previousSamples)
 	if spike1 == nil {
 		t.Fatal("expected first spike to be detected")
 	}
@@ -196,7 +196,7 @@ func TestSpikeAPI_CooldownInfo_AllRequiredFields(t *testing.T) {
 	})
 
 	// Second spike (will be suppressed)
-	spike2 := st.DetectAndRecordSpike("test-target", "http", 2000.0, now, true, nil, nil, nil, previousSamples)
+	spike2 := RecordSpikeForTest(st, "test-target", "http", 2000.0, now, true, nil, nil, nil, previousSamples)
 	if spike2 == nil {
 		t.Fatal("expected second spike to be detected")
 	}
@@ -329,7 +329,7 @@ func TestSpikeAPI_AllVisibleRowsSuppressed_RequiresVisibleOrExplicitAnchor(t *te
 	skippedOffsets := []time.Duration{-50 * time.Second, -30 * time.Second, -10 * time.Second}
 	for _, offset := range skippedOffsets {
 		spikeTime := now.Add(offset)
-		spike := st.DetectAndRecordSpike("test-target", "http", 2000.0, spikeTime, true, nil, nil, nil, previousSamples)
+		spike := RecordSpikeForTest(st, "test-target", "http", 2000.0, spikeTime, true, nil, nil, nil, previousSamples)
 		if spike == nil {
 			t.Fatal("expected skipped spike to be detected")
 		}

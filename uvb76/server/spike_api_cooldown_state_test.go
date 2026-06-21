@@ -37,7 +37,7 @@ func TestSpikeAPI_FirstSpike_NotSuppressed(t *testing.T) {
 	}
 
 	// First spike - no prior captures exist
-	spike1 := st.DetectAndRecordSpike("test-target", "http", 1500.0, now, true, nil, nil, nil, previousSamples)
+	spike1 := RecordSpikeForTest(st, "test-target", "http", 1500.0, now, true, nil, nil, nil, previousSamples)
 	if spike1 == nil {
 		t.Fatal("expected first spike to be detected")
 	}
@@ -107,7 +107,7 @@ func TestSpikeAPI_CooldownActive_SkipsSpike(t *testing.T) {
 	}
 
 	// First spike at t=0
-	spike1 := st.DetectAndRecordSpike("test-target", "http", 1500.0, now, true, nil, nil, nil, previousSamples)
+	spike1 := RecordSpikeForTest(st, "test-target", "http", 1500.0, now, true, nil, nil, nil, previousSamples)
 	if spike1 == nil {
 		t.Fatal("expected first spike to be detected")
 	}

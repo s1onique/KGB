@@ -39,7 +39,7 @@ func TestSpikeCaptureAPI_TovarischError(t *testing.T) {
 		}
 	}
 
-	spikeEvent := st.DetectAndRecordSpike("test-target", "http", 1500.0, now.Add(-time.Second), true, nil, nil, nil, previousSamples)
+	spikeEvent := RecordSpikeForTest(st, "test-target", "http", 1500.0, now.Add(-time.Second), true, nil, nil, nil, previousSamples)
 	if spikeEvent == nil {
 		t.Fatal("expected spike to be detected")
 	}
@@ -118,7 +118,7 @@ func TestSpikeCaptureAPI_TovarischInvalidJSON(t *testing.T) {
 		}
 	}
 
-	spikeEvent := st.DetectAndRecordSpike("test-target", "http", 1500.0, now.Add(-time.Second), true, nil, nil, nil, previousSamples)
+	spikeEvent := RecordSpikeForTest(st, "test-target", "http", 1500.0, now.Add(-time.Second), true, nil, nil, nil, previousSamples)
 	if spikeEvent == nil {
 		t.Fatal("expected spike to be detected")
 	}

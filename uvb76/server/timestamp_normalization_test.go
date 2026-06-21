@@ -115,7 +115,7 @@ func TestSpikeAPI_TimestampsHaveExplicitTimezone(t *testing.T) {
 		}
 	}
 
-	spike := st.DetectAndRecordSpike("test-target", "http", 1500.0, now.Add(-time.Second), true, nil, nil, nil, previousSamples)
+	spike := RecordSpikeForTest(st, "test-target", "http", 1500.0, now.Add(-time.Second), true, nil, nil, nil, previousSamples)
 	if spike == nil {
 		t.Fatal("expected spike to be detected")
 	}
@@ -204,7 +204,7 @@ func TestSpikeAPI_CooldownInfoTimestampsExplicit(t *testing.T) {
 		}
 	}
 
-	anchorSpike := st.DetectAndRecordSpike("test-target", "http", 1500.0, anchorTime, true, nil, nil, nil, previousSamples)
+	anchorSpike := RecordSpikeForTest(st, "test-target", "http", 1500.0, anchorTime, true, nil, nil, nil, previousSamples)
 	if anchorSpike == nil {
 		t.Fatal("expected anchor spike to be detected")
 	}
@@ -219,7 +219,7 @@ func TestSpikeAPI_CooldownInfoTimestampsExplicit(t *testing.T) {
 
 	// Create skipped spike (within 90s cooldown)
 	skippedTime := now.Add(-15 * time.Second) // Still in cooldown
-	skippedSpike := st.DetectAndRecordSpike("test-target", "http", 2000.0, skippedTime, true, nil, nil, nil, previousSamples)
+	skippedSpike := RecordSpikeForTest(st, "test-target", "http", 2000.0, skippedTime, true, nil, nil, nil, previousSamples)
 	if skippedSpike == nil {
 		t.Fatal("expected skipped spike to be detected")
 	}
@@ -332,7 +332,7 @@ func TestSpikeAPI_NoTimezoneLessPattern(t *testing.T) {
 		}
 	}
 
-	spike := st.DetectAndRecordSpike("test-target", "http", 1500.0, now, true, nil, nil, nil, previousSamples)
+	spike := RecordSpikeForTest(st, "test-target", "http", 1500.0, now, true, nil, nil, nil, previousSamples)
 	if spike == nil {
 		t.Fatal("expected spike")
 	}

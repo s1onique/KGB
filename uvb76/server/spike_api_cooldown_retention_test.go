@@ -45,7 +45,7 @@ func TestSpikeAPI_RetentionStats_ProtectedCaptureCount(t *testing.T) {
 	}
 
 	// First spike - successful capture
-	spike1 := st.DetectAndRecordSpike("test-target", "http", 1500.0, now.Add(-time.Second), true, nil, nil, nil, previousSamples)
+	spike1 := RecordSpikeForTest(st, "test-target", "http", 1500.0, now.Add(-time.Second), true, nil, nil, nil, previousSamples)
 	if spike1 == nil {
 		t.Fatal("expected first spike to be detected")
 	}
@@ -59,7 +59,7 @@ func TestSpikeAPI_RetentionStats_ProtectedCaptureCount(t *testing.T) {
 	})
 
 	// Second spike - suppressed (cooldown active)
-	spike2 := st.DetectAndRecordSpike("test-target", "http", 2000.0, now, true, nil, nil, nil, previousSamples)
+	spike2 := RecordSpikeForTest(st, "test-target", "http", 2000.0, now, true, nil, nil, nil, previousSamples)
 	if spike2 == nil {
 		t.Fatal("expected second spike to be detected")
 	}
