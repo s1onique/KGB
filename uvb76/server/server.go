@@ -15,7 +15,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/s1onique/KGB/uvb76/auth"
 	"github.com/s1onique/KGB/uvb76/config"
-	"github.com/s1onique/KGB/uvb76/probe"
 	"github.com/s1onique/KGB/uvb76/scraper"
 	"github.com/s1onique/KGB/uvb76/state"
 )
@@ -31,15 +30,15 @@ func SetWebFS(fs fs.FS) {
 
 // Server is the main HTTP server for UVB-76.
 type Server struct {
-	cfg        *config.Config
-	state      *state.Manager
-	client     *scraper.Client
-	listener   *config.ListenConfig
-	sessions   *auth.SessionStore
-	devMode    bool
-	server     *http.Server
-	wg         sync.WaitGroup
-	startedAt  time.Time // captured once at construction
+	cfg       *config.Config
+	state     *state.Manager
+	client    *scraper.Client
+	listener  *config.ListenConfig
+	sessions  *auth.SessionStore
+	devMode   bool
+	server    *http.Server
+	wg        sync.WaitGroup
+	startedAt time.Time // captured once at construction
 }
 
 // NewServer creates a new server (HTTPS in production, HTTP in dev mode).
@@ -90,7 +89,7 @@ func (s *Server) Start() error {
 	// Diagnostics API endpoints
 	protected.Handle("/diagnostics/capture-cooldown", http.HandlerFunc(s.handleCaptureCooldownDiagnostics)).Methods(http.MethodGet)
 	protected.Handle("/diagnostics/cooldown/anchors/{peer_name}", http.HandlerFunc(s.handleGetCooldownAnchorForPeer)).Methods(http.MethodGet)
-	
+
 	// Capture lookup endpoints
 	protected.Handle("/captures/{capture_id}/anchor", http.HandlerFunc(s.handleGetAnchorCapture)).Methods(http.MethodGet)
 
@@ -313,12 +312,12 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 
 // TargetInfo represents a target with its effective probe URL and diagnostic capture URL for debugging.
 type TargetInfo struct {
-	ID                  string `json:"id"`
-	Name                string `json:"name"`
-	BaseURL             string `json:"base_url"`
-	ProbeURL            string `json:"probe_url,omitempty"`
-	EffectiveProbeURL   string `json:"effective_probe_url"`
-	Enabled             bool   `json:"enabled"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	BaseURL           string `json:"base_url"`
+	ProbeURL          string `json:"probe_url,omitempty"`
+	EffectiveProbeURL string `json:"effective_probe_url"`
+	Enabled           bool   `json:"enabled"`
 	// Diagnostic capture info is empty/omitted if no diagnostics peer targets this target.
 	DiagnosticPeerName  string `json:"diagnostic_peer_name,omitempty"`
 	DiagnosticBaseURL   string `json:"diagnostic_base_url,omitempty"`
@@ -394,11 +393,11 @@ func (s *Server) handleTargetSnapshot(w http.ResponseWriter, r *http.Request) {
 
 // CaptureCooldownDiagnostics represents the diagnostics output for cooldown state.
 type CaptureCooldownDiagnostics struct {
-	ServerStartedAt       string                                `json:"server_started_at"`
-	CurrentTime          string                                `json:"current_time"`
-	CooldownAnchors      map[string]state.CaptureCooldownAnchor `json:"cooldown_anchors"`
-	ActiveCooldownKeys   []string                              `json:"active_cooldown_keys"`
-	TotalCaptures        int                                   `json:"total_captures"`
+	ServerStartedAt    string                                 `json:"server_started_at"`
+	CurrentTime        string                                 `json:"current_time"`
+	CooldownAnchors    map[string]state.CaptureCooldownAnchor `json:"cooldown_anchors"`
+	ActiveCooldownKeys []string                               `json:"active_cooldown_keys"`
+	TotalCaptures      int                                    `json:"total_captures"`
 }
 
 // handleCaptureCooldownDiagnostics returns diagnostic information about cooldown state.
@@ -416,7 +415,7 @@ func (s *Server) handleCaptureCooldownDiagnostics(w http.ResponseWriter, r *http
 	}
 
 	diagnostics := CaptureCooldownDiagnostics{
-		ServerStartedAt:     s.startedAt.Format(time.RFC3339),
+		ServerStartedAt:    s.startedAt.Format(time.RFC3339),
 		CurrentTime:        time.Now().UTC().Format(time.RFC3339),
 		CooldownAnchors:    anchors,
 		ActiveCooldownKeys: activeKeys,
