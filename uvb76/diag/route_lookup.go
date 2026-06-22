@@ -201,10 +201,9 @@ func (c *RouteCollector) CollectRouteLookup(ctx context.Context, probeKind state
 		route.Error = "invalid route lookup target"
 		return route
 	}
-	cmdCtx := ctx
-	if ctx.Done() == nil {
-		cmdCtx, _ = context.WithTimeout(context.Background(), c.timeout)
-	}
+	// Always derive a child timeout from the parent context to ensure bounded execution.
+	cmdCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
 	result := runRouteCommand(cmdCtx, lookupTarget)
 	if cmdCtx.Err() == context.DeadlineExceeded {
 		route.ErrorKind = state.RouteLookupErrorTimeout

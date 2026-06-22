@@ -52,6 +52,13 @@ type DiagCapture struct {
 	// This provides evidence of which kernel route was selected for the exact
 	// probe destination at capture time. Route lookup failures do not block capture.
 	ProbeRoute *ProbeRoute `json:"probe_route,omitempty"`
+
+	// TcpQuality contains TCP path quality evidence for the probe destination socket.
+	// This provides evidence of network path health at the TCP layer during the spike,
+	// including RTT, retransmits, congestion window, and queue depths.
+	// TCP quality collection failures do not block diagnostic capture.
+	// For ICMP probes, TCP quality is unavailable (not applicable).
+	TcpQuality *TcpQuality `json:"tcp_quality,omitempty"`
 }
 
 // TcpAbsenceEvent explains why TCP diagnostics were absent from a successful capture.

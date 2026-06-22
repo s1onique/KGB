@@ -20,6 +20,7 @@ type CaptureService struct {
 	httpClient     *http.Client
 	targetPeers    map[string]*config.DiagPeerConfig
 	routeCollector *RouteCollector
+	tcpCollector   *TcpQualityCollector
 	stopCh         chan struct{}
 	wg             sync.WaitGroup
 }
@@ -36,6 +37,7 @@ func NewCaptureService(cfg *config.DiagnosticsConfig, captureStore *state.Captur
 		httpClient:     &http.Client{Timeout: time.Duration(timeout) * time.Millisecond},
 		targetPeers:    cfg.TargetToDiagPeers(),
 		routeCollector: NewRouteCollector(),
+		tcpCollector:   NewTcpQualityCollector(),
 		stopCh:         make(chan struct{}),
 	}
 }
@@ -121,6 +123,13 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig, probeKind 
 	// This is valuable even when the diagnostic endpoint is unreachable.
 	routeKind := probeKindToRouteKind(probeKind)
 	capture.ProbeRoute = cs.collectProbeRoute(ctx, peer, routeKind)
+
+	// Collect TCP quality evidence for the probe destination.
+	// TCP quality collection failures do NOT block the diagnostic capture.
+	// For HTTP probes, we collect TCP socket metrics for the destination.
+	// For ICMP probes, TCP quality is unavailable (TCP is HTTP/TCP-only).
+	host := extractHostFromURL(peer.BaseURL)
+	capture.TcpQuality = cs.tcpCollector.CollectTcpQuality(ctx, probeKind, host)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
 	if err != nil {
