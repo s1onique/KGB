@@ -159,6 +159,19 @@ bash scripts/verify_uvb76_diag_packet_contract.sh --self-test
 echo "[gate] checking UVB-76 polling (nested Go module)"
 (cd uvb76/cmd/uvb76-capture-netns-polling && go build -o uvb76-capture-netns-polling . && go test ./...)
 
+echo "[gate] checking frontend test hygiene"
+
+python3 scripts/verify_frontend_test_hygiene.py
+
+echo "[gate] running frontend tests via bounded wrapper"
+
+if [[ -d "uvb76/web/node_modules" ]]; then
+  # Use --kill-stale to clean up any stale processes from previous runs
+  ./scripts/run_frontend_tests.sh --kill-stale
+else
+  echo "[gate] frontend dependencies not installed; skipping frontend tests"
+fi
+
 echo "[gate] checking forbidden generic naming"
 
 # Use git grep to search tracked file contents (not filenames) with timeout

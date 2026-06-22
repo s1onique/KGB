@@ -6,8 +6,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest",
-    "test:run": "vitest run"
+    "test": "../../scripts/run_frontend_tests.sh",
+    "test:run": "../../scripts/run_frontend_tests.sh",
+    "test:watch": "vitest --watch"
   },
   "devDependencies": {
     "jsdom": "^29.1.1",
