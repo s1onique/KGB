@@ -12,13 +12,19 @@ import (
 )
 
 // fakeICMPSocketOpener is a mock socket opener for testing.
-type fakeICMPSocketOpener struct{ openErr error }
+type fakeICMPSocketOpener struct {
+	openErr     error
+	socketMode  NativeICMPSocketMode
+}
 
-func (f *fakeICMPSocketOpener) OpenSocket() (NativeICMPPacketConn, error) {
+func (f *fakeICMPSocketOpener) OpenSocket() (*SocketOpenResult, error) {
 	if f.openErr != nil {
-		return nil, f.openErr
+		return &SocketOpenResult{SocketMode: SocketModeUnknown}, f.openErr
 	}
-	return nil, errors.New("fake opener not connected to real socket")
+	return &SocketOpenResult{
+		Conn:       nil,
+		SocketMode: f.socketMode,
+	}, errors.New("fake opener not connected to real socket")
 }
 
 // fakeICMPPacketConn is a mock ICMP packet connection for testing.

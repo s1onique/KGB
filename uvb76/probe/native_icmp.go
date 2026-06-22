@@ -27,18 +27,19 @@ type NativeICMPPacketConn interface {
 
 // NativeICMPSocketOpener is the interface for opening ICMP sockets.
 type NativeICMPSocketOpener interface {
-	OpenSocket() (NativeICMPPacketConn, error)
+	OpenSocket() (*SocketOpenResult, error)
 }
 
 // NativeICMPBackend implements ICMPProbeBackend using native Go ICMP sockets.
 // This avoids per-second os/exec ping execution on constrained routers,
 // which has caused SIGSEGV on ASUS RT-AX88U / linux arm64.
 type NativeICMPBackend struct {
-	opener    NativeICMPSocketOpener
-	conn      NativeICMPPacketConn
-	mu        sync.Mutex
-	stats     *nativeICMPStatsInternal
-	backendID uint16 // unique ID for this backend instance to match Echo Replies
+	opener      NativeICMPSocketOpener
+	conn        NativeICMPPacketConn
+	socketMode  NativeICMPSocketMode // determined at socket open time; raw ICMP requires *net.IPAddr, dgram requires *net.UDPAddr
+	mu          sync.Mutex
+	stats       *nativeICMPStatsInternal
+	backendID   uint16 // unique ID for this backend instance to match Echo Replies
 }
 
 // NewNativeICMPBackend creates a new native ICMP backend.
@@ -50,7 +51,7 @@ func NewNativeICMPBackend() (*NativeICMPBackend, error) {
 // NewNativeICMPBackendWithOpener creates a native ICMP backend with a custom socket opener.
 // This exists for testing with fake socket openers.
 func NewNativeICMPBackendWithOpener(opener NativeICMPSocketOpener) (*NativeICMPBackend, error) {
-	conn, err := opener.OpenSocket()
+	result, err := opener.OpenSocket()
 	if err != nil {
 		return nil, err
 	}
@@ -58,10 +59,11 @@ func NewNativeICMPBackendWithOpener(opener NativeICMPSocketOpener) (*NativeICMPB
 	backendID := generateBackendID()
 
 	return &NativeICMPBackend{
-		opener:    opener,
-		conn:      conn,
-		stats:     &nativeICMPStatsInternal{},
-		backendID: backendID,
+		opener:     opener,
+		conn:       result.Conn,
+		socketMode: result.SocketMode,
+		stats:      &nativeICMPStatsInternal{},
+		backendID:  backendID,
 	}, nil
 }
 
@@ -118,8 +120,14 @@ func (b *NativeICMPBackend) Ping(ctx context.Context, host string, timeout time.
 		)
 	}
 
-	_, err = b.conn.WriteTo(msg, &net.UDPAddr{IP: targetIP, Zone: ""})
+	// Use the correct address type for the socket mode:
+	// - Raw ICMP ("ip4:icmp") requires *net.IPAddr
+	// - Datagram ICMP ("udp4") requires *net.UDPAddr
+	writeAddr := icmpWriteAddr(b.socketMode, targetIP)
+	b.stats.lastOperation.Store("write_to")
+	_, err = b.conn.WriteTo(msg, writeAddr)
 	if err != nil {
+		b.stats.lastError.Store(err.Error())
 		b.classifyAndRecordSocketError(err)
 		return 0, NewNativeICMPError(
 			b.getLastErrorClass(),
@@ -245,6 +253,17 @@ func icmpPeerIP(peer net.Addr) net.IP {
 		return addr.IP
 	default:
 		return nil
+	}
+}
+
+// icmpWriteAddr returns the correct address type for WriteTo based on socket mode.
+// Raw ICMP sockets ("ip4:icmp") require *net.IPAddr, while datagram sockets ("udp4") require *net.UDPAddr.
+func icmpWriteAddr(socketMode NativeICMPSocketMode, ip net.IP) net.Addr {
+	switch socketMode {
+	case SocketModeRawICMP:
+		return &net.IPAddr{IP: ip}
+	default:
+		return &net.UDPAddr{IP: ip, Zone: ""}
 	}
 }
 

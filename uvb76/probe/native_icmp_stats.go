@@ -32,6 +32,8 @@ type NativeICMPStatsSnapshot struct {
 	UnmatchedReplies uint64 `json:"unmatched_replies"`
 	LastRTTMillis    int64  `json:"last_rtt_ms"`
 	LastErrorClass   string `json:"last_error_class"`
+	LastError        string `json:"last_error,omitempty"`        // last runtime error string
+	LastOperation    string `json:"last_operation,omitempty"`    // last operation attempted (e.g., "write_to", "read_from")
 	// Socket mode diagnostics - shows which socket type is active
 	SocketMode       NativeICMPSocketMode `json:"socket_mode"`
 	DgramError       string              `json:"dgram_error,omitempty"`    // EACCES if datagram failed
@@ -55,6 +57,8 @@ type nativeICMPStatsInternal struct {
 	unmatchedReplies atomic.Uint64
 	lastRTTMillis    atomic.Int64
 	lastErrorClass   atomic.Value // string
+	lastError        atomic.Value // string
+	lastOperation    atomic.Value // string
 }
 
 // pingGroupRange reads the kernel's ping_group_range setting.
@@ -85,6 +89,8 @@ func (s *nativeICMPStatsInternal) Snapshot() NativeICMPStatsSnapshot {
 		UnmatchedReplies: s.unmatchedReplies.Load(),
 		LastRTTMillis:    s.lastRTTMillis.Load(),
 		LastErrorClass:   s.getLastErrorClass(),
+		LastError:        s.getLastError(),
+		LastOperation:    s.getLastOperation(),
 	}
 
 	// Add socket mode diagnostics if available
@@ -102,6 +108,20 @@ func (s *nativeICMPStatsInternal) Snapshot() NativeICMPStatsSnapshot {
 
 func (s *nativeICMPStatsInternal) getLastErrorClass() string {
 	if v := s.lastErrorClass.Load(); v != nil {
+		return v.(string)
+	}
+	return ""
+}
+
+func (s *nativeICMPStatsInternal) getLastError() string {
+	if v := s.lastError.Load(); v != nil {
+		return v.(string)
+	}
+	return ""
+}
+
+func (s *nativeICMPStatsInternal) getLastOperation() string {
+	if v := s.lastOperation.Load(); v != nil {
 		return v.(string)
 	}
 	return ""

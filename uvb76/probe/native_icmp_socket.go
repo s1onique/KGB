@@ -39,27 +39,27 @@ type realICMPSocketOpener struct{}
 // Tries SOCK_DGRAM first (unprivileged), falls back to SOCK_RAW (privileged).
 // This handles routers like RT-AX88U where ping_group_range=1 0 disables
 // unprivileged ICMP, but privileged raw sockets work.
-func (r *realICMPSocketOpener) OpenSocket() (NativeICMPPacketConn, error) {
+func (r *realICMPSocketOpener) OpenSocket() (*SocketOpenResult, error) {
 	result := r.tryOpenSocket()
 
 	// Store the result for status reporting
 	lastSocketOpenResult.Store(result)
 
 	if result.Conn != nil {
-		return result.Conn, nil
+		return result, nil
 	}
 
 	// Both socket types failed - return a descriptive error
 	if result.DgramError != "" && result.RawError != "" {
-		return nil, fmt.Errorf("native ICMP unavailable: dgram failed: %s; raw failed: %s", result.DgramError, result.RawError)
+		return result, fmt.Errorf("native ICMP unavailable: dgram failed: %s; raw failed: %s", result.DgramError, result.RawError)
 	}
 	if result.DgramError != "" {
-		return nil, fmt.Errorf("native ICMP unavailable: %s", result.DgramError)
+		return result, fmt.Errorf("native ICMP unavailable: %s", result.DgramError)
 	}
 	if result.RawError != "" {
-		return nil, fmt.Errorf("native ICMP unavailable: %s", result.RawError)
+		return result, fmt.Errorf("native ICMP unavailable: %s", result.RawError)
 	}
-	return nil, errors.New("native ICMP unavailable: unknown error")
+	return result, errors.New("native ICMP unavailable: unknown error")
 }
 
 // tryOpenSocket attempts to open both datagram and raw ICMP sockets.

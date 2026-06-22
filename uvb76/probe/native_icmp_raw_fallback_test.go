@@ -16,25 +16,25 @@ type multiSocketFakeOpener struct {
 	rawErr   error                  // error to return for raw socket attempt (if rawConn is nil)
 }
 
-func (f *multiSocketFakeOpener) OpenSocket() (NativeICMPPacketConn, error) {
+func (f *multiSocketFakeOpener) OpenSocket() (*SocketOpenResult, error) {
 	result := f.tryOpenSocket()
 
 	// Store result for status reporting (like real opener does)
 	lastSocketOpenResult.Store(result)
 
 	if result.Conn != nil {
-		return result.Conn, nil
+		return result, nil
 	}
 	if result.DgramError != "" && result.RawError != "" {
-		return nil, errors.New("dgram failed: " + result.DgramError + "; raw failed: " + result.RawError)
+		return result, errors.New("dgram failed: " + result.DgramError + "; raw failed: " + result.RawError)
 	}
 	if result.DgramError != "" {
-		return nil, errors.New(result.DgramError)
+		return result, errors.New(result.DgramError)
 	}
 	if result.RawError != "" {
-		return nil, errors.New(result.RawError)
+		return result, errors.New(result.RawError)
 	}
-	return nil, errors.New("unknown error")
+	return result, errors.New("unknown error")
 }
 
 func (f *multiSocketFakeOpener) tryOpenSocket() *SocketOpenResult {
