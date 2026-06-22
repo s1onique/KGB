@@ -15,14 +15,17 @@ import (
 )
 
 type CaptureService struct {
-	cfg            *config.DiagnosticsConfig
-	captures       *state.CaptureStore
-	httpClient     *http.Client
-	targetPeers    map[string]*config.DiagPeerConfig
-	routeCollector *RouteCollector
-	tcpCollector   *TcpQualityCollector
-	stopCh         chan struct{}
-	wg             sync.WaitGroup
+	cfg                 *config.DiagnosticsConfig
+	captures            *state.CaptureStore
+	httpClient          *http.Client
+	targetPeers         map[string]*config.DiagPeerConfig
+	routeCollector      *RouteCollector
+	tcpCollector        *TcpQualityCollector
+	stopCh              chan struct{}
+	wg                  sync.WaitGroup
+	anchorValidator     state.AnchorRetainedValidator
+	spikeStoreGetter    func(targetID, probeKind string) []state.SpikeEvent
+	captureStoreGetter  func(eventID string) []state.DiagCapture
 }
 
 func NewCaptureService(cfg *config.DiagnosticsConfig, captureStore *state.CaptureStore) *CaptureService {
@@ -40,6 +43,29 @@ func NewCaptureService(cfg *config.DiagnosticsConfig, captureStore *state.Captur
 		tcpCollector:   NewTcpQualityCollector(),
 		stopCh:         make(chan struct{}),
 	}
+}
+
+// SetAnchorValidatorWithCaptureStatus configures the anchor validator for ghost suppression prevention.
+// This is the production validator that checks BOTH:
+// 1. Anchor spike is retained in timeline (wasn't evicted)
+// 2. Anchor capture has successful status (DiagCaptureStatusOK)
+//
+// This MUST be called to enable anchor-backed cooldown evaluation.
+func (cs *CaptureService) SetAnchorValidatorWithCaptureStatus(
+	spikeStoreGetter func(targetID, probeKind string) []state.SpikeEvent,
+	captureStoreGetter func(eventID string) []state.DiagCapture,
+) {
+	cs.spikeStoreGetter = spikeStoreGetter
+	cs.captureStoreGetter = captureStoreGetter
+	cs.anchorValidator = state.ValidateAnchorWithCaptureStatus(spikeStoreGetter, captureStoreGetter)
+}
+
+// SetAnchorValidator configures the anchor validator for ghost suppression prevention.
+// NOTE: This uses ValidateAnchorAgainstTimeline which only checks spike retention.
+// For production, use SetAnchorValidatorWithCaptureStatus to also verify capture status.
+func (cs *CaptureService) SetAnchorValidator(spikeStoreGetter func(targetID, probeKind string) []state.SpikeEvent) {
+	cs.spikeStoreGetter = spikeStoreGetter
+	cs.anchorValidator = state.ValidateAnchorAgainstTimeline(spikeStoreGetter)
 }
 
 // TriggerCapture triggers a diagnostic capture for the given spike event.
@@ -64,8 +90,19 @@ func (cs *CaptureService) TriggerCapture(eventID, targetID, probeKind string) {
 		return
 	}
 
-	// Evaluate cooldown using the authoritative shared decision function.
-	decision := cs.captures.EvaluateCooldown(now, peer.Name, cs.cfg.CooldownSeconds)
+	// Evaluate cooldown with anchor validation if validator is configured.
+	// This is the CRITICAL fix for ghost suppressions:
+	// - Suppression is only allowed when the anchor spike is retained in the timeline
+	// - If the anchor spike is evicted, the cooldown state is cleared
+	var decision state.CaptureCooldownDecision
+	if cs.anchorValidator != nil {
+		decision = cs.captures.EvaluateCooldownWithAnchorValidation(
+			now, peer.Name, cs.cfg.CooldownSeconds, cs.anchorValidator)
+	} else {
+		// Fallback to basic cooldown evaluation (backward compatibility)
+		decision = cs.captures.EvaluateCooldown(now, peer.Name, cs.cfg.CooldownSeconds)
+	}
+
 	if decision.IsInCooldown {
 		cs.captures.ReleaseInFlight(peer.Name)
 		cs.recordSuppressedCooldown(eventID, peer, targetID, now, decision, probeKind)

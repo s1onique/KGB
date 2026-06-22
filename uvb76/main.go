@@ -114,6 +114,20 @@ func main() {
 	if cfg.Diagnostics.Enabled {
 		captureStore := stateManager.GetCaptureStore()
 		diagCaptureService = diag.NewCaptureService(&cfg.Diagnostics, captureStore)
+		
+		// Wire anchor validator for ghost suppression prevention.
+		// Production validator checks BOTH:
+		// 1. Anchor spike is retained in timeline (wasn't evicted)
+		// 2. Anchor capture has successful status (DiagCaptureStatusOK)
+		diagCaptureService.SetAnchorValidatorWithCaptureStatus(
+			func(targetID, probeKind string) []state.SpikeEvent {
+				return stateManager.GetSpikes(targetID, probeKind, 0)
+			},
+			func(eventID string) []state.DiagCapture {
+				return captureStore.GetCaptures(eventID)
+			},
+		)
+
 		// Enable capture-aware spike retention with configured cap
 		stateManager.EnableCaptureAwareSpikeRetentionWithCap(cfg.Diagnostics.MaxUncapturedSpikes)
 

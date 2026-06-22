@@ -4,77 +4,33 @@ import (
 	"time"
 )
 
-// =============================================================================
-// CaptureCooldownAnchor — Provenance for Cooldown Anchor
-// =============================================================================
-
-// CaptureCooldownAnchor records the provenance of the successful capture that
-// started a cooldown window. This provides root-cause evidence for UI debugging.
-//
-// The anchor is updated ONLY by successful captures (status=captured).
-// Skipped cooldown records MUST NOT update anchor provenance.
+// CaptureCooldownAnchor records provenance of the successful capture that started cooldown.
+// INVARIANT: suppressed event requires anchor spike to be retained/visible.
 type CaptureCooldownAnchor struct {
-	// AnchorEventID is the event ID of the spike that triggered the anchor capture.
-	AnchorEventID string `json:"anchor_event_id,omitempty"`
-	// AnchorCaptureID is the event ID where the successful capture was recorded.
-	// This may differ from AnchorEventID if the capture was recorded on a different event.
-	AnchorCaptureID string `json:"anchor_capture_id,omitempty"`
-	// AnchorTargetID is the target ID of the successful capture.
-	AnchorTargetID string `json:"anchor_target_id,omitempty"`
-	// AnchorProbeKind is the probe kind (http/icmp) of the anchor capture.
-	AnchorProbeKind string `json:"anchor_probe_kind,omitempty"`
-	// AnchorSource is the diagnostic peer/source that performed the capture.
-	AnchorSource string `json:"anchor_source,omitempty"`
-	// AnchorUpdatedByStatus describes what status updated this anchor.
-	// Values: "captured", "diag_capture_success"
-	AnchorUpdatedByStatus string `json:"anchor_updated_by_status,omitempty"`
-	// AnchorCreatedAt is when the anchor capture was started.
-	AnchorCreatedAt time.Time `json:"anchor_created_at,omitempty"`
-	// AnchorCompletedAt is when the anchor capture was completed (nil if still in progress).
-	AnchorCompletedAt *time.Time `json:"anchor_completed_at,omitempty"`
-	// CreatedFrom describes the path that created this anchor.
-	// Values: "diag_capture_success", "startup_warmup", "api_injection", "test_helper"
-	CreatedFrom string `json:"created_from,omitempty"`
-	// IsWarmupAnchor indicates this anchor was created during startup/warmup.
-	IsWarmupAnchor bool `json:"is_warmup_anchor,omitempty"`
+	AnchorEventID         string     `json:"anchor_event_id,omitempty"`
+	AnchorCaptureID       string     `json:"anchor_capture_id,omitempty"` // May differ from AnchorEventID
+	AnchorTargetID        string     `json:"anchor_target_id,omitempty"`
+	AnchorProbeKind       string     `json:"anchor_probe_kind,omitempty"` // http/icmp
+	AnchorSource          string     `json:"anchor_source,omitempty"`
+	AnchorUpdatedByStatus string     `json:"anchor_updated_by_status,omitempty"` // captured, diag_capture_success
+	AnchorCreatedAt       time.Time  `json:"anchor_created_at,omitempty"`
+	AnchorCompletedAt     *time.Time `json:"anchor_completed_at,omitempty"`
+	CreatedFrom           string     `json:"created_from,omitempty"` // diag_capture_success, startup_warmup, etc
+	IsWarmupAnchor        bool       `json:"is_warmup_anchor,omitempty"`
+	AnchorRetained        bool       `json:"anchor_retained,omitempty"` // Validated at decision time
 }
 
-// =============================================================================
-// CaptureCooldownDecision — Authoritative Cooldown Decision
-// =============================================================================
-
-// CaptureCooldownDecision represents the authoritative cooldown decision at a specific moment.
-// This is the single source of truth used for BOTH:
-//   - The capture/skip decision in TriggerCapture
-//   - The cooldown_info metadata in skipped captures
-//
-// This ensures the exported metadata exactly matches the decision logic.
+// CaptureCooldownDecision is authoritative cooldown decision for skip/capture and metadata.
 type CaptureCooldownDecision struct {
-	// IsInCooldown indicates whether the capture should be skipped due to cooldown.
-	IsInCooldown bool `json:"is_in_cooldown"`
-	// CooldownKey is the key used for cooldown state (typically peer/source name).
-	CooldownKey string `json:"cooldown_key"`
-	// DecisionNowAt is the timestamp when this decision was made.
-	DecisionNowAt time.Time `json:"decision_now_at"`
-	// LastSuccessfulCaptureAt is the timestamp of the last successful capture for this key.
-	// Zero time if no prior capture exists.
-	LastSuccessfulCaptureAt time.Time `json:"last_successful_capture_at"`
-	// NextCaptureEligibleAt is when the next capture will be eligible.
-	// Zero time if not in cooldown.
-	NextCaptureEligibleAt time.Time `json:"next_capture_eligible_at"`
-	// RemainingCooldownMs is the remaining cooldown in milliseconds.
-	// 0 if not in cooldown or cooldown has expired.
-	RemainingCooldownMs int64 `json:"remaining_cooldown_ms"`
-	// CooldownSeconds is the configured cooldown duration in seconds.
-	CooldownSeconds int `json:"cooldown_seconds"`
-	// SkippedAttemptUpdatesCooldown documents the cooldown semantics:
-	// - true: skipped attempts extend the cooldown window
-	// - false: only successful captures update cooldown
-	// This is the authoritative semantics documented in tests.
-	SkippedAttemptUpdatesCooldown bool `json:"skipped_attempt_updates_cooldown"`
-	// Anchor contains provenance of the successful capture that started the cooldown.
-	// This field is populated when IsInCooldown is true.
-	Anchor *CaptureCooldownAnchor `json:"anchor,omitempty"`
+	IsInCooldown               bool                  `json:"is_in_cooldown"`
+	CooldownKey                string                `json:"cooldown_key"`
+	DecisionNowAt              time.Time             `json:"decision_now_at"`
+	LastSuccessfulCaptureAt     time.Time             `json:"last_successful_capture_at"`
+	NextCaptureEligibleAt      time.Time             `json:"next_capture_eligible_at"`
+	RemainingCooldownMs        int64                 `json:"remaining_cooldown_ms"`
+	CooldownSeconds            int                   `json:"cooldown_seconds"`
+	SkippedAttemptUpdatesCooldown bool               `json:"skipped_attempt_updates_cooldown"`
+	Anchor                    *CaptureCooldownAnchor `json:"anchor,omitempty"`
 }
 
 // EvaluateCooldown computes the authoritative cooldown decision at the given time.
