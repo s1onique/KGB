@@ -377,6 +377,11 @@ func (m *Manager) GetICMPLatencySampleTimestamps(targetID string) (oldest, newes
 
 // CalculatePercentiles computes percentiles from a sorted slice of samples.
 // Returns nil for any percentile if no valid (successful) samples exist.
+//
+// Return detached percentile values so response DTOs never alias caller-owned
+// sample slices. Go permits returning addresses of locals; escaping locals
+// are kept alive by the compiler/runtime. The risk being removed is aliasing
+// between API response DTO pointers and caller-owned/mutable sample storage.
 func CalculatePercentiles(sortedSamples []float64, percentiles []float64) map[float64]*float64 {
 	result := make(map[float64]*float64)
 	n := len(sortedSamples)
@@ -393,14 +398,19 @@ func CalculatePercentiles(sortedSamples []float64, percentiles []float64) map[fl
 		k := int(rank)
 		d := rank - float64(k)
 
+		var value float64
 		if k <= 0 {
-			result[percentile] = &sortedSamples[0]
+			value = sortedSamples[0]
 		} else if k >= n {
-			result[percentile] = &sortedSamples[n-1]
+			value = sortedSamples[n-1]
 		} else {
-			value := sortedSamples[k-1] + d*(sortedSamples[k]-sortedSamples[k-1])
-			result[percentile] = &value
+			value = sortedSamples[k-1] + d*(sortedSamples[k]-sortedSamples[k-1])
 		}
+		// Allocate on heap to detach from local variable and ensure percentile
+		// values do not alias the input sample slice.
+		ptr := new(float64)
+		*ptr = value
+		result[percentile] = ptr
 	}
 	return result
 }
