@@ -64,12 +64,82 @@ type ICMPClient struct {
 	inFlight map[string]bool
 }
 
+// Global native ICMP telemetry pointer.
+// This pointer is set to the actual backend's stats when a native backend is created.
+var globalNativeICMPStats *nativeICMPStatsInternal
+
+// Global native telemetry mutex for lazy initialization.
+var globalNativeTelemetryMu sync.Mutex
+
+// InitGlobalNativeICMPTelemetry initializes the global native ICMP telemetry.
+// Takes a stats pointer from the actual backend to ensure /status reads real data.
+func InitGlobalNativeICMPTelemetry(stats *nativeICMPStatsInternal) {
+	globalNativeTelemetryMu.Lock()
+	defer globalNativeTelemetryMu.Unlock()
+	globalNativeICMPStats = stats
+}
+
+// GetGlobalNativeICMPTelemetry returns a telemetry wrapper around the global stats pointer.
+// Returns nil if no native ICMP backend has been initialized.
+func GetGlobalNativeICMPTelemetry() *NativeICMPTelemetry {
+	globalNativeTelemetryMu.Lock()
+	defer globalNativeTelemetryMu.Unlock()
+	if globalNativeICMPStats == nil {
+		return nil
+	}
+	return &NativeICMPTelemetry{stats: globalNativeICMPStats}
+}
+
+// ResetGlobalNativeICMPTelemetry resets the global telemetry (for testing).
+func ResetGlobalNativeICMPTelemetry() {
+	globalNativeTelemetryMu.Lock()
+	stats := globalNativeICMPStats
+	globalNativeTelemetryMu.Unlock()
+
+	if stats == nil {
+		return
+	}
+
+	stats.sent.Store(0)
+	stats.received.Store(0)
+	stats.timeouts.Store(0)
+	stats.socketOpenErrors.Store(0)
+	stats.permissionErrors.Store(0)
+	stats.parseErrors.Store(0)
+	stats.unmatchedReplies.Store(0)
+	stats.lastRTTMillis.Store(0)
+	stats.lastErrorClass.Store("")
+}
+
 // NewICMPClient creates a new ICMP probe client.
-func NewICMPClient(cfg *config.ICMPProbeConfig, st ICMPSampleRecorder, targets []*config.TargetConfig) *ICMPClient {
+func NewICMPClient(cfg *config.ICMPProbeConfig, st ICMPSampleRecorder, targets []*config.TargetConfig) (*ICMPClient, error) {
 	var backend ICMPProbeBackend
+	var backendErr error
+
 	if cfg.IsEnabled() {
-		// Use bounded backend with configured concurrency limit
-		backend = NewOSPingBackendWithLimit(cfg.MaxConcurrentOSPing)
+		backendType := cfg.BackendType()
+
+		switch backendType {
+		case config.ICMPBackendNative:
+			// Try native ICMP backend first
+			native, err := NewNativeICMPBackend()
+			if err != nil {
+				// Native ICMP failed - this is a startup error, not a silent fallback
+				// Return the error so the caller can decide how to handle it
+				backendErr = fmt.Errorf("native ICMP backend unavailable: %w; set icmp.backend=os_ping to use legacy fallback explicitly", err)
+				return nil, backendErr
+			}
+			backend = native
+
+		case config.ICMPBackendOSPing:
+			// Explicitly use OS ping
+			backend = NewOSPingBackendWithLimit(cfg.MaxConcurrentOSPing)
+
+		default:
+			// Unknown backend type - this shouldn't happen with validation, but be defensive
+			backendErr = fmt.Errorf("unknown ICMP backend type: %q", backendType)
+			return nil, backendErr
+		}
 	}
 
 	client := &ICMPClient{
@@ -86,7 +156,7 @@ func NewICMPClient(cfg *config.ICMPProbeConfig, st ICMPSampleRecorder, targets [
 		client.targets[t.ID] = t
 	}
 
-	return client
+	return client, nil
 }
 
 // IsEnabled returns whether ICMP probing is enabled.
@@ -294,4 +364,13 @@ func extractHost(baseURL string) string {
 		return ""
 	}
 	return u.Hostname()
+}
+
+// GetNativeICMPStats returns the native ICMP backend's stats if using native backend.
+// This allows main.go to wire the actual backend stats to the global telemetry.
+func (c *ICMPClient) GetNativeICMPStats() *nativeICMPStatsInternal {
+	if native, ok := c.backend.(*NativeICMPBackend); ok {
+		return native.stats
+	}
+	return nil
 }

@@ -90,12 +90,20 @@ func main() {
 	httpProbeClient.Start()
 
 	// Initialize ICMP probe client (independent ICMP ping probing)
-	icmpProbeClient := probe.NewICMPClient(&cfg.Latency.ICMP, stateManager, targets)
+	icmpProbeClient, err := probe.NewICMPClient(&cfg.Latency.ICMP, stateManager, targets)
+	if err != nil {
+		log.Fatalf("Failed to initialize ICMP probe client: %v", err)
+	}
 	if icmpProbeClient.IsEnabled() {
-		log.Printf("ICMP ping probe enabled (interval: %ds, timeout: %ds)",
-			cfg.Latency.ICMP.IntervalSeconds, cfg.Latency.ICMP.TimeoutSeconds)
+		backendType := cfg.Latency.ICMP.BackendType()
+		log.Printf("ICMP ping probe enabled (backend: %s, interval: %ds, timeout: %ds)",
+			backendType, cfg.Latency.ICMP.IntervalSeconds, cfg.Latency.ICMP.TimeoutSeconds)
 		// Initialize daemon-owned ICMP telemetry for HTTP status API exposure
 		probe.InitGlobalICMPTelemetry(true, cfg.Latency.ICMP.MaxConcurrentOSPing)
+		// Wire actual backend stats to global telemetry for /status API
+		if stats := icmpProbeClient.GetNativeICMPStats(); stats != nil {
+			probe.InitGlobalNativeICMPTelemetry(stats)
+		}
 	} else {
 		log.Println("ICMP ping probe disabled")
 	}

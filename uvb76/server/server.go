@@ -358,29 +358,6 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(targets)
 }
 
-// ServerStatus represents the runtime status of the UVB-76 server.
-type ServerStatus struct {
-	StartedAt    string                            `json:"started_at"`
-	ICMPOSPing   *probe.ICMPPingTelemetrySnapshot `json:"icmp_os_ping,omitempty"`
-}
-
-// handleStatus returns server runtime status including start time and ICMP telemetry.
-func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	status := ServerStatus{
-		StartedAt: s.startedAt.Format(time.RFC3339),
-	}
-
-	// Include ICMP OS ping telemetry if available
-	if tm := probe.GetGlobalICMPTelemetry(); tm != nil {
-		snap := tm.Snapshot()
-		status.ICMPOSPing = &snap
-	}
-
-	json.NewEncoder(w).Encode(status)
-}
-
 // handleTargetSnapshot returns the latest snapshot for a specific target.
 func (s *Server) handleTargetSnapshot(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)

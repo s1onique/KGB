@@ -3,6 +3,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 )
 
 // LatencyConfig holds latency measurement settings.
@@ -14,21 +15,22 @@ type LatencyConfig struct {
 
 // HTTPProbeConfig holds HTTP status probe latency measurement settings.
 type HTTPProbeConfig struct {
-	Enabled             *bool  `json:"enabled"` // pointer so we can distinguish unset from false
-	IntervalSeconds     int    `json:"interval_seconds"`
-	TimeoutMilliseconds int    `json:"timeout_milliseconds"`
-	HistogramBucketsMS  []int64 `json:"histogram_buckets_ms"`
-	RecentSamplesMax    int    `json:"recent_samples_max"`
-	WindowSeconds       int    `json:"window_seconds"`
-	RetainedRangeSeconds int   `json:"retained_range_seconds"`
+	Enabled              *bool  `json:"enabled"` // pointer so we can distinguish unset from false
+	IntervalSeconds      int    `json:"interval_seconds"`
+	TimeoutMilliseconds  int    `json:"timeout_milliseconds"`
+	HistogramBucketsMS   []int64 `json:"histogram_buckets_ms"`
+	RecentSamplesMax     int    `json:"recent_samples_max"`
+	WindowSeconds        int    `json:"window_seconds"`
+	RetainedRangeSeconds int    `json:"retained_range_seconds"`
 }
 
 // ICMPProbeConfig holds ICMP ping latency measurement settings.
 type ICMPProbeConfig struct {
 	Enabled              *bool  `json:"enabled"` // pointer so we can distinguish unset from false
 	IntervalSeconds      int    `json:"interval_seconds"`
-	TimeoutSeconds      int    `json:"timeout_seconds"`
+	TimeoutSeconds       int    `json:"timeout_seconds"`
 	MaxConcurrentOSPing  int    `json:"max_concurrent_os_ping"` // bounds concurrent os/exec ping processes
+	Backend              string `json:"backend"` // "native" or "os_ping"; defaults to "native" on Linux
 	HistogramBucketsMS   []int64 `json:"histogram_buckets_ms"`
 	RecentSamplesMax     int    `json:"recent_samples_max"`
 	WindowSeconds        int    `json:"window_seconds"`
@@ -72,6 +74,14 @@ const (
 	// Computed dynamically from retained_range / interval in ApplyDefaults.
 	// At 1s interval with 3600s retention, this equals 3600 samples.
 	DefaultICMPRecentSamplesMax = 0 // 0 means auto-compute
+)
+
+// ICMP backend type constants
+const (
+	// ICMPBackendNative uses native Go ICMP sockets (preferred on Linux).
+	ICMPBackendNative = "native"
+	// ICMPBackendOSPing uses os/exec ping (fallback only).
+	ICMPBackendOSPing = "os_ping"
 )
 
 // ApplyDefaults applies sensible defaults to latency config when values are missing.
@@ -247,10 +257,39 @@ func ValidateICMPProbeConfig(c ICMPProbeConfig) error {
 	if c.RecentSamplesMax*c.IntervalSeconds < c.RetainedRangeSeconds {
 		return errors.New("latency.icmp.recent_samples_max * interval_seconds must be >= retained_range_seconds")
 	}
+	// Validate backend type
+	if err := ValidateBackend(c.Backend); err != nil {
+		return err
+	}
 	return nil
 }
 
 // IsEnabled is kept for backward compatibility - returns true if either HTTP or ICMP is enabled.
 func (c *LatencyConfig) IsEnabled() bool {
 	return c.HTTP.IsEnabled() || c.ICMP.IsEnabled()
+}
+
+// BackendType returns the configured ICMP backend, applying platform defaults.
+// Returns the configured backend string.
+func (c *ICMPProbeConfig) BackendType() string {
+	if c.Backend == "" {
+		return DefaultICMPBackend()
+	}
+	return c.Backend
+}
+
+// DefaultICMPBackend returns the default ICMP backend.
+// Currently always returns native - os_ping is only used when explicitly configured.
+func DefaultICMPBackend() string {
+	return ICMPBackendNative
+}
+
+// ValidateBackend validates the ICMP backend configuration.
+func ValidateBackend(backend string) error {
+	switch backend {
+	case "", ICMPBackendNative, ICMPBackendOSPing:
+		return nil
+	default:
+		return fmt.Errorf("latency.icmp.backend must be %q or %q, got %q", ICMPBackendNative, ICMPBackendOSPing, backend)
+	}
 }
