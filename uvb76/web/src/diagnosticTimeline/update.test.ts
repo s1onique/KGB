@@ -16,7 +16,7 @@ function createTestEvent(overrides: Partial<TimelineEvent> = {}): TimelineEvent 
   const probeKind = overrides.probeKind ?? 'http';
   const severity = overrides.severity ?? 'warning';
   const sampleTs = overrides.sampleTs ?? '2026-06-18T12:00:00Z';
-  const canonicalTime = new Date(sampleTs);
+  const canonicalTimeMs = new Date(sampleTs).getTime();
   
   return {
     eventId,
@@ -36,7 +36,8 @@ function createTestEvent(overrides: Partial<TimelineEvent> = {}): TimelineEvent 
     captures: overrides.captures ?? [],
     primaryCapture: overrides.primaryCapture ?? null,
     captureStatus: overrides.captureStatus ?? 'captured',
-    canonicalTime,
+    canonicalTimeMs,
+    timeStatus: overrides.timeStatus ?? 'ok',
     sortProbeKind: probeKind === 'http' ? 0 : 1,
     sortSeverity: severity === 'warning' ? 0 : 1,
     sortEventId: eventId,

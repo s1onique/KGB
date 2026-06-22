@@ -14,6 +14,9 @@ export type Severity = 'warning' | 'critical';
 /** Capture status for display - maps backend statuses to operator-friendly categories */
 export type CaptureStatusDisplay = 'captured' | 'suppressed' | 'failed' | 'not_attempted';
 
+/** Timestamp quality status */
+export type TimeStatus = 'ok' | 'missing' | 'invalid';
+
 /** Unified timeline event combining HTTP and ICMP spike events */
 export interface TimelineEvent {
   // Source data
@@ -37,8 +40,12 @@ export interface TimelineEvent {
   primaryCapture: DiagCapture | null;
   captureStatus: CaptureStatusDisplay;
   
-  // Canonical event time - deterministic selector for sorting
-  canonicalTime: Date;
+  // Canonical event time - numeric sort key (milliseconds since epoch)
+  // null indicates missing/invalid timestamp
+  canonicalTimeMs: number | null;
+  
+  // Timestamp quality status for degraded rendering
+  timeStatus: TimeStatus;
   
   // Stable sort keys
   sortProbeKind: number;  // http=0, icmp=1
@@ -71,47 +78,82 @@ export interface TimelineState {
 }
 
 // ---------------------------------------------------------------------------
-// Canonical Time Selector
+// Timestamp Parsing
 // ---------------------------------------------------------------------------
 
-/** 
+/** Result of parsing a timestamp from API response */
+interface ParsedTimestamp {
+  ms: number | null;
+  status: TimeStatus;
+}
+
+/**
+ * Parse a timestamp value and return milliseconds with status.
+ * Handles missing, empty, and invalid timestamp values.
+ */
+function parseTimestamp(value: unknown): ParsedTimestamp {
+  // Handle missing/undefined/null
+  if (value === null || value === undefined || value === '') {
+    return { ms: null, status: 'missing' };
+  }
+  
+  // Handle non-string values
+  const strValue = String(value).trim();
+  if (strValue === '') {
+    return { ms: null, status: 'missing' };
+  }
+  
+  // Parse the timestamp
+  const ms = Date.parse(strValue);
+  
+  // Handle invalid date (e.g., "not-a-date", "0001-01-01T00:00:00Z" on some parsers)
+  if (!Number.isFinite(ms)) {
+    return { ms: null, status: 'invalid' };
+  }
+  
+  return { ms, status: 'ok' };
+}
+
+/**
  * Get canonical event time using deterministic selector:
  * 1. sample timestamp if present
  * 2. collected/created timestamp if present
  * 3. capture started timestamp if present
  * 4. capture finished timestamp if present
- * 5. stable fallback (epoch)
+ * 5. missing/invalid (based on whether we saw any invalid timestamps)
  */
-function getCanonicalTime(spike: SpikeEventWithCaptures): Date {
+function getCanonicalTime(spike: SpikeEventWithCaptures): ParsedTimestamp {
+  let sawInvalid = false;
+  
+  const consider = (value: unknown): ParsedTimestamp | null => {
+    if (value === undefined || value === null || value === '') return null;
+    
+    const result = parseTimestamp(value);
+    if (result.status === 'ok') return result;
+    if (result.status === 'invalid') sawInvalid = true;
+    return null;
+  };
+  
   // 1. sample timestamp
-  if (spike.sample_ts) {
-    const d = new Date(spike.sample_ts);
-    if (!isNaN(d.getTime())) return d;
-  }
+  const sample = consider(spike.sample_ts);
+  if (sample) return sample;
   
   // 2. collected timestamp
-  if (spike.collected_at) {
-    const d = new Date(spike.collected_at);
-    if (!isNaN(d.getTime())) return d;
-  }
+  const collected = consider(spike.collected_at);
+  if (collected) return collected;
   
-  // 3. capture started timestamp
-  if (spike.captures && spike.captures.length > 0) {
-    const capture = spike.captures[0];
-    if (capture.capture_started_at) {
-      const d = new Date(capture.capture_started_at);
-      if (!isNaN(d.getTime())) return d;
-    }
+  // 3-4. capture timestamps
+  const capture = spike.captures?.[0];
+  if (capture) {
+    const started = consider(capture.capture_started_at);
+    if (started) return started;
     
-    // 4. capture finished timestamp
-    if (capture.capture_finished_at) {
-      const d = new Date(capture.capture_finished_at);
-      if (!isNaN(d.getTime())) return d;
-    }
+    const finished = consider(capture.capture_finished_at);
+    if (finished) return finished;
   }
   
-  // 5. stable fallback
-  return new Date(0);
+  // 5. No valid timestamp found - report invalid if we saw invalid values, else missing
+  return { ms: null, status: sawInvalid ? 'invalid' : 'missing' };
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +210,7 @@ function mapCaptureStatus(capture: DiagCapture): CaptureStatusDisplay {
 
 /** Normalize a spike event to a timeline event */
 function normalizeSpikeEvent(spike: SpikeEventWithCaptures): TimelineEvent {
-  const canonicalTime = getCanonicalTime(spike);
+  const { ms, status } = getCanonicalTime(spike);
   
   // Sort captures: prefer 'captured', then 'suppressed', then others
   const sortedCaptures = [...(spike.captures || [])].sort((a, b) => {
@@ -197,7 +239,8 @@ function normalizeSpikeEvent(spike: SpikeEventWithCaptures): TimelineEvent {
     captures: sortedCaptures,
     primaryCapture,
     captureStatus,
-    canonicalTime,
+    canonicalTimeMs: ms,
+    timeStatus: status,
     sortProbeKind: spike.kind === 'http' ? 0 : 1,
     sortSeverity: spike.severity === 'warning' ? 0 : 1,
     sortEventId: spike.event_id,
@@ -220,11 +263,16 @@ function normalizeIcmpResponse(response: SpikeResponseWithCaptures | null): Time
 // Sorting
 // ---------------------------------------------------------------------------
 
-/** Sort timeline events newest-first with stable tie-breaks */
-function sortTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
+/** Sort timeline events newest-first with stable tie-breaks.
+ * Events with missing/invalid timestamps are sorted to the end.
+ */
+export function sortTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
   return [...events].sort((a, b) => {
     // Primary: newest-first canonical time
-    const timeDiff = b.canonicalTime.getTime() - a.canonicalTime.getTime();
+    // null timestamps sort after valid timestamps
+    const aTime = a.canonicalTimeMs ?? Number.MIN_SAFE_INTEGER;
+    const bTime = b.canonicalTimeMs ?? Number.MIN_SAFE_INTEGER;
+    const timeDiff = bTime - aTime;
     if (timeDiff !== 0) return timeDiff;
     
     // Stable tie-break 1: probe kind (http before icmp)

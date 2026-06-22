@@ -267,4 +267,114 @@ describe('diagnosticTimeline.model', () => {
       expect(getCooldownInfo(event)).toBeNull();
     });
   });
+
+  describe('timestamp normalization', () => {
+    it('marks valid ISO timestamp as ok', () => {
+      const spike = createSpikeEvent({
+        sample_ts: '2026-06-18T12:00:00Z',
+      });
+      
+      const response = createSpikeResponse(spike);
+      const state = buildTimelineState(response, null);
+      
+      expect(state.mergedEvents[0].canonicalTimeMs).not.toBeNull();
+      expect(state.mergedEvents[0].timeStatus).toBe('ok');
+    });
+
+    it('marks missing timestamp as missing', () => {
+      const spike = createSpikeEvent({
+        sample_ts: '',
+        collected_at: '',
+      });
+      
+      const response = createSpikeResponse(spike);
+      const state = buildTimelineState(response, null);
+      
+      expect(state.mergedEvents[0].canonicalTimeMs).toBeNull();
+      expect(state.mergedEvents[0].timeStatus).toBe('missing');
+    });
+
+    it('marks malformed API timestamp as invalid', () => {
+      const spike = createSpikeEvent({
+        sample_ts: 'not-a-valid-date',
+        collected_at: 'also-invalid',
+      });
+      
+      const response = createSpikeResponse(spike);
+      const state = buildTimelineState(response, null);
+      
+      expect(state.mergedEvents[0].canonicalTimeMs).toBeNull();
+      expect(state.mergedEvents[0].timeStatus).toBe('invalid');
+    });
+
+    it('falls back to collected_at when sample_ts is missing', () => {
+      const spike = createSpikeEvent({
+        sample_ts: '',
+        collected_at: '2026-06-18T14:00:00Z',
+      });
+      
+      const response = createSpikeResponse(spike);
+      const state = buildTimelineState(response, null);
+      
+      expect(state.mergedEvents[0].canonicalTimeMs).not.toBeNull();
+      expect(state.mergedEvents[0].timeStatus).toBe('ok');
+    });
+
+    it('falls back to capture timestamp when both sample and collected are missing', () => {
+      const spike = createSpikeEvent({
+        sample_ts: '',
+        collected_at: '',
+        captures: [{
+          source: 'peer-1',
+          base_url: 'http://10.0.0.1:8080',
+          capture_started_at: '2026-06-18T15:00:00Z',
+          status: 'ok',
+        }],
+      });
+      
+      const response = createSpikeResponse(spike);
+      const state = buildTimelineState(response, null);
+      
+      expect(state.mergedEvents[0].canonicalTimeMs).not.toBeNull();
+      expect(state.mergedEvents[0].timeStatus).toBe('ok');
+    });
+
+    it('sorts events with invalid timestamps to the end', () => {
+      // Create spikes directly to ensure invalid timestamps aren't overridden by fixtures
+      const validSpike = {
+        event_id: 'aaa-valid-1',
+        target_id: 'test',
+        kind: 'http',
+        severity: 'warning',
+        latency_ms: 100,
+        sample_ts: '2026-06-18T12:00:00Z',
+        rolling_median_ms: 50,
+        reasons: [],
+        thresholds: { warning_ms: 100, critical_ms: 500, relative_multiplier: 2 },
+        previous_samples: [],
+        collected_at: '2026-06-18T12:00:00Z',
+      };
+      const invalidSpike = {
+        event_id: 'zzz-invalid-1',
+        target_id: 'test',
+        kind: 'http',
+        severity: 'warning',
+        latency_ms: 100,
+        sample_ts: 'not-a-date',
+        rolling_median_ms: 50,
+        reasons: [],
+        thresholds: { warning_ms: 100, critical_ms: 500, relative_multiplier: 2 },
+        previous_samples: [],
+        collected_at: 'also-invalid',
+      };
+      
+      const state = buildTimelineState({ spikes: [validSpike], count: 1, retention: defaultRetention }, { spikes: [invalidSpike], count: 1, retention: defaultRetention });
+      
+      // Valid timestamp should come first
+      expect(state.mergedEvents[0].eventId).toBe('aaa-valid-1');
+      expect(state.mergedEvents[0].timeStatus).toBe('ok');
+      expect(state.mergedEvents[1].eventId).toBe('zzz-invalid-1');
+      expect(state.mergedEvents[1].timeStatus).toBe('invalid');
+    });
+  });
 });
