@@ -1,0 +1,112 @@
+# UVB-76 Memory Budget — Go Control Tower
+#
+# Memory budgets are explicit product contracts for UVB-76.
+# Values marked "baseline_required" must be measured before being set.
+#
+# Reference: kgb://doctrine/embedded-memory-frugality
+
+version: "1.0"
+service: uvb76
+description: |
+  Memory budgets for the UVB-76 Go control tower daemon.
+  These budgets establish RSS/PSS limits for various operational states.
+
+# Architecture-specific budgets
+arch_budgets:
+  linux/arm64:
+    # Idle state — after initial startup, no active probing
+    idle:
+      rss_kib: baseline_required
+      pss_kib: baseline_required
+      heap_alloc_bytes: baseline_required
+      goroutines_max: baseline_required
+      notes: Measure after 120s warmup with no active probes
+
+    # Warm steady-state — with active probing and collection
+    warm:
+      rss_kib: baseline_required
+      pss_kib: baseline_required
+      heap_alloc_bytes: baseline_required
+      goroutines_max: baseline_required
+      growth_allowed_kib: baseline_required
+      notes: Measure after 10 minutes with active ICMP/TCP probing
+
+    # Hot-path allocation budgets (per-call)
+    hot_paths:
+      status_api:
+        alloc_bytes_max: baseline_required
+        notes: Maximum allocation during /api/v1/status render
+      diagnostic_capture:
+        alloc_bytes_max: baseline_required
+        notes: Maximum allocation during diagnostic packet capture
+      icmp_probe:
+        alloc_bytes_max: baseline_required
+        notes: Maximum allocation per ICMP probe cycle
+      tcp_quality_collector:
+        alloc_bytes_max: baseline_required
+        notes: Maximum allocation per TCP quality sample
+      route_collector:
+        alloc_bytes_max: baseline_required
+        notes: Maximum allocation per route collection cycle
+      spike_diagnostics:
+        alloc_bytes_max: baseline_required
+        notes: Maximum allocation per spike diagnostic render
+
+    # History and artifact caps
+    history:
+      max_retained_targets: 1000
+      max_retained_results: 10000
+      max_diagnostic_buffer_kib: 512
+      max_log_buffer_mb: 10
+      notes: Explicit retention limits to prevent unbounded growth
+
+    # Max response/artifact sizes
+    max_response:
+      status_json_kib: 256
+      diagnostic_packet_kib: 128
+      notes: Bounded response sizes; must not grow unbounded
+
+  linux/amd64:
+    idle:
+      rss_kib: baseline_required
+      pss_kib: baseline_required
+    warm:
+      rss_kib: baseline_required
+      pss_kib: baseline_required
+      growth_allowed_kib: baseline_required
+
+  darwin/arm64:
+    # macOS development builds may have higher baseline
+    idle:
+      rss_kib: baseline_required
+      pss_kib: baseline_required
+    warm:
+      rss_kib: baseline_required
+      pss_kib: baseline_required
+      growth_allowed_kib: baseline_required
+
+# Workload-specific budgets for memory labs
+workload_budgets:
+  status_api_polling:
+    description: Repeated /api/v1/status polling
+    max_growth_kib: baseline_required
+    max_growth_percent: 5.0
+    notes: Growth should flatten after initial warmup
+
+  icmp_probe_loop:
+    description: Continuous ICMP probe execution
+    max_growth_kib: baseline_required
+    max_growth_percent: 10.0
+    notes: Some growth acceptable during probe target discovery
+
+  diagnostic_capture_loop:
+    description: Continuous diagnostic capture with network_diag
+    max_growth_kib: baseline_required
+    max_growth_percent: 10.0
+    notes: Growth should flatten after warmup
+
+# Budget enforcement
+enforcement:
+  gate_level: fast_local
+  fail_on_budget_exceeded: true
+  baseline_required_tolerance_percent: 0

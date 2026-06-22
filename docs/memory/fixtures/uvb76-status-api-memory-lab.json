@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "evidence_kind": "schema_fixture",
+  "_schema_fixture_note": "This is a SCHEMA FIXTURE, not real lab evidence. Real artifacts go in artifacts/memory-labs/. Used for verifier self-tests only.",
+  "service": {
+    "name": "uvb76",
+    "version": "1.0.0+def5678",
+    "commit": "def5678"
+  },
+  "environment": {
+    "arch": "linux/arm64",
+    "kernel": "5.15.0-generic",
+    "os": "Linux"
+  },
+  "workload": {
+    "type": "status-api-polling",
+    "operations": 200,
+    "errors": 0,
+    "duration_ms": 20000,
+    "interval_ms": 100,
+    "description": "Repeated /api/v1/status polling"
+  },
+  "memory": {
+    "first": {
+      "rss_kib": 8192,
+      "pss_kib": 7800
+    },
+    "max": {
+      "rss_kib": 8600,
+      "pss_kib": 8100
+    },
+    "last": {
+      "rss_kib": 8220,
+      "pss_kib": 7820
+    },
+    "growth": {
+      "rss_kib": 28,
+      "pss_kib": 20,
+      "rss_percent": 0.34
+    }
+  },
+  "runtime": {
+    "goroutines": 15,
+    "gc_count": 2,
+    "heap_alloc_bytes": 2097152,
+    "gc_pause_ns": 100000,
+    "notes": "Schema fixture baseline for status API polling lab verifier"
+  },
+  "decision": {
+    "pass": true,
+    "reason": "SCHEMA FIXTURE: for verifier self-tests only; RSS growth 0.34% < 5% threshold",
+    "budget_checked": "status_api_polling",
+    "budget_value": "28 KiB < baseline_required (initial measurement pending)"
+  }
+}

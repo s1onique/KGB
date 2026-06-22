@@ -18,6 +18,7 @@ Canonical doctrine documents for KGB project hygiene and architecture.
 | [runtime-harness-adaptation.md](./runtime-harness-adaptation.md) | Four-layer harness: contract, skill, action, trajectory |
 | [shell-containment.md](./shell-containment.md) | Shell wrapper policy, banned anti-patterns, migration guide |
 | [native-owned-critical-paths.md](./native-owned-critical-paths.md) | Native code preference for critical paths, anti-NIH clause |
+| [embedded-memory-frugality.md](./embedded-memory-frugality.md) | Memory footprint contracts, allocation ownership, leak discipline |
 
 ## Day-0 Practices
 
@@ -31,3 +32,4 @@ Canonical doctrine documents for KGB project hygiene and architecture.
 - **`tovarisch`** is the leaf; **`UVB-76`** is the control tower.
 - Coverage is tracked from Day 0; it is a signal, not a vanity metric.
 - Leafs must NOT include: Kubernetes, containers by default, embedded TSDB.
+- Memory footprint is a product contract; no unbounded growth allowed.

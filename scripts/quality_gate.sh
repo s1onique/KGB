@@ -89,6 +89,7 @@ required=(
   docs/doctrine/git-history-safety.md
   docs/doctrine/shell-containment.md
   docs/doctrine/native-owned-critical-paths.md
+  docs/doctrine/embedded-memory-frugality.md
   docs/generated/shell_inventory.csv
   docs/tooling/cli-composition-inventory.csv
   docs/architecture/overview.md
@@ -109,6 +110,10 @@ required=(
   scripts/verify_cold_resume_checkpoints.py
   docs/tooling/cold-resume-checkpoints.md
   docs/reference_allowlists/cold_resume_checkpoint_legacy_allowlist.csv
+  docs/memory/budgets/tovarisch-memory-budget.yaml
+  docs/memory/budgets/uvb76-memory-budget.yaml
+  scripts/verify_memory_budgets.py
+  scripts/verify_memory_lab_artifact.py
   AGENTS.md
   .clinerules/00-bootstrap.md
   .clinerules/10-kgb-doctrine.md
@@ -311,6 +316,26 @@ echo "[gate] checking structured logs"
 echo "[gate] checking plaintext logging policy"
 
 ./scripts/verify_plaintext_logs.sh
+
+echo "[gate] checking memory budgets schema"
+
+python3 scripts/verify_memory_budgets.py
+
+echo "[gate] checking memory budgets schema self-test"
+
+python3 scripts/verify_memory_budgets.py --self-test
+
+echo "[gate] checking memory lab artifacts schema"
+
+python3 scripts/verify_memory_lab_artifact.py
+
+echo "[gate] checking memory lab artifacts schema self-test"
+
+python3 scripts/verify_memory_lab_artifact.py --self-test
+
+echo "[gate] checking memory allocation ownership hygiene"
+
+bash scripts/check_memory_ownership.sh
 
 echo ""
 echo "[gate] PASS"

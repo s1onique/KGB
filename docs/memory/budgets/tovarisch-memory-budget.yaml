@@ -1,0 +1,101 @@
+# Tovarisch Memory Budget — Zig Leaf Daemon
+#
+# Memory budgets are explicit product contracts for tovarisch.
+# Values marked "baseline_required" must be measured before being set.
+#
+# Reference: kgb://doctrine/embedded-memory-frugality
+
+version: "1.0"
+service: tovarisch
+description: |
+  Memory budgets for the tovarisch Zig leaf daemon.
+  These budgets establish RSS/PSS limits for various operational states.
+
+# Architecture-specific budgets
+arch_budgets:
+  linux/arm64:
+    # Idle state — after initial startup, no active sessions
+    idle:
+      rss_kib: baseline_required
+      pss_kib: baseline_required
+      heap_alloc_bytes: baseline_required
+      notes: Measure after 60s warmup with no active BGP/BFD sessions
+
+    # Warm steady-state — with active BGP/BFD sessions
+    warm:
+      rss_kib: baseline_required
+      pss_kib: baseline_required
+      heap_alloc_bytes: baseline_required
+      growth_allowed_kib: baseline_required
+      notes: Measure after 5 minutes with stable BGP/BFD sessions
+
+    # Hot-path allocation budgets (per-call)
+    hot_paths:
+      status_render:
+        alloc_bytes_max: baseline_required
+        notes: Maximum allocation during /status or /status.json render
+      status_json_render:
+        alloc_bytes_max: baseline_required
+        notes: Maximum allocation during /status.json?include=network_diag render
+      bgp_status_render:
+        alloc_bytes_max: baseline_required
+        notes: Maximum allocation during BGP status section render
+      bfd_status_render:
+        alloc_bytes_max: baseline_required
+        notes: Maximum allocation during BFD status section render
+      config_parse:
+        alloc_bytes_max: baseline_required
+        notes: Maximum allocation during config file parsing
+
+    # History and artifact caps
+    history:
+      max_retained_routes: 10000
+      max_retained_sessions: 100
+      max_diagnostic_buffer_kib: 256
+      notes: Explicit retention limits to prevent unbounded growth
+
+    # Max response sizes
+    max_response:
+      status_json_kib: 64
+      status_plaintext_kib: 16
+      notes: Bounded response sizes; must not grow unbounded
+
+  linux/amd64:
+    # Baseline same as arm64 unless measured otherwise
+    idle:
+      rss_kib: baseline_required
+      pss_kib: baseline_required
+    warm:
+      rss_kib: baseline_required
+      pss_kib: baseline_required
+      growth_allowed_kib: baseline_required
+
+  darwin/arm64:
+    # macOS development builds may have higher baseline
+    idle:
+      rss_kib: baseline_required
+      pss_kib: baseline_required
+    warm:
+      rss_kib: baseline_required
+      pss_kib: baseline_required
+      growth_allowed_kib: baseline_required
+
+# Workload-specific budgets for memory labs
+workload_budgets:
+  status_json_warmup:
+    description: Repeated /status.json calls after warmup
+    max_growth_kib: baseline_required
+    max_growth_percent: 5.0
+    notes: Growth should flatten after initial warmup
+
+  bgp_bfd_steady_state:
+    description: Continuous BGP/BFD status with real peers
+    max_growth_kib: baseline_required
+    max_growth_percent: 10.0
+    notes: Some growth acceptable during session establishment
+
+# Budget enforcement
+enforcement:
+  gate_level: fast_local
+  fail_on_budget_exceeded: true
+  baseline_required_tolerance_percent: 0

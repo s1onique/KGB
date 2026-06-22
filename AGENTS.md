@@ -27,6 +27,7 @@ Before any implementation work, read:
 - `docs/doctrine/privacy.md`
 - `docs/doctrine/native-owned-critical-paths.md`
 - `docs/doctrine/tiny-leafs.md`
+- `docs/doctrine/embedded-memory-frugality.md`
 - `docs/architecture/overview.md`
 - `docs/architecture/components.md`
 - `docs/architecture/naming.md`

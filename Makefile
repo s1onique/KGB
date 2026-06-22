@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 87
@@ -288,4 +288,22 @@ verify-opkg-package:
 # Combined opkg gate: build, self-test, and verify all packages
 opkg-gate: opkg-package verify-opkg-package
 	@echo "=== opkg-gate passed ==="
+
+# === Memory Frugality Gates ===
+# Fast local gates for memory hygiene and budgets.
+
+verify-memory-budgets:
+	@echo "=== Memory Budget Verifier ==="
+	python3 scripts/verify_memory_budgets.py
+
+verify-memory-lab-artifacts:
+	@echo "=== Memory Lab Artifact Verifier ==="
+	python3 scripts/verify_memory_lab_artifact.py
+
+verify-memory-ownership:
+	@echo "=== Memory Ownership Hygiene Gate ==="
+	bash scripts/check_memory_ownership.sh
+
+memory-gate: verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership
+	@echo "=== memory-gate passed ==="
 

@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0",
+  "evidence_kind": "schema_fixture",
+  "_schema_fixture_note": "This is a SCHEMA FIXTURE, not real lab evidence. Real artifacts go in artifacts/memory-labs/. Used for verifier self-tests only.",
+  "service": {
+    "name": "tovarisch",
+    "version": "0.1.0+abc1234",
+    "commit": "abc1234"
+  },
+  "environment": {
+    "arch": "linux/arm64",
+    "kernel": "5.15.0-generic",
+    "os": "Linux"
+  },
+  "workload": {
+    "type": "status-json-warmup",
+    "operations": 100,
+    "errors": 0,
+    "duration_ms": 10000,
+    "interval_ms": 100,
+    "description": "Repeated /status.json?include=network_diag calls"
+  },
+  "memory": {
+    "first": {
+      "rss_kib": 2048,
+      "pss_kib": 1900
+    },
+    "max": {
+      "rss_kib": 2100,
+      "pss_kib": 1950
+    },
+    "last": {
+      "rss_kib": 2060,
+      "pss_kib": 1910
+    },
+    "growth": {
+      "rss_kib": 12,
+      "pss_kib": 10,
+      "rss_percent": 0.59
+    }
+  },
+  "runtime": {
+    "zig_allocator": "GeneralPurposeAllocator",
+    "notes": "Schema fixture baseline for status JSON warmup lab verifier"
+  },
+  "decision": {
+    "pass": true,
+    "reason": "SCHEMA FIXTURE: for verifier self-tests only; RSS growth 0.59% < 5% threshold",
+    "budget_checked": "status_json_warmup",
+    "budget_value": "12 KiB < baseline_required (initial measurement pending)"
+  }
+}
