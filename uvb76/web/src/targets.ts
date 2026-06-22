@@ -277,7 +277,16 @@ function createTargetsRenderer(container: HTMLElement): TargetsRenderer {
           ? trimmedVersion.substring(0, 64) + '…' 
           : trimmedVersion;
         const displayVersion = safeVersion || 'unknown';
-        el.innerHTML = `<span class="status ${safeStatusClass}">${escapeText(safeStatus)}</span><span class="target-header-sep">·</span>Node: ${safeNodeId}<span class="target-header-sep">·</span><span class="peer-version" data-testid="target-peer-version">Peer: tovarisch ${escapeText(displayVersion)}</span>`;
+        
+        // RSS: format peer_rss_kib (KiB) as MiB, omit if absent/null/invalid
+        let rssHtml = '';
+        const rssKib = snap.peer_rss_kib;
+        if (typeof rssKib === 'number' && Number.isFinite(rssKib) && rssKib > 0) {
+          const rssMib = Math.round(rssKib / 1024);
+          rssHtml = `<span class="target-header-sep">·</span><span class="peer-rss" data-testid="target-peer-rss">RSS ${rssMib}M</span>`;
+        }
+        
+        el.innerHTML = `<span class="status ${safeStatusClass}">${escapeText(safeStatus)}</span><span class="target-header-sep">·</span>Node: ${safeNodeId}<span class="target-header-sep">·</span><span class="peer-version" data-testid="target-peer-version">Peer: tovarisch ${escapeText(displayVersion)}</span>${rssHtml}`;
       } else {
         const safeError = escapeText(snap.error || '');
         el.innerHTML = `<span class="status error">unreachable</span> ${safeError}`;

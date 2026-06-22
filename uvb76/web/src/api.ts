@@ -15,6 +15,8 @@ export interface TargetSnapshot {
   node_id?: string;
   checks?: CheckResult[];
   error?: string;
+  // RSS from tovarisch runtime telemetry (VmRSS in KiB, null on non-Linux)
+  peer_rss_kib?: number | null;
 }
 
 export interface CheckResult {

@@ -44,7 +44,16 @@ function renderStatusLine(snap: TargetSnapshot): string {
     ? trimmedVersion.substring(0, 64) + '…' 
     : trimmedVersion;
   const displayVersion = safeVersion || 'unknown';
-  return `<span class="status ${safeStatusClass}">${escapeText(safeStatus)}</span> Node: ${safeNodeId} <span class="peer-version" data-testid="target-peer-version">Peer: tovarisch ${escapeText(displayVersion)}</span>`;
+  
+  // RSS: format peer_rss_kib (KiB) as MiB, omit if absent/null/invalid
+  let rssHtml = '';
+  const rssKib = snap.peer_rss_kib;
+  if (typeof rssKib === 'number' && Number.isFinite(rssKib) && rssKib > 0) {
+    const rssMib = Math.round(rssKib / 1024);
+    rssHtml = `<span class="target-header-sep">·</span><span class="peer-rss" data-testid="target-peer-rss">RSS ${rssMib}M</span>`;
+  }
+  
+  return `<span class="status ${safeStatusClass}">${escapeText(safeStatus)}</span> Node: ${safeNodeId} <span class="peer-version" data-testid="target-peer-version">Peer: tovarisch ${escapeText(displayVersion)}</span>${rssHtml}`;
 }
 
 describe('Peer version rendering', () => {
@@ -517,5 +526,209 @@ describe('Target header compact layout', () => {
       const separatorCount = (statusContent.match(/<span class="target-header-sep">·<\/span>/g) || []).length;
       expect(separatorCount).toBe(2);
     }
+  });
+});
+
+// RSS rendering regression tests
+describe('Peer RSS rendering', () => {
+  it('renders RSS when peer_rss_kib is provided', () => {
+    const snap: TargetSnapshot = {
+      target_id: 'test-1',
+      scraped_at: new Date().toISOString(),
+      reachable: true,
+      status: 'up',
+      peer_version: '0.1.1-rc51+05902ce',
+      node_id: 'local-dev',
+      peer_rss_kib: 8388608, // 8 GiB in KiB = 8192 MiB
+    };
+
+    const html = renderStatusLine(snap);
+    
+    expect(html).toContain('RSS 8192M');
+    expect(html).toContain('data-testid="target-peer-rss"');
+    expect(html).toContain('Peer: tovarisch 0.1.1-rc51+05902ce');
+  });
+
+  it('omits RSS when peer_rss_kib is absent', () => {
+    const snap: TargetSnapshot = {
+      target_id: 'test-1',
+      scraped_at: new Date().toISOString(),
+      reachable: true,
+      status: 'up',
+      peer_version: '0.1.0',
+      node_id: 'local-dev',
+    };
+
+    const html = renderStatusLine(snap);
+    
+    expect(html).not.toContain('RSS');
+    expect(html).not.toContain('data-testid="target-peer-rss"');
+  });
+
+  it('omits RSS when peer_rss_kib is null', () => {
+    const snap: TargetSnapshot = {
+      target_id: 'test-1',
+      scraped_at: new Date().toISOString(),
+      reachable: true,
+      status: 'up',
+      peer_version: '0.1.0',
+      node_id: 'local-dev',
+      peer_rss_kib: null,
+    };
+
+    const html = renderStatusLine(snap);
+    
+    expect(html).not.toContain('RSS');
+    expect(html).not.toContain('data-testid="target-peer-rss"');
+  });
+
+  it('omits RSS when peer_rss_kib is zero', () => {
+    const snap: TargetSnapshot = {
+      target_id: 'test-1',
+      scraped_at: new Date().toISOString(),
+      reachable: true,
+      status: 'up',
+      peer_version: '0.1.0',
+      node_id: 'local-dev',
+      peer_rss_kib: 0,
+    };
+
+    const html = renderStatusLine(snap);
+    
+    expect(html).not.toContain('RSS');
+    expect(html).not.toContain('data-testid="target-peer-rss"');
+  });
+
+  it('formats KiB to integer MiB correctly', () => {
+    const snap: TargetSnapshot = {
+      target_id: 'test-1',
+      scraped_at: new Date().toISOString(),
+      reachable: true,
+      status: 'up',
+      peer_version: '1.0.0',
+      node_id: 'test-node',
+      peer_rss_kib: 1920, // Should round to 2M
+    };
+
+    const html = renderStatusLine(snap);
+    
+    expect(html).toContain('RSS 2M');
+  });
+
+  it('renders RSS with separator after peer version', () => {
+    const snap: TargetSnapshot = {
+      target_id: 'test-1',
+      scraped_at: new Date().toISOString(),
+      reachable: true,
+      status: 'up',
+      peer_version: '0.1.0',
+      node_id: 'local-dev',
+      peer_rss_kib: 8192, // 8 MiB
+    };
+
+    const html = renderStatusLine(snap);
+    
+    expect(html).toContain('Peer: tovarisch 0.1.0</span><span class="target-header-sep">·</span><span class="peer-rss"');
+  });
+
+  it('does not render RSS for unreachable targets', () => {
+    const snap: TargetSnapshot = {
+      target_id: 'test-1',
+      scraped_at: new Date().toISOString(),
+      reachable: false,
+      error: 'connection refused',
+      peer_rss_kib: 8192,
+    };
+
+    const html = renderStatusLine(snap);
+    
+    expect(html).toContain('unreachable');
+    expect(html).not.toContain('RSS');
+  });
+});
+
+// Real DOM renderer regression test
+describe('Real TargetsRenderer RSS rendering', () => {
+  it('renders peer RSS through the real target card renderer', async () => {
+    // Create a container with the expected ID for initTargets
+    const container = document.createElement('div');
+    container.id = 'real-rss-targets';
+    document.body.appendChild(container);
+
+    // Setup mock to return snapshot with RSS
+    const mockSnapshot: TargetSnapshot = {
+      target_id: 'real-rss-test',
+      scraped_at: new Date().toISOString(),
+      reachable: true,
+      status: 'up',
+      node_id: 'local-dev',
+      peer_version: '0.1.1-rc51+05902ce',
+      peer_rss_kib: 8388608, // 8 GiB in KiB = 8192 MiB
+    };
+
+    (api.getTargetSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue(mockSnapshot);
+
+    // Import and use the real initTargets function
+    const { initTargets } = await import('./targets');
+    const { renderer, loadTargets } = initTargets('real-rss-targets');
+
+    // Load targets which triggers the snapshot update
+    await loadTargets();
+
+    // Wait for DOM update
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // Find the RSS element
+    const rssElement = container.querySelector('[data-testid="target-peer-rss"]');
+    expect(rssElement).not.toBeNull();
+    expect(rssElement?.textContent).toBe('RSS 8192M');
+
+    // Also verify peer version is present
+    const peerVersionElement = container.querySelector('[data-testid="target-peer-version"]');
+    expect(peerVersionElement?.textContent).toBe('Peer: tovarisch 0.1.1-rc51+05902ce');
+
+    // Cleanup
+    document.body.removeChild(container);
+  });
+
+  it('omits RSS through the real renderer when peer_rss_kib is absent', async () => {
+    // Create a container with the expected ID for initTargets
+    const container = document.createElement('div');
+    container.id = 'no-rss-targets';
+    document.body.appendChild(container);
+
+    // Setup mock WITHOUT RSS
+    const mockSnapshot: TargetSnapshot = {
+      target_id: 'no-rss-test',
+      scraped_at: new Date().toISOString(),
+      reachable: true,
+      status: 'up',
+      node_id: 'local-dev',
+      peer_version: '1.0.0',
+      // no peer_rss_kib field
+    };
+
+    (api.getTargetSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue(mockSnapshot);
+
+    // Import and use the real initTargets function
+    const { initTargets } = await import('./targets');
+    const { renderer } = initTargets('no-rss-targets');
+
+    // Load targets which triggers the snapshot update
+    await renderer.loadTargets();
+
+    // Wait for DOM update
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // RSS element should not exist
+    const rssElement = container.querySelector('[data-testid="target-peer-rss"]');
+    expect(rssElement).toBeNull();
+
+    // Peer version should still be present
+    const peerVersionElement = container.querySelector('[data-testid="target-peer-version"]');
+    expect(peerVersionElement?.textContent).toBe('Peer: tovarisch 1.0.0');
+
+    // Cleanup
+    document.body.removeChild(container);
   });
 });
