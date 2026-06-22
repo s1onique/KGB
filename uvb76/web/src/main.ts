@@ -3,7 +3,7 @@ import { auth } from './auth';
 import { api } from './api';
 import { initTargets, setupGraphControls } from './targets';
 import { loadLatencyForTarget } from './latency';
-import { loadSpikeDiagnostics } from './spikes';
+import { mountDiagnosticTimeline } from './diagnosticTimeline';
 import { formatStartTime } from './format';
 import { renderThemeToggle } from './themeToggle';
 
@@ -68,14 +68,13 @@ async function loadDashboard(): Promise<void> {
 
   await targetsInstance.loadTargets();
 
-  // Load latency for all targets
+  // Load latency and diagnostic timeline for all targets
   try {
     const targets = await api.getTargets();
     for (const t of targets) {
       await loadLatencyForTarget(t.id);
-      // Load spike diagnostics for both HTTP and ICMP probe kinds
-      await loadSpikeDiagnostics(t.id, 'http');
-      await loadSpikeDiagnostics(t.id, 'icmp');
+      // Mount unified diagnostic timeline for this target
+      mountDiagnosticTimeline(t.id, `timeline-${t.id}`);
     }
 
     // Set up auto-refresh every 30 seconds
@@ -85,9 +84,6 @@ async function loadDashboard(): Promise<void> {
         const currentTargets = await api.getTargets();
         for (const t of currentTargets) {
           await loadLatencyForTarget(t.id);
-          // Load spike diagnostics for both HTTP and ICMP probe kinds
-          await loadSpikeDiagnostics(t.id, 'http');
-          await loadSpikeDiagnostics(t.id, 'icmp');
         }
       } catch (e) {
         console.error('Auto-refresh failed:', e);

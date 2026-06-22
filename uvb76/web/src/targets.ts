@@ -96,19 +96,12 @@ function latencySectionHTML(targetId: string, kind: 'http' | 'icmp', title: stri
   `;
 }
 
-// Spike diagnostics section HTML template - probe-kind aware
-function spikeDiagSectionHTML(targetId: string, kind: 'http' | 'icmp'): string {
-  const title = kind === 'http' ? 'HTTP Spike Diagnostics' : 'ICMP Spike Diagnostics';
-  const emptyMsg = kind === 'http' 
-    ? 'No retained HTTP spikes in the selected range.' 
-    : 'No retained ICMP spikes in the selected range.';
+// Unified Diagnostic Timeline section HTML template
+function timelineSectionHTML(targetId: string): string {
   return `
-      <div class="spike-diag-section" id="spike-diag-section-${kind}-${escapeText(targetId)}">
-          <div class="spike-diag-section-header">
-              <span class="spike-diag-section-title">${escapeText(title)}</span>
-          </div>
-          <div class="spike-diag-card" id="spike-diag-${kind}-${escapeText(targetId)}" data-kind="${kind}">
-              <div class="spike-diag-loading" data-empty-message="${escapeAttr(emptyMsg)}">Loading spike diagnostics...</div>
+      <div class="timeline-section" id="timeline-section-${escapeText(targetId)}">
+          <div class="timeline-container" id="timeline-${escapeText(targetId)}">
+              <div class="timeline-loading-placeholder">Loading diagnostic timeline...</div>
           </div>
       </div>
   `;
@@ -254,9 +247,8 @@ function createTargetsRenderer(container: HTMLElement): TargetsRenderer {
               ${latencySectionHTML(t.id, 'http', 'HTTP Status Probe Latency')}
               ${latencySectionHTML(t.id, 'icmp', 'ICMP Ping Latency')}
           </div>
-          <div class="spike-diagnostics-container">
-              ${spikeDiagSectionHTML(t.id, 'http')}
-              ${spikeDiagSectionHTML(t.id, 'icmp')}
+          <div class="diagnostic-timeline-container">
+              ${timelineSectionHTML(t.id)}
           </div>
       </div>
     `

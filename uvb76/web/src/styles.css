@@ -1273,3 +1273,654 @@ h2 { color: var(--color-text-secondary); margin: 1.5rem 0 1rem; font-weight: 500
     gap: 0.75rem;
     flex-shrink: 0;
 }
+
+/* ====== Diagnostic Timeline Styles ====== */
+
+/* Timeline container */
+.diagnostic-timeline-container {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid #30363d;
+}
+
+.timeline-section {
+    margin-top: 0.5rem;
+}
+
+.timeline-container {
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.timeline-loading-placeholder {
+    padding: 2rem;
+    text-align: center;
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+}
+
+/* Timeline header */
+.timeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.timeline-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-text);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Timeline summary cards */
+.timeline-summary-container {
+    display: flex;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.timeline-summary-card {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border-muted);
+    border-radius: 4px;
+}
+
+.timeline-summary-card.probe-http {
+    border-left: 3px solid #58a6ff;
+}
+
+.timeline-summary-card.probe-icmp {
+    border-left: 3px solid #3fb950;
+}
+
+.timeline-summary-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.timeline-summary-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-text);
+    text-transform: uppercase;
+}
+
+.timeline-summary-total {
+    font-size: 0.6875rem;
+    color: var(--color-text-secondary);
+}
+
+.timeline-summary-stats {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.timeline-summary-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 48px;
+}
+
+.timeline-summary-stat .stat-captured {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-ok);
+}
+
+.timeline-summary-stat .stat-suppressed {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #a371f7;
+}
+
+.timeline-summary-stat .stat-failed {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-error);
+}
+
+.timeline-summary-stat .stat-critical {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-error);
+}
+
+.timeline-summary-stat .stat-warning {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-warn);
+}
+
+.timeline-summary-stat .stat-label {
+    font-size: 0.5625rem;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+}
+
+/* Timeline filters */
+.timeline-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background: var(--color-overlay);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+}
+
+.filter-label {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+}
+
+.filter-select {
+    padding: 0.25rem 0.5rem;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    color: var(--color-text);
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.filter-select:hover {
+    border-color: var(--color-text-secondary);
+}
+
+.filter-select:focus {
+    outline: none;
+    border-color: var(--color-accent);
+}
+
+.filter-count {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    margin-left: auto;
+}
+
+.filter-reset-btn {
+    padding: 0.25rem 0.5rem;
+    background: var(--color-error);
+    border: none;
+    border-radius: 4px;
+    color: var(--color-error-solid-text);
+    font-size: 0.6875rem;
+    cursor: pointer;
+}
+
+.filter-reset-btn:hover {
+    opacity: 0.9;
+}
+
+/* Timeline table */
+.timeline-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.75rem;
+}
+
+.timeline-table thead {
+    background: var(--color-surface);
+}
+
+.timeline-table th {
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.timeline-table tbody tr {
+    border-bottom: 1px solid var(--color-border-muted);
+}
+
+.timeline-table tbody tr:hover {
+    background: var(--color-surface);
+}
+
+.timeline-table tbody tr:last-child {
+    border-bottom: none;
+}
+
+.timeline-cell {
+    padding: 0.5rem 0.75rem;
+    vertical-align: middle;
+}
+
+.time-cell {
+    font-family: monospace;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+}
+
+.probe-cell {
+    white-space: nowrap;
+}
+
+.probe-badge {
+    display: inline-block;
+    padding: 0.125rem 0.375rem;
+    border-radius: 3px;
+    font-size: 0.5625rem;
+    font-weight: 600;
+}
+
+.probe-badge.probe-http {
+    background: rgba(88, 166, 255, 0.2);
+    color: #58a6ff;
+}
+
+.probe-badge.probe-icmp {
+    background: rgba(63, 185, 80, 0.2);
+    color: #3fb950;
+}
+
+.severity-cell {
+    white-space: nowrap;
+}
+
+.severity-badge {
+    display: inline-block;
+    padding: 0.125rem 0.375rem;
+    border-radius: 3px;
+    font-size: 0.5625rem;
+    font-weight: 600;
+}
+
+.severity-badge.severity-critical {
+    background: rgba(248, 81, 73, 0.2);
+    color: #f85149;
+}
+
+.severity-badge.severity-warn {
+    background: rgba(210, 153, 34, 0.2);
+    color: #d29922;
+}
+
+.latency-cell {
+    font-weight: 600;
+    color: #f0883e;
+    white-space: nowrap;
+}
+
+.capture-cell {
+    white-space: nowrap;
+}
+
+.capture-badge {
+    display: inline-block;
+    padding: 0.125rem 0.375rem;
+    border-radius: 3px;
+    font-size: 0.5625rem;
+    font-weight: 600;
+}
+
+.capture-badge.capture-captured {
+    background: rgba(63, 185, 80, 0.2);
+    color: #3fb950;
+}
+
+.capture-badge.capture-suppressed {
+    background: rgba(163, 113, 247, 0.2);
+    color: #a371f7;
+}
+
+.capture-badge.capture-failed {
+    background: rgba(248, 81, 73, 0.2);
+    color: #f85149;
+}
+
+.capture-badge.capture-muted {
+    background: rgba(110, 118, 129, 0.2);
+    color: #6e7681;
+}
+
+.details-cell {
+    color: var(--color-text-muted);
+    font-size: 0.6875rem;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.action-cell {
+    white-space: nowrap;
+}
+
+.timeline-details-btn {
+    padding: 0.25rem 0.5rem;
+    background: var(--color-overlay);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    color: var(--color-text-secondary);
+    font-size: 0.625rem;
+    cursor: pointer;
+}
+
+.timeline-details-btn:hover {
+    background: var(--color-border);
+    color: var(--color-text);
+}
+
+/* Timeline empty state */
+.timeline-empty {
+    padding: 2rem;
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: 0.875rem;
+}
+
+.timeline-empty-state {
+    padding: 3rem 2rem;
+    text-align: center;
+}
+
+.empty-icon {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+.empty-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin-bottom: 0.5rem;
+}
+
+.empty-text {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+}
+
+/* Timeline loading state */
+.timeline-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 2rem;
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+}
+
+/* Timeline error state */
+.timeline-error {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem;
+    background: rgba(248, 81, 73, 0.1);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+    border-radius: 4px;
+    margin: 1rem;
+}
+
+.error-icon {
+    color: var(--color-error);
+    font-size: 1rem;
+}
+
+.error-text {
+    color: var(--color-error);
+    font-size: 0.875rem;
+}
+
+/* Timeline expanded panels */
+.timeline-expanded-panels {
+    padding: 0.5rem 1rem;
+}
+
+.timeline-expanded-panel {
+    display: none;
+    padding: 1rem;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border-muted);
+    border-radius: 4px;
+    margin-bottom: 0.5rem;
+}
+
+.timeline-expanded-panel:last-child {
+    margin-bottom: 0;
+}
+
+/* Event metadata in expanded panel */
+.event-metadata {
+    margin-bottom: 1rem;
+}
+
+.detail-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-bottom: 0.375rem;
+}
+
+.detail-label {
+    font-size: 0.6875rem;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    min-width: 100px;
+}
+
+.detail-value {
+    font-size: 0.75rem;
+    color: var(--color-text);
+}
+
+.detail-value.event-id {
+    font-family: monospace;
+    font-size: 0.6875rem;
+    color: var(--color-text-secondary);
+}
+
+.detail-value.latency-value {
+    color: #f0883e;
+    font-weight: 600;
+}
+
+.error-row .detail-value {
+    color: var(--color-error);
+}
+
+/* Cross-probe explanation */
+.cross-probe-explanation {
+    padding: 0.75rem;
+    background: rgba(163, 113, 247, 0.1);
+    border: 1px solid rgba(163, 113, 247, 0.3);
+    border-radius: 4px;
+    margin-bottom: 1rem;
+}
+
+.cross-probe-text {
+    font-size: 0.75rem;
+    color: #a371f7;
+    font-weight: 500;
+}
+
+/* Cooldown details section */
+.cooldown-details {
+    padding: 0.75rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border-muted);
+    border-radius: 4px;
+    margin-bottom: 1rem;
+}
+
+.cooldown-section-title {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+}
+
+.cooldown-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-bottom: 0.25rem;
+}
+
+.cooldown-label {
+    font-size: 0.625rem;
+    color: var(--color-text-muted);
+    min-width: 80px;
+}
+
+.cooldown-value {
+    font-size: 0.6875rem;
+    color: var(--color-text);
+}
+
+.cooldown-value.capture-id {
+    font-family: monospace;
+    font-size: 0.625rem;
+    color: var(--color-text-secondary);
+}
+
+.cooldown-value.anchor-hidden {
+    color: var(--color-warn);
+}
+
+/* Capture details section */
+.capture-details-section {
+    padding: 0.75rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border-muted);
+    border-radius: 4px;
+    margin-bottom: 1rem;
+}
+
+.capture-section-title {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+}
+
+.capture-row-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.capture-source-label {
+    font-size: 0.75rem;
+    color: var(--color-text);
+    font-family: monospace;
+}
+
+.capture-status-badge {
+    display: inline-block;
+    padding: 0.125rem 0.375rem;
+    border-radius: 3px;
+    font-size: 0.5625rem;
+    font-weight: 600;
+}
+
+/* Network diagnostics section */
+.network-diag-section {
+    padding: 0.75rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border-muted);
+    border-radius: 4px;
+    margin-bottom: 1rem;
+}
+
+.network-section-title {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+}
+
+.tcp-sockets {
+    margin-top: 0.5rem;
+}
+
+.tcp-socket-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.25rem 0;
+    font-family: monospace;
+    font-size: 0.6875rem;
+    border-bottom: 1px dashed var(--color-border-muted);
+}
+
+.tcp-socket-row:last-child {
+    border-bottom: none;
+}
+
+.tcp-socket-name {
+    color: var(--color-text);
+    font-weight: 500;
+}
+
+.tcp-socket-state {
+    color: var(--color-ok);
+}
+
+.tcp-socket-rtt,
+.tcp-socket-retrans {
+    color: var(--color-text-secondary);
+}
+
+/* Timeline action buttons */
+.timeline-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.timeline-action-btn {
+    padding: 0.375rem 0.75rem;
+    background: var(--color-overlay);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.timeline-action-btn:hover {
+    background: var(--color-border);
+    color: var(--color-text);
+}
+
+.copy-btn:hover {
+    border-color: var(--color-accent);
+}
+
+.download-btn:hover {
+    border-color: var(--color-ok);
+}
