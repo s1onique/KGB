@@ -88,7 +88,9 @@ required=(
   docs/doctrine/manifesto_axiom_coverage.csv
   docs/doctrine/git-history-safety.md
   docs/doctrine/shell-containment.md
+  docs/doctrine/native-owned-critical-paths.md
   docs/generated/shell_inventory.csv
+  docs/tooling/cli-composition-inventory.csv
   docs/architecture/overview.md
   docs/architecture/naming.md
   docs/architecture/components.md
@@ -227,6 +229,14 @@ python3 scripts/verify_shell_containment.py --self-test
 echo "[gate] checking shell inventory consistency"
 
 python3 scripts/verify_shell_containment.py --check-inventory
+
+echo "[gate] checking CLI composition inventory"
+
+python3 scripts/verify_cli_composition_inventory.py
+
+echo "[gate] checking CLI composition inventory self-test"
+
+python3 scripts/verify_cli_composition_inventory.py --self-test
 
 echo "[gate] checking workflow release safety (no release-in-build)"
 

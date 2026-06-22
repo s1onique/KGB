@@ -62,3 +62,10 @@ tovarisch/.ziggy/
 # Splitting by ACT would break the "one epic, linear narrative" readability.
 # Each ACT subsection is self-contained; the file structure is the feature.
 docs/epics/act-5-sysfs-collector.md  # ACT 5 epic; grows with each slice per epic pattern
+
+# =============================================================================
+# Self-testing verifiers — line count inflated by comprehensive self-test
+# =============================================================================
+
+# CLI composition inventory verifier has comprehensive self-test (~150 lines of test code)
+scripts/verify_cli_composition_inventory.py  # Self-test requires extensive test coverage

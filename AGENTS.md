@@ -25,6 +25,7 @@ Before any implementation work, read:
 - `docs/doctrine/karpathy-agent-guidelines.md`
 - `docs/doctrine/kgb.md`
 - `docs/doctrine/privacy.md`
+- `docs/doctrine/native-owned-critical-paths.md`
 - `docs/doctrine/tiny-leafs.md`
 - `docs/architecture/overview.md`
 - `docs/architecture/components.md`

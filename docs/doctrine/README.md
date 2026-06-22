@@ -17,6 +17,7 @@ Canonical doctrine documents for KGB project hygiene and architecture.
 | [platform-portability.md](./platform-portability.md) | Portable code default, platform isolation rules |
 | [runtime-harness-adaptation.md](./runtime-harness-adaptation.md) | Four-layer harness: contract, skill, action, trajectory |
 | [shell-containment.md](./shell-containment.md) | Shell wrapper policy, banned anti-patterns, migration guide |
+| [native-owned-critical-paths.md](./native-owned-critical-paths.md) | Native code preference for critical paths, anti-NIH clause |
 
 ## Day-0 Practices
 

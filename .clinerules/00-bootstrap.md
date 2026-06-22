@@ -5,6 +5,7 @@
 1. Read `AGENTS.md` — canonical agent contract for this repo.
 2. Read the current epic under `docs/epics/`.
 3. Read relevant doctrine docs under `docs/doctrine/` (see `ai-native-code-discipline-axioms.md` for axiom mappings).
+4. Read `docs/doctrine/native-owned-critical-paths.md` — native code preference for critical paths, anti-NIH clause.
 
 ## If Touching Zig
 
