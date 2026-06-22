@@ -16,6 +16,12 @@ function escapeText(s: string | null | undefined): string {
   return div.innerHTML;
 }
 
+/** HTML attribute escape helper - escapes text for safe use in HTML attributes */
+function escapeAttr(s: string | null | undefined): string {
+  if (!s) return '';
+  return escapeText(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // ---------------------------------------------------------------------------
 // CSS Class Helpers
 // ---------------------------------------------------------------------------
@@ -406,7 +412,7 @@ export function renderTimelineRow(event: TimelineEvent, rowIndex: number): strin
       <td class="timeline-cell capture-cell"><span class="capture-badge ${captureStatusClass}">${captureStatusLabel}</span></td>
       <td class="timeline-cell details-cell">${escapeText(detailsText)}</td>
       <td class="timeline-cell action-cell">
-        <button class="timeline-details-btn" data-details-id="${detailsId}" data-row-index="${rowIndex}">Details</button>
+        <button class="timeline-details-btn" data-details-id="${detailsId}" data-row-index="${rowIndex}" data-event-id="${escapeAttr(event.eventId)}">Details</button>
       </td>
     </tr>
   `;

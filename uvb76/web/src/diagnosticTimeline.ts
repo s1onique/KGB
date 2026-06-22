@@ -15,11 +15,18 @@ export class DiagnosticTimelineController {
   private targetId: string = '';
   private state: TimelineState;
   private filters: TimelineFilters;
+  // Track expanded event IDs for state preservation across refreshes
+  private expandedEventIds: Set<string> = new Set();
   
   constructor(targetId: string) {
     this.targetId = targetId;
     this.state = buildEmptyTimelineState();
     this.filters = { ...defaultFilters };
+  }
+
+  /** Get the target ID (useful for testing) */
+  getTargetId(): string {
+    return this.targetId;
   }
   
   /** Mount the timeline to a container element */
@@ -82,11 +89,12 @@ export class DiagnosticTimelineController {
       }
     });
     
-    // Row details toggle
+    // Row details toggle - tracks expanded state for preservation across refresh
     this.container.addEventListener('click', (e) => {
       const target = e.target as HTMLButtonElement;
       if (target.classList.contains('timeline-details-btn')) {
         const detailsId = target.dataset.detailsId;
+        const eventId = target.dataset.eventId;
         if (!detailsId) return;
         
         const detailsEl = this.container?.querySelector('#' + detailsId);
@@ -94,6 +102,17 @@ export class DiagnosticTimelineController {
           const isHidden = detailsEl.style.display === 'none' || detailsEl.style.display === '';
           detailsEl.style.display = isHidden ? 'block' : 'none';
           target.textContent = isHidden ? 'Hide' : 'Details';
+          
+          // Track expanded state by eventId
+          if (eventId) {
+            if (isHidden) {
+              // Was hidden, now expanding - add to expanded set
+              this.expandedEventIds.add(eventId);
+            } else {
+              // Was visible, now collapsing - remove from expanded set
+              this.expandedEventIds.delete(eventId);
+            }
+          }
         }
       }
       
@@ -120,6 +139,29 @@ export class DiagnosticTimelineController {
       }
     });
   }
+
+  /** Restore expanded row state after render */
+  private restoreExpandedState(): void {
+    if (!this.container) return;
+    
+    for (const eventId of this.expandedEventIds) {
+      // Find all rows with this eventId that are still present
+      const buttons = this.container.querySelectorAll(
+        `.timeline-details-btn[data-event-id="${CSS.escape(eventId)}"]`
+      );
+      buttons.forEach((btn) => {
+        const button = btn as HTMLButtonElement;
+        const detailsId = button.dataset.detailsId;
+        if (!detailsId) return;
+        
+        const detailsEl = this.container?.querySelector('#' + detailsId);
+        if (detailsEl) {
+          detailsEl.style.display = 'block';
+          button.textContent = 'Hide';
+        }
+      });
+    }
+  }
   
   /** Load timeline data */
   async load(): Promise<void> {
@@ -138,14 +180,20 @@ export class DiagnosticTimelineController {
     this.render();
   }
   
-  /** Refresh timeline data */
+  /** Refresh timeline data, preserving filters and expanded row state */
   async refresh(): Promise<void> {
     try {
       const { http, icmp } = await fetchTimelineResponses(this.targetId);
       this.state = buildTimelineState(http, icmp);
       this.render();
+      // Restore expanded state for events that still exist
+      this.restoreExpandedState();
     } catch (e) {
       console.error('Failed to refresh timeline:', e);
+      // Render error state so operator sees the failure
+      const errorMessage = e instanceof Error ? e.message : 'Failed to refresh diagnostic timeline';
+      this.state = buildErrorTimelineState(errorMessage);
+      this.render();
     }
   }
   

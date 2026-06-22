@@ -3,7 +3,7 @@ import { auth } from './auth';
 import { api } from './api';
 import { initTargets, setupGraphControls } from './targets';
 import { loadLatencyForTarget } from './latency';
-import { mountDiagnosticTimeline } from './diagnosticTimeline';
+import { mountDiagnosticTimeline, type DiagnosticTimelineController } from './diagnosticTimeline';
 import { formatStartTime } from './format';
 import { renderThemeToggle } from './themeToggle';
 
@@ -19,6 +19,26 @@ const logoutBtn = document.getElementById('logout-btn');
 
 let targetsInstance: ReturnType<typeof initTargets> | null = null;
 let refreshInterval: number | null = null;
+
+// Timeline controller registry - prevents duplicate controllers/listeners on refresh
+const timelineControllers = new Map<string, DiagnosticTimelineController>();
+
+/**
+ * Ensure a timeline controller is mounted for the given target.
+ * Returns existing controller if already mounted, mounts and returns new controller otherwise.
+ */
+function ensureDiagnosticTimelineMounted(targetId: string): DiagnosticTimelineController | null {
+  const existing = timelineControllers.get(targetId);
+  if (existing) return existing;
+
+  const containerId = `timeline-${targetId}`;
+  const container = document.getElementById(containerId);
+  if (!container) return null;
+
+  const controller = mountDiagnosticTimeline(targetId, containerId);
+  timelineControllers.set(targetId, controller);
+  return controller;
+}
 
 // UI State management
 function showLoginForm(): void {
@@ -73,8 +93,8 @@ async function loadDashboard(): Promise<void> {
     const targets = await api.getTargets();
     for (const t of targets) {
       await loadLatencyForTarget(t.id);
-      // Mount unified diagnostic timeline for this target
-      mountDiagnosticTimeline(t.id, `timeline-${t.id}`);
+      // Mount unified diagnostic timeline for this target (uses registry to avoid duplicates)
+      ensureDiagnosticTimelineMounted(t.id);
     }
 
     // Set up auto-refresh every 30 seconds
@@ -84,6 +104,9 @@ async function loadDashboard(): Promise<void> {
         const currentTargets = await api.getTargets();
         for (const t of currentTargets) {
           await loadLatencyForTarget(t.id);
+          // Refresh timeline controller if one exists for this target
+          const controller = ensureDiagnosticTimelineMounted(t.id);
+          await controller?.refresh();
         }
       } catch (e) {
         console.error('Auto-refresh failed:', e);
