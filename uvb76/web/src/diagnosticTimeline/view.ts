@@ -1,22 +1,10 @@
-// Diagnostic Timeline Render - Render summary cards, filter controls, table rows, and expanded evidence panels
-import type { TimelineEvent, ProbeKindSummary, TimelineState } from './diagnosticTimeline.model';
-import type { TimelineFilters } from './diagnosticTimeline.filters';
-import type { TimelinePageState } from './diagnosticTimeline';
-import { PAGE_SIZE_OPTIONS } from './diagnosticTimeline';
-import { formatSpikeTime, formatLatencyMs } from './format';
-import { formatLocalDateTime, parseApiInstant, formatRemainingCooldown } from './time';
+// Diagnostic Timeline View - Rendering logic (no business logic, no state mutations)
 
-// ---------------------------------------------------------------------------
-// Pagination Types
-// ---------------------------------------------------------------------------
-
-/** Pagination context passed to the render function */
-export interface PaginationContext {
-  pagination: TimelinePageState;
-  totalPages: number;
-  safePageIndex: number;
-  filteredCount: number;
-}
+import type { TimelineModel } from './model';
+import { PAGE_SIZE_OPTIONS, getFilteredEvents, getPagedEvents, getPaginationInfo } from './model';
+import type { TimelineEvent, ProbeKindSummary } from '../diagnosticTimeline.model';
+import { formatSpikeTime, formatLatencyMs } from '../format';
+import { formatLocalDateTime, parseApiInstant } from '../time';
 
 // ---------------------------------------------------------------------------
 // XSS Protection
@@ -33,7 +21,10 @@ function escapeText(s: string | null | undefined): string {
 /** HTML attribute escape helper - escapes text for safe use in HTML attributes */
 function escapeAttr(s: string | null | undefined): string {
   if (!s) return '';
-  return escapeText(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  // Escape for safe use in HTML double-quoted attributes
+  // Must escape &, ", and ' characters
+  const str = String(s);
+  return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // ---------------------------------------------------------------------------
@@ -73,11 +64,22 @@ function getCaptureStatusLabel(status: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Timestamp Formatting
+// ---------------------------------------------------------------------------
+
+/** Format timestamp for display using local timezone */
+function formatTimelineTime(timestamp: string | undefined): string {
+  const date = parseApiInstant(timestamp ?? null);
+  if (!date) return '—';
+  return formatLocalDateTime(timestamp);
+}
+
+// ---------------------------------------------------------------------------
 // Summary Card Rendering
 // ---------------------------------------------------------------------------
 
 /** Render a single probe kind summary card */
-export function renderSummaryCard(summary: ProbeKindSummary): string {
+function renderSummaryCard(summary: ProbeKindSummary): string {
   const { probeKind, totalEvents, capturedCount, suppressedCount, failedCount, criticalCount, warningCount } = summary;
   
   const label = probeKind === 'http' ? 'HTTP' : 'ICMP';
@@ -116,7 +118,7 @@ export function renderSummaryCard(summary: ProbeKindSummary): string {
 }
 
 /** Render both summary cards */
-export function renderSummaryCards(httpSummary: ProbeKindSummary, icmpSummary: ProbeKindSummary): string {
+function renderSummaryCards(httpSummary: ProbeKindSummary, icmpSummary: ProbeKindSummary): string {
   return `
     <div class="timeline-summary-container">
       ${renderSummaryCard(httpSummary)}
@@ -130,7 +132,7 @@ export function renderSummaryCards(httpSummary: ProbeKindSummary, icmpSummary: P
 // ---------------------------------------------------------------------------
 
 /** Render filter controls */
-export function renderFilterControls(filters: TimelineFilters, totalCount: number, filteredCount: number): string {
+function renderFilterControls(filters: TimelineModel['filters'], totalCount: number, filteredCount: number): string {
   const hasActiveFilters = filters.probeKind !== 'all' || filters.captureStatus !== 'all' || filters.severity !== 'all';
   
   return `
@@ -173,12 +175,8 @@ export function renderFilterControls(filters: TimelineFilters, totalCount: numbe
 // ---------------------------------------------------------------------------
 
 /** Render compact page number buttons with ellipsis for many pages */
-function renderPageNumbers(
-  currentPage: number,
-  totalPages: number
-): string {
+function renderPageNumbers(currentPage: number, totalPages: number): string {
   if (totalPages <= 7) {
-    // Show all pages if 7 or fewer
     return Array.from({ length: totalPages }, (_, i) => {
       const pageNum = i;
       const isCurrent = pageNum === currentPage;
@@ -186,21 +184,17 @@ function renderPageNumbers(
     }).join('');
   }
   
-  // For many pages, show a sliding window
   const pages: (number | 'ellipsis')[] = [];
   
   if (currentPage < 4) {
-    // Near the start: show 1-5, ellipsis, last
     for (let i = 0; i < 4; i++) pages.push(i);
     pages.push('ellipsis');
     pages.push(totalPages - 1);
   } else if (currentPage > totalPages - 5) {
-    // Near the end: show first, ellipsis, last 5
     pages.push(0);
     pages.push('ellipsis');
     for (let i = totalPages - 4; i < totalPages; i++) pages.push(i);
   } else {
-    // In the middle: show first, ellipsis, current-1, current, current+1, ellipsis, last
     pages.push(0);
     pages.push('ellipsis');
     pages.push(currentPage - 1);
@@ -220,22 +214,19 @@ function renderPageNumbers(
 }
 
 /** Render pagination controls */
-export function renderPaginationControls(
-  pagination: TimelinePageState,
+function renderPaginationControls(
+  pagination: TimelineModel['pagination'],
   totalPages: number,
   safePageIndex: number,
   filteredCount: number
 ): string {
-  // Calculate showing range (1-based for display)
   const displayStart = filteredCount === 0 ? 0 : safePageIndex * pagination.pageSize + 1;
   const displayEnd = Math.min((safePageIndex + 1) * pagination.pageSize, filteredCount);
   const displayCurrentPage = safePageIndex + 1;
   
-  // Determine button disabled states
   const isFirstPage = safePageIndex === 0;
   const isLastPage = safePageIndex >= totalPages - 1;
   
-  // Page size selector options
   const pageSizeOptions = PAGE_SIZE_OPTIONS.map(size => {
     const selected = size === pagination.pageSize ? ' selected' : '';
     return `<option value="${size}"${selected}>${size}</option>`;
@@ -283,18 +274,7 @@ export function renderPaginationControls(
 }
 
 // ---------------------------------------------------------------------------
-// Timestamp Formatting
-// ---------------------------------------------------------------------------
-
-/** Format timestamp for display using local timezone */
-function formatTimelineTime(timestamp: string | undefined): string {
-  const date = parseApiInstant(timestamp ?? null);
-  if (!date) return '—';
-  return formatLocalDateTime(timestamp);
-}
-
-// ---------------------------------------------------------------------------
-// Cross-Probe Suppression Wording
+// Cross-Probe Suppression
 // ---------------------------------------------------------------------------
 
 /** Render cross-probe suppression explanation */
@@ -316,166 +296,17 @@ function renderCrossProbeSuppression(event: TimelineEvent): string {
 }
 
 // ---------------------------------------------------------------------------
-// Cooldown Details
-// ---------------------------------------------------------------------------
-
-/** Render cooldown details section */
-function renderCooldownDetails(event: TimelineEvent): string {
-  const capture = event.primaryCapture;
-  if (!capture?.cooldown_info) return '';
-  
-  const info = capture.cooldown_info;
-  const anchorKind = escapeText(info.anchor_probe_kind || '');
-  const suppressedKind = escapeText(info.suppressed_probe_kind || '');
-  const isCrossProbe = info.is_cross_probe_suppression === true;
-  const anchorCaptureId = escapeText(info.anchor_capture_id || '');
-  const scope = escapeText(info.scope || '');
-  const cooldownKey = escapeText(info.cooldown_key || '');
-  
-  let html = '<div class="cooldown-details">';
-  html += '<div class="cooldown-section-title">Cooldown Information</div>';
-  
-  if (isCrossProbe) {
-    html += `<div class="cooldown-row"><span class="cooldown-label">Anchor probe:</span><span class="cooldown-value">${anchorKind}</span></div>`;
-    html += `<div class="cooldown-row"><span class="cooldown-label">Suppressed probe:</span><span class="cooldown-value">${suppressedKind}</span></div>`;
-  }
-  
-  if (info.last_successful_capture_at) {
-    html += `<div class="cooldown-row"><span class="cooldown-label">Anchor capture:</span><span class="cooldown-value">${formatTimelineTime(info.last_successful_capture_at)}</span></div>`;
-  }
-  
-  if (anchorCaptureId) {
-    html += `<div class="cooldown-row"><span class="cooldown-label">Anchor capture ID:</span><span class="cooldown-value capture-id">${anchorCaptureId}</span></div>`;
-  }
-  
-  if (scope) {
-    html += `<div class="cooldown-row"><span class="cooldown-label">Scope:</span><span class="cooldown-value">${scope}</span></div>`;
-  }
-  
-  if (cooldownKey) {
-    html += `<div class="cooldown-row"><span class="cooldown-label">Cooldown key:</span><span class="cooldown-value">${cooldownKey}</span></div>`;
-  }
-  
-  if (info.next_capture_eligible_at) {
-    html += `<div class="cooldown-row"><span class="cooldown-label">Next eligible:</span><span class="cooldown-value">${formatTimelineTime(info.next_capture_eligible_at)}</span></div>`;
-  }
-  
-  if (info.remaining_cooldown_ms !== undefined && info.remaining_cooldown_ms > 0) {
-    const formatted = formatRemainingCooldown(info.remaining_cooldown_ms);
-    html += `<div class="cooldown-row"><span class="cooldown-label">Remaining cooldown:</span><span class="cooldown-value">${formatted}</span></div>`;
-  }
-  
-  if (!info.anchor_visible && info.anchor_visibility_reason) {
-    let reasonText = 'outside current view';
-    if (info.anchor_visibility_reason === 'evicted_from_retention') {
-      reasonText = 'anchor evicted from retention';
-    } else if (info.anchor_visibility_reason === 'suppressed_cooldown') {
-      reasonText = 'anchor also suppressed by cooldown';
-    }
-    html += `<div class="cooldown-row"><span class="cooldown-label">Anchor:</span><span class="cooldown-value anchor-hidden">${reasonText}</span></div>`;
-  }
-  
-  html += '</div>';
-  return html;
-}
-
-// ---------------------------------------------------------------------------
-// Capture Details
-// ---------------------------------------------------------------------------
-
-/** Render capture details section */
-function renderCaptureDetailsSection(event: TimelineEvent): string {
-  const capture = event.primaryCapture;
-  if (!capture) return '';
-  
-  const source = escapeText(capture.source);
-  const duration = capture.duration_ms !== undefined ? ` (${capture.duration_ms}ms)` : '';
-  const statusClass = getCaptureStatusClass(event.captureStatus);
-  const statusLabel = getCaptureStatusLabel(event.captureStatus);
-  
-  let html = '<div class="capture-details-section">';
-  html += '<div class="capture-section-title">Capture Details</div>';
-  html += `<div class="capture-row-header"><span class="capture-source-label">${source}${duration}</span><span class="capture-status-badge ${statusClass}">${statusLabel}</span></div>`;
-  
-  html += `<div class="detail-row"><span class="detail-label">Started:</span><span class="detail-value">${formatTimelineTime(capture.capture_started_at)}</span></div>`;
-  
-  if (capture.capture_finished_at) {
-    html += `<div class="detail-row"><span class="detail-label">Finished:</span><span class="detail-value">${formatTimelineTime(capture.capture_finished_at)}</span></div>`;
-  }
-  
-  if (capture.duration_ms !== undefined) {
-    html += `<div class="detail-row"><span class="detail-label">Duration:</span><span class="detail-value">${capture.duration_ms} ms</span></div>`;
-  }
-  
-  if (capture.error) {
-    const errorText = escapeText(capture.error);
-    const truncated = errorText.length > 80 ? errorText.substring(0, 80) + '…' : errorText;
-    html += `<div class="detail-row error-row"><span class="detail-label">Error:</span><span class="detail-value error-text">${truncated}</span></div>`;
-  }
-  
-  html += '</div>';
-  return html;
-}
-
-// ---------------------------------------------------------------------------
-// Network Diagnostics
-// ---------------------------------------------------------------------------
-
-/** Render network diagnostics section */
-function renderNetworkDiagSection(event: TimelineEvent): string {
-  const capture = event.primaryCapture;
-  if (!capture?.network_diag) return '';
-  
-  // Don't show network diag if suppressed by cooldown
-  if (capture.suppressed_by_cooldown) {
-    return '<div class="network-diag-section"><span class="diag-muted">Network diagnostics suppressed by cooldown</span></div>';
-  }
-  
-  const diag = capture.network_diag;
-  const statusClass = diag.status === 'ok' ? 'status-ok' : 'status-warn';
-  
-  let html = '<div class="network-diag-section">';
-  html += '<div class="network-section-title">Network Diagnostics</div>';
-  html += `<div class="detail-row"><span class="detail-label">Status:</span><span class="detail-value"><span class="${statusClass}">${escapeText(diag.status)}</span></span></div>`;
-  
-  if (diag.underlay_tcp && diag.underlay_tcp.length > 0) {
-    html += '<div class="tcp-sockets">';
-    for (const sock of diag.underlay_tcp) {
-      const name = escapeText(sock.name) || 'socket';
-      const state = escapeText(sock.state) || 'UNKNOWN';
-      html += `<div class="tcp-socket-row">`;
-      html += `<span class="tcp-socket-name">${name}</span>`;
-      html += `<span class="tcp-socket-state">${state}</span>`;
-      if (sock.rtt_ms !== undefined) {
-        html += `<span class="tcp-socket-rtt">RTT: ${sock.rtt_ms.toFixed(1)} ms</span>`;
-      }
-      if (sock.retransmits !== undefined) {
-        html += `<span class="tcp-socket-retrans">retrans: ${sock.retransmits}</span>`;
-      }
-      html += '</div>';
-    }
-    html += '</div>';
-  } else if (diag.underlay_tcp !== undefined) {
-    html += '<span class="diag-muted">No TCP sockets captured</span>';
-  }
-  
-  html += '</div>';
-  return html;
-}
-
-// ---------------------------------------------------------------------------
-// Expanded Row Rendering
+// Expanded Panel Rendering
 // ---------------------------------------------------------------------------
 
 /** Render expanded evidence panel for an event */
-export function renderExpandedPanel(event: TimelineEvent, rowIndex: number): string {
+function renderExpandedPanel(event: TimelineEvent, rowIndex: number): string {
   const detailsId = `timeline-details-${rowIndex}`;
   
   let html = `<div class="timeline-expanded-panel" id="${detailsId}">`;
   
-  // Event metadata
   html += '<div class="event-metadata">';
-  html += `<div class="detail-row"><span class="detail-label">Event ID:</span><span class="detail-value event-id">${escapeText(event.eventId)}</span></div>`;
+  html += `<div class="detail-row"><span class="detail-label">Event ID:</span><span class="detail-value event-id">${escapeAttr(event.eventId)}</span></div>`;
   html += `<div class="detail-row"><span class="detail-label">Sample time:</span><span class="detail-value">${formatTimelineTime(event.sampleTs)}</span></div>`;
   html += `<div class="detail-row"><span class="detail-label">Collected at:</span><span class="detail-value">${formatTimelineTime(event.collectedAt)}</span></div>`;
   html += `<div class="detail-row"><span class="detail-label">Latency:</span><span class="detail-value latency-value">${formatLatencyMs(event.latencyMs)}</span></div>`;
@@ -487,22 +318,12 @@ export function renderExpandedPanel(event: TimelineEvent, rowIndex: number): str
   
   html += '</div>';
   
-  // Cross-probe suppression wording
   html += renderCrossProbeSuppression(event);
   
-  // Capture details
-  html += renderCaptureDetailsSection(event);
-  
-  // Cooldown details
-  html += renderCooldownDetails(event);
-  
-  // Network diagnostics
-  html += renderNetworkDiagSection(event);
-  
-  // Action buttons
+  // Action buttons - use escapeAttr for data attributes
   html += '<div class="timeline-actions">';
-  html += `<button class="timeline-action-btn copy-btn" data-event-id="${escapeText(event.eventId)}">Copy JSON</button>`;
-  html += `<button class="timeline-action-btn download-btn" data-event-id="${escapeText(event.eventId)}">Download</button>`;
+  html += `<button class="timeline-action-btn copy-btn" data-event-id="${escapeAttr(event.eventId)}">Copy JSON</button>`;
+  html += `<button class="timeline-action-btn download-btn" data-event-id="${escapeAttr(event.eventId)}">Download</button>`;
   html += '</div>';
   
   html += '</div>';
@@ -514,7 +335,7 @@ export function renderExpandedPanel(event: TimelineEvent, rowIndex: number): str
 // ---------------------------------------------------------------------------
 
 /** Render a single timeline row */
-export function renderTimelineRow(event: TimelineEvent, rowIndex: number): string {
+function renderTimelineRow(event: TimelineEvent, rowIndex: number): string {
   const time = formatSpikeTime(event.sampleTs);
   const latency = formatLatencyMs(event.latencyMs);
   const probeKindClass = getProbeKindClass(event.probeKind);
@@ -522,7 +343,6 @@ export function renderTimelineRow(event: TimelineEvent, rowIndex: number): strin
   const captureStatusClass = getCaptureStatusClass(event.captureStatus);
   const captureStatusLabel = getCaptureStatusLabel(event.captureStatus);
   
-  // Get error text if failed
   let detailsText = '—';
   if (event.captureStatus === 'failed' && event.primaryCapture?.error) {
     const error = event.primaryCapture.error;
@@ -547,18 +367,16 @@ export function renderTimelineRow(event: TimelineEvent, rowIndex: number): strin
 }
 
 // ---------------------------------------------------------------------------
-// Timeline Table Rendering
+// Table Rendering
 // ---------------------------------------------------------------------------
 
 /** Render the complete timeline table */
-export function renderTimelineTable(events: TimelineEvent[]): string {
+function renderTimelineTable(events: TimelineEvent[]): string {
   if (events.length === 0) {
     return '<div class="timeline-empty">No diagnostic events in the selected range.</div>';
   }
   
   const rows = events.map((event, index) => renderTimelineRow(event, index)).join('');
-  
-  // Expanded panels
   const expandedPanels = events.map((event, index) => renderExpandedPanel(event, index)).join('');
   
   return `
@@ -589,7 +407,7 @@ export function renderTimelineTable(events: TimelineEvent[]): string {
 // ---------------------------------------------------------------------------
 
 /** Render loading state */
-export function renderLoadingState(): string {
+function renderLoadingState(): string {
   return `
     <div class="timeline-loading">
       <div class="spinner"></div>
@@ -599,7 +417,7 @@ export function renderLoadingState(): string {
 }
 
 /** Render error state */
-export function renderErrorState(error: string): string {
+function renderErrorState(error: string): string {
   return `
     <div class="timeline-error">
       <span class="error-icon">⚠</span>
@@ -609,7 +427,7 @@ export function renderErrorState(error: string): string {
 }
 
 /** Render empty state */
-export function renderEmptyState(): string {
+function renderEmptyState(): string {
   return `
     <div class="timeline-empty-state">
       <div class="empty-icon">📭</div>
@@ -620,35 +438,12 @@ export function renderEmptyState(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Complete Timeline Render
+// Main Render Function
 // ---------------------------------------------------------------------------
 
-/** Render the complete timeline component (legacy signature without pagination) */
-export function renderTimeline(
-  container: HTMLElement,
-  state: TimelineState,
-  filters: TimelineFilters,
-  filteredEvents: TimelineEvent[]
-): void {
-  // Use default pagination context for backward compatibility
-  const paginationCtx: PaginationContext = {
-    pagination: { pageIndex: 0, pageSize: 20 },
-    totalPages: Math.max(1, Math.ceil(filteredEvents.length / 20)),
-    safePageIndex: 0,
-    filteredCount: filteredEvents.length,
-  };
-  renderTimelineWithPagination(container, state, filters, filteredEvents, paginationCtx);
-}
-
-/** Render the complete timeline component with pagination support */
-export function renderTimelineWithPagination(
-  container: HTMLElement,
-  state: TimelineState,
-  filters: TimelineFilters,
-  filteredEvents: TimelineEvent[],
-  paginationCtx: PaginationContext
-): void {
-  const { isLoading, error, httpSummary, icmpSummary } = state;
+/** Render the complete timeline component */
+export function renderTimeline(container: HTMLElement, model: TimelineModel): void {
+  const { isLoading, error, httpSummary, icmpSummary, mergedEvents, filters, pagination } = model;
   
   // Loading state
   if (isLoading) {
@@ -672,24 +467,22 @@ export function renderTimelineWithPagination(
     return;
   }
   
-  // Summary cards
+  const filteredEvents = getFilteredEvents(model);
+  const pagedEvents = getPagedEvents(model);
+  const paginationInfo = getPaginationInfo(model);
+  
   const summaryCards = renderSummaryCards(httpSummary, icmpSummary);
-  
-  // Filter controls (show total count, not filtered count)
-  const filterControls = renderFilterControls(filters, state.mergedEvents.length, paginationCtx.filteredCount);
-  
-  // Pagination controls
+  const filterControls = renderFilterControls(filters, mergedEvents.length, paginationInfo.filteredCount);
   const paginationControls = renderPaginationControls(
-    paginationCtx.pagination,
-    paginationCtx.totalPages,
-    paginationCtx.safePageIndex,
-    paginationCtx.filteredCount
+    pagination,
+    paginationInfo.totalPages,
+    paginationInfo.safePageIndex,
+    paginationInfo.filteredCount
   );
   
-  // Timeline table or empty state
-  const timelineContent = filteredEvents.length === 0 && state.mergedEvents.length === 0
+  const timelineContent = filteredEvents.length === 0 && mergedEvents.length === 0
     ? renderEmptyState()
-    : renderTimelineTable(filteredEvents);
+    : renderTimelineTable(pagedEvents);
   
   container.innerHTML = `
     <div class="timeline-header">
@@ -700,4 +493,26 @@ export function renderTimelineWithPagination(
     ${paginationControls}
     ${timelineContent}
   `;
+}
+
+/** Render the loading/error shell only */
+export function renderShell(container: HTMLElement, isLoading: boolean, error: string | null): void {
+  if (isLoading) {
+    container.innerHTML = `
+      <div class="timeline-header">
+        <span class="timeline-title">Diagnostic Timeline</span>
+      </div>
+      ${renderLoadingState()}
+    `;
+    return;
+  }
+  
+  if (error) {
+    container.innerHTML = `
+      <div class="timeline-header">
+        <span class="timeline-title">Diagnostic Timeline</span>
+      </div>
+      ${renderErrorState(error)}
+    `;
+  }
 }
