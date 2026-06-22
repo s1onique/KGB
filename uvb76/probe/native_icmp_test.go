@@ -12,7 +12,7 @@ import (
 )
 
 // fakeICMPSocketOpener is a mock socket opener for testing.
-type fakeICMPSocketOpener struct{openErr error}
+type fakeICMPSocketOpener struct{ openErr error }
 
 func (f *fakeICMPSocketOpener) OpenSocket() (NativeICMPPacketConn, error) {
 	if f.openErr != nil {
@@ -54,14 +54,14 @@ func (f *fakeICMPPacketConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	}
 	return len(b), nil
 }
-func (f *fakeICMPPacketConn) Close() error   { f.closed = true; return nil }
-func (f *fakeICMPPacketConn) SetReadDeadline(time.Time) error { return nil }
+func (f *fakeICMPPacketConn) Close() error                       { f.closed = true; return nil }
+func (f *fakeICMPPacketConn) SetReadDeadline(time.Time) error   { return nil }
 
 // capturingFakeICMPPacketConn captures write data to build matching replies.
 type capturingFakeICMPPacketConn struct {
 	fakeICMPPacketConn
 	backendID uint16
-	sendTime time.Time
+	sendTime  time.Time
 }
 
 func (f *capturingFakeICMPPacketConn) WriteTo(b []byte, addr net.Addr) (int, error) {
@@ -78,15 +78,26 @@ func (f *capturingFakeICMPPacketConn) WriteTo(b []byte, addr net.Addr) (int, err
 	return len(b), nil
 }
 
-// buildTestEchoReply creates a synthetic ICMP Echo Reply packet.
+// buildTestEchoReply builds a test echo reply with UDPAddr peer.
 func buildTestEchoReply(id, seq uint16, sourceIP string, timestamp int64) ([]byte, net.Addr, error) {
+	return buildTestEchoReplyWithPeerType(id, seq, sourceIP, timestamp, "udp")
+}
+
+// buildTestEchoReplyWithPeerType builds a test echo reply with configurable peer type.
+func buildTestEchoReplyWithPeerType(id, seq uint16, sourceIP string, timestamp int64, peerType string) ([]byte, net.Addr, error) {
 	body := &icmp.Echo{ID: int(id), Seq: int(seq), Data: int64ToBytes(timestamp)}
 	msg := icmp.Message{Type: ipv4.ICMPTypeEchoReply, Code: 0, Body: body}
 	data, err := msg.Marshal(nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	return data, &net.UDPAddr{IP: net.ParseIP(sourceIP)}, nil
+	ip := net.ParseIP(sourceIP)
+	switch peerType {
+	case "ipaddr":
+		return data, &net.IPAddr{IP: ip}, nil
+	default:
+		return data, &net.UDPAddr{IP: ip}, nil
+	}
 }
 
 func TestNativeICMPBackendBuildsEchoRequest(t *testing.T) {
@@ -193,21 +204,18 @@ func TestNativeICMPMatchEchoReplyUnmatchedContinuesWaiting(t *testing.T) {
 	backend := &NativeICMPBackend{backendID: 42, stats: &nativeICMPStatsInternal{}}
 	sendTime := time.Now().UnixNano()
 
-	// Wrong ID
 	replyData, addr, _ := buildTestEchoReply(99, 123, "127.0.0.1", sendTime)
 	_, matched, _ := backend.matchEchoReply(replyData, addr, net.ParseIP("127.0.0.1"), 123)
 	if matched {
 		t.Error("expected reply to NOT match (wrong ID)")
 	}
 
-	// Wrong sequence
 	replyData2, addr2, _ := buildTestEchoReply(42, 999, "127.0.0.1", sendTime)
 	_, matched2, _ := backend.matchEchoReply(replyData2, addr2, net.ParseIP("127.0.0.1"), 123)
 	if matched2 {
 		t.Error("expected reply to NOT match (wrong sequence)")
 	}
 
-	// Wrong source IP
 	replyData3, addr3, _ := buildTestEchoReply(42, 123, "10.0.0.1", sendTime)
 	_, matched3, _ := backend.matchEchoReply(replyData3, addr3, net.ParseIP("127.0.0.1"), 123)
 	if matched3 {
@@ -254,4 +262,99 @@ func TestNativeICMPBackendClose(t *testing.T) {
 	if !fakeConn.closed {
 		t.Error("expected conn.Close() to be called")
 	}
+}
+
+func TestNativeICMPMatchEchoReplyMatchesRawIPAddrPeer(t *testing.T) {
+	// Raw SOCK_RAW sockets return *net.IPAddr peers, not *net.UDPAddr.
+	// This test ensures matchEchoReply handles *net.IPAddr correctly.
+	backend := &NativeICMPBackend{backendID: 42}
+	replyData, addr, _ := buildTestEchoReplyWithPeerType(42, 123, "192.168.1.1", time.Now().UnixNano(), "ipaddr")
+
+	// Verify the peer is actually an IPAddr
+	if _, ok := addr.(*net.IPAddr); !ok {
+		t.Fatalf("expected *net.IPAddr peer, got %T", addr)
+	}
+
+	rtt, matched, err := backend.matchEchoReply(replyData, addr, net.ParseIP("192.168.1.1"), 123)
+	if err != nil {
+		t.Fatalf("matchEchoReply failed: %v", err)
+	}
+	if !matched {
+		t.Error("expected reply to match with *net.IPAddr peer but it did not")
+	}
+	if rtt < 0 || rtt > 100*time.Millisecond {
+		t.Errorf("unexpected RTT: %v", rtt)
+	}
+}
+
+func TestNativeICMPMatchEchoReplyRejectsWrongRawIPAddrPeer(t *testing.T) {
+	// Ensure wrong IP in *net.IPAddr peer is rejected.
+	backend := &NativeICMPBackend{backendID: 42}
+	replyData, addr, _ := buildTestEchoReplyWithPeerType(42, 123, "10.0.0.1", time.Now().UnixNano(), "ipaddr")
+
+	if _, ok := addr.(*net.IPAddr); !ok {
+		t.Fatalf("expected *net.IPAddr peer, got %T", addr)
+	}
+
+	_, matched, _ := backend.matchEchoReply(replyData, addr, net.ParseIP("192.168.1.1"), 123)
+	if matched {
+		t.Error("expected reply to NOT match with wrong IP in *net.IPAddr peer")
+	}
+}
+
+func TestIcmpPeerIPHelper(t *testing.T) {
+	// Test icmpPeerIP helper handles both UDPAddr and IPAddr.
+	tests := []struct {
+		name     string
+		peer     net.Addr
+		wantNil  bool
+		wantIP   string
+	}{
+		{
+			name:    "UDPAddr peer",
+			peer:    &net.UDPAddr{IP: net.ParseIP("192.168.1.1")},
+			wantNil: false,
+			wantIP:  "192.168.1.1",
+		},
+		{
+			name:    "IPAddr peer",
+			peer:    &net.IPAddr{IP: net.ParseIP("10.0.0.5")},
+			wantNil: false,
+			wantIP:  "10.0.0.5",
+		},
+		{
+			name:    "nil peer",
+			peer:    nil,
+			wantNil: true,
+		},
+		{
+			name:    "unexpected type",
+			peer:    &net.TCPAddr{IP: net.ParseIP("1.2.3.4")},
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := icmpPeerIP(tt.peer)
+			if tt.wantNil && got != nil {
+				t.Errorf("icmpPeerIP() = %v, want nil", got)
+			}
+			if !tt.wantNil && got == nil {
+				t.Errorf("icmpPeerIP() = nil, want non-nil")
+			}
+			if !tt.wantNil && !got.Equal(net.ParseIP(tt.wantIP)) {
+				t.Errorf("icmpPeerIP() = %v, want %v", got, net.ParseIP(tt.wantIP))
+			}
+		})
+	}
+}
+
+func TestPingGroupRangeHelper(t *testing.T) {
+	// Test pingGroupRange reads the kernel setting.
+	// On non-Linux this returns empty string.
+	result := pingGroupRange()
+	t.Logf("pingGroupRange() = %q", result)
+	// Just verify it doesn't panic and returns a string.
+	// On macOS/Windows this will be empty; on Linux it should have a value like "1 0" or "0 4294967295".
 }

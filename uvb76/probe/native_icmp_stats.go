@@ -2,6 +2,8 @@
 package probe
 
 import (
+	"os"
+	"strings"
 	"sync/atomic"
 )
 
@@ -30,6 +32,11 @@ type NativeICMPStatsSnapshot struct {
 	UnmatchedReplies uint64 `json:"unmatched_replies"`
 	LastRTTMillis    int64  `json:"last_rtt_ms"`
 	LastErrorClass   string `json:"last_error_class"`
+	// Socket mode diagnostics - shows which socket type is active
+	SocketMode       NativeICMPSocketMode `json:"socket_mode"`
+	DgramError       string              `json:"dgram_error,omitempty"`    // EACCES if datagram failed
+	RawError         string              `json:"raw_error,omitempty"`     // error if raw socket failed
+	PingGroupRange   string              `json:"ping_group_range,omitempty"` // from /proc/sys/net/ipv4/ping_group_range
 }
 
 // NativeICMPStatsRecorder provides methods to record native ICMP statistics.
@@ -50,9 +57,24 @@ type nativeICMPStatsInternal struct {
 	lastErrorClass   atomic.Value // string
 }
 
+// pingGroupRange reads the kernel's ping_group_range setting.
+// This controls which GIDs can use unprivileged ICMP (SOCK_DGRAM).
+// Returns empty string if reading fails (e.g., not on Linux).
+func pingGroupRange() string {
+	// Linux-specific: /proc/sys/net/ipv4/ping_group_range
+	data, err := os.ReadFile("/proc/sys/net/ipv4/ping_group_range")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
 // Snapshot returns a read-only copy of the stats.
 func (s *nativeICMPStatsInternal) Snapshot() NativeICMPStatsSnapshot {
-	return NativeICMPStatsSnapshot{
+	// Get socket open result for diagnostics
+	socketResult := GetLastSocketOpenResult()
+
+	snap := NativeICMPStatsSnapshot{
 		Backend:          "native",
 		Sent:             s.sent.Load(),
 		Received:         s.received.Load(),
@@ -64,6 +86,18 @@ func (s *nativeICMPStatsInternal) Snapshot() NativeICMPStatsSnapshot {
 		LastRTTMillis:    s.lastRTTMillis.Load(),
 		LastErrorClass:   s.getLastErrorClass(),
 	}
+
+	// Add socket mode diagnostics if available
+	if socketResult != nil {
+		snap.SocketMode = socketResult.SocketMode
+		snap.DgramError = socketResult.DgramError
+		snap.RawError = socketResult.RawError
+	}
+
+	// Add ping_group_range for Linux diagnostics
+	snap.PingGroupRange = pingGroupRange()
+
+	return snap
 }
 
 func (s *nativeICMPStatsInternal) getLastErrorClass() string {
