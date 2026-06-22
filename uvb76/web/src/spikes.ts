@@ -510,7 +510,7 @@ function createDetailRow(label: string, value: string): HTMLDivElement {
 }
 
 // Display anchor capture details in a modal dialog using DOM APIs for XSS safety
-function displayAnchorCaptureModal(anchorResponse: AnchorCaptureResponse, targetId: string): void {
+export function displayAnchorCaptureModal(anchorResponse: AnchorCaptureResponse, targetId: string): void {
   // Create modal overlay
   const overlay = document.createElement('div');
   overlay.className = 'anchor-modal-overlay';
@@ -530,6 +530,14 @@ function displayAnchorCaptureModal(anchorResponse: AnchorCaptureResponse, target
   title.textContent = 'Anchor Capture Details';
   headerDiv.appendChild(title);
 
+  // Add timezone indicator for clarity
+  const tzNote = document.createElement('div');
+  tzNote.className = 'anchor-modal-timezone-note';
+  tzNote.style.cssText = 'font-size:11px;color:#6c757d;margin-bottom:8px;';
+  const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  tzNote.textContent = 'Times shown in your local timezone (' + userTz + ')';
+  headerDiv.appendChild(tzNote);
+
   // Show status badge
   if (anchorResponse.degraded) {
     const statusBadge = document.createElement('div');
@@ -540,8 +548,24 @@ function displayAnchorCaptureModal(anchorResponse: AnchorCaptureResponse, target
     warnText.textContent = '⚠ Degraded: ';
     statusBadge.appendChild(warnText);
 
+    // Determine degraded reason from degradation_reason for accurate messaging
+    const reason = anchorResponse.degradation_reason;
+    let reasonText = 'Anchor metadata retained but capture artifact is missing';
+    if (reason === 'spike_event_evicted') {
+      reasonText = 'Original spike event is outside retention window; artifact available';
+    } else if (reason === 'artifact_purged') {
+      reasonText = 'Original spike event is within retention; capture artifact has been purged';
+    } else if (reason === 'missing_provenance') {
+      reasonText = 'Cooldown provenance metadata is missing; cannot verify suppression anchor';
+    } else if (reason === 'partial_metadata') {
+      reasonText = 'Partial metadata available; some anchor details are incomplete';
+    } else if (anchorResponse.message) {
+      // Fall back to backend message if no known reason code
+      reasonText = anchorResponse.message;
+    }
+
     const msgText = document.createElement('span');
-    msgText.textContent = anchorResponse.message || 'Anchor metadata retained but capture artifact is missing';
+    msgText.textContent = reasonText;
     statusBadge.appendChild(msgText);
 
     headerDiv.appendChild(statusBadge);
@@ -624,10 +648,11 @@ function displayAnchorCaptureModal(anchorResponse: AnchorCaptureResponse, target
 
     captureContent.appendChild(createDetailRow('Status: ', capture.capture_status || capture.status));
     captureContent.appendChild(createDetailRow('Source: ', capture.source));
-    captureContent.appendChild(createDetailRow('Started: ', capture.capture_started_at));
+    // Use formatAnchorTime for consistent local time display (same as provenance timestamps)
+    captureContent.appendChild(createDetailRow('Started: ', formatAnchorTime(capture.capture_started_at)));
 
     if (capture.capture_finished_at) {
-      captureContent.appendChild(createDetailRow('Finished: ', capture.capture_finished_at));
+      captureContent.appendChild(createDetailRow('Finished: ', formatAnchorTime(capture.capture_finished_at)));
     }
     if (capture.duration_ms !== undefined) {
       captureContent.appendChild(createDetailRow('Duration: ', capture.duration_ms.toString() + ' ms'));
