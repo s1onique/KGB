@@ -11,6 +11,18 @@
 #   - artifacts/memory-labs/uvb76/*.json
 #
 # Reference: kgb://doctrine/embedded-memory-frugality
+#
+# === Expected Runtimes ===
+# short all variants:    ~10–20m (builds + idle labs + short soak steps)
+# medium all variants:   ~30–45m (builds + idle labs + medium soak steps)
+# long all variants:     ~75–90m (builds + idle labs + long soak steps)
+# manual_soak all:       may exceed GitHub-hosted practicality; run 1–2 toggles per job
+#
+# === Timeout Budget ===
+# Job timeout: 120 minutes
+# Step-level timeouts guard individual leak-slope steps to prevent runaway jobs.
+# If all four manual_soak toggles are enabled, the job will likely exceed 120 minutes
+# and a preflight guard will fail fast to prevent wasted runner time.
 
 name: Memory Lab
 
@@ -84,7 +96,7 @@ jobs:
     name: Memory Lab
     # Linux runner required for /proc access (memory sampling)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
 
     steps:
       - name: Checkout repository
@@ -129,12 +141,63 @@ jobs:
         if: ${{ !inputs.skip_uvb76 }}
         run: make lab-uvb76-memory
 
+      # === Preflight Guard: manual_soak with multiple toggles ===
+      # Warn/fail fast when running manual_soak with all four toggles enabled.
+      # Each manual_soak step runs: warmup + operations × interval_ms.
+      # Four simultaneous manual_soak toggles will exceed the 120-minute job timeout.
+      - name: Preflight guard — manual_soak multi-toggle warning
+        if: ${{ inputs.leak_slope_profile == 'manual_soak' }}
+        run: |
+          # Assign GitHub Actions inputs to shell variables
+          WARMUP_SECONDS="${{ inputs.leak_slope_warmup_seconds }}"
+          OPERATIONS="${{ inputs.leak_slope_operations }}"
+          INTERVAL_MS="${{ inputs.leak_slope_interval_ms }}"
+
+          # Validate inputs are positive integers
+          if ! [[ "$WARMUP_SECONDS" =~ ^[0-9]+$ ]] || ! [[ "$OPERATIONS" =~ ^[0-9]+$ ]] || ! [[ "$INTERVAL_MS" =~ ^[0-9]+$ ]]; then
+            echo "::error::Invalid input: warmup_seconds, operations, or interval_ms is not a positive integer."
+            exit 1
+          fi
+          if (( WARMUP_SECONDS <= 0 || OPERATIONS <= 0 || INTERVAL_MS <= 0 )); then
+            echo "::error::Invalid input: warmup_seconds, operations, and interval_ms must be positive integers."
+            exit 1
+          fi
+
+          # Count enabled toggles (use assignment-style to avoid exit-1 under set -e)
+          ENABLED_TOGGLES=0
+          [[ "${{ inputs.run_tovarisch_leak_slope }}" == "true" ]] && ENABLED_TOGGLES=$((ENABLED_TOGGLES + 1))
+          [[ "${{ inputs.run_tovarisch_leak_slope_netdiag }}" == "true" ]] && ENABLED_TOGGLES=$((ENABLED_TOGGLES + 1))
+          [[ "${{ inputs.run_uvb76_leak_slope }}" == "true" ]] && ENABLED_TOGGLES=$((ENABLED_TOGGLES + 1))
+          [[ "${{ inputs.run_uvb76_leak_slope_netdiag }}" == "true" ]] && ENABLED_TOGGLES=$((ENABLED_TOGGLES + 1))
+
+          # Calculate per-workload runtime: warmup + (operations * interval_ms / 1000)
+          PER_WORKLOAD_SECONDS=$(( WARMUP_SECONDS + (OPERATIONS * INTERVAL_MS / 1000) ))
+          # Add 5min baseline overhead, round up to nearest minute
+          ESTIMATED_MINUTES=$(( ((PER_WORKLOAD_SECONDS * ENABLED_TOGGLES + 59) / 60) + 5 ))
+
+          echo "manual_soak profile with $ENABLED_TOGGLES workload toggle(s)"
+          echo "  warmup: ${WARMUP_SECONDS}s, operations: ${OPERATIONS}, interval: ${INTERVAL_MS}ms"
+          echo "  per-workload: ${PER_WORKLOAD_SECONDS}s"
+          echo "  estimated runtime: ~${ESTIMATED_MINUTES} minutes (job timeout: 120 minutes)"
+
+          if [[ $ENABLED_TOGGLES -ge 3 ]]; then
+            echo "::error::Running manual_soak with 3+ toggles simultaneously is likely to exceed the 120-minute job timeout."
+            echo "::error::Recommended: run 1–2 toggles per job, or reduce leak_slope_operations."
+            exit 1
+          fi
+          if [[ $ENABLED_TOGGLES -ge 2 ]]; then
+            echo "::warning::Running manual_soak with 2+ toggles simultaneously may approach the 120-minute job timeout."
+            echo "::warning::Consider running toggles sequentially or reducing leak_slope_operations."
+          fi
+
       # === Optional Leak-Slope Workloads ===
       # These are optional soaks that measure memory growth slope over repeated requests.
       # They are NOT required for the basic memory-gate but can be enabled manually.
+      # Step timeouts guard against runaway workloads.
 
       - name: Run tovarisch leak-slope workload (short window)
         if: ${{ inputs.run_tovarisch_leak_slope && inputs.leak_slope_profile == 'short' }}
+        timeout-minutes: 10
         run: |
           ./tools/memory-lab/memory-lab \
             --service tovarisch \
@@ -145,6 +208,7 @@ jobs:
 
       - name: Run tovarisch leak-slope workload (medium window)
         if: ${{ inputs.run_tovarisch_leak_slope && inputs.leak_slope_profile == 'medium' }}
+        timeout-minutes: 20
         run: |
           ./tools/memory-lab/memory-lab \
             --service tovarisch \
@@ -155,6 +219,7 @@ jobs:
 
       - name: Run tovarisch leak-slope workload (long window)
         if: ${{ inputs.run_tovarisch_leak_slope && inputs.leak_slope_profile == 'long' }}
+        timeout-minutes: 40
         run: |
           ./tools/memory-lab/memory-lab \
             --service tovarisch \
@@ -165,6 +230,7 @@ jobs:
 
       - name: Run tovarisch leak-slope workload (manual soak)
         if: ${{ inputs.run_tovarisch_leak_slope && inputs.leak_slope_profile == 'manual_soak' }}
+        timeout-minutes: 90
         run: |
           ./tools/memory-lab/memory-lab \
             --service tovarisch \
@@ -175,6 +241,7 @@ jobs:
 
       - name: Run tovarisch leak-slope with network_diag (short window)
         if: ${{ inputs.run_tovarisch_leak_slope_netdiag && inputs.leak_slope_profile == 'short' }}
+        timeout-minutes: 10
         run: |
           ./tools/memory-lab/memory-lab \
             --service tovarisch \
@@ -185,6 +252,7 @@ jobs:
 
       - name: Run tovarisch leak-slope with network_diag (medium window)
         if: ${{ inputs.run_tovarisch_leak_slope_netdiag && inputs.leak_slope_profile == 'medium' }}
+        timeout-minutes: 20
         run: |
           ./tools/memory-lab/memory-lab \
             --service tovarisch \
@@ -195,6 +263,7 @@ jobs:
 
       - name: Run tovarisch leak-slope with network_diag (long window)
         if: ${{ inputs.run_tovarisch_leak_slope_netdiag && inputs.leak_slope_profile == 'long' }}
+        timeout-minutes: 40
         run: |
           ./tools/memory-lab/memory-lab \
             --service tovarisch \
@@ -205,6 +274,7 @@ jobs:
 
       - name: Run tovarisch leak-slope with network_diag (manual soak)
         if: ${{ inputs.run_tovarisch_leak_slope_netdiag && inputs.leak_slope_profile == 'manual_soak' }}
+        timeout-minutes: 90
         run: |
           ./tools/memory-lab/memory-lab \
             --service tovarisch \
@@ -215,6 +285,7 @@ jobs:
 
       - name: Run uvb76 leak-slope workload (short window)
         if: ${{ inputs.run_uvb76_leak_slope && inputs.leak_slope_profile == 'short' }}
+        timeout-minutes: 10
         run: |
           ./tools/memory-lab/memory-lab \
             --service uvb76 \
@@ -226,6 +297,7 @@ jobs:
 
       - name: Run uvb76 leak-slope workload (medium window)
         if: ${{ inputs.run_uvb76_leak_slope && inputs.leak_slope_profile == 'medium' }}
+        timeout-minutes: 20
         run: |
           ./tools/memory-lab/memory-lab \
             --service uvb76 \
@@ -237,6 +309,7 @@ jobs:
 
       - name: Run uvb76 leak-slope workload (long window)
         if: ${{ inputs.run_uvb76_leak_slope && inputs.leak_slope_profile == 'long' }}
+        timeout-minutes: 40
         run: |
           ./tools/memory-lab/memory-lab \
             --service uvb76 \
@@ -248,6 +321,7 @@ jobs:
 
       - name: Run uvb76 leak-slope workload (manual soak)
         if: ${{ inputs.run_uvb76_leak_slope && inputs.leak_slope_profile == 'manual_soak' }}
+        timeout-minutes: 90
         run: |
           ./tools/memory-lab/memory-lab \
             --service uvb76 \
@@ -259,6 +333,7 @@ jobs:
 
       - name: Run uvb76 leak-slope with network_diag (short window)
         if: ${{ inputs.run_uvb76_leak_slope_netdiag && inputs.leak_slope_profile == 'short' }}
+        timeout-minutes: 10
         run: |
           ./tools/memory-lab/memory-lab \
             --service uvb76 \
@@ -270,6 +345,7 @@ jobs:
 
       - name: Run uvb76 leak-slope with network_diag (medium window)
         if: ${{ inputs.run_uvb76_leak_slope_netdiag && inputs.leak_slope_profile == 'medium' }}
+        timeout-minutes: 20
         run: |
           ./tools/memory-lab/memory-lab \
             --service uvb76 \
@@ -281,6 +357,7 @@ jobs:
 
       - name: Run uvb76 leak-slope with network_diag (long window)
         if: ${{ inputs.run_uvb76_leak_slope_netdiag && inputs.leak_slope_profile == 'long' }}
+        timeout-minutes: 40
         run: |
           ./tools/memory-lab/memory-lab \
             --service uvb76 \
@@ -292,6 +369,7 @@ jobs:
 
       - name: Run uvb76 leak-slope with network_diag (manual soak)
         if: ${{ inputs.run_uvb76_leak_slope_netdiag && inputs.leak_slope_profile == 'manual_soak' }}
+        timeout-minutes: 90
         run: |
           ./tools/memory-lab/memory-lab \
             --service uvb76 \
@@ -313,16 +391,16 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload tovarisch memory artifacts
-        if: ${{ !inputs.skip_tovarisch }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: tovarisch-memory-lab
           path: artifacts/memory-labs/tovarisch/
           retention-days: 30
-          if-no-files-found: error
+          if-no-files-found: ignore
 
       - name: Upload uvb76 memory artifacts
-        if: ${{ !inputs.skip_uvb76 }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: uvb76-memory-lab
@@ -334,7 +412,7 @@ jobs:
             !artifacts/memory-labs/uvb76/*.crt
             !artifacts/memory-labs/uvb76/*.derived.json
           retention-days: 30
-          if-no-files-found: error
+          if-no-files-found: ignore
 
       - name: Verify memory lab artifacts
         run: python3 scripts/verify_memory_lab_artifact.py --require-real-evidence
