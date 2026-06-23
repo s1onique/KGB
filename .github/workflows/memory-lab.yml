@@ -107,7 +107,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: uvb76-memory-lab
-          path: artifacts/memory-labs/uvb76/
+          # Exclude sensitive TLS material and derived configs from artifacts
+          # Generated keys/certs are ephemeral localhost material, not secrets but should not be archived
+          path: |
+            artifacts/memory-labs/uvb76/*.json
+            !artifacts/memory-labs/uvb76/*.key
+            !artifacts/memory-labs/uvb76/*.crt
+            !artifacts/memory-labs/uvb76/*.derived.json
           retention-days: 30
           if-no-files-found: error
 

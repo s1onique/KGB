@@ -67,10 +67,22 @@ def validate_no_secrets(data: dict) -> List[str]:
     
     Returns list of warnings (not errors) - these don't fail validation
     but serve as a signal that this is a CI-safe test config.
+    
+    Note on TLS paths:
+    The memory-lab runner (tools/memory-lab) generates ephemeral TLS certificates
+    for UVB-76 via tools/memory-lab/tls_config.go:GenerateEphemeralCert().
+    Empty tls_cert_file/tls_key_file in the memory-lab.json is expected and safe
+    because the runner will:
+    1. Generate ephemeral self-signed localhost cert/key
+    2. Write a derived config with TLS paths populated
+    3. Launch UVB-76 with the derived config
+    4. Use HTTPS with the generated cert for readiness/workload
+    
+    See: kgb://doctrine/native-owned-critical-paths
     """
     warnings = []
     
-    # Check for TLS certs pointing to real paths
+    # Check for TLS certs pointing to real production paths
     cert = data.get("listen", {}).get("tls_cert_file", "")
     key = data.get("listen", {}).get("tls_key_file", "")
     
@@ -78,6 +90,11 @@ def validate_no_secrets(data: dict) -> List[str]:
         warnings.append("TLS cert path contains /etc/ - may be production path")
     if key and "/etc/" in key:
         warnings.append("TLS key path contains /etc/ - may be production path")
+    
+    # Document expected empty TLS paths (will be materialized by runner)
+    if not cert and not key:
+        print("  INFO: Empty TLS paths are expected for memory-lab config")
+        print("        Runner will generate ephemeral self-signed cert/key")
     
     return warnings
 

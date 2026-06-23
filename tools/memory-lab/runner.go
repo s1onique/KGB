@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"os"
@@ -30,6 +31,12 @@ type RunConfig struct {
 	Operations   int
 	IntervalMs   int
 	ArtifactDir  string
+	// TLS holds generated TLS certificate paths for UVB-76.
+	// Set by prepareUVB76TLS() before service start.
+	TLS *TLSCertFiles
+	// DerivedConfigPath is the config path to use when launching the service.
+	// For UVB-76, this is the derived config with TLS paths populated.
+	DerivedConfigPath string
 }
 
 // Runner orchestrates the memory lab execution.
@@ -123,6 +130,11 @@ func (r *Runner) run() (string, error) {
 		return "", fmt.Errorf("preflight: %w", err)
 	}
 
+	// Prepare TLS for UVB-76 (generates ephemeral cert and derived config)
+	if err := r.prepareUVB76TLS(); err != nil {
+		return "", fmt.Errorf("prepare TLS: %w", err)
+	}
+
 	pid, stdoutPath, err := r.startService()
 	if err != nil {
 		return "", fmt.Errorf("start service: %w", err)
@@ -185,13 +197,51 @@ func (r *Runner) artifactDir() string {
 	return filepath.Join(findRepoRootOrCWD(), "artifacts", "memory-labs", r.cfg.Service)
 }
 
+// prepareUVB76TLS generates ephemeral TLS certificates and creates a derived config
+// for UVB-76 memory lab runs. This allows UVB-76 (which requires TLS in production)
+// to run in the memory lab without checking in test certificates.
+func (r *Runner) prepareUVB76TLS() error {
+	if r.cfg.Service != "uvb76" {
+		return nil // Only applies to uvb76
+	}
+
+	artifactDir := r.artifactDir()
+
+	// Generate ephemeral cert/key pair
+	tlsFiles, err := GenerateEphemeralCert(artifactDir, "uvb76")
+	if err != nil {
+		return fmt.Errorf("generate ephemeral cert: %w", err)
+	}
+	r.cfg.TLS = tlsFiles
+
+	// Determine source config path
+	sourceConfig := r.cfg.ConfigPath
+	if sourceConfig == "" {
+		sourceConfig = filepath.Join(findRepoRootOrCWD(), "uvb76", "uvb76.memory-lab.json")
+	}
+
+	// Write derived config with TLS paths populated
+	derivedPath, err := WriteDerivedConfig(artifactDir, "uvb76", sourceConfig, tlsFiles)
+	if err != nil {
+		return fmt.Errorf("write derived config: %w", err)
+	}
+	r.cfg.DerivedConfigPath = derivedPath
+
+	fmt.Printf("Generated TLS cert: %s\n", tlsFiles.CertFile)
+	fmt.Printf("Generated TLS key: %s\n", tlsFiles.KeyFile)
+	fmt.Printf("Derived config: %s\n", derivedPath)
+
+	return nil
+}
+
 func (r *Runner) buildServiceCommand() *exec.Cmd {
 	if r.cfg.Service == "tovarisch" {
 		// Note: tovarisch CLI requires space between --listen and address,
 		// not an equals sign. e.g., "--listen 127.0.0.1:18080" not "--listen=127.0.0.1:18080"
 		return exec.Command(r.cfg.Binary, "serve", "--listen", fmt.Sprintf("127.0.0.1:%d", r.cfg.Port))
 	}
-	configPath := r.cfg.ConfigPath
+	// UVB-76 uses the derived config with TLS paths populated
+	configPath := r.cfg.DerivedConfigPath
 	if configPath == "" {
 		configPath = "./uvb76/uvb76.example.json"
 	}
@@ -212,7 +262,8 @@ func (r *Runner) readinessURL() string {
 	if r.cfg.Service == "tovarisch" {
 		return fmt.Sprintf("http://127.0.0.1:%d/status", r.cfg.Port)
 	}
-	return fmt.Sprintf("http://127.0.0.1:%d/api/v1/status", r.cfg.Port)
+	// UVB-76 uses HTTPS with generated self-signed cert
+	return fmt.Sprintf("https://127.0.0.1:%d/api/v1/status", r.cfg.Port)
 }
 
 func (r *Runner) startService() (int, string, error) {
@@ -253,6 +304,9 @@ func (r *Runner) waitForReady(pid int, stdoutPath string) error {
 	deadline := time.Now().Add(15 * time.Second)
 	url := r.readinessURL()
 
+	// Create HTTP client with TLS cert trust for UVB-76's self-signed cert
+	client := r.httpClientForReadiness()
+
 	waitCh := make(chan struct{}, 1)
 	go func() {
 		r.wg.Wait()
@@ -272,9 +326,10 @@ func (r *Runner) waitForReady(pid int, stdoutPath string) error {
 		default:
 		}
 
-		resp, err := http.Get(url)
+		resp, err := client.Get(url)
 		if err == nil {
 			resp.Body.Close()
+			// Status endpoint is public - 200 means ready
 			if resp.StatusCode == http.StatusOK {
 				return nil
 			}
@@ -288,6 +343,30 @@ func (r *Runner) waitForReady(pid int, stdoutPath string) error {
 		PID:          pid,
 		ReadinessURL: url,
 		StdoutTail:   tail,
+	}
+}
+
+// httpClientForReadiness returns an HTTP client configured for readiness checks.
+// For UVB-76, this trusts the self-signed localhost cert.
+// For tovarisch, this is a default HTTP client.
+func (r *Runner) httpClientForReadiness() *http.Client {
+	if r.cfg.Service == "tovarisch" || r.cfg.TLS == nil {
+		return http.DefaultClient
+	}
+
+	// UVB-76 with self-signed cert: create client that trusts our generated cert
+	pool, err := NewInsecureTLSCertPool(r.cfg.TLS.CertFile)
+	if err != nil {
+		// Fall back to default client (will fail cert verification)
+		return http.DefaultClient
+	}
+
+	return &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs: pool,
+			},
+		},
 	}
 }
 
@@ -316,11 +395,13 @@ func (r *Runner) executeWorkload(pid int) HTTPWorkloadResult {
 		url = urls[r.cfg.WorkloadType]
 	}
 
+	// Use TLS-aware client for UVB-76 HTTPS workloads
 	return RunHTTPWorkload(HTTPWorkloadConfig{
 		URL:        url,
 		Operations: r.cfg.Operations,
 		IntervalMs: r.cfg.IntervalMs,
 		Name:       string(r.cfg.WorkloadType),
+		Client:     r.httpClientForReadiness(), // Same TLS-aware client for HTTPS
 	})
 }
 

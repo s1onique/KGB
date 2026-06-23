@@ -27,6 +27,7 @@ type HTTPWorkloadConfig struct {
 	Operations  int
 	IntervalMs  int
 	Name        string
+	Client      *http.Client // Optional custom client (for TLS-aware UVB-76)
 }
 
 // RunHTTPWorkload executes an HTTP workload with controlled interval.
@@ -34,8 +35,13 @@ func RunHTTPWorkload(cfg HTTPWorkloadConfig) HTTPWorkloadResult {
 	var errors int
 	start := time.Now()
 
+	client := cfg.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+
 	for i := 0; i < cfg.Operations; i++ {
-		if err := fetchURL(cfg.URL); err != nil {
+		if err := fetchURLWithClient(client, cfg.URL); err != nil {
 			errors++
 		}
 
@@ -52,9 +58,9 @@ func RunHTTPWorkload(cfg HTTPWorkloadConfig) HTTPWorkloadResult {
 	}
 }
 
-// fetchURL performs a single HTTP GET request.
-func fetchURL(url string) error {
-	resp, err := http.Get(url)
+// fetchURLWithClient performs a single HTTP GET request with a custom client.
+func fetchURLWithClient(client *http.Client, url string) error {
+	resp, err := client.Get(url)
 	if err != nil {
 		return err
 	}
@@ -98,11 +104,12 @@ func TovarischWorkloadURLs(port int) map[WorkloadType]string {
 }
 
 // UVB76WorkloadURLs returns URLs for uvb76 workloads.
+// UVB-76 uses HTTPS with self-signed localhost cert.
 func UVB76WorkloadURLs(port int) map[WorkloadType]string {
 	return map[WorkloadType]string{
-		WorkloadUVB76Idle:                  fmt.Sprintf("http://127.0.0.1:%d/", port),
-		WorkloadUVB76StatusAPIPolling:      fmt.Sprintf("http://127.0.0.1:%d/api/v1/status", port),
-		WorkloadUVB76DiagnosticCaptureLoop: fmt.Sprintf("http://127.0.0.1:%d/api/v1/status?include=network_diag", port),
+		WorkloadUVB76Idle:                  fmt.Sprintf("https://127.0.0.1:%d/", port),
+		WorkloadUVB76StatusAPIPolling:      fmt.Sprintf("https://127.0.0.1:%d/api/v1/status", port),
+		WorkloadUVB76DiagnosticCaptureLoop: fmt.Sprintf("https://127.0.0.1:%d/api/v1/status?include=network_diag", port),
 	}
 }
 
