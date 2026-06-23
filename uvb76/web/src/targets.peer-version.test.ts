@@ -8,6 +8,7 @@ vi.mock('./api', async () => {
   return {
     ...actual,
     api: {
+      getTargets: vi.fn(),
       getTargetSnapshot: vi.fn(),
     },
   };
@@ -655,6 +656,11 @@ describe('Real TargetsRenderer RSS rendering', () => {
     container.id = 'real-rss-targets';
     document.body.appendChild(container);
 
+    // Mock targets list with matching target_id
+    const mockTargets = [
+      { id: 'real-rss-test', name: 'Real RSS Test', base_url: 'http://localhost:8080' }
+    ];
+
     // Setup mock to return snapshot with RSS
     const mockSnapshot: TargetSnapshot = {
       target_id: 'real-rss-test',
@@ -666,11 +672,12 @@ describe('Real TargetsRenderer RSS rendering', () => {
       peer_rss_kib: 8388608, // 8 GiB in KiB = 8192 MiB
     };
 
+    (api.getTargets as ReturnType<typeof vi.fn>).mockResolvedValue(mockTargets);
     (api.getTargetSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue(mockSnapshot);
 
     // Import and use the real initTargets function
     const { initTargets } = await import('./targets');
-    const { renderer, loadTargets } = initTargets('real-rss-targets');
+    const { loadTargets } = initTargets('real-rss-targets');
 
     // Load targets which triggers the snapshot update
     await loadTargets();
@@ -697,6 +704,11 @@ describe('Real TargetsRenderer RSS rendering', () => {
     container.id = 'no-rss-targets';
     document.body.appendChild(container);
 
+    // Mock targets list with matching target_id
+    const mockTargets = [
+      { id: 'no-rss-test', name: 'No RSS Test', base_url: 'http://localhost:8080' }
+    ];
+
     // Setup mock WITHOUT RSS
     const mockSnapshot: TargetSnapshot = {
       target_id: 'no-rss-test',
@@ -708,14 +720,15 @@ describe('Real TargetsRenderer RSS rendering', () => {
       // no peer_rss_kib field
     };
 
+    (api.getTargets as ReturnType<typeof vi.fn>).mockResolvedValue(mockTargets);
     (api.getTargetSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue(mockSnapshot);
 
     // Import and use the real initTargets function
     const { initTargets } = await import('./targets');
-    const { renderer } = initTargets('no-rss-targets');
+    const { loadTargets } = initTargets('no-rss-targets');
 
     // Load targets which triggers the snapshot update
-    await renderer.loadTargets();
+    await loadTargets();
 
     // Wait for DOM update
     await new Promise(resolve => setTimeout(resolve, 10));

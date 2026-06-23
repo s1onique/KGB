@@ -34,6 +34,36 @@ interface ChartInstance {
 
 const charts = new Map<HTMLCanvasElement, ChartInstance>();
 
+// ResizeObserver map to track observers per canvas
+const resizeObservers = new Map<HTMLCanvasElement, ResizeObserver>();
+
+// Setup ResizeObserver for a chart's container to trigger resize
+function observeChartResize(canvas: HTMLCanvasElement, chart: Chart): void {
+  // Guard: ResizeObserver may not exist in Node/jsdom environments
+  if (typeof ResizeObserver === 'undefined') {
+    return;
+  }
+
+  // Clean up any existing observer for this canvas
+  const existing = resizeObservers.get(canvas);
+  if (existing) {
+    existing.disconnect();
+  }
+
+  // Find the chart wrap container (parent of canvas or canvas itself)
+  const container = canvas.parentElement;
+  if (!container) return;
+
+  const observer = new ResizeObserver(() => {
+    // Chart.js handles resize via ResizeObserver when responsive: true
+    // Just trigger a resize update
+    chart.resize();
+  });
+
+  observer.observe(container);
+  resizeObservers.set(canvas, observer);
+}
+
 // Dark theme colors
 const colors = {
   p50: { border: '#3fb950', background: 'rgba(63, 185, 80, 0.1)' },
@@ -272,6 +302,9 @@ export function renderLatencyChart(canvas: HTMLCanvasElement, points: Percentile
   });
 
   charts.set(canvas, { chart, canvas });
+
+  // Setup ResizeObserver for responsive resize when container changes
+  observeChartResize(canvas, chart);
 }
 
 export function destroyChart(canvas: HTMLCanvasElement): void {
@@ -279,6 +312,13 @@ export function destroyChart(canvas: HTMLCanvasElement): void {
   if (instance?.chart) {
     instance.chart.destroy();
     charts.delete(canvas);
+  }
+
+  // Clean up ResizeObserver
+  const observer = resizeObservers.get(canvas);
+  if (observer) {
+    observer.disconnect();
+    resizeObservers.delete(canvas);
   }
 }
 
@@ -403,6 +443,9 @@ export function renderLatencyChartWithViewport(
 
   // Store full points for viewport navigation
   charts.set(canvas, { chart, canvas, fullPoints: points });
+
+  // Setup ResizeObserver for responsive resize when container changes
+  observeChartResize(canvas, chart);
 }
 
 // Update chart viewport bounds and recompute visible data (for navigation controls)

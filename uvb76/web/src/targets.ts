@@ -28,14 +28,14 @@ import {
 } from './graphScaleStorage';
 
 // HTML escape helper for XSS protection - uses textContent pattern to safely escape all HTML
-function escapeText(s: string): string {
+export function escapeText(s: string): string {
   const div = document.createElement('div');
   div.textContent = s;
   return div.innerHTML;
 }
 
 // HTML attribute escape helper - escapes text for use in HTML attributes
-function escapeAttr(s: string): string {
+export function escapeAttr(s: string): string {
   return escapeText(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
@@ -45,19 +45,20 @@ const statusClasses = new Set(['up', 'down', 'unknown', 'error', 'degraded', 'wa
 // Graph controls HTML for a latency section
 function graphControlsHTML(targetId: string, kind: 'http' | 'icmp'): string {
   const presets = kind === 'icmp' ? ICMP_PRESETS : HTTP_PRESETS;
+  const targetIdAttr = escapeAttr(targetId);
   const presetsHTML = presets.map(p => 
-    `<button class="graph-control-btn preset-btn" data-target="${escapeText(targetId)}" data-kind="${kind}" data-preset="${p.seconds}">${escapeText(p.label)}</button>`
+    `<button class="graph-control-btn preset-btn" data-target="${targetIdAttr}" data-kind="${escapeAttr(kind)}" data-preset="${escapeAttr(String(p.seconds))}">${escapeText(p.label)}</button>`
   ).join('');
   
   return `
-    <div class="graph-controls" id="controls-${kind}-${escapeText(targetId)}">
-      <button class="graph-control-btn nav-btn" data-target="${escapeText(targetId)}" data-kind="${kind}" data-action="pan-left" title="Pan left">&#9664;</button>
-      <button class="graph-control-btn zoom-btn" data-target="${escapeText(targetId)}" data-kind="${kind}" data-action="zoom-out" title="Zoom out">-</button>
+    <div class="graph-controls" id="controls-${kind}-${targetIdAttr}">
+      <button class="graph-control-btn nav-btn" data-target="${targetIdAttr}" data-kind="${escapeAttr(kind)}" data-action="pan-left" title="Pan left">&#9664;</button>
+      <button class="graph-control-btn zoom-btn" data-target="${targetIdAttr}" data-kind="${escapeAttr(kind)}" data-action="zoom-out" title="Zoom out">-</button>
       ${presetsHTML}
-      <button class="graph-control-btn zoom-btn" data-target="${escapeText(targetId)}" data-kind="${kind}" data-action="zoom-in" title="Zoom in">+</button>
-      <button class="graph-control-btn nav-btn" data-target="${escapeText(targetId)}" data-kind="${kind}" data-action="pan-right" title="Pan right">&#9654;</button>
-      <button class="graph-control-btn action-btn" data-target="${escapeText(targetId)}" data-kind="${kind}" data-action="now" title="Jump to now">Now</button>
-      <button class="graph-control-btn action-btn" data-target="${escapeText(targetId)}" data-kind="${kind}" data-action="full" title="Show full retained range">Full</button>
+      <button class="graph-control-btn zoom-btn" data-target="${targetIdAttr}" data-kind="${escapeAttr(kind)}" data-action="zoom-in" title="Zoom in">+</button>
+      <button class="graph-control-btn nav-btn" data-target="${targetIdAttr}" data-kind="${escapeAttr(kind)}" data-action="pan-right" title="Pan right">&#9654;</button>
+      <button class="graph-control-btn action-btn" data-target="${targetIdAttr}" data-kind="${escapeAttr(kind)}" data-action="now" title="Jump to now">Now</button>
+      <button class="graph-control-btn action-btn" data-target="${targetIdAttr}" data-kind="${escapeAttr(kind)}" data-action="full" title="Show full retained range">Full</button>
     </div>
   `;
 }
@@ -65,13 +66,15 @@ function graphControlsHTML(targetId: string, kind: 'http' | 'icmp'): string {
 // Latency section HTML template with graph controls
 function latencySectionHTML(targetId: string, kind: 'http' | 'icmp', title: string): string {
   const kindId = kind;
+  const targetIdAttr = escapeAttr(targetId);
+  const titleText = escapeText(title);
   return `
-      <div class="latency-section" id="latency-${kindId}-${escapeText(targetId)}">
-          <div class="latency-meta" id="meta-${kindId}-${escapeText(targetId)}">Loading ${title}...</div>
-          <div class="percentile-stats" id="stats-${kindId}-${escapeText(targetId)}"></div>
-          <div class="graph-container" id="graph-container-${kindId}-${escapeText(targetId)}">
+      <div class="latency-panel" id="latency-${kindId}-${targetIdAttr}" data-kind="${escapeAttr(kind)}">
+          <div class="latency-meta" id="meta-${kindId}-${targetIdAttr}">Loading ${titleText}...</div>
+          <div class="percentile-stats" id="stats-${kindId}-${targetIdAttr}"></div>
+          <div class="graph-container" id="graph-container-${kindId}-${targetIdAttr}">
               <div class="graph-header">
-                  <span class="graph-title">${escapeText(title)} (ms)</span>
+                  <span class="graph-title">${titleText} (ms)</span>
                   <div class="graph-legend">
                       <span class="legend-item"><span class="legend-dot p50"></span>p50</span>
                       <span class="legend-item"><span class="legend-dot p90"></span>p90</span>
@@ -81,15 +84,15 @@ function latencySectionHTML(targetId: string, kind: 'http' | 'icmp', title: stri
               </div>
               ${graphControlsHTML(targetId, kind)}
               <div class="latency-chart-wrap">
-                  <canvas class="latency-chart" id="chart-${kindId}-${escapeText(targetId)}"></canvas>
-                  <div class="latency-empty hidden" id="chart-empty-${kindId}-${escapeText(targetId)}">
+                  <canvas class="latency-chart" id="chart-${kindId}-${targetIdAttr}"></canvas>
+                  <div class="latency-empty hidden" id="chart-empty-${kindId}-${targetIdAttr}">
                       No finite latency series points yet
                   </div>
               </div>
               <div class="graph-subtitle">Trailing windows over retained range</div>
-              <div class="sample-count" id="samples-${kindId}-${escapeText(targetId)}"></div>
+              <div class="sample-count" id="samples-${kindId}-${targetIdAttr}"></div>
           </div>
-          <div class="low-sample-warning hidden" id="warning-${kindId}-${escapeText(targetId)}">
+          <div class="low-sample-warning hidden" id="warning-${kindId}-${targetIdAttr}">
               Low sample count; tail percentiles are approximate.
           </div>
       </div>
@@ -233,25 +236,30 @@ function createTargetsRenderer(container: HTMLElement): TargetsRenderer {
   function render(targets: Target[]): void {
     container.innerHTML = targets
       .map(
-        (t) => `
-      <div class="card target" id="target-${escapeText(t.id)}">
-          <div class="target-header-row" data-testid="target-header-${escapeText(t.id)}">
+        (t) => {
+          const targetIdAttr = escapeAttr(t.id);
+          return `
+      <div class="card target" id="target-${targetIdAttr}">
+          <div class="target-header-row" data-testid="target-header-${targetIdAttr}">
               <strong class="target-name" title="${escapeAttr(t.name)}">${escapeText(t.name)}</strong>
               <span class="target-id" title="${escapeAttr(t.id)}">(${escapeText(t.id)})</span>
               <span class="target-header-sep">·</span>
               <span class="target-url" title="${escapeAttr(t.base_url)}">${escapeText(t.base_url)}</span>
               <span class="target-header-sep">·</span>
-              <span class="target-status-meta" id="status-${escapeText(t.id)}">Loading...</span>
+              <span class="target-status-meta" id="status-${targetIdAttr}">Loading...</span>
           </div>
-          <div class="latency-card" id="latency-${escapeText(t.id)}">
-              ${latencySectionHTML(t.id, 'http', 'HTTP Status Probe Latency')}
-              ${latencySectionHTML(t.id, 'icmp', 'ICMP Ping Latency')}
+          <div class="latency-card" id="latency-${targetIdAttr}">
+              <div class="latency-grid">
+                  ${latencySectionHTML(t.id, 'http', 'HTTP Status Probe Latency')}
+                  ${latencySectionHTML(t.id, 'icmp', 'ICMP Ping Latency')}
+              </div>
           </div>
           <div class="diagnostic-timeline-container">
               ${timelineSectionHTML(t.id)}
           </div>
       </div>
-    `
+    `;
+        }
       )
       .join('');
   }
