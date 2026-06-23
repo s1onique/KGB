@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,6 +38,7 @@ type Runner struct {
 	sampler  *MemorySampler
 	stopChan chan struct{}
 	wg       sync.WaitGroup
+	cmd      *exec.Cmd // kept for Wait() and Kill()
 }
 
 // MemorySampler concurrently samples memory during workload execution.
@@ -116,61 +118,52 @@ func Run(cfg RunConfig) (string, error) {
 }
 
 func (r *Runner) run() (string, error) {
-	// Start the service
-	pid, _, err := r.startService()
+	pid, stdoutPath, err := r.startService()
 	if err != nil {
 		return "", fmt.Errorf("start service: %w", err)
 	}
-	defer r.stopService(pid)
+	defer r.stopService()
 
-	// Wait briefly for service to be ready
-	time.Sleep(2 * time.Second)
+	if err := r.waitForReady(pid, stdoutPath); err != nil {
+		return "", err
+	}
 
-	// Take first snapshot immediately after readiness
 	firstSnap, err := ReadMemorySnapshot(pid)
 	if err != nil {
 		return "", fmt.Errorf("first snapshot: %w", err)
 	}
 	fmt.Printf("Initial RSS: %d KiB, PSS: %d KiB\n", firstSnap.RSSKiB, firstSnap.PSSKiB)
 
-	// Create memory sampler and start concurrent sampling DURING warmup
-	sampler := NewMemorySampler(pid, 2000) // Sample every 2s
+	sampler := NewMemorySampler(pid, 2000)
 	ctx, cancel := context.WithCancel(context.Background())
 	sampler.Start(ctx)
 
-	// Wait for warmup
 	fmt.Printf("Warming up for %ds...\n", r.cfg.WarmupSecs)
 	time.Sleep(time.Duration(r.cfg.WarmupSecs) * time.Second)
 
-	// Execute workload (for non-idle workloads)
 	workloadResult := r.executeWorkload(pid)
 	fmt.Printf("Workload: %d ops, %d errors, %dms\n",
 		workloadResult.Operations, workloadResult.Errors, workloadResult.DurationMs)
 
-	// Stop sampling
 	cancel()
 	sampler.Stop()
 
-	// Take last snapshot
 	lastSnap, err := ReadMemorySnapshot(pid)
 	if err != nil {
 		return "", fmt.Errorf("last snapshot: %w", err)
 	}
 	fmt.Printf("Final RSS: %d KiB, PSS: %d KiB\n", lastSnap.RSSKiB, lastSnap.PSSKiB)
 
-	// Calculate max from: first, sampled, last
 	sampledMaxRSS, sampledMaxPSS := sampler.Max()
 	maxRSS := maxOf3(firstSnap.RSSKiB, sampledMaxRSS, lastSnap.RSSKiB)
 	maxPSS := maxOf3(firstSnap.PSSKiB, sampledMaxPSS, lastSnap.PSSKiB)
 	fmt.Printf("Max RSS: %d KiB, Max PSS: %d KiB\n", maxRSS, maxPSS)
 
-	// Build artifact
 	artifact, err := r.buildArtifact(firstSnap, lastSnap, maxRSS, maxPSS, workloadResult)
 	if err != nil {
 		return "", fmt.Errorf("build artifact: %w", err)
 	}
 
-	// Write artifact
 	path, err := artifact.Write(r.artifactDir(), r.cfg.Service, string(r.cfg.WorkloadType))
 	if err != nil {
 		return "", fmt.Errorf("write artifact: %w", err)
@@ -187,8 +180,6 @@ func (r *Runner) artifactDir() string {
 	return filepath.Join(findRepoRootOrCWD(), "artifacts", "memory-labs", r.cfg.Service)
 }
 
-// buildServiceCommand constructs the exec.Command for starting a service.
-// This is a pure function for testability.
 func (r *Runner) buildServiceCommand() *exec.Cmd {
 	if r.cfg.Service == "tovarisch" {
 		return exec.Command(r.cfg.Binary, "serve", fmt.Sprintf("--listen=127.0.0.1:%d", r.cfg.Port))
@@ -200,8 +191,14 @@ func (r *Runner) buildServiceCommand() *exec.Cmd {
 	return exec.Command(r.cfg.Binary, "-config="+configPath)
 }
 
+func (r *Runner) readinessURL() string {
+	if r.cfg.Service == "tovarisch" {
+		return fmt.Sprintf("http://127.0.0.1:%d/status", r.cfg.Port)
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d/api/v1/status", r.cfg.Port)
+}
+
 func (r *Runner) startService() (int, string, error) {
-	// Resolve artifact dir once and use for both stdout and artifacts
 	artifactDir := r.artifactDir()
 	if err := os.MkdirAll(artifactDir, 0755); err != nil {
 		return 0, "", err
@@ -214,35 +211,77 @@ func (r *Runner) startService() (int, string, error) {
 	}
 	defer stdoutFile.Close()
 
-	cmd := r.buildServiceCommand()
-	cmd.Stdout = stdoutFile
-	cmd.Stderr = stdoutFile
+	r.cmd = r.buildServiceCommand()
+	r.cmd.Stdout = stdoutFile
+	r.cmd.Stderr = stdoutFile
 
-	if err := cmd.Start(); err != nil {
+	if err := r.cmd.Start(); err != nil {
 		return 0, "", err
 	}
 
-	// Wait for process to start
-	time.Sleep(2 * time.Second)
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		_ = r.cmd.Wait()
+	}()
 
-	// Verify process is running
-	if cmd.Process == nil {
+	if r.cmd.Process == nil {
 		return 0, "", fmt.Errorf("process not started")
 	}
 
-	return cmd.Process.Pid, stdoutPath, nil
+	return r.cmd.Process.Pid, stdoutPath, nil
 }
 
-func (r *Runner) stopService(pid int) {
-	proc, _ := os.FindProcess(pid)
-	if proc != nil {
-		proc.Kill()
-		proc.Wait()
+func (r *Runner) waitForReady(pid int, stdoutPath string) error {
+	deadline := time.Now().Add(15 * time.Second)
+	url := r.readinessURL()
+
+	waitCh := make(chan struct{}, 1)
+	go func() {
+		r.wg.Wait()
+		waitCh <- struct{}{}
+	}()
+
+	for time.Now().Before(deadline) {
+		select {
+		case <-waitCh:
+			tail := readTail(stdoutPath, 8192)
+			return &ServiceExitError{
+				PID:        pid,
+				Argv:       r.cmd.Args,
+				ExitError:  r.cmd.ProcessState,
+				StdoutTail: tail,
+			}
+		default:
+		}
+
+		resp, err := http.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+
+		time.Sleep(250 * time.Millisecond)
+	}
+
+	tail := readTail(stdoutPath, 8192)
+	return &ReadinessTimeoutError{
+		PID:          pid,
+		ReadinessURL: url,
+		StdoutTail:   tail,
+	}
+}
+
+func (r *Runner) stopService() {
+	if r.cmd != nil && r.cmd.Process != nil {
+		r.cmd.Process.Kill()
+		r.wg.Wait()
 	}
 }
 
 func (r *Runner) executeWorkload(pid int) HTTPWorkloadResult {
-	// For idle-warmup, no HTTP workload
 	if r.cfg.WorkloadType == WorkloadTovarischIdle || r.cfg.WorkloadType == WorkloadUVB76Idle {
 		return HTTPWorkloadResult{
 			Operations: 0,
@@ -251,7 +290,6 @@ func (r *Runner) executeWorkload(pid int) HTTPWorkloadResult {
 		}
 	}
 
-	// Build URL
 	var url string
 	if r.cfg.Service == "tovarisch" {
 		urls := TovarischWorkloadURLs(r.cfg.Port)
@@ -270,14 +308,12 @@ func (r *Runner) executeWorkload(pid int) HTTPWorkloadResult {
 }
 
 func (r *Runner) buildArtifact(first, last MemorySnapshot, maxRSS, maxPSS int64, workload HTTPWorkloadResult) (*Artifact, error) {
-	// Get service info
 	serviceInfo := ServiceInfo{
 		Name:    r.cfg.Service,
 		Version: getBinaryVersion(r.cfg.Binary),
 		Commit:  getGitCommit(),
 	}
 
-	// Get environment info
 	envInfo := EnvironmentInfo{
 		Arch:           GetArch(),
 		Kernel:         getKernelVersion(),
@@ -285,7 +321,6 @@ func (r *Runner) buildArtifact(first, last MemorySnapshot, maxRSS, maxPSS int64,
 		HasSmapsRollup: HasSmapsRollup(),
 	}
 
-	// Build workload info
 	workloadInfo := WorkloadInfo{
 		Type:          string(r.cfg.WorkloadType),
 		Operations:    workload.Operations,
@@ -297,92 +332,20 @@ func (r *Runner) buildArtifact(first, last MemorySnapshot, maxRSS, maxPSS int64,
 		Description:   describeWorkload(r.cfg.Service, r.cfg.WorkloadType, r.cfg.WarmupSecs),
 	}
 
-	// Create artifact
 	artifact := NewArtifact(serviceInfo, workloadInfo, envInfo)
 	artifact.SetMemory(first, last, maxRSS, maxPSS)
 
-	// Load budget and make decision
 	budget, err := LoadBudget(r.cfg.Service)
 	if err != nil {
-		// Budget not available - measurement only
 		artifact.SetDecision(true, "Budget not loaded; measurement recorded")
 	} else {
 		decision := budget.CheckWorkloadBudget(string(r.cfg.WorkloadType), artifact.Memory.Growth.RSSKiB, artifact.Memory.Growth.RSSPercent)
 		artifact.SetDecision(decision.Pass, decision.Reason)
 	}
 
-	// Set runtime info
 	if r.cfg.Service == "tovarisch" {
 		artifact.Runtime = RuntimeInfo{Allocator: "zig-default"}
 	}
-	// For uvb76, runtime info would come from HTTP API (future enhancement)
 
 	return artifact, nil
-}
-
-// Helper functions
-
-func findRepoRootOrCWD() string {
-	if root, err := findRepoRoot(); err == nil {
-		return root
-	}
-	cwd, _ := os.Getwd()
-	return cwd
-}
-
-func getBinaryVersion(binary string) string {
-	out, err := exec.Command(binary, "--version").Output()
-	if err != nil {
-		return "unknown"
-	}
-	// Return first line, trimmed
-	return trimNL(string(out))
-}
-
-func getGitCommit() string {
-	out, err := exec.Command("git", "rev-parse", "--short=7", "HEAD").Output()
-	if err != nil {
-		return "unknown"
-	}
-	return trimNL(string(out))
-}
-
-func getKernelVersion() string {
-	out, err := os.ReadFile("/proc/version")
-	if err != nil {
-		return "unknown"
-	}
-	return trimNL(string(out))
-}
-
-func trimNL(s string) string {
-	for len(s) > 0 && (s[len(s)-1] == '\n' || s[len(s)-1] == '\r') {
-		s = s[:len(s)-1]
-	}
-	return s
-}
-
-func describeWorkload(service string, wt WorkloadType, warmupSecs int) string {
-	switch wt {
-	case WorkloadTovarischStatusJSON, WorkloadUVB76StatusAPIPolling:
-		return fmt.Sprintf("Repeated status calls after %ds warmup", warmupSecs)
-	case WorkloadTovarischStatusJSONNetDiag, WorkloadUVB76DiagnosticCaptureLoop:
-		return fmt.Sprintf("Repeated status with network_diag after %ds warmup", warmupSecs)
-	default:
-		return fmt.Sprintf("Idle memory footprint after %ds warmup", warmupSecs)
-	}
-}
-
-// maxOf3 returns the maximum of three int64 values.
-func maxOf3(a, b, c int64) int64 {
-	if a > b {
-		if a > c {
-			return a
-		}
-		return c
-	}
-	if b > c {
-		return b
-	}
-	return c
 }

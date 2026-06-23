@@ -32,26 +32,30 @@ func ReadMemorySnapshot(pid int) (MemorySnapshot, error) {
 	// Try smaps_rollup first (most accurate)
 	if smapsRollup, err := os.Open(procPath(pid, "smaps_rollup")); err == nil {
 		defer smapsRollup.Close()
-		snapshot, err := parseSmapsRollup(smapsRollup)
+		snapshot, err := parseSmapsRollup(pid, smapsRollup)
 		if err == nil {
 			return snapshot, nil
+		}
+		// If it's a zombie error, propagate it
+		if _, ok := err.(*ProcError); ok {
+			return MemorySnapshot{}, err
 		}
 	}
 
 	// Fallback to status for RSS only
 	if statusFile, err := os.Open(procPath(pid, "status")); err == nil {
 		defer statusFile.Close()
-		return parseStatusRSS(statusFile)
+		return parseStatusRSS(pid, statusFile)
 	}
 
-	return MemorySnapshot{}, &ProcError{PID: pid, Op: "read"}
+	return MemorySnapshot{}, &ProcError{PID: pid, Op: "open status"}
 }
 
 // parseSmapsRollup parses /proc/<pid>/smaps_rollup for Rss and Pss.
 // Format:
 //   Rss:                5120 kB
 //   Pss:                4800 kB
-func parseSmapsRollup(r *os.File) (MemorySnapshot, error) {
+func parseSmapsRollup(pid int, r *os.File) (MemorySnapshot, error) {
 	var rss, pss int64
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
@@ -63,25 +67,42 @@ func parseSmapsRollup(r *os.File) (MemorySnapshot, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return MemorySnapshot{}, err
+		return MemorySnapshot{}, &ProcError{PID: pid, Op: "parse smaps_rollup"}
 	}
 	return MemorySnapshot{RSSKiB: rss, PSSKiB: pss}, nil
 }
 
 // parseStatusRSS parses /proc/<pid>/status for VmRSS only (fallback).
+// It also checks for zombie state and preserves the real PID in error messages.
 // Format: VmRSS:     5120 kB
-func parseStatusRSS(r *os.File) (MemorySnapshot, error) {
+func parseStatusRSS(pid int, r *os.File) (MemorySnapshot, error) {
 	scanner := bufio.NewScanner(r)
+	var state string
+
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "VmRSS:") {
+		if strings.HasPrefix(line, "State:") {
+			// Extract state field (e.g., "State:\tR (running)" or "State:\tZ (zombie)")
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				state = parts[1]
+			}
+		} else if strings.HasPrefix(line, "VmRSS:") {
 			return MemorySnapshot{RSSKiB: parseMemValue(line), PSSKiB: 0}, nil
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return MemorySnapshot{}, err
+		return MemorySnapshot{}, &ProcError{PID: pid, Op: "scan status"}
 	}
-	return MemorySnapshot{}, &ProcError{PID: 0, Op: "parse"}
+
+	// VmRSS not found - check if process is zombie/exited
+	// Z = zombie, X = dead (both indicate process has exited)
+	if state == "Z" || state == "X" {
+		return MemorySnapshot{}, &ProcError{PID: pid, Op: "read VmRSS (zombie/exited)"}
+	}
+
+	// VmRSS not found and not zombie - report with real PID
+	return MemorySnapshot{}, &ProcError{PID: pid, Op: "parse VmRSS"}
 }
 
 // parseMemValue extracts the numeric value from lines like "VmRSS:     5120 kB".
@@ -102,7 +123,7 @@ func procPath(pid int, file string) string {
 	return "/proc/" + strconv.Itoa(pid) + "/" + file
 }
 
-// ProcError represents a /proc access error.
+// ProcError represents a /proc access error with context about the operation.
 type ProcError struct {
 	PID int
 	Op  string
@@ -110,4 +131,9 @@ type ProcError struct {
 
 func (e *ProcError) Error() string {
 	return "procfs: failed to " + e.Op + " for pid " + strconv.Itoa(e.PID)
+}
+
+// IsZombie reports true if this error indicates the process is zombie/exited.
+func (e *ProcError) IsZombie() bool {
+	return strings.Contains(e.Op, "zombie")
 }

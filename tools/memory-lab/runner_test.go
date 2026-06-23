@@ -3,6 +3,9 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -82,13 +85,13 @@ func TestRunConfigDefaults(t *testing.T) {
 	cfg := RunConfig{
 		Service:      "tovarisch",
 		WorkloadType: WorkloadTovarischIdle,
-		Binary:      "./tovarisch",
-		ConfigPath:  "",
-		Port:        18080,
-		WarmupSecs:  60,
-		Operations:  100,
-		IntervalMs:  100,
-		ArtifactDir: "",
+		Binary:       "./tovarisch",
+		ConfigPath:   "",
+		Port:         18080,
+		WarmupSecs:   60,
+		Operations:   100,
+		IntervalMs:   100,
+		ArtifactDir:  "",
 	}
 
 	if cfg.Service != "tovarisch" {
@@ -106,13 +109,13 @@ func TestRunConfigUvb76(t *testing.T) {
 	cfg := RunConfig{
 		Service:      "uvb76",
 		WorkloadType: WorkloadUVB76Idle,
-		Binary:      "./uvb76",
-		ConfigPath:  "./custom/config.json",
-		Port:        18081,
-		WarmupSecs:  120,
-		Operations:  200,
-		IntervalMs:  50,
-		ArtifactDir: "",
+		Binary:       "./uvb76",
+		ConfigPath:   "./custom/config.json",
+		Port:         18081,
+		WarmupSecs:   120,
+		Operations:   200,
+		IntervalMs:   50,
+		ArtifactDir:  "",
 	}
 
 	if cfg.Service != "uvb76" {
@@ -156,9 +159,9 @@ func TestBuildServiceCommandUvb76Default(t *testing.T) {
 	r := &Runner{
 		cfg: RunConfig{
 			Service:    "uvb76",
-			Binary:    "./uvb76/uvb76",
+			Binary:     "./uvb76/uvb76",
 			ConfigPath: "", // empty, should use default
-			Port:      18081,
+			Port:       18081,
 		},
 	}
 
@@ -180,9 +183,9 @@ func TestBuildServiceCommandUvb76Custom(t *testing.T) {
 	r := &Runner{
 		cfg: RunConfig{
 			Service:    "uvb76",
-			Binary:    "./uvb76/uvb76",
+			Binary:     "./uvb76/uvb76",
 			ConfigPath: "/etc/uvb76/production.json",
-			Port:      18081,
+			Port:       18081,
 		},
 	}
 
@@ -199,3 +202,184 @@ func TestBuildServiceCommandUvb76Custom(t *testing.T) {
 		t.Errorf("cmd.Args[1] = %q, want -config=/etc/uvb76/production.json", cmd.Args[1])
 	}
 }
+
+func TestReadinessURL(t *testing.T) {
+	tests := []struct {
+		service string
+		port    int
+		want    string
+	}{
+		{"tovarisch", 18080, "http://127.0.0.1:18080/status"},
+		{"uvb76", 18081, "http://127.0.0.1:18081/api/v1/status"},
+	}
+
+	for _, tt := range tests {
+		r := &Runner{
+			cfg: RunConfig{
+				Service: tt.service,
+				Port:    tt.port,
+			},
+		}
+		got := r.readinessURL()
+		if got != tt.want {
+			t.Errorf("readinessURL() for %s = %q, want %q", tt.service, got, tt.want)
+		}
+	}
+}
+
+func TestReadTail(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "stdout.log")
+
+	// Write a log file with known content
+	content := "line1\nline2\nline3\nline4\nline5\n"
+	if err := os.WriteFile(logPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	// Test reading last 100 bytes
+	tail := readTail(logPath, 100)
+	if tail == "" {
+		t.Error("readTail returned empty string")
+	}
+	if !strings.Contains(tail, "line5") {
+		t.Errorf("readTail = %q, want contains line5", tail)
+	}
+
+	// Test reading last 10 bytes (should get partial line)
+	tail = readTail(logPath, 10)
+	if tail == "" {
+		t.Error("readTail returned empty string for small n")
+	}
+}
+
+func TestReadTailMissingFile(t *testing.T) {
+	tail := readTail("/nonexistent/file/path", 100)
+	if tail != "" {
+		t.Errorf("readTail = %q, want empty string for missing file", tail)
+	}
+}
+
+func TestServiceExitError(t *testing.T) {
+	err := &ServiceExitError{
+		PID:       12345,
+		Argv:      []string{"./tovarisch", "serve", "--listen=127.0.0.1:18080"},
+		ExitError: nil,
+		StdoutTail: "error: config missing\n",
+	}
+
+	msg := err.Error()
+
+	// Verify PID is in error message
+	if !strings.Contains(msg, "12345") {
+		t.Errorf("ServiceExitError.Error() = %q, want contains PID 12345", msg)
+	}
+
+	// Verify command is in error message
+	if !strings.Contains(msg, "tovarisch") {
+		t.Errorf("ServiceExitError.Error() = %q, want contains command", msg)
+	}
+
+	// Verify stdout tail is in error message
+	if !strings.Contains(msg, "error: config missing") {
+		t.Errorf("ServiceExitError.Error() = %q, want contains stdout tail", msg)
+	}
+}
+
+func TestServiceExitErrorWithExitStatus(t *testing.T) {
+	// Test that ServiceExitError with nil ExitError shows "unknown exit status"
+	err := &ServiceExitError{
+		PID:        12345,
+		Argv:       []string{"./tovarisch", "serve", "--listen=127.0.0.1:18080"},
+		ExitError:  nil,
+		StdoutTail: "fatal: serve command not supported\n",
+	}
+
+	msg := err.Error()
+
+	// Verify PID is present
+	if !strings.Contains(msg, "12345") {
+		t.Errorf("ServiceExitError.Error() = %q, want contains PID", msg)
+	}
+
+	// Verify "unknown exit status" is shown when ExitError is nil
+	if !strings.Contains(msg, "unknown exit status") {
+		t.Errorf("ServiceExitError.Error() = %q, want contains 'unknown exit status'", msg)
+	}
+
+	// Verify stdout tail is present
+	if !strings.Contains(msg, "fatal:") {
+		t.Errorf("ServiceExitError.Error() = %q, want contains stdout tail", msg)
+	}
+}
+
+func TestReadinessTimeoutError(t *testing.T) {
+	err := &ReadinessTimeoutError{
+		PID:          12345,
+		ReadinessURL: "http://127.0.0.1:18080/status",
+		StdoutTail:   "listening on 127.0.0.1:18080\n",
+	}
+
+	msg := err.Error()
+
+	// Verify URL is in error message
+	if !strings.Contains(msg, "http://127.0.0.1:18080/status") {
+		t.Errorf("ReadinessTimeoutError.Error() = %q, want contains URL", msg)
+	}
+
+	// Verify PID is in error message
+	if !strings.Contains(msg, "12345") {
+		t.Errorf("ReadinessTimeoutError.Error() = %q, want contains PID", msg)
+	}
+
+	// Verify stdout tail is in error message
+	if !strings.Contains(msg, "listening on") {
+		t.Errorf("ReadinessTimeoutError.Error() = %q, want contains stdout tail", msg)
+	}
+}
+
+func TestReadinessTimeoutErrorNoTail(t *testing.T) {
+	err := &ReadinessTimeoutError{
+		PID:          12345,
+		ReadinessURL: "http://127.0.0.1:18080/status",
+		StdoutTail:   "",
+	}
+
+	msg := err.Error()
+
+	// Should still contain URL and PID even without tail
+	if !strings.Contains(msg, "http://127.0.0.1:18080/status") {
+		t.Errorf("ReadinessTimeoutError.Error() = %q, want contains URL", msg)
+	}
+	if !strings.Contains(msg, "12345") {
+		t.Errorf("ReadinessTimeoutError.Error() = %q, want contains PID", msg)
+	}
+}
+
+func TestRunnerKeepsCmd(t *testing.T) {
+	// Verify Runner struct has cmd field
+	r := &Runner{}
+	// This just verifies the field exists and is accessible
+	r.cmd = nil
+	if r.cmd != nil {
+		t.Error("cmd should be nil initially")
+	}
+}
+
+// fakeCmd is a minimal fake for testing
+type fakeCmd struct {
+	args         []string
+	processState os.ProcessState
+}
+
+// fakeProcessState is a minimal fake for testing
+type fakeProcessState struct {
+	exitStatus int
+}
+
+func (f *fakeProcessState) Exited() bool      { return true }
+func (f *fakeProcessState) Success() bool     { return f.exitStatus == 0 }
+func (f *fakeProcessState) ExitStatus() int   { return f.exitStatus }
+func (f *fakeProcessState) Sys() interface{}  { return nil }
+func (f *fakeProcessState) SysUsage() interface{} { return nil }
+func (f *fakeProcessState) String() string    { return "" }
