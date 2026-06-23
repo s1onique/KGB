@@ -405,7 +405,8 @@ def main():
     if "--self-test" in sys.argv:
         sys.exit(0 if run_self_tests() else 1)
 
-    errors = run_verifier(REPO_ROOT)
+    require_real_evidence = "--require-real-evidence" in sys.argv
+    errors = run_verifier(REPO_ROOT, require_real_evidence=require_real_evidence)
 
     print("\n" + "=" * 50)
     if errors:
