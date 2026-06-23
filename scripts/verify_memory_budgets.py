@@ -31,6 +31,10 @@ from verify_memory_budgets_leak_slope_ci import (
     validate_ci_leak_slope_baselines,
     check_leak_slope_baseline_evidence_exists,
 )
+from verify_memory_budgets_leak_slope_long_window import (
+    validate_ci_leak_slope_long_window,
+    check_long_window_evidence_traceability,
+)
 
 REQUIRED_BUDGET_FILES = [
     "tovarisch-memory-budget.yaml",
@@ -236,6 +240,32 @@ def run_verifier() -> List[str]:
             all_errors.extend(leak_trace_errors)
         else:
             print(f"    Leak-slope evidence traceability: OK for {filename}")
+    
+    print("\nE. Validating long-window leak-slope baselines...")
+    for filename, data in budgets_data.items():
+        if "ci_leak_slope_long_window" not in data:
+            continue
+        
+        # Validate long-window schema
+        lw_errors = validate_ci_leak_slope_long_window(data, filename)
+        if lw_errors:
+            for e in lw_errors:
+                print(f"    LONG_WINDOW SCHEMA ERROR: {e}")
+            all_errors.extend(lw_errors)
+        else:
+            print(f"    Long-window schema valid for {filename}")
+    
+    print("\nF. Checking long-window evidence traceability...")
+    for filename, data in budgets_data.items():
+        if "ci_leak_slope_long_window" not in data:
+            continue
+        lw_trace_errors = check_long_window_evidence_traceability(data, filename, REPO_ROOT)
+        if lw_trace_errors:
+            for e in lw_trace_errors:
+                print(f"    LONG_WINDOW EVIDENCE ERROR: {e}")
+            all_errors.extend(lw_trace_errors)
+        else:
+            print(f"    Long-window evidence traceability: OK for {filename}")
     
     return all_errors
 

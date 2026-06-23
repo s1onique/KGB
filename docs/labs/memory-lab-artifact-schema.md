@@ -149,6 +149,34 @@ workload-log.json         # Optional: Detailed operation log
 
 Use `scripts/verify_memory_lab_artifact.py` to validate artifacts against this schema.
 
+## Evidence Classes
+
+Memory lab artifacts are classified by signal quality:
+
+### Short-Window Evidence (warmup_sensitive)
+
+- **Window**: 10 seconds
+- **signal_quality**: `warmup_sensitive`
+- **Use**: Quick CI feedback, not definitive leak proof
+- **Limitations**: Warmup effects dominate the signal
+
+### Long-Window Evidence (long_window)
+
+- **Window**: >= 900 seconds (15+ minutes)
+- **signal_quality**: `long_window`
+- **Use**: Durable leak-slope evidence with warmup settled
+- **Requirements**:
+  - operations >= 9000
+  - duration_seconds >= 900
+  - request_errors == 0
+
+### Evidence Preserved Location
+
+Long-window evidence from workflow run 28024460972 is preserved at:
+```
+docs/evidence/memory-lab/run-28024460972/
+```
+
 ## See Also
 
 - `kgb://doctrine/embedded-memory-frugality` — Memory doctrine

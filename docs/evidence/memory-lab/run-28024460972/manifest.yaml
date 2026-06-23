@@ -1,0 +1,71 @@
+# Long-window memory leak-slope evidence manifest
+# First durable long-window evidence from workflow run 28024460972
+
+evidence_class: memory_leak_slope_long_window
+signal_quality: long_window
+
+workflow_run_id: 28024460972
+source_repository: s1onique/KGB
+source_workflow_name: Memory Lab
+source_workflow_path: .github/workflows/memory-lab.yml
+
+source_commit_sha: 189937815e2493d4179e6bc9729cde74785699ef
+downloaded_at_utc: "2026-06-23T12:38:00Z"
+
+artifacts:
+  diagnostics:
+    artifact_id: 7820989432
+    artifact_name: memory-lab-diagnostics
+    size_in_bytes: 9570
+    expired: false
+    created_at: "2026-06-23T12:37:55Z"
+    updated_at: "2026-06-23T12:37:55Z"
+  tovarisch:
+    artifact_id: 7820989700
+    artifact_name: tovarisch-memory-lab
+    size_in_bytes: 4760
+    expired: false
+    created_at: "2026-06-23T12:37:55Z"
+    updated_at: "2026-06-23T12:37:55Z"
+  uvb76:
+    artifact_id: 7820989961
+    artifact_name: uvb76-memory-lab
+    size_in_bytes: 4381
+    expired: false
+    created_at: "2026-06-23T12:37:56Z"
+    updated_at: "2026-06-23T12:37:56Z"
+
+workloads:
+  uvb76:
+    component: uvb76
+    workload_type: uvb76-leak-slope
+    operations: 9000
+    request_errors: 0
+    duration_ms: 906198
+    duration_seconds: 906.198
+    max_rss_kib: 17344
+    max_pss_kib: 17336
+    rss_slope_kib_per_min: 360.72
+    pss_slope_kib_per_min: 360.72
+    warmup_seconds: 180
+  tovarisch:
+    component: tovarisch
+    workload_type: tovarisch-leak-slope
+    operations: 9000
+    request_errors: 0
+    duration_ms: 908819
+    duration_seconds: 908.819
+    max_rss_kib: 9004
+    max_pss_kib: 7122
+    rss_slope_kib_per_min: 60.47
+    pss_slope_kib_per_min: 60.47
+    warmup_seconds: 180
+
+verifier:
+  command: "python scripts/verify_memory_lab_artifact.py --require-real-evidence"
+  result: pass
+
+notes: |
+  This is the FIRST long-window memory leak-slope evidence.
+  Short-window baselines are separate and labeled as warmup_sensitive.
+  This evidence is from a 900+ second soak with 9000 operations.

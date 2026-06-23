@@ -1,0 +1,7 @@
+# Artifact ID to Name mapping for workflow run 28024460972
+# Generated: 2026-06-23T12:38:00Z
+
+artifact_id	name	size_in_bytes	expired	created_at	updated_at
+7820989432	memory-lab-diagnostics	9570	false	2026-06-23T12:37:55Z	2026-06-23T12:37:55Z
+7820989700	tovarisch-memory-lab	4760	false	2026-06-23T12:37:55Z	2026-06-23T12:37:55Z
+7820989961	uvb76-memory-lab	4381	false	2026-06-23T12:37:56Z	2026-06-23T12:37:56Z

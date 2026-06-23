@@ -8,6 +8,7 @@ Validates:
 - Required evidence fields are present in leak-slope baselines
 - Artifact traceability by workload identity (not filename substring)
 - Short-window baselines are labeled as warmup_sensitive
+- Long-window baselines are labeled as long_window with duration_seconds >= 900
 """
 
 import os
@@ -29,6 +30,27 @@ REQUIRED_LEAK_SLOPE_EVIDENCE_FIELDS = [
     "short_window_seconds",
     "signal_quality",
 ]
+
+# Required fields for long-window leak-slope baseline evidence entries
+REQUIRED_LEAK_SLOPE_LONG_WINDOW_EVIDENCE_FIELDS = [
+    "workflow_run",
+    "artifact_id",
+    "artifact_name",
+    "service_version",
+    "service_commit",
+    "workload",
+    "duration_seconds",
+    "operations",
+    "request_errors",
+    "environment_label",
+    "workload_type",
+    "long_window_seconds",
+    "signal_quality",
+]
+
+# Long-window minimum thresholds
+LONG_WINDOW_MIN_DURATION_SECONDS = 900
+LONG_WINDOW_MIN_OPERATIONS = 9000
 
 # Known environment labels
 VALID_ENVIRONMENT_LABELS = [

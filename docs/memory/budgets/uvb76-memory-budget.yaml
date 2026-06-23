@@ -101,6 +101,48 @@ ci_leak_slope_baselines:
         short_window_seconds: 10
         signal_quality: warmup_sensitive
 
+# GitHub-hosted CI long-window leak-slope baselines (first evidence run 28024460972)
+# These are LONG-WINDOW baselines with signal_quality: long_window.
+# Stronger signal than short-window - warmup has settled.
+ci_leak_slope_long_window:
+  github_hosted_ubuntu:
+    # First long-window leak-slope evidence: workflow 28024460972, artifact 7820989961
+    # This is the FIRST durable long-window evidence - strong leak-slope signal.
+    evidence_status: long_window_evidence
+    signal_quality: long_window
+    long_window_seconds: 900
+    uvb76_leak_slope:
+      rss_slope_kib_per_min: 360.72
+      pss_slope_kib_per_min: 360.72
+      rss_max_kib: 17344
+      pss_max_kib: 17336
+      rss_growth_kib: 5448
+      pss_growth_kib: 5448
+      operations: 9000
+      errors: 0
+      duration_ms: 906198
+      duration_seconds: 906.198
+      warmup_seconds: 180
+      notes: |
+        Long-window baseline (906s). signal_quality: long_window - durable leak-slope evidence.
+        Warmup has settled; this is stronger evidence than short-window baselines.
+        Source: workflow run 28024460972, artifact uvb76-memory-lab (ID 7820989961).
+        Evidence preserved in: docs/evidence/memory-lab/run-28024460972/
+    evidence_sources:
+      - workflow_run: 28024460972
+        artifact_id: 7820989961
+        artifact_name: uvb76-memory-lab
+        service_version: "unknown"
+        service_commit: "189937815e2493d4179e6bc9729cde74785699ef"
+        workload: uvb76-leak-slope
+        duration_seconds: 906.198
+        operations: 9000
+        request_errors: 0
+        environment_label: github_hosted_ubuntu
+        workload_type: uvb76_leak_slope
+        long_window_seconds: 900
+        signal_quality: long_window
+
 # Proposed warning thresholds (for medium/long manual mode)
 # Router/embedded leak-slope baselines remain baseline_required
 ci_leak_slope_thresholds:

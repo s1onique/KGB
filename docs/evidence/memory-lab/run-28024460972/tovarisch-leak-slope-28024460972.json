@@ -1,0 +1,67 @@
+{
+  "schema_version": "1.0",
+  "evidence_kind": "real_evidence",
+  "service": {
+    "name": "tovarisch",
+    "version": "tovarisch 0.1.2+1899378",
+    "commit": "1899378"
+  },
+  "environment": {
+    "arch": "linux/amd64",
+    "kernel": "Linux version 6.17.0-1018-azure (buildd@lcy02-amd64-096) (x86_64-linux-gnu-gcc-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, GNU ld (GNU Binutils for Ubuntu) 2.42) #18~24.04.1-Ubuntu SMP Thu May 28 16:39:11 UTC 2026",
+    "os": "Linux",
+    "has_smaps_rollup": true
+  },
+  "workload": {
+    "type": "tovarisch-leak-slope",
+    "operations": 9000,
+    "errors": 0,
+    "duration_ms": 908819,
+    "interval_ms": 100,
+    "endpoint": "/status",
+    "warmup_seconds": 180,
+    "description": "Idle memory footprint after 180s warmup"
+  },
+  "memory": {
+    "first": {
+      "rss_kib": 8088,
+      "pss_kib": 6206
+    },
+    "max": {
+      "rss_kib": 9004,
+      "pss_kib": 7122
+    },
+    "last": {
+      "rss_kib": 9004,
+      "pss_kib": 7122
+    },
+    "growth": {
+      "rss_kib": 916,
+      "pss_kib": 916,
+      "rss_percent": 11.32542037586548
+    }
+  },
+  "leak_slope": {
+    "sampled_points": 544,
+    "duration_seconds": 908.819,
+    "rss_first_kib": 8088,
+    "rss_max_kib": 9004,
+    "rss_last_kib": 9004,
+    "pss_first_kib": 6206,
+    "pss_max_kib": 7122,
+    "pss_last_kib": 7122,
+    "rss_growth_kib": 916,
+    "pss_growth_kib": 916,
+    "rss_slope_kib_per_min": 60.47408779966088,
+    "pss_slope_kib_per_min": 60.47408779966088,
+    "request_count": 9000,
+    "request_errors": 0
+  },
+  "runtime": {
+    "allocator": "zig-default"
+  },
+  "decision": {
+    "pass": true,
+    "reason": "No budget for workload type \"tovarisch-leak-slope\"; measurement recorded"
+  }
+}
