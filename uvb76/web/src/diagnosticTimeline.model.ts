@@ -17,14 +17,17 @@ export type CaptureStatusDisplay = 'captured' | 'suppressed' | 'failed' | 'not_a
 /** Timestamp quality status */
 export type TimeStatus = 'ok' | 'missing' | 'invalid';
 
+/** Data quality status for a timeline event */
+export type TimelineEventDataStatus = 'ok' | 'malformed';
+
 /** Unified timeline event combining HTTP and ICMP spike events */
 export interface TimelineEvent {
   // Source data
   eventId: string;
   targetId: string;
-  probeKind: ProbeKind;
-  severity: Severity;
-  latencyMs: number;
+  probeKind: ProbeKind | 'unknown';
+  severity: Severity | 'unknown';
+  latencyMs: number | null;
   sampleTs: string;
   collectedAt: string;
   reasons: string[];
@@ -48,9 +51,14 @@ export interface TimelineEvent {
   timeStatus: TimeStatus;
   
   // Stable sort keys
-  sortProbeKind: number;  // http=0, icmp=1
-  sortSeverity: number;    // warning=0, critical=1
+  sortProbeKind: number;  // http=0, icmp=1, unknown=2
+  sortSeverity: number;    // warning=0, critical=1, unknown=2
   sortEventId: string;     // event id for stable tie-break
+
+  // Data quality tracking - explicit malformed-row semantics
+  // Distinguishes "legitimate missing optional value" from "wrong DTO shape"
+  dataStatus: TimelineEventDataStatus;
+  malformedReasons: string[];
 }
 
 /** Summary card for a probe kind */
@@ -278,16 +286,81 @@ function normalizeDisplayString(value: unknown, fallback: string): string {
   return fallback;
 }
 
-/** Normalize a spike event to a timeline event */
-function normalizeSpikeEvent(spike: SpikeEventWithCaptures): TimelineEvent {
+/**
+ * Result of normalizing a spike event with data quality tracking.
+ */
+interface NormalizeSpikeEventResult {
+  event: TimelineEvent;
+  malformedReasons: string[];
+}
+
+/**
+ * Validate and normalize a spike event, tracking data quality issues.
+ * 
+ * Unlike previous implementations that silently defaulted missing values,
+ * this function explicitly tracks when the DTO shape is wrong so the UI
+ * can render honest degraded rows instead of fake data.
+ */
+function normalizeSpikeEvent(spike: SpikeEventWithCaptures): NormalizeSpikeEventResult {
+  const malformedReasons: string[] = [];
+  
   const { ms, status } = getCanonicalTime(spike);
+  
+  // Validate event_id - missing is a data quality issue
+  const hasEventId = typeof spike.event_id === 'string' && spike.event_id.trim() !== '';
+  if (!hasEventId) {
+    malformedReasons.push('missing event_id');
+  }
+  
+  // Validate kind - unknown/missing is a data quality issue (not defaulting to http)
+  const hasValidKind = spike.kind === 'http' || spike.kind === 'icmp';
+  if (!hasValidKind) {
+    malformedReasons.push(spike.kind === undefined ? 'missing kind' : `invalid kind: ${spike.kind}`);
+  }
+  
+  // Validate severity - unknown/missing is a data quality issue (not defaulting to warning)
+  const hasValidSeverity = spike.severity === 'warning' || spike.severity === 'critical';
+  if (!hasValidSeverity) {
+    malformedReasons.push(spike.severity === undefined ? 'missing severity' : `invalid severity: ${spike.severity}`);
+  }
+  
+  // Validate latency_ms
+  const hasValidLatency = typeof spike.latency_ms === 'number' && Number.isFinite(spike.latency_ms);
+  if (!hasValidLatency) {
+    malformedReasons.push(spike.latency_ms === undefined ? 'missing latency_ms' : `invalid latency_ms: ${spike.latency_ms}`);
+  }
   
   // Normalize event identity - always non-empty string
   const eventId = normalizeEventId(spike);
   
-  // Normalize enum fields at the API boundary - these are rendered with .toUpperCase()
-  const probeKind = normalizeProbeKind(spike.kind);
-  const severity = normalizeSeverity(spike.severity);
+  // Determine effective probeKind and severity (with 'unknown' for malformed values)
+  // This preserves type safety while allowing honest degraded rendering
+  let probeKind: ProbeKind | 'unknown';
+  let sortProbeKind: number;
+  if (spike.kind === 'http') {
+    probeKind = 'http';
+    sortProbeKind = 0;
+  } else if (spike.kind === 'icmp') {
+    probeKind = 'icmp';
+    sortProbeKind = 1;
+  } else {
+    probeKind = 'unknown';
+    sortProbeKind = 2; // Sort unknown after known values
+  }
+  
+  let severity: Severity | 'unknown';
+  let sortSeverity: number;
+  if (spike.severity === 'warning') {
+    severity = 'warning';
+    sortSeverity = 0;
+  } else if (spike.severity === 'critical') {
+    severity = 'critical';
+    sortSeverity = 1;
+  } else {
+    severity = 'unknown';
+    sortSeverity = 2; // Sort unknown after known values
+  }
+  
   const targetId = normalizeDisplayString(spike.target_id, 'unknown-target');
   
   // Sort captures: prefer 'captured', then 'suppressed', then others
@@ -299,16 +372,16 @@ function normalizeSpikeEvent(spike: SpikeEventWithCaptures): TimelineEvent {
   const primaryCapture = sortedCaptures[0] || null;
   const captureStatus = primaryCapture ? mapCaptureStatus(primaryCapture) : 'not_attempted';
   
-  return {
+  const event: TimelineEvent = {
     eventId,
     targetId,
     probeKind,
     severity,
-    latencyMs: spike.latency_ms,
-    sampleTs: spike.sample_ts,
-    collectedAt: spike.collected_at,
-    reasons: spike.reasons,
-    rollingMedianMs: spike.rolling_median_ms,
+    latencyMs: hasValidLatency ? spike.latency_ms : null,
+    sampleTs: spike.sample_ts || '',
+    collectedAt: spike.collected_at || '',
+    reasons: spike.reasons || [],
+    rollingMedianMs: spike.rolling_median_ms ?? 0,
     thresholds: {
       warningMs: spike.thresholds?.warning_ms ?? 0,
       criticalMs: spike.thresholds?.critical_ms ?? 0,
@@ -319,22 +392,26 @@ function normalizeSpikeEvent(spike: SpikeEventWithCaptures): TimelineEvent {
     captureStatus,
     canonicalTimeMs: ms,
     timeStatus: status,
-    sortProbeKind: probeKind === 'http' ? 0 : 1,
-    sortSeverity: severity === 'warning' ? 0 : 1,
+    sortProbeKind,
+    sortSeverity,
     sortEventId: eventId,
+    dataStatus: malformedReasons.length === 0 ? 'ok' : 'malformed',
+    malformedReasons,
   };
+  
+  return { event, malformedReasons };
 }
 
-/** Normalize HTTP response */
-function normalizeHttpResponse(response: SpikeResponseWithCaptures | null): TimelineEvent[] {
+/** Normalize HTTP response - exported for use in effects.ts */
+export function normalizeHttpResponse(response: SpikeResponseWithCaptures | null): TimelineEvent[] {
   if (!response?.spikes) return [];
-  return response.spikes.map(normalizeSpikeEvent);
+  return response.spikes.map(spike => normalizeSpikeEvent(spike).event);
 }
 
-/** Normalize ICMP response */
-function normalizeIcmpResponse(response: SpikeResponseWithCaptures | null): TimelineEvent[] {
+/** Normalize ICMP response - exported for use in effects.ts */
+export function normalizeIcmpResponse(response: SpikeResponseWithCaptures | null): TimelineEvent[] {
   if (!response?.spikes) return [];
-  return response.spikes.map(normalizeSpikeEvent);
+  return response.spikes.map(spike => normalizeSpikeEvent(spike).event);
 }
 
 // ---------------------------------------------------------------------------

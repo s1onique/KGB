@@ -23,4 +23,11 @@ export {
 } from './model';
 
 // Re-export types from the base model
-export type { TimelineEvent, ProbeKind, Severity, CaptureStatusDisplay } from '../diagnosticTimeline.model';
+export type { 
+  TimelineEvent, 
+  ProbeKind, 
+  Severity, 
+  CaptureStatusDisplay,
+  TimelineEventDataStatus,
+  TimeStatus 
+} from '../diagnosticTimeline.model';

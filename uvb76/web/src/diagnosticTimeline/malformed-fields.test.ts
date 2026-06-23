@@ -1,5 +1,6 @@
 // Diagnostic Timeline Malformed Fields Regression Tests
 // Tests for the "Cannot read properties of undefined (reading 'toUpperCase')" fix
+// AND the DTO contract correctness fix for honest malformed-row rendering
 
 import { describe, it, expect } from 'vitest';
 import { buildTimelineState, sortTimelineEvents } from '../diagnosticTimeline.model';
@@ -73,8 +74,41 @@ function createEventWithFields(overrides: Partial<{
     sortProbeKind: probeKind === 'http' ? 0 : 1,
     sortSeverity: severity === 'warning' ? 0 : 1,
     sortEventId: eventId,
+    dataStatus: 'ok',
+    malformedReasons: [],
   };
 }
+
+// ---------------------------------------------------------------------------
+// Valid Event Tests (should remain unchanged)
+// ---------------------------------------------------------------------------
+
+describe('buildTimelineState with valid spike event', () => {
+  it('produces ok event with correct probeKind', () => {
+    const response = createValidSpikeResponse({ kind: 'http' });
+    const state = buildTimelineState(response, null);
+    
+    expect(state.httpEvents[0].dataStatus).toBe('ok');
+    expect(state.httpEvents[0].probeKind).toBe('http');
+    expect(state.httpEvents[0].malformedReasons).toHaveLength(0);
+  });
+
+  it('produces ok event with icmp probeKind', () => {
+    const response = createValidSpikeResponse({ kind: 'icmp' });
+    const state = buildTimelineState(response, null);
+    
+    expect(state.httpEvents[0].dataStatus).toBe('ok');
+    expect(state.httpEvents[0].probeKind).toBe('icmp');
+  });
+
+  it('produces ok event with critical severity', () => {
+    const response = createValidSpikeResponse({ severity: 'critical' });
+    const state = buildTimelineState(response, null);
+    
+    expect(state.httpEvents[0].dataStatus).toBe('ok');
+    expect(state.httpEvents[0].severity).toBe('critical');
+  });
+});
 
 // ---------------------------------------------------------------------------
 // buildTimelineState Tests - Missing/Invalid probeKind
@@ -121,24 +155,29 @@ describe('buildTimelineState with malformed probeKind', () => {
     }).not.toThrow();
   });
 
-  it('normalizes missing kind to http (default)', () => {
+  it('marks missing kind as malformed with UNKNOWN probeKind', () => {
     const response = createValidSpikeResponse({ kind: undefined });
     const state = buildTimelineState(response, null);
     
-    expect(state.httpEvents[0].probeKind).toBe('http');
+    expect(state.httpEvents[0].dataStatus).toBe('malformed');
+    expect(state.httpEvents[0].probeKind).toBe('unknown');
+    expect(state.httpEvents[0].malformedReasons).toContain('missing kind');
   });
 
-  it('normalizes invalid kind to http (default)', () => {
+  it('marks invalid kind as malformed with UNKNOWN probeKind', () => {
     const response = createValidSpikeResponse({ kind: 'garbage' });
     const state = buildTimelineState(response, null);
     
-    expect(state.httpEvents[0].probeKind).toBe('http');
+    expect(state.httpEvents[0].dataStatus).toBe('malformed');
+    expect(state.httpEvents[0].probeKind).toBe('unknown');
+    expect(state.httpEvents[0].malformedReasons).toContain('invalid kind: garbage');
   });
 
   it('preserves icmp when kind is icmp', () => {
     const response = createValidSpikeResponse({ kind: 'icmp' });
     const state = buildTimelineState(response, null);
     
+    expect(state.httpEvents[0].dataStatus).toBe('ok');
     expect(state.httpEvents[0].probeKind).toBe('icmp');
   });
 });
@@ -188,25 +227,61 @@ describe('buildTimelineState with malformed severity', () => {
     }).not.toThrow();
   });
 
-  it('normalizes missing severity to warning (default)', () => {
+  it('marks missing severity as malformed with UNKNOWN severity', () => {
     const response = createValidSpikeResponse({ severity: undefined });
     const state = buildTimelineState(response, null);
     
-    expect(state.httpEvents[0].severity).toBe('warning');
+    expect(state.httpEvents[0].dataStatus).toBe('malformed');
+    expect(state.httpEvents[0].severity).toBe('unknown');
+    expect(state.httpEvents[0].malformedReasons).toContain('missing severity');
   });
 
-  it('normalizes invalid severity to warning (default)', () => {
+  it('marks invalid severity as malformed with UNKNOWN severity', () => {
     const response = createValidSpikeResponse({ severity: 'garbage' });
     const state = buildTimelineState(response, null);
     
-    expect(state.httpEvents[0].severity).toBe('warning');
+    expect(state.httpEvents[0].dataStatus).toBe('malformed');
+    expect(state.httpEvents[0].severity).toBe('unknown');
+    expect(state.httpEvents[0].malformedReasons).toContain('invalid severity: garbage');
   });
 
   it('preserves critical when severity is critical', () => {
     const response = createValidSpikeResponse({ severity: 'critical' });
     const state = buildTimelineState(response, null);
     
+    expect(state.httpEvents[0].dataStatus).toBe('ok');
     expect(state.httpEvents[0].severity).toBe('critical');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildTimelineState Tests - Missing/Invalid latency_ms
+// ---------------------------------------------------------------------------
+
+describe('buildTimelineState with malformed latency_ms', () => {
+  it('does not throw when spike is missing latency_ms', () => {
+    const response = createValidSpikeResponse({ latency_ms: undefined });
+    
+    expect(() => {
+      buildTimelineState(response, null);
+    }).not.toThrow();
+  });
+
+  it('marks missing latency as malformed', () => {
+    const response = createValidSpikeResponse({ latency_ms: undefined });
+    const state = buildTimelineState(response, null);
+    
+    expect(state.httpEvents[0].dataStatus).toBe('malformed');
+    expect(state.httpEvents[0].latencyMs).toBeNull();
+    expect(state.httpEvents[0].malformedReasons).toContain('missing latency_ms');
+  });
+
+  it('marks invalid latency as malformed', () => {
+    const response = createValidSpikeResponse({ latency_ms: NaN });
+    const state = buildTimelineState(response, null);
+    
+    expect(state.httpEvents[0].dataStatus).toBe('malformed');
+    expect(state.httpEvents[0].latencyMs).toBeNull();
   });
 });
 
@@ -293,26 +368,49 @@ describe('buildTimelineState with multiple malformed fields', () => {
     }).not.toThrow();
   });
 
-  it('produces valid TimelineEvent when all fields are malformed', () => {
+  it('produces malformed event when all fields are missing', () => {
     const response = createValidSpikeResponse({
       event_id: undefined,
       target_id: undefined,
       kind: undefined,
       severity: undefined,
-      sample_ts: 'not-a-timestamp',  // Use clearly invalid value
+      latency_ms: undefined, // Must explicitly set to undefined
+      sample_ts: 'not-a-timestamp',
     });
     const state = buildTimelineState(response, null);
     
     const event = state.httpEvents[0];
     
-    // All fields should be normalized to valid values
+    // Should be marked as malformed
+    expect(event.dataStatus).toBe('malformed');
+    expect(event.malformedReasons.length).toBeGreaterThan(0);
+    
+    // probeKind and severity should be 'unknown', NOT default http/warning
+    expect(event.probeKind).toBe('unknown');
+    expect(event.severity).toBe('unknown');
+    
+    // Event ID should still be generated (fallback)
     expect(event.eventId).toBeTruthy();
     expect(event.eventId.length).toBeGreaterThan(0);
-    expect(event.targetId).toBe('unknown-target');
-    expect(event.probeKind).toBe('http');
-    expect(event.severity).toBe('warning');
-    // Note: sampleTs is the raw value from API; canonicalTimeMs/timeStatus reflect parsing result
-    expect(event.sampleTs).toBeTruthy();
+    
+    // latencyMs should be null when latency_ms is undefined
+    expect(event.latencyMs).toBeNull();
+  });
+
+  it('accumulates all malformed reasons', () => {
+    const response = createValidSpikeResponse({
+      event_id: undefined,
+      kind: undefined,
+      severity: undefined,
+      latency_ms: undefined,
+    });
+    const state = buildTimelineState(response, null);
+    
+    const reasons = state.httpEvents[0].malformedReasons;
+    expect(reasons).toContain('missing event_id');
+    expect(reasons).toContain('missing kind');
+    expect(reasons).toContain('missing severity');
+    expect(reasons).toContain('missing latency_ms');
   });
 
   it('sorts multiple malformed events without throwing', () => {
@@ -339,10 +437,10 @@ describe('buildTimelineState with multiple malformed fields', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Sorting with Normalized Enum Fields
+// Sorting with Unknown Values
 // ---------------------------------------------------------------------------
 
-describe('sorting with normalized enum fields', () => {
+describe('sorting with unknown enum values', () => {
   it('sorts events by canonical time regardless of probeKind normalization', () => {
     const events = [
       createEventWithFields({ eventId: 'evt-newer', probeKind: 'http' }),
@@ -359,10 +457,29 @@ describe('sorting with normalized enum fields', () => {
     expect(sorted[1].eventId).toBe('evt-older');
   });
 
-  it('does not throw when sorting events with normalized default values', () => {
+  it('sorts unknown probeKind after known values with same timestamp', () => {
+    const response1 = createValidSpikeResponse({ kind: undefined, event_id: 'evt-unknown' });
+    const response2 = createValidSpikeResponse({ kind: 'http', event_id: 'evt-http' });
+    
+    const state1 = buildTimelineState(response1, null);
+    const state2 = buildTimelineState(response2, null);
+    
+    const allEvents = [...state1.httpEvents, ...state2.httpEvents];
+    
+    // Same timestamp - sortProbeKind should be 2 for unknown, 0 for http
+    allEvents[0].canonicalTimeMs = allEvents[1].canonicalTimeMs = new Date('2026-06-18T12:00:00Z').getTime();
+    
+    const sorted = sortTimelineEvents(allEvents);
+    
+    // HTTP (sortProbeKind=0) should come before unknown (sortProbeKind=2)
+    expect(sorted[0].probeKind).toBe('http');
+    expect(sorted[1].probeKind).toBe('unknown');
+  });
+
+  it('does not throw when sorting events with unknown values', () => {
     const events = [
       createEventWithFields({ eventId: 'evt-1', probeKind: 'http', severity: 'warning' }),
-      createEventWithFields({ eventId: 'evt-2', probeKind: 'http', severity: 'warning' }),
+      createEventWithFields({ eventId: 'evt-2', probeKind: 'unknown', severity: 'unknown' }),
     ];
     
     expect(() => sortTimelineEvents(events)).not.toThrow();
@@ -370,11 +487,11 @@ describe('sorting with normalized enum fields', () => {
 });
 
 // ---------------------------------------------------------------------------
-// upperLabel Defense-in-Depth Tests (simulated)
+// upperLabel Defense-in-Depth Tests
 // ---------------------------------------------------------------------------
 
-describe('upperLabel defense-in-depth simulation', () => {
-  it('does not throw when event.probeKind is used in toUpperCase simulation', () => {
+describe('upperLabel defense-in-depth', () => {
+  it('does not throw when event.probeKind is unknown', () => {
     const response = createValidSpikeResponse({ kind: undefined });
     const state = buildTimelineState(response, null);
     
@@ -382,13 +499,13 @@ describe('upperLabel defense-in-depth simulation', () => {
     
     // Simulate what view.ts does - this should not throw
     expect(() => {
-      // Direct toUpperCase on normalized field (now safe)
+      // Direct toUpperCase on unknown field (now safe with upperLabel fallback)
       const label = event.probeKind.toUpperCase();
-      expect(label).toBe('HTTP');
+      expect(label).toBe('UNKNOWN');
     }).not.toThrow();
   });
 
-  it('does not throw when event.severity is used in toUpperCase simulation', () => {
+  it('does not throw when event.severity is unknown', () => {
     const response = createValidSpikeResponse({ severity: undefined });
     const state = buildTimelineState(response, null);
     
@@ -397,8 +514,48 @@ describe('upperLabel defense-in-depth simulation', () => {
     // Simulate what view.ts does - this should not throw
     expect(() => {
       const label = event.severity.toUpperCase();
-      expect(label).toBe('WARNING');
+      expect(label).toBe('UNKNOWN');
     }).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Summary Counts Match Table Rows (Invariant Test)
+// ---------------------------------------------------------------------------
+
+describe('summary counts match mergedEvents', () => {
+  it('httpSummary.totalEvents equals httpEvents.length', () => {
+    const response = createValidSpikeResponse({ kind: 'http' });
+    const state = buildTimelineState(response, null);
+    
+    expect(state.httpSummary.totalEvents).toBe(state.httpEvents.length);
+  });
+
+  it('icmpSummary.totalEvents equals icmpEvents.length', () => {
+    // ICMP events should go through normalizeIcmpResponse, not normalizeHttpResponse
+    const icmpResponse = createValidSpikeResponse({ kind: 'icmp' });
+    const state = buildTimelineState(null, icmpResponse);
+    
+    expect(state.icmpSummary.totalEvents).toBe(state.icmpEvents.length);
+  });
+
+  it('mergedEvents length equals httpEvents + icmpEvents', () => {
+    const httpResponse = createValidSpikeResponse({ kind: 'http' });
+    const icmpResponse = createValidSpikeResponse({ kind: 'icmp' });
+    const state = buildTimelineState(httpResponse, icmpResponse);
+    
+    expect(state.mergedEvents.length).toBe(state.httpEvents.length + state.icmpEvents.length);
+  });
+
+  it('summary counts reflect malformed events correctly', () => {
+    // When kind is unknown, it should NOT appear in httpSummary
+    const response = createValidSpikeResponse({ kind: undefined });
+    const state = buildTimelineState(response, null);
+    
+    // Unknown events should NOT be counted in httpSummary or icmpSummary
+    // because they don't match either 'http' or 'icmp' probeKind
+    expect(state.httpSummary.totalEvents).toBe(0);
+    expect(state.icmpSummary.totalEvents).toBe(0);
   });
 });
 

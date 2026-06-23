@@ -1,6 +1,11 @@
 // Diagnostic Timeline Effects - Explicit side effects
 
-import { fetchTimelineResponses, sortTimelineEvents } from '../diagnosticTimeline.model';
+import { 
+  fetchTimelineResponses, 
+  sortTimelineEvents,
+  normalizeHttpResponse,
+  normalizeIcmpResponse 
+} from '../diagnosticTimeline.model';
 import type { TimelineMsg } from './msg';
 
 // ---------------------------------------------------------------------------
@@ -31,9 +36,13 @@ async function fetchTimelineEffect(
   try {
     const { http, icmp } = await fetchTimelineResponses(targetId);
     
-    // Merge HTTP and ICMP events
-    const httpEvents = http?.spikes || [];
-    const icmpEvents = icmp?.spikes || [];
+    // CRITICAL: Normalize API responses before using them.
+    // Raw spike objects do NOT have TimelineEvent fields like probeKind, severity, 
+    // canonicalTimeMs, captureStatus, dataStatus, etc.
+    // Previously this code directly used http?.spikes which caused all the placeholder 
+    // row issues because fields weren't properly mapped.
+    const httpEvents = normalizeHttpResponse(http);
+    const icmpEvents = normalizeIcmpResponse(icmp);
     const mergedEvents = [...httpEvents, ...icmpEvents];
     
     // Sort newest-first with stable tie-breaks

@@ -239,13 +239,15 @@ export function createCrossProbeSuppressionResponse(): SpikeResponseWithCaptures
 export function createTimelineEvent(overrides: Partial<{
   eventId: string;
   targetId: string;
-  probeKind: 'http' | 'icmp';
-  severity: 'warning' | 'critical';
-  latencyMs: number;
+  probeKind: 'http' | 'icmp' | 'unknown';
+  severity: 'warning' | 'critical' | 'unknown';
+  latencyMs: number | null;
   sampleTs: string;
   collectedAt: string;
   captureStatus: 'captured' | 'suppressed' | 'failed' | 'not_attempted';
   canonicalTime: Date;
+  dataStatus: 'ok' | 'malformed';
+  malformedReasons: string[];
 }> = {}): TimelineEvent {
   const eventId = overrides.eventId ?? 'evt-1';
   const probeKind = overrides.probeKind ?? 'http';
@@ -271,10 +273,13 @@ export function createTimelineEvent(overrides: Partial<{
     captures: [],
     primaryCapture: null,
     captureStatus: overrides.captureStatus ?? 'captured',
-    canonicalTime,
-    sortProbeKind: probeKind === 'http' ? 0 : 1,
-    sortSeverity: severity === 'warning' ? 0 : 1,
+    canonicalTimeMs: canonicalTime.getTime(),
+    timeStatus: 'ok',
+    sortProbeKind: probeKind === 'http' ? 0 : probeKind === 'icmp' ? 1 : 2,
+    sortSeverity: severity === 'warning' ? 0 : severity === 'critical' ? 1 : 2,
     sortEventId: eventId,
+    dataStatus: overrides.dataStatus ?? 'ok',
+    malformedReasons: overrides.malformedReasons ?? [],
   };
 }
 

@@ -2,7 +2,7 @@
 
 import type { TimelineModel } from './model';
 import { PAGE_SIZE_OPTIONS, getFilteredEvents, getPagedEvents, getPaginationInfo } from './model';
-import type { TimelineEvent, ProbeKindSummary } from '../diagnosticTimeline.model';
+import type { TimelineEvent, ProbeKindSummary, ProbeKind, Severity, CaptureStatusDisplay } from '../diagnosticTimeline.model';
 import { formatSpikeTime, formatLatencyMs } from '../format';
 import { formatLocalDateTime, parseApiInstant } from '../time';
 
@@ -22,7 +22,12 @@ function escapeText(s: string | null | undefined): string {
 function escapeAttr(s: string | null | undefined): string {
   if (!s) return '';
   const str = String(s);
-  return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  // CRITICAL: Must use HTML entity names, not literal characters
+  // OWASP XSS guidance for HTML attribute context requires proper entity encoding
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // ---------------------------------------------------------------------------
@@ -44,35 +49,43 @@ function upperLabel(value: unknown, fallback = 'UNKNOWN'): string {
 // CSS Class Helpers
 // ---------------------------------------------------------------------------
 
-/** Get CSS class for probe kind */
-function getProbeKindClass(probeKind: string): string {
-  return probeKind === 'http' ? 'probe-http' : 'probe-icmp';
+/** Get CSS class for probe kind - handles 'unknown' for malformed rows */
+function getProbeKindClass(probeKind: ProbeKind | 'unknown'): string {
+  if (probeKind === 'http') return 'probe-http';
+  if (probeKind === 'icmp') return 'probe-icmp';
+  return 'probe-unknown'; // CSS class for malformed/unknown
 }
 
-/** Get CSS class for severity badge */
-function getSeverityClass(severity: string): string {
-  return severity === 'critical' ? 'severity-critical' : 'severity-warn';
+/** Get CSS class for severity badge - handles 'unknown' for malformed rows */
+function getSeverityClass(severity: Severity | 'unknown'): string {
+  if (severity === 'critical') return 'severity-critical';
+  if (severity === 'warning') return 'severity-warn';
+  return 'severity-unknown'; // CSS class for malformed/unknown
 }
 
-/** Get CSS class for capture status badge */
-function getCaptureStatusClass(status: string): string {
+/** Get CSS class for capture status badge - handles undefined/unknown */
+function getCaptureStatusClass(status: CaptureStatusDisplay | 'unknown' | undefined): string {
   switch (status) {
     case 'captured': return 'capture-captured';
     case 'suppressed': return 'capture-suppressed';
     case 'failed': return 'capture-failed';
     case 'not_attempted': return 'capture-muted';
+    case 'unknown': return 'capture-muted'; // Treat unknown like muted
+    case undefined: return 'capture-muted'; // Never render undefined to user
     default: return 'capture-muted';
   }
 }
 
-/** Get label for capture status */
-function getCaptureStatusLabel(status: string): string {
+/** Get label for capture status - NEVER returns undefined */
+function getCaptureStatusLabel(status: CaptureStatusDisplay | 'unknown' | undefined): string {
   switch (status) {
     case 'captured': return 'captured';
     case 'suppressed': return 'suppressed';
     case 'failed': return 'failed';
     case 'not_attempted': return 'not attempted';
-    default: return status;
+    case 'unknown': return 'unknown';
+    case undefined: return 'not attempted'; // Safe fallback, never undefined
+    default: return 'not attempted'; // Safe fallback for any unexpected value
   }
 }
 
