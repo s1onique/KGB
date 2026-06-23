@@ -5,6 +5,16 @@ import { formatLatencyMs } from './format';
 import { getOrCreateViewport, getViewport, clampToRetained } from './viewport';
 import { applyStoredScalePreset } from './targets';
 
+// Presentation-only label mapping (does not affect API/enum names)
+function probeKindToLabel(kind: 'http' | 'icmp'): string {
+  switch (kind) {
+    case 'http':
+      return 'HTTP status';
+    case 'icmp':
+      return 'ICMP ping';
+  }
+}
+
 // Check if series has any finite percentile values
 function hasFinitePercentiles(points: PercentilePoint[]): boolean {
   return points.some((p) => {
@@ -221,12 +231,12 @@ function createLatencyRenderer(): LatencyRenderer {
       renderLatencySection(
         targetId, 'http',
         httpMetaEl, httpStatsEl, httpChartEl, httpEmptyEl!, httpWarningEl!, httpSamplesEl!,
-        'HTTP status probe'
+        probeKindToLabel('http')
       ),
       renderLatencySection(
         targetId, 'icmp',
         icmpMetaEl!, icmpStatsEl!, icmpChartEl, icmpEmptyEl!, icmpWarningEl!, icmpSamplesEl!,
-        'ICMP ping'
+        probeKindToLabel('icmp')
       ),
     ]);
   }
