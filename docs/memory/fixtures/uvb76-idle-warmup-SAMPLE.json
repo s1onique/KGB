@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0",
+  "evidence_kind": "schema_fixture",
+  "_schema_fixture_note": "SAMPLE artifact - for schema validation only. Run make lab-uvb76-memory to generate real evidence.",
+  "service": {
+    "name": "uvb76",
+    "version": "1.0.0-placeholder",
+    "commit": "f231216"
+  },
+  "environment": {
+    "arch": "linux/arm64",
+    "kernel": "5.15.0-generic",
+    "os": "Linux",
+    "has_smaps_rollup": true
+  },
+  "workload": {
+    "type": "idle-warmup",
+    "operations": 0,
+    "errors": 0,
+    "duration_ms": 120000,
+    "warmup_seconds": 120,
+    "description": "Idle memory footprint after 120s warmup"
+  },
+  "memory": {
+    "first": {
+      "rss_kib": 18432,
+      "pss_kib": 17000
+    },
+    "max": {
+      "rss_kib": 20480,
+      "pss_kib": 18500
+    },
+    "last": {
+      "rss_kib": 19456,
+      "pss_kib": 17800
+    },
+    "growth": {
+      "rss_kib": 1024,
+      "pss_kib": 800,
+      "rss_percent": 5.56
+    }
+  },
+  "runtime": {
+    "goroutines": 25,
+    "heap_alloc_bytes": 4194304,
+    "gc_count": 3,
+    "gc_pause_ns": 150000
+  },
+  "decision": {
+    "pass": true,
+    "reason": "Idle memory baseline: RSS 19456 KiB, growth 5.56% within initial warmup"
+  }
+}

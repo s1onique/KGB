@@ -20,7 +20,7 @@ arch_budgets:
       pss_kib: baseline_required
       heap_alloc_bytes: baseline_required
       goroutines_max: baseline_required
-      notes: Measure after 120s warmup with no active probes
+      notes: Run make lab-uvb76-memory to generate real baseline
 
     # Warm steady-state — with active probing and collection
     warm:
@@ -29,7 +29,7 @@ arch_budgets:
       heap_alloc_bytes: baseline_required
       goroutines_max: baseline_required
       growth_allowed_kib: baseline_required
-      notes: Measure after 10 minutes with active ICMP/TCP probing
+      notes: Run make lab-uvb76-memory to generate real baseline
 
     # Hot-path allocation budgets (per-call)
     hot_paths:

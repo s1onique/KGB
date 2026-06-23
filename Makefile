@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate memory-lab memory-lab-test lab-tovarisch-memory lab-uvb76-memory
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 87
@@ -304,6 +304,43 @@ verify-memory-ownership:
 	@echo "=== Memory Ownership Hygiene Gate ==="
 	bash scripts/check_memory_ownership.sh
 
-memory-gate: verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership
+memory-gate: verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-lab-test
 	@echo "=== memory-gate passed ==="
+
+# === Go Memory Lab Runner ===
+# Native Go memory lab for real evidence generation.
+# Replaces Bash-based scripts under native-owned-critical-paths doctrine.
+
+memory-lab: tools/memory-lab/memory-lab
+
+tools/memory-lab/memory-lab: tools/memory-lab/*.go
+	cd tools/memory-lab && go build -o memory-lab .
+
+memory-lab-test:
+	cd tools/memory-lab && go test -v ./...
+
+# === Real Memory Labs (Linux only, requires /proc) ===
+# These labs measure real memory footprint under controlled workloads.
+# Artifacts go to: artifacts/memory-labs/{service}/
+# NOT part of local gate; run manually or via CI workflow_dispatch.
+
+BASH ?= bash
+
+# Tovarisch memory lab (Go-based)
+lab-tovarisch-memory: memory-lab
+	@echo "=== Tovarisch Memory Lab ==="
+	@if [ "$$(uname -s)" != "Linux" ]; then \
+		echo "[SKIP] Memory labs require Linux (needs /proc)"; \
+		exit 0; \
+	fi
+	@./tools/memory-lab/memory-lab --service tovarisch --workload tovarisch-idle-warmup --warmup-secs 60
+
+# UVB-76 memory lab (Go-based)
+lab-uvb76-memory: memory-lab
+	@echo "=== UVB-76 Memory Lab ==="
+	@if [ "$$(uname -s)" != "Linux" ]; then \
+		echo "[SKIP] Memory labs require Linux (needs /proc)"; \
+		exit 0; \
+	fi
+	@./tools/memory-lab/memory-lab --service uvb76 --workload uvb76-idle-warmup --warmup-secs 120
 

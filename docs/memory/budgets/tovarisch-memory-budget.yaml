@@ -19,7 +19,7 @@ arch_budgets:
       rss_kib: baseline_required
       pss_kib: baseline_required
       heap_alloc_bytes: baseline_required
-      notes: Measure after 60s warmup with no active BGP/BFD sessions
+      notes: Run make lab-tovarisch-memory to generate real baseline
 
     # Warm steady-state — with active BGP/BFD sessions
     warm:
@@ -27,7 +27,7 @@ arch_budgets:
       pss_kib: baseline_required
       heap_alloc_bytes: baseline_required
       growth_allowed_kib: baseline_required
-      notes: Measure after 5 minutes with stable BGP/BFD sessions
+      notes: Run make lab-tovarisch-memory to generate real baseline
 
     # Hot-path allocation budgets (per-call)
     hot_paths:

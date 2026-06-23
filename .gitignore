@@ -19,3 +19,4 @@ uvb76/uvb76-targets-crash-lab
 uvb76/uvb76-targets-crash-verify
 scripts/verify_shell_containment/__pycache__/
 uvb76/cmd/uvb76-capture-netns-polling/uvb76-capture-netns-polling
+tools/memory-lab/memory-lab
