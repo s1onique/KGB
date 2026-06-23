@@ -1824,11 +1824,17 @@ h2 { color: var(--color-text-secondary); margin: 1.5rem 0 1rem; font-weight: 500
     font-size: 0.875rem;
 }
 
-/* Timeline expanded panels */
-.timeline-expanded-panels {
-    padding: 0.5rem 1rem;
+/* Timeline details row - inline expansion within tbody for correct DOM anchoring */
+.timeline-details-row {
+    border-bottom: 1px solid var(--color-border-muted);
 }
 
+.timeline-details-row > td {
+    padding: 0;
+    background: var(--color-bg);
+}
+
+/* Timeline expanded panel content (inside .timeline-details-row) */
 .timeline-expanded-panel {
     display: none;
     padding: 1rem;

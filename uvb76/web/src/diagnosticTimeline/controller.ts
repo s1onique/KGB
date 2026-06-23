@@ -62,26 +62,10 @@ export class DiagnosticTimelineController {
     this.load();
   }
   
-  /** Restore expanded row state after render */
+  /** Restore expanded row state after render - no longer needed, view handles this */
   private restoreExpandedState(): void {
-    if (!this.container) return;
-    
-    for (const eventId of this.model.expandedEventIds) {
-      const buttons = this.container.querySelectorAll(
-        `.timeline-details-btn[data-event-id="${CSS.escape(eventId)}"]`
-      );
-      buttons.forEach((btn) => {
-        const button = btn as HTMLButtonElement;
-        const detailsId = button.dataset.detailsId;
-        if (!detailsId) return;
-        
-        const detailsEl = this.container?.querySelector('#' + detailsId);
-        if (detailsEl) {
-          detailsEl.style.display = 'block';
-          button.textContent = 'Hide';
-        }
-      });
-    }
+    // Expansion state is now rendered directly from model.expandedEventIds in view.ts
+    // This method is kept for backwards compatibility but does nothing
   }
   
   /** Setup event listeners for filter, pagination, and row interactions */
@@ -182,8 +166,8 @@ export class DiagnosticTimelineController {
         
         const detailsEl = this.container?.querySelector('#' + detailsId);
         if (detailsEl) {
-          const isHidden = detailsEl.style.display === 'none' || detailsEl.style.display === '';
-          detailsEl.style.display = isHidden ? 'block' : 'none';
+          const isHidden = detailsEl.style.display === 'none';
+          detailsEl.style.display = isHidden ? '' : 'none';
           buttonTarget.textContent = isHidden ? 'Hide' : 'Details';
           
           // Track expanded state by eventId

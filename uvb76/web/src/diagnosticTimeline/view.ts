@@ -326,12 +326,18 @@ function renderCrossProbeSuppression(event: TimelineEvent): string {
 // Expanded Panel Rendering
 // ---------------------------------------------------------------------------
 
-/** Render expanded evidence panel for an event */
-function renderExpandedPanel(event: TimelineEvent, rowIndex: number): string {
+/** Number of columns in the timeline table (for colspan) */
+const TABLE_COLUMN_COUNT = 7;
+
+/** Render expanded evidence panel for an event - as a TABLE ROW for correct DOM anchoring */
+function renderExpandedPanelRow(event: TimelineEvent, rowIndex: number, isExpanded: boolean): string {
   const detailsId = `timeline-details-${rowIndex}`;
+  const displayStyle = isExpanded ? '' : ' style="display:none"';
   
-  let html = `<div class="timeline-expanded-panel" id="${detailsId}">`;
+  let html = `<tr class="timeline-details-row" data-details-for="${escapeAttr(event.eventId)}" id="${detailsId}"${displayStyle}>`;
+  html += `<td colspan="${TABLE_COLUMN_COUNT}">`;
   
+  html += '<div class="timeline-expanded-panel">';
   html += '<div class="event-metadata">';
   html += `<div class="detail-row"><span class="detail-label">Event ID:</span><span class="detail-value event-id">${escapeAttr(event.eventId)}</span></div>`;
   html += `<div class="detail-row"><span class="detail-label">Sample time:</span><span class="detail-value">${formatTimelineTime(event.sampleTs)}</span></div>`;
@@ -339,7 +345,7 @@ function renderExpandedPanel(event: TimelineEvent, rowIndex: number): string {
   html += `<div class="detail-row"><span class="detail-label">Latency:</span><span class="detail-value latency-value">${formatLatencyMs(event.latencyMs)}</span></div>`;
   html += `<div class="detail-row"><span class="detail-label">Rolling median:</span><span class="detail-value">${event.rollingMedianMs} ms</span></div>`;
   
-  if (event.reasons.length > 0) {
+  if (event.reasons && event.reasons.length > 0) {
     html += `<div class="detail-row"><span class="detail-label">Reasons:</span><span class="detail-value">${escapeText(event.reasons.join(', '))}</span></div>`;
   }
   
@@ -353,7 +359,9 @@ function renderExpandedPanel(event: TimelineEvent, rowIndex: number): string {
   html += `<button class="timeline-action-btn download-btn" data-event-id="${escapeAttr(event.eventId)}">Download</button>`;
   html += '</div>';
   
-  html += '</div>';
+  html += '</div>'; // .timeline-expanded-panel
+  html += '</td></tr>';
+  
   return html;
 }
 
@@ -401,14 +409,23 @@ function renderTimelineRow(event: TimelineEvent, rowIndex: number): string {
 // Table Rendering
 // ---------------------------------------------------------------------------
 
-/** Render the complete timeline table */
-function renderTimelineTable(events: TimelineEvent[]): string {
+/** Render the complete timeline table with inline details rows for correct DOM anchoring */
+export function renderTimelineTable(events: TimelineEvent[], expandedEventIds: Set<string>): string {
   if (events.length === 0) {
     return '<div class="timeline-empty">No diagnostic events in the selected range.</div>';
   }
   
-  const rows = events.map((event, index) => renderTimelineRow(event, index)).join('');
-  const expandedPanels = events.map((event, index) => renderExpandedPanel(event, index)).join('');
+  // Interleave event rows with their details rows - this ensures the details
+  // panel is always immediately after its event row in the DOM, fixing the
+  // visual anchoring bug where details appeared at the bottom of the table.
+  const rows: string[] = [];
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i];
+    rows.push(renderTimelineRow(event, i));
+    // Render details row immediately after the event row
+    const isExpanded = expandedEventIds.has(event.eventId);
+    rows.push(renderExpandedPanelRow(event, i, isExpanded));
+  }
   
   return `
     <table class="timeline-table" aria-label="Diagnostic timeline">
@@ -424,12 +441,9 @@ function renderTimelineTable(events: TimelineEvent[]): string {
         </tr>
       </thead>
       <tbody>
-        ${rows}
+        ${rows.join('')}
       </tbody>
     </table>
-    <div class="timeline-expanded-panels">
-      ${expandedPanels}
-    </div>
   `;
 }
 
@@ -513,7 +527,7 @@ export function renderTimeline(container: HTMLElement, model: TimelineModel): vo
   
   const timelineContent = filteredEvents.length === 0 && mergedEvents.length === 0
     ? renderEmptyState()
-    : renderTimelineTable(pagedEvents);
+    : renderTimelineTable(pagedEvents, model.expandedEventIds);
   
   container.innerHTML = `
     <div class="timeline-header">
