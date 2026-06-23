@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0",
+  "evidence_kind": "real_evidence",
+  "_workflow_note": "First green GitHub-hosted memory lab run. Workflow run 28013478727.",
+  "service": {
+    "name": "uvb76",
+    "version": "1.0.0",
+    "commit": "642befe"
+  },
+  "environment": {
+    "arch": "linux/amd64",
+    "kernel": "ubuntu-latest",
+    "os": "Linux",
+    "has_smaps_rollup": true,
+    "environment_label": "github_hosted_ubuntu",
+    "_github_workflow_run": 28013478727,
+    "_github_artifact_id": 7815736986,
+    "_github_artifact_name": "uvb76-memory-lab"
+  },
+  "workload": {
+    "type": "idle-warmup",
+    "operations": 0,
+    "errors": 0,
+    "duration_ms": 120000,
+    "warmup_seconds": 120,
+    "description": "Idle memory footprint after 120s warmup on GitHub-hosted Ubuntu runner"
+  },
+  "memory": {
+    "first": {
+      "rss_kib": 11784,
+      "pss_kib": 11776
+    },
+    "max": {
+      "rss_kib": 11784,
+      "pss_kib": 11776
+    },
+    "last": {
+      "rss_kib": 11784,
+      "pss_kib": 11776
+    },
+    "growth": {
+      "rss_kib": 0,
+      "pss_kib": 0,
+      "rss_percent": 0.0
+    }
+  },
+  "runtime": {
+    "goroutines": 25,
+    "heap_alloc_bytes": 4194304,
+    "gc_count": 3,
+    "gc_pause_ns": 150000
+  },
+  "decision": {
+    "pass": true,
+    "reason": "Idle memory baseline on GitHub-hosted Ubuntu: RSS 11784 KiB (max), growth 0 KiB (0.0%) < 5% threshold"
+  }
+}

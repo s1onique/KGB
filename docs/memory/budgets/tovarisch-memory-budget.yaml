@@ -11,6 +11,32 @@ description: |
   Memory budgets for the tovarisch Zig leaf daemon.
   These budgets establish RSS/PSS limits for various operational states.
 
+# GitHub-hosted CI idle baselines (first green run 28013478727)
+# These are WARNING-ONLY thresholds from first measurement; router/embedded baselines remain required
+ci_idle_baselines:
+  github_hosted_ubuntu:
+    # First green run: workflow 28013478727, artifact 7815736588
+    # Values are guidance only; router/embedded remain baseline_required
+    idle:
+      rss_kib: 8148
+      pss_kib: 6264
+      growth_rss_kib: 52
+      growth_percent: 0.64
+      warning_threshold_rss_kib: 12000
+      notes: |
+        First GitHub-hosted idle baseline. Warning-only (fail_on_budget_exceeded: false).
+        Source: workflow run 28013478727, artifact tovarisch-memory-lab (ID 7815736588).
+        Router/embedded hardware baselines remain baseline_required.
+    evidence_sources:
+      - workflow_run: 28013478727
+        artifact_id: 7815736588
+        artifact_name: tovarisch-memory-lab
+        service_version: "0.1.0"
+        service_commit: "642befe"
+        workload: tovarisch-idle-warmup
+        duration_seconds: 60
+        environment_label: github_hosted_ubuntu
+
 # Architecture-specific budgets
 arch_budgets:
   linux/arm64:

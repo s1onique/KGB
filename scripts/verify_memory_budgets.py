@@ -7,18 +7,26 @@ Validates:
 - Schema compliance with embedded-memory-frugality doctrine
 - No invalid budget values (strings where integers expected)
 - baseline_required values are marked appropriately
+- CI baseline entries reference real_evidence (not schema fixtures)
+- Environment labels distinguish GitHub-hosted from router/self-hosted evidence
+- Required evidence fields are present in CI baselines
 """
 
 import os
 import sys
 import yaml
 import tempfile
-import shutil
 from typing import List, Tuple, Any, Dict
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUDGETS_DIR = os.path.join(REPO_ROOT, "docs", "memory", "budgets")
+
+# Import CI baseline validation from separate module
+from verify_memory_budgets_ci import (
+    validate_ci_idle_baselines,
+    check_ci_baseline_evidence_exists,
+)
 
 REQUIRED_BUDGET_FILES = [
     "tovarisch-memory-budget.yaml",
@@ -146,6 +154,7 @@ def run_verifier() -> List[str]:
     
     print(f"A. Checking required budget files...")
     
+    budgets_data = {}
     for filename in REQUIRED_BUDGET_FILES:
         path = os.path.join(BUDGETS_DIR, filename)
         print(f"  Checking: {filename}")
@@ -164,16 +173,21 @@ def run_verifier() -> List[str]:
                 total = baseline_count + actual_count
                 pct_baseline = (baseline_count / total * 100) if total > 0 else 0
                 print(f"    Baseline required: {baseline_count}/{total} ({pct_baseline:.0f}%)")
+                
+                # Validate CI baselines if present
+                ci_errors = validate_ci_idle_baselines(data, path)
+                if ci_errors:
+                    for e in ci_errors:
+                        print(f"    CI BASELINE ERROR: {e}")
+                    all_errors.extend(ci_errors)
+                else:
+                    # Check for CI baselines presence
+                    if "ci_idle_baselines" in data:
+                        print(f"    CI baselines: {list(data['ci_idle_baselines'].keys())}")
+                
+                budgets_data[filename] = data
     
     print("\nB. Checking budget file schema consistency...")
-    
-    # Check both files have consistent structure
-    budgets_data = {}
-    for filename in REQUIRED_BUDGET_FILES:
-        path = os.path.join(BUDGETS_DIR, filename)
-        _, data = validate_budget_yaml(path)
-        if data:
-            budgets_data[filename] = data
     
     if len(budgets_data) == 2:
         # Both files loaded; check they have similar hot_path entries
@@ -184,6 +198,10 @@ def run_verifier() -> List[str]:
                         hot_paths = budgets["hot_paths"]
                         if isinstance(hot_paths, dict):
                             print(f"    {filename}: {arch} hot_paths = {list(hot_paths.keys())}")
+    
+    print("\nC. Checking CI baseline evidence traceability...")
+    for filename, data in budgets_data.items():
+        check_ci_baseline_evidence_exists(data, filename, REPO_ROOT)
     
     return all_errors
 
