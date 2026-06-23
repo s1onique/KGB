@@ -41,11 +41,12 @@ type RunConfig struct {
 
 // Runner orchestrates the memory lab execution.
 type Runner struct {
-	cfg      RunConfig
-	sampler  *MemorySampler
-	stopChan chan struct{}
-	wg       sync.WaitGroup
-	cmd      *exec.Cmd // kept for Wait() and Kill()
+	cfg         RunConfig
+	sampler     *MemorySampler
+	stopChan    chan struct{}
+	wg          sync.WaitGroup
+	cmd         *exec.Cmd // kept for Wait() and Kill()
+	rtDir       string    // ephemeral temp dir for TLS certs and derived config
 }
 
 // MemorySampler concurrently samples memory during workload execution.
@@ -134,6 +135,8 @@ func (r *Runner) run() (string, error) {
 	if err := r.prepareUVB76TLS(); err != nil {
 		return "", fmt.Errorf("prepare TLS: %w", err)
 	}
+	// Ensure runtime dir is cleaned up even if later steps fail.
+	defer r.cleanupRuntimeDir()
 
 	pid, stdoutPath, err := r.startService()
 	if err != nil {
@@ -197,41 +200,26 @@ func (r *Runner) artifactDir() string {
 	return filepath.Join(findRepoRootOrCWD(), "artifacts", "memory-labs", r.cfg.Service)
 }
 
-// prepareUVB76TLS generates ephemeral TLS certificates and creates a derived config
-// for UVB-76 memory lab runs. This allows UVB-76 (which requires TLS in production)
-// to run in the memory lab without checking in test certificates.
-func (r *Runner) prepareUVB76TLS() error {
-	if r.cfg.Service != "uvb76" {
-		return nil // Only applies to uvb76
+// runtimeDir returns the ephemeral runtime directory for this runner.
+// Creates it lazily via runtimeDirForService().
+func (r *Runner) runtimeDir() (string, error) {
+	if r.rtDir == "" {
+		dir, err := runtimeDirForService(r.cfg.Service)
+		if err != nil {
+			return "", err
+		}
+		r.rtDir = dir
 	}
+	return r.rtDir, nil
+}
 
-	artifactDir := r.artifactDir()
-
-	// Generate ephemeral cert/key pair
-	tlsFiles, err := GenerateEphemeralCert(artifactDir, "uvb76")
-	if err != nil {
-		return fmt.Errorf("generate ephemeral cert: %w", err)
+// cleanupRuntimeDir removes the ephemeral runtime directory.
+// Safe to call multiple times; idem-potent when rtDir is already empty.
+func (r *Runner) cleanupRuntimeDir() {
+	if r.rtDir != "" {
+		_ = os.RemoveAll(r.rtDir)
+		r.rtDir = ""
 	}
-	r.cfg.TLS = tlsFiles
-
-	// Determine source config path
-	sourceConfig := r.cfg.ConfigPath
-	if sourceConfig == "" {
-		sourceConfig = filepath.Join(findRepoRootOrCWD(), "uvb76", "uvb76.memory-lab.json")
-	}
-
-	// Write derived config with TLS paths populated
-	derivedPath, err := WriteDerivedConfig(artifactDir, "uvb76", sourceConfig, tlsFiles)
-	if err != nil {
-		return fmt.Errorf("write derived config: %w", err)
-	}
-	r.cfg.DerivedConfigPath = derivedPath
-
-	fmt.Printf("Generated TLS cert: %s\n", tlsFiles.CertFile)
-	fmt.Printf("Generated TLS key: %s\n", tlsFiles.KeyFile)
-	fmt.Printf("Derived config: %s\n", derivedPath)
-
-	return nil
 }
 
 func (r *Runner) buildServiceCommand() *exec.Cmd {
@@ -375,6 +363,9 @@ func (r *Runner) stopService() {
 		r.cmd.Process.Kill()
 		r.wg.Wait()
 	}
+	// Clean up ephemeral runtime directory (TLS certs, derived config).
+	// The evidence artifact (JSON + logs) stays in artifactDir.
+	r.cleanupRuntimeDir()
 }
 
 func (r *Runner) executeWorkload(pid int) HTTPWorkloadResult {

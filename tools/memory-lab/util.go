@@ -122,3 +122,14 @@ func maxOf3(a, b, c int64) int64 {
 	}
 	return c
 }
+
+// runtimeDirForService returns a temporary directory for ephemeral runtime files
+// (TLS certs, derived config). Creates dir with mode 0700 before umask — appropriate
+// for key material.
+func runtimeDirForService(service string) (string, error) {
+	dir, err := os.MkdirTemp("", "kgb-memory-lab-"+service+"-*")
+	if err != nil {
+		return "", err
+	}
+	return dir, nil
+}

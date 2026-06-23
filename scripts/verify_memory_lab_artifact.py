@@ -31,6 +31,19 @@ REQUIRED_MEMORY_SNAPSHOT_FIELDS = {"rss_kib": int}
 REQUIRED_DECISION_FIELDS = {"pass": bool, "reason": str}
 
 
+def is_runtime_support_file(path: str) -> bool:
+    """Check if a file is a runtime support file, not a memory lab artifact.
+    
+    Runtime support files (*.derived.json, *.runtime.json) are generated during
+    memory lab runs but are NOT evidence artifacts. They should be skipped.
+    """
+    name = os.path.basename(path)
+    return (
+        name.endswith(".derived.json")
+        or name.endswith(".runtime.json")
+    )
+
+
 def validate_service(data: Dict, path: str) -> List[str]:
     errors = []
     if not isinstance(data, dict):
@@ -240,6 +253,12 @@ def run_verifier(repo_root: str, require_real_evidence: bool = False) -> List[st
         for entry in os.listdir(evidence_dir):
             if entry.endswith(".json"):
                 path = os.path.join(evidence_dir, entry)
+                
+                # Skip runtime support files - they are not evidence artifacts.
+                if is_runtime_support_file(path):
+                    print(f"  SKIP (runtime support): {path}")
+                    continue
+                
                 print(f"  Validating: {path}")
                 
                 # Reject placeholders immediately
