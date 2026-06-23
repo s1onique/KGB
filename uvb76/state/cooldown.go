@@ -90,6 +90,9 @@ func (cs *CaptureStore) EvaluateCooldown(now time.Time, peerName string, cooldow
 // AnchorVisibilityReason constants define why an anchor is or is not visible.
 const (
 	AnchorVisibilityReasonRetained          = "retained_visible"
+	AnchorVisibilityReasonPinned            = "pinned_anchor"          // Anchor pinned for suppressed row visibility
+	AnchorVisibilityReasonEmbedded          = "embedded_summary"       // Anchor summary embedded (anchor evicted but row shows proof)
+	AnchorVisibilityReasonDegraded         = "degraded"               // Suppression degraded: no anchor visible AND no summary
 	AnchorVisibilityReasonFilterWindow      = "outside_filter_window"
 	AnchorVisibilityReasonEvictedRetention   = "evicted_from_retention"
 	AnchorVisibilityReasonTargetFilter       = "outside_target_filter"
@@ -98,7 +101,6 @@ const (
 	AnchorVisibilityReasonUnknown           = "unknown_anchor_not_visible"
 )
 
-// BuildCooldownInfoFromDecision creates a CaptureCooldownInfo from a decision.
 // This ensures cooldown_info exactly matches the decision used for skip/capture.
 //
 // Anchor visibility defaults: When lastSuccessfulCaptureAt exists, the anchor capture
@@ -183,7 +185,7 @@ type CaptureCooldownInfo struct {
 	DecisionNowAt *time.Time `json:"decision_now_at,omitempty"`
 	// AnchorVisible is a legacy alias for AnchorTimelineVisible.
 	// It indicates whether the anchor spike row is visible in the user-visible timeline.
-	// - true: anchor spike is in the timeline (same-probe OR cross-probe set)
+	// - true: anchor spike is in the timeline (visible in same-probe OR cross-probe set)
 	// - false: anchor spike is not visible (evicted, outside window, filtered out)
 	// For granular visibility, use AnchorArtifactVisible and AnchorTimelineVisible.
 	AnchorVisible bool `json:"anchor_visible"`
@@ -195,12 +197,14 @@ type CaptureCooldownInfo struct {
 	// user-visible mixed HTTP/ICMP timeline response.
 	// - true: anchor spike is in the timeline (visible in same-probe OR cross-probe set)
 	// - false: anchor spike is not in timeline (evicted, outside window, filtered out)
-	// SUPPRESSION INVARIANT: skipped_cooldown requires anchor_timeline_visible=true.
-	// When false, the suppression decision is rejected at decision time.
+	// SUPPRESSION INVARIANT: skipped_cooldown requires anchor_timeline_visible=true
+	// OR anchor_event_summary is embedded (for response-time anchor expiry scenarios).
+	// When false without anchor_event_summary, the row must be degraded.
 	AnchorTimelineVisible bool `json:"anchor_timeline_visible"`
 	// AnchorVisibilityReason explains why anchor_visible is false.
 	// Empty when anchor_visible is true.
-	// Values: "retained_visible", "outside_filter_window", "evicted_from_retention",
+	// Values: "retained_visible", "pinned_anchor", "embedded_summary", "degraded",
+	//         "outside_filter_window", "evicted_from_retention",
 	//         "outside_target_filter", "outside_probe_filter", "startup_warmup_anchor",
 	//         "unknown_anchor_not_visible"
 	AnchorVisibilityReason string `json:"anchor_visibility_reason,omitempty"`
@@ -234,6 +238,23 @@ type CaptureCooldownInfo struct {
 	CreatedFrom string `json:"created_from,omitempty"`
 	// IsWarmupAnchor indicates this anchor was created during startup/warmup.
 	IsWarmupAnchor bool `json:"is_warmup_anchor,omitempty"`
+
+	// === Anchor Event Summary (for Response-Time Anchor Expiry) ===
+	// When the anchor spike is not visible in the timeline (evicted, outside window, etc.)
+	// but suppression decision was valid, we embed the anchor event summary so the UI
+	// can display auditable suppression context without requiring the anchor row.
+	// This prevents "ghost suppression" where suppressed rows appear without any visible anchor.
+	AnchorEventSummary *AnchorEventSummary `json:"anchor_event_summary,omitempty"`
+	// SuppressionDegraded indicates the suppression row should be rendered as degraded/warning
+	// instead of normal suppressed status, because:
+	// - anchor is not visible AND
+	// - anchor_event_summary could not be embedded
+	// The UI should show this row differently to indicate incomplete provenance.
+	SuppressionDegraded bool `json:"suppression_degraded,omitempty"`
+	// SuppressionDegradedReason explains why the suppression is degraded.
+	// Only set when SuppressionDegraded is true.
+	// Values: "anchor_not_visible_at_response_time", "anchor_summary_unavailable"
+	SuppressionDegradedReason string `json:"suppression_degraded_reason,omitempty"`
 }
 
 // =============================================================================

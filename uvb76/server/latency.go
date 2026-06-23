@@ -124,6 +124,10 @@ type SpikeResponseWithCaptures struct {
 	Spikes    []state.SpikeEventWithCaptures `json:"spikes"`
 	Count     int                            `json:"count"`
 	Retention state.SpikeRetentionStats     `json:"retention"`
+	// PinnedAnchors contains anchor spike events that were pinned into the response
+	// because they are required by suppressed rows but would otherwise be evicted.
+	// These are rendered with "pinned_anchor" badge and do not count toward page totals.
+	PinnedAnchors []state.SpikeEventWithCaptures `json:"pinned_anchors,omitempty"`
 }
 
 // anchorVisibleInProbeKind checks if an anchor timestamp is visible in the spike set
@@ -225,78 +229,121 @@ func (s *Server) handleTargetLatencySpikes(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	if includeCaptures {
-		// Build set of visible anchor timestamps (from successful captures in displaySpikes)
+		// STEP 1: Build set of visible anchor timestamps from displaySpikes
 		visibleAnchorTimestamps := make(map[time.Time]bool)
+		visibleCapturedEventIDs := make(map[string]bool)
 		for _, spike := range displaySpikes {
 			captures := captureStore.GetCaptures(spike.EventID)
 			for _, capture := range captures {
 				if capture.CaptureStatus == state.CaptureStatusCaptured && capture.CaptureStartedAt.After(time.Time{}) {
 					visibleAnchorTimestamps[capture.CaptureStartedAt] = true
+					visibleCapturedEventIDs[spike.EventID] = true
 				}
 			}
 		}
 
-		spikesWithCaptures := make([]state.SpikeEventWithCaptures, len(displaySpikes))
-		for i, spike := range displaySpikes {
+		// STEP 2: Collect anchor dependencies from suppressed spikes
+		var suppressedDependencies []anchorDependency
+		for _, spike := range displaySpikes {
 			captures := captureStore.GetCaptures(spike.EventID)
+			for _, capture := range captures {
+				if capture.SuppressedByCooldown && capture.CooldownInfo != nil && capture.CooldownInfo.LastSuccessfulCaptureAt != nil {
+					suppressedDependencies = append(suppressedDependencies, anchorDependency{
+						suppressedEventID: spike.EventID,
+						anchorCaptureID:   capture.CooldownInfo.AnchorCaptureID,
+						anchorEventID:     capture.CooldownInfo.CooldownSourceSpikeID,
+						anchorTargetID:    capture.CooldownInfo.AnchorTargetID,
+						anchorProbeKind:   capture.CooldownInfo.AnchorProbeKind,
+					})
+				}
+			}
+		}
 
-			// Override anchor visibility for skipped cooldown captures
-			for j := range captures {
-				capture := &captures[j]
-				if capture.SuppressedByCooldown && capture.CooldownInfo != nil {
-					// Check if the anchor timestamp is visible in current response
-					if capture.CooldownInfo.LastSuccessfulCaptureAt != nil {
-						anchorTime := *capture.CooldownInfo.LastSuccessfulCaptureAt
-						var anchorTimelineVisible bool
-						var visibilityReason string
+		// STEP 3: Determine which anchors need to be pinned
+		anchorsToPin := make(map[string]*state.SpikeEventWithCaptures)
+		allSpikesGetter := func(tid, k string, lim int) []state.SpikeEvent {
+			return s.state.GetSpikes(tid, k, lim)
+		}
 
-						if capture.CooldownInfo.IsCrossProbeSuppression {
-							// Cross-probe suppression: check visibility against the anchor probe's spike set.
-							anchorProbeKind := capture.CooldownInfo.AnchorProbeKind
-							if anchorProbeKind == "" {
-								anchorTimelineVisible = false
-								visibilityReason = "anchor_probe_kind_missing"
-							} else {
-								// Look up anchor visibility in the anchor probe's spike set
-								anchorTimelineVisible = anchorVisibleInProbeKind(s.state, targetID, anchorProbeKind, anchorTime)
-								if anchorTimelineVisible {
-									visibilityReason = "retained_visible"
-								} else {
-									visibilityReason = "outside_filter_window"
-								}
-							}
-						} else if !visibleAnchorTimestamps[anchorTime] {
-							// Same-probe suppression: anchor spike should be in this response.
-							// If not found, it's truly outside the filter window.
-							anchorTimelineVisible = false
-							visibilityReason = "outside_filter_window"
-						} else {
-							// Anchor is visible in timeline
-							anchorTimelineVisible = true
-							visibilityReason = "retained_visible"
-						}
+		for _, dep := range suppressedDependencies {
+			// Skip cross-probe suppression - those use embedded summaries
+			if dep.anchorProbeKind != kind && dep.anchorProbeKind != "" {
+				continue
+			}
+			if dep.anchorTargetID != targetID {
+				continue
+			}
 
-						// Set granular visibility fields
-						capture.CooldownInfo.AnchorTimelineVisible = anchorTimelineVisible
-						capture.CooldownInfo.AnchorVisibilityReason = visibilityReason
-
-						// AnchorVisible is true only if BOTH artifact and timeline are visible
-						// Artifact is always "visible" if the capture record exists (it does, since we're in cooldown)
-						capture.CooldownInfo.AnchorArtifactVisible = true
-						capture.CooldownInfo.AnchorVisible = anchorTimelineVisible
+			anchorTime := time.Time{}
+			if dep.anchorCaptureID != "" {
+				captures := captureStore.GetCaptures(dep.anchorCaptureID)
+				for _, c := range captures {
+					if c.CaptureStartedAt.After(time.Time{}) {
+						anchorTime = c.CaptureStartedAt
+						break
 					}
 				}
 			}
 
+			if visibleAnchorTimestamps[anchorTime] || visibleCapturedEventIDs[dep.anchorCaptureID] {
+				continue
+			}
+			if _, alreadyPinned := anchorsToPin[dep.anchorCaptureID]; alreadyPinned {
+				continue
+			}
+
+			anchorSpike := findAnchorSpike(dep.anchorCaptureID, dep.anchorTargetID, dep.anchorProbeKind, allSpikesGetter, captureStore)
+			if anchorSpike != nil {
+				anchorsToPin[dep.anchorCaptureID] = anchorSpike
+			}
+		}
+
+		// STEP 4: Get visible cross-probe spikes for cross-probe visibility check
+		// For HTTP query: get visible ICMP spikes; for ICMP query: get visible HTTP spikes
+		crossProbeKind := "http"
+		if kind == "http" {
+			crossProbeKind = "icmp"
+		}
+		visibleCrossProbeSpikes := s.state.GetSpikes(targetID, crossProbeKind, limit)
+
+		// STEP 5: Build pinned anchors list (sorted by timestamp for stable ordering)
+		var pinnedAnchors []state.SpikeEventWithCaptures
+		for _, anchor := range anchorsToPin {
+			for i := range anchor.Captures {
+				if anchor.Captures[i].CaptureStatus == state.CaptureStatusCaptured {
+					break
+				}
+			}
+			pinnedAnchors = append(pinnedAnchors, *anchor)
+		}
+		sortPinnedAnchorsByTimestamp(pinnedAnchors)
+
+		// STEP 6: Process display spikes with anchor visibility logic
+		spikesWithCaptures := make([]state.SpikeEventWithCaptures, len(displaySpikes))
+		for i, spike := range displaySpikes {
+			captures := captureStore.GetCaptures(spike.EventID)
+			for j := range captures {
+				capture := &captures[j]
+				if capture.SuppressedByCooldown && capture.CooldownInfo != nil {
+					capture.CooldownInfo = processSuppressedCaptureAnchorVisibility(
+						capture.CooldownInfo, kind, targetID,
+						visibleAnchorTimestamps, visibleCapturedEventIDs,
+						anchorsToPin, allSpikesGetter, captureStore,
+						visibleCrossProbeSpikes,
+					)
+				}
+			}
 			spikesWithCaptures[i] = state.SpikeEventWithCaptures{
 				SpikeEvent: spike,
 				Captures:   captures,
 			}
 		}
+
 		json.NewEncoder(w).Encode(SpikeResponseWithCaptures{
-			Spikes:    spikesWithCaptures,
-			Count:     len(spikesWithCaptures),
-			Retention: retention,
+			Spikes:       spikesWithCaptures,
+			Count:        len(spikesWithCaptures),
+			Retention:    retention,
+			PinnedAnchors: pinnedAnchors,
 		})
 	} else {
 		json.NewEncoder(w).Encode(SpikeResponse{
