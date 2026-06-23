@@ -30,6 +30,59 @@ REQUIRED_MEMORY_FIELDS = {"first": dict, "max": dict, "last": dict, "growth": di
 REQUIRED_MEMORY_SNAPSHOT_FIELDS = {"rss_kib": int}
 REQUIRED_DECISION_FIELDS = {"pass": bool, "reason": str}
 
+# Number type for JSON numeric fields (accepts int or float but not bool)
+# Use string sentinel since we can't use a tuple without breaking isinstance checks
+Number = "number"
+
+
+def is_numeric(value) -> bool:
+    """Check if value is numeric (int or float) but not bool."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def matches_expected_type(value, expected_type) -> bool:
+    """Check if value matches the expected type, handling Number specially."""
+    if expected_type == Number:
+        return is_numeric(value)
+    if expected_type is int:
+        # Explicitly reject bool since bool is a subclass of int in Python
+        return isinstance(value, int) and not isinstance(value, bool)
+    return isinstance(value, expected_type)
+
+
+def type_name_for_error(expected_type) -> str:
+    """Get a clean type name for error messages."""
+    if expected_type == Number:
+        return "number"
+    return expected_type.__name__
+
+
+# Leak-slope specific fields (required for leak-slope workloads)
+LEAK_SLOPE_REQUIRED_FIELDS = {
+    "sampled_points": int,
+    "duration_seconds": Number,
+    "rss_first_kib": int,
+    "rss_max_kib": int,
+    "rss_last_kib": int,
+    "pss_first_kib": int,
+    "pss_max_kib": int,
+    "pss_last_kib": int,
+    "rss_growth_kib": int,
+    "pss_growth_kib": int,
+    "rss_slope_kib_per_min": Number,
+    "pss_slope_kib_per_min": Number,
+    "request_count": int,
+    "request_errors": int,
+}
+
+# Leak-slope workload types
+LEAK_SLOPE_WORKLOAD_TYPES = {
+    "tovarisch-leak-slope",
+    "tovarisch-leak-slope-netdiag",
+    "uvb76-leak-slope",
+    "uvb76-leak-slope-netdiag",
+}
+
 
 def is_runtime_support_file(path: str) -> bool:
     """Check if a file is a runtime support file, not a memory lab artifact.
@@ -98,6 +151,19 @@ def validate_memory(data: Dict, path: str) -> List[str]:
     return errors
 
 
+def validate_leak_slope(data: Dict, path: str) -> List[str]:
+    """Validate leak-slope metrics if present."""
+    errors = []
+    if not isinstance(data, dict):
+        return [f"{path} must be a dict"]
+    for field, expected_type in LEAK_SLOPE_REQUIRED_FIELDS.items():
+        if field not in data:
+            errors.append(f"{path}.{field} is required for leak-slope workload")
+        elif not matches_expected_type(data[field], expected_type):
+            errors.append(f"{path}.{field} must be {type_name_for_error(expected_type)}")
+    return errors
+
+
 def validate_decision(data: Dict, path: str) -> List[str]:
     errors = []
     if not isinstance(data, dict):
@@ -136,6 +202,15 @@ def validate_lab_result(data: Dict) -> List[str]:
         errors.extend(validate_memory(data["memory"], "memory"))
     else:
         errors.append("memory is required")
+
+    # Validate leak-slope metrics if workload is a leak-slope type
+    workload = data.get("workload", {})
+    workload_type = workload.get("type", "")
+    if workload_type in LEAK_SLOPE_WORKLOAD_TYPES:
+        if "leak_slope" in data:
+            errors.extend(validate_leak_slope(data["leak_slope"], "leak_slope"))
+        else:
+            errors.append("leak_slope is required for leak-slope workload")
 
     if "decision" in data:
         errors.extend(validate_decision(data["decision"], "decision"))
@@ -182,6 +257,16 @@ def validate_semantic_consistency(data: Dict) -> List[str]:
         if all(isinstance(x, int) for x in [max_rss, last_rss]):
             if max_rss < last_rss:
                 errors.append(f"memory.max.rss_kib ({max_rss}) < memory.last.rss_kib ({last_rss})")
+
+        # Validate leak-slope semantics if present
+        leak_slope = data.get("leak_slope", {})
+        if leak_slope:
+            request_count = leak_slope.get("request_count", 0)
+            request_errors = leak_slope.get("request_errors", 0)
+            if request_count <= 0:
+                errors.append("leak_slope.request_count must be > 0")
+            if request_errors > request_count:
+                errors.append(f"leak_slope.request_errors ({request_errors}) > leak_slope.request_count ({request_count})")
 
     return errors
 
@@ -315,114 +400,16 @@ def run_verifier(repo_root: str, require_real_evidence: bool = False) -> List[st
     return all_errors
 
 
-def run_self_tests() -> bool:
-    """Run self-tests on the verifier."""
-    import tempfile
-    print("\n=== Running Self-Tests ===\n")
-
-    valid_fixture = {
-        "schema_version": "1.0", "evidence_kind": "schema_fixture",
-        "service": {"name": "test", "version": "1.0.0", "commit": "abc123"},
-        "environment": {"arch": "linux/arm64"},
-        "workload": {"type": "test", "operations": 100, "errors": 0, "duration_ms": 1000},
-        "memory": {
-            "first": {"rss_kib": 1000}, "max": {"rss_kib": 1100},
-            "last": {"rss_kib": 1050}, "growth": {"rss_kib": 50, "rss_percent": 5.0}
-        },
-        "decision": {"pass": True, "reason": "test passed"},
-    }
-
-    valid_real = {
-        "schema_version": "1.0", "evidence_kind": "real_evidence",
-        "service": {"name": "test", "version": "1.0.0", "commit": "abc123"},
-        "environment": {"arch": "linux/arm64"},
-        "workload": {"type": "test", "operations": 100, "errors": 0, "duration_ms": 1000},
-        "memory": {
-            "first": {"rss_kib": 1000}, "max": {"rss_kib": 1100},
-            "last": {"rss_kib": 1050}, "growth": {"rss_kib": 50, "rss_percent": 5.0}
-        },
-        "decision": {"pass": True, "reason": "test passed"},
-    }
-
-    tests_passed = 0
-    tests_failed = 0
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Test: valid fixture
-        path = os.path.join(tmpdir, "fixture.json")
-        with open(path, "w") as f:
-            json.dump(valid_fixture, f)
-        errors, _ = validate_file(path)
-        if len(errors) == 0:
-            print("  PASS: Valid schema_fixture passes")
-            tests_passed += 1
-        else:
-            print(f"  FAIL: {errors}")
-            tests_failed += 1
-
-        # Test: valid real_evidence
-        path = os.path.join(tmpdir, "real.json")
-        with open(path, "w") as f:
-            json.dump(valid_real, f)
-        errors, _ = validate_file(path)
-        if len(errors) == 0:
-            print("  PASS: Valid real_evidence passes")
-            tests_passed += 1
-        else:
-            print(f"  FAIL: {errors}")
-            tests_failed += 1
-
-        # Test: bad growth math
-        bad = dict(valid_real)
-        bad["memory"]["growth"]["rss_kib"] = 999
-        path = os.path.join(tmpdir, "bad.json")
-        with open(path, "w") as f:
-            json.dump(bad, f)
-        errors, _ = validate_file(path)
-        if len(errors) > 0 and any("growth.rss_kib" in e for e in errors):
-            print("  PASS: bad growth math fails correctly")
-            tests_passed += 1
-        else:
-            print(f"  FAIL: should have failed")
-            tests_failed += 1
-
-        # Test: missing evidence_kind
-        bad = dict(valid_fixture)
-        del bad["evidence_kind"]
-        path = os.path.join(tmpdir, "missing.json")
-        with open(path, "w") as f:
-            json.dump(bad, f)
-        errors, _ = validate_file(path)
-        if len(errors) > 0 and any("evidence_kind" in e for e in errors):
-            print("  PASS: missing evidence_kind fails correctly")
-            tests_passed += 1
-        else:
-            print(f"  FAIL: should have failed")
-            tests_failed += 1
-
-        # Test: operations < errors
-        bad = dict(valid_fixture)
-        bad["workload"]["operations"] = 5
-        bad["workload"]["errors"] = 10
-        path = os.path.join(tmpdir, "badops.json")
-        with open(path, "w") as f:
-            json.dump(bad, f)
-        errors, _ = validate_file(path)
-        if len(errors) > 0 and any("operations" in e for e in errors):
-            print("  PASS: operations < errors fails correctly")
-            tests_passed += 1
-        else:
-            print(f"  FAIL: should have failed")
-            tests_failed += 1
-
-    print(f"\n=== Self-Test Results ===")
-    print(f"  Passed: {tests_passed}, Failed: {tests_failed}")
-    return tests_failed == 0
-
-
 def main():
     if "--self-test" in sys.argv:
-        sys.exit(0 if run_self_tests() else 1)
+        # Delegate to separate test file for LLM-friendliness
+        import subprocess
+        test_file = os.path.join(SCRIPT_DIR, "verify_memory_lab_artifact_tests.py")
+        result = subprocess.run([sys.executable, test_file], capture_output=True, text=True)
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+        sys.exit(result.returncode)
 
     require_real_evidence = "--require-real-evidence" in sys.argv
     errors = run_verifier(REPO_ROOT, require_real_evidence=require_real_evidence)

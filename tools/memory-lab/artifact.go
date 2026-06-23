@@ -23,6 +23,7 @@ type Artifact struct {
 	Environment   EnvironmentInfo `json:"environment"`
 	Workload      WorkloadInfo    `json:"workload"`
 	Memory        MemoryInfo      `json:"memory"`
+	LeakSlope     *LeakSlopeMetrics `json:"leak_slope,omitempty"`
 	Runtime       RuntimeInfo     `json:"runtime,omitempty"`
 	Decision      Decision        `json:"decision"`
 }
@@ -67,6 +68,24 @@ type MemoryGrowth struct {
 	RSSKiB     int64   `json:"rss_kib"`
 	PSSKiB     int64   `json:"pss_kib"`
 	RSSPercent float64 `json:"rss_percent"`
+}
+
+// LeakSlopeMetrics contains memory growth slope analysis for repeated-request workloads.
+type LeakSlopeMetrics struct {
+	SampledPoints     int     `json:"sampled_points"`
+	DurationSeconds   float64 `json:"duration_seconds"`
+	RSSFirstKiB       int64   `json:"rss_first_kib"`
+	RSSMaxKiB         int64   `json:"rss_max_kib"`
+	RSSLastKiB        int64   `json:"rss_last_kib"`
+	PSSFirstKiB       int64   `json:"pss_first_kib"`
+	PSSMaxKiB         int64   `json:"pss_max_kib"`
+	PSSLastKiB        int64   `json:"pss_last_kib"`
+	RSSGrowthKiB      int64   `json:"rss_growth_kib"`
+	PSSGrowthKiB      int64   `json:"pss_growth_kib"`
+	RSSSlopeKiBPerMin float64 `json:"rss_slope_kib_per_min"`
+	PSSSlopeKiBPerMin float64 `json:"pss_slope_kib_per_min"`
+	RequestCount      int     `json:"request_count"`
+	RequestErrors     int     `json:"request_errors"`
 }
 
 // RuntimeInfo captures runtime-specific stats (Go for uvb76).

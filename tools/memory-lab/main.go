@@ -113,11 +113,15 @@ func validWorkload(service string, wt WorkloadType) bool {
 	case "tovarisch":
 		return wt == WorkloadTovarischIdle ||
 			wt == WorkloadTovarischStatusJSON ||
-			wt == WorkloadTovarischStatusJSONNetDiag
+			wt == WorkloadTovarischStatusJSONNetDiag ||
+			wt == WorkloadTovarischLeakSlope ||
+			wt == WorkloadTovarischLeakSlopeNetDiag
 	case "uvb76":
 		return wt == WorkloadUVB76Idle ||
 			wt == WorkloadUVB76StatusAPIPolling ||
-			wt == WorkloadUVB76DiagnosticCaptureLoop
+			wt == WorkloadUVB76DiagnosticCaptureLoop ||
+			wt == WorkloadUVB76LeakSlope ||
+			wt == WorkloadUVB76LeakSlopeNetDiag
 	default:
 		return false
 	}

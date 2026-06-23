@@ -37,6 +37,32 @@ ci_idle_baselines:
         duration_seconds: 60
         environment_label: github_hosted_ubuntu
 
+# GitHub-hosted CI leak-slope thresholds (WARNING-ONLY)
+# Leak-slope thresholds detect memory growth patterns under repeated requests.
+# These are WARNING-ONLY thresholds; no real leak-slope evidence artifact exists yet.
+# Run Memory Lab with leak-slope inputs enabled to generate actual baselines.
+ci_leak_slope_thresholds:
+  github_hosted_ubuntu:
+    # Proposed warning thresholds for leak-slope detection
+    # slope is measured in KiB/minute
+    evidence_status: proposed_thresholds
+    tovarisch_leak_slope:
+      rss_slope_warning_kib_per_min: 100.0
+      pss_slope_warning_kib_per_min: 80.0
+      max_growth_kib: 500
+      notes: |
+        Proposed warning-only threshold. No real leak-slope artifact yet.
+        Run Memory Lab workflow with run_tovarisch_leak_slope=true to generate real baseline.
+        Router/embedded leak-slope baselines remain baseline_required.
+    tovarisch_leak_slope_netdiag:
+      rss_slope_warning_kib_per_min: 150.0
+      pss_slope_warning_kib_per_min: 120.0
+      max_growth_kib: 750
+      notes: |
+        Proposed warning-only threshold. No real leak-slope artifact yet.
+        Run Memory Lab workflow with run_tovarisch_leak_slope_netdiag=true to generate real baseline.
+        Router/embedded leak-slope baselines remain baseline_required.
+
 # Architecture-specific budgets
 arch_budgets:
   linux/arm64:

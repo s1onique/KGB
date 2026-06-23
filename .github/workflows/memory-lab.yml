@@ -27,6 +27,26 @@ on:
         required: false
         default: 'false'
         type: boolean
+      run_tovarisch_leak_slope:
+        description: 'Run tovarisch leak-slope workload (optional)'
+        required: false
+        default: 'false'
+        type: boolean
+      run_tovarisch_leak_slope_netdiag:
+        description: 'Run tovarisch leak-slope with network_diag (optional)'
+        required: false
+        default: 'false'
+        type: boolean
+      run_uvb76_leak_slope:
+        description: 'Run uvb76 leak-slope workload (optional)'
+        required: false
+        default: 'false'
+        type: boolean
+      run_uvb76_leak_slope_netdiag:
+        description: 'Run uvb76 leak-slope with network_diag (optional)'
+        required: false
+        default: 'false'
+        type: boolean
 
 env:
   # Disable Go CGO for cross-compilation compatibility
@@ -81,6 +101,52 @@ jobs:
       - name: Run uvb76 memory lab
         if: ${{ !inputs.skip_uvb76 }}
         run: make lab-uvb76-memory
+
+      # === Optional Leak-Slope Workloads ===
+      # These are optional soaks that measure memory growth slope over repeated requests.
+      # They are NOT required for the basic memory-gate but can be enabled manually.
+
+      - name: Run tovarisch leak-slope workload
+        if: ${{ inputs.run_tovarisch_leak_slope }}
+        run: |
+          ./tools/memory-lab/memory-lab \
+            --service tovarisch \
+            --workload tovarisch-leak-slope \
+            --warmup-secs 60 \
+            --operations 100 \
+            --interval-ms 100
+
+      - name: Run tovarisch leak-slope with network_diag
+        if: ${{ inputs.run_tovarisch_leak_slope_netdiag }}
+        run: |
+          ./tools/memory-lab/memory-lab \
+            --service tovarisch \
+            --workload tovarisch-leak-slope-netdiag \
+            --warmup-secs 60 \
+            --operations 100 \
+            --interval-ms 100
+
+      - name: Run uvb76 leak-slope workload
+        if: ${{ inputs.run_uvb76_leak_slope }}
+        run: |
+          ./tools/memory-lab/memory-lab \
+            --service uvb76 \
+            --workload uvb76-leak-slope \
+            --config ./uvb76/uvb76.memory-lab.json \
+            --warmup-secs 60 \
+            --operations 100 \
+            --interval-ms 100
+
+      - name: Run uvb76 leak-slope with network_diag
+        if: ${{ inputs.run_uvb76_leak_slope_netdiag }}
+        run: |
+          ./tools/memory-lab/memory-lab \
+            --service uvb76 \
+            --workload uvb76-leak-slope-netdiag \
+            --config ./uvb76/uvb76.memory-lab.json \
+            --warmup-secs 60 \
+            --operations 100 \
+            --interval-ms 100
 
       - name: Upload memory lab diagnostics
         if: ${{ always() }}

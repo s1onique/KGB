@@ -179,7 +179,7 @@ func (r *Runner) run() (string, error) {
 	maxPSS := maxOf3(firstSnap.PSSKiB, sampledMaxPSS, lastSnap.PSSKiB)
 	fmt.Printf("Max RSS: %d KiB, Max PSS: %d KiB\n", maxRSS, maxPSS)
 
-	artifact, err := r.buildArtifact(firstSnap, lastSnap, maxRSS, maxPSS, workloadResult)
+	artifact, err := r.buildArtifact(sampler.samples, firstSnap, lastSnap, maxRSS, maxPSS, workloadResult)
 	if err != nil {
 		return "", fmt.Errorf("build artifact: %w", err)
 	}
@@ -396,7 +396,7 @@ func (r *Runner) executeWorkload(pid int) HTTPWorkloadResult {
 	})
 }
 
-func (r *Runner) buildArtifact(first, last MemorySnapshot, maxRSS, maxPSS int64, workload HTTPWorkloadResult) (*Artifact, error) {
+func (r *Runner) buildArtifact(samples []MemorySnapshot, first, last MemorySnapshot, maxRSS, maxPSS int64, workload HTTPWorkloadResult) (*Artifact, error) {
 	serviceInfo := ServiceInfo{
 		Name:    r.cfg.Service,
 		Version: getBinaryVersion(r.cfg.Binary),
@@ -423,6 +423,11 @@ func (r *Runner) buildArtifact(first, last MemorySnapshot, maxRSS, maxPSS int64,
 
 	artifact := NewArtifact(serviceInfo, workloadInfo, envInfo)
 	artifact.SetMemory(first, last, maxRSS, maxPSS)
+
+	// Calculate leak-slope metrics for leak-slope workloads
+	if isLeakSlopeWorkload(r.cfg.WorkloadType) {
+		artifact.LeakSlope = calculateLeakSlopeMetrics(samples, first, last, maxRSS, maxPSS, workload)
+	}
 
 	budget, err := LoadBudget(r.cfg.Service)
 	if err != nil {

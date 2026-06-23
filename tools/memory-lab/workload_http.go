@@ -84,6 +84,12 @@ const (
 	WorkloadUVB76Idle                  WorkloadType = "uvb76-idle-warmup"
 	WorkloadUVB76StatusAPIPolling      WorkloadType = "status-api-polling"
 	WorkloadUVB76DiagnosticCaptureLoop WorkloadType = "diagnostic-capture-loop"
+
+	// Leak-slope workloads (repeated requests to measure memory growth slope)
+	WorkloadTovarischLeakSlope        WorkloadType = "tovarisch-leak-slope"
+	WorkloadTovarischLeakSlopeNetDiag WorkloadType = "tovarisch-leak-slope-netdiag"
+	WorkloadUVB76LeakSlope            WorkloadType = "uvb76-leak-slope"
+	WorkloadUVB76LeakSlopeNetDiag     WorkloadType = "uvb76-leak-slope-netdiag"
 )
 
 // ServiceConfig holds service-specific configuration.
@@ -100,6 +106,9 @@ func TovarischWorkloadURLs(port int) map[WorkloadType]string {
 		WorkloadTovarischIdle:              fmt.Sprintf("http://127.0.0.1:%d/", port),
 		WorkloadTovarischStatusJSON:        fmt.Sprintf("http://127.0.0.1:%d/status", port),
 		WorkloadTovarischStatusJSONNetDiag: fmt.Sprintf("http://127.0.0.1:%d/status.json?include=network_diag", port),
+		// Leak-slope workloads
+		WorkloadTovarischLeakSlope:        fmt.Sprintf("http://127.0.0.1:%d/status", port),
+		WorkloadTovarischLeakSlopeNetDiag: fmt.Sprintf("http://127.0.0.1:%d/status.json?include=network_diag", port),
 	}
 }
 
@@ -110,16 +119,23 @@ func UVB76WorkloadURLs(port int) map[WorkloadType]string {
 		WorkloadUVB76Idle:                  fmt.Sprintf("https://127.0.0.1:%d/", port),
 		WorkloadUVB76StatusAPIPolling:      fmt.Sprintf("https://127.0.0.1:%d/api/v1/status", port),
 		WorkloadUVB76DiagnosticCaptureLoop: fmt.Sprintf("https://127.0.0.1:%d/api/v1/status?include=network_diag", port),
+		// Leak-slope workloads
+		WorkloadUVB76LeakSlope:            fmt.Sprintf("https://127.0.0.1:%d/api/v1/status", port),
+		WorkloadUVB76LeakSlopeNetDiag:     fmt.Sprintf("https://127.0.0.1:%d/api/v1/status?include=network_diag", port),
 	}
 }
 
 // EndpointFor returns the endpoint path for a workload type.
 func EndpointFor(wt WorkloadType) string {
 	switch wt {
-	case WorkloadTovarischStatusJSON, WorkloadUVB76StatusAPIPolling:
+	case WorkloadTovarischStatusJSON, WorkloadTovarischLeakSlope:
 		return "/status"
-	case WorkloadTovarischStatusJSONNetDiag, WorkloadUVB76DiagnosticCaptureLoop:
+	case WorkloadUVB76StatusAPIPolling, WorkloadUVB76LeakSlope:
+		return "/api/v1/status"
+	case WorkloadTovarischStatusJSONNetDiag, WorkloadTovarischLeakSlopeNetDiag:
 		return "/status.json?include=network_diag"
+	case WorkloadUVB76DiagnosticCaptureLoop, WorkloadUVB76LeakSlopeNetDiag:
+		return "/api/v1/status?include=network_diag"
 	default:
 		return "/"
 	}
