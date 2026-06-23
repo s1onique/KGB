@@ -181,13 +181,26 @@ type CaptureCooldownInfo struct {
 	// DecisionNowAt is the timestamp when the cooldown decision was made.
 	// This proves the cooldown_info was computed at the same moment as the decision.
 	DecisionNowAt *time.Time `json:"decision_now_at,omitempty"`
-	// AnchorVisible indicates whether the successful capture anchor is visible in the current response scope.
-	// - true: anchor spike is retained and visible in current API response
-	// - false: anchor spike is not visible (outside filter window, evicted, or suppressed)
+	// AnchorVisible is a legacy alias for AnchorTimelineVisible.
+	// It indicates whether the anchor spike row is visible in the user-visible timeline.
+	// - true: anchor spike is in the timeline (same-probe OR cross-probe set)
+	// - false: anchor spike is not visible (evicted, outside window, filtered out)
+	// For granular visibility, use AnchorArtifactVisible and AnchorTimelineVisible.
 	AnchorVisible bool `json:"anchor_visible"`
+	// AnchorArtifactVisible indicates whether the capture artifact exists/retrievable in the store.
+	// This is true when a successful capture record exists for the anchor event.
+	// NOTE: This field is NOT used for suppression validity - only AnchorTimelineVisible is.
+	AnchorArtifactVisible bool `json:"anchor_artifact_visible"`
+	// AnchorTimelineVisible indicates whether the anchor event row is present in the
+	// user-visible mixed HTTP/ICMP timeline response.
+	// - true: anchor spike is in the timeline (visible in same-probe OR cross-probe set)
+	// - false: anchor spike is not in timeline (evicted, outside window, filtered out)
+	// SUPPRESSION INVARIANT: skipped_cooldown requires anchor_timeline_visible=true.
+	// When false, the suppression decision is rejected at decision time.
+	AnchorTimelineVisible bool `json:"anchor_timeline_visible"`
 	// AnchorVisibilityReason explains why anchor_visible is false.
 	// Empty when anchor_visible is true.
-	// Values: "retained_visible", "outside_filter_window", "evicted_from_retention", 
+	// Values: "retained_visible", "outside_filter_window", "evicted_from_retention",
 	//         "outside_target_filter", "outside_probe_filter", "startup_warmup_anchor",
 	//         "unknown_anchor_not_visible"
 	AnchorVisibilityReason string `json:"anchor_visibility_reason,omitempty"`

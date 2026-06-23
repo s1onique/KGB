@@ -247,33 +247,43 @@ func (s *Server) handleTargetLatencySpikes(w http.ResponseWriter, r *http.Reques
 					// Check if the anchor timestamp is visible in current response
 					if capture.CooldownInfo.LastSuccessfulCaptureAt != nil {
 						anchorTime := *capture.CooldownInfo.LastSuccessfulCaptureAt
+						var anchorTimelineVisible bool
+						var visibilityReason string
+
 						if capture.CooldownInfo.IsCrossProbeSuppression {
 							// Cross-probe suppression: check visibility against the anchor probe's spike set.
 							anchorProbeKind := capture.CooldownInfo.AnchorProbeKind
 							if anchorProbeKind == "" {
-								capture.CooldownInfo.AnchorVisible = false
-								capture.CooldownInfo.AnchorVisibilityReason = "anchor_probe_kind_missing"
+								anchorTimelineVisible = false
+								visibilityReason = "anchor_probe_kind_missing"
 							} else {
 								// Look up anchor visibility in the anchor probe's spike set
-								anchorVisible := anchorVisibleInProbeKind(s.state, targetID, anchorProbeKind, anchorTime)
-								if anchorVisible {
-									capture.CooldownInfo.AnchorVisible = true
-									capture.CooldownInfo.AnchorVisibilityReason = "retained_visible"
+								anchorTimelineVisible = anchorVisibleInProbeKind(s.state, targetID, anchorProbeKind, anchorTime)
+								if anchorTimelineVisible {
+									visibilityReason = "retained_visible"
 								} else {
-									capture.CooldownInfo.AnchorVisible = false
-									capture.CooldownInfo.AnchorVisibilityReason = "outside_filter_window"
+									visibilityReason = "outside_filter_window"
 								}
 							}
 						} else if !visibleAnchorTimestamps[anchorTime] {
 							// Same-probe suppression: anchor spike should be in this response.
 							// If not found, it's truly outside the filter window.
-							capture.CooldownInfo.AnchorVisible = false
-							capture.CooldownInfo.AnchorVisibilityReason = "outside_filter_window"
+							anchorTimelineVisible = false
+							visibilityReason = "outside_filter_window"
 						} else {
-							// Anchor is visible - use state layer default
-							capture.CooldownInfo.AnchorVisible = true
-							capture.CooldownInfo.AnchorVisibilityReason = "retained_visible"
+							// Anchor is visible in timeline
+							anchorTimelineVisible = true
+							visibilityReason = "retained_visible"
 						}
+
+						// Set granular visibility fields
+						capture.CooldownInfo.AnchorTimelineVisible = anchorTimelineVisible
+						capture.CooldownInfo.AnchorVisibilityReason = visibilityReason
+
+						// AnchorVisible is true only if BOTH artifact and timeline are visible
+						// Artifact is always "visible" if the capture record exists (it does, since we're in cooldown)
+						capture.CooldownInfo.AnchorArtifactVisible = true
+						capture.CooldownInfo.AnchorVisible = anchorTimelineVisible
 					}
 				}
 			}

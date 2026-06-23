@@ -131,10 +131,18 @@ export interface CaptureCooldownInfo {
   cooldown_key?: string;
   // DecisionNowAt is the timestamp when the cooldown decision was made.
   decision_now_at?: string;
-  // AnchorVisible indicates whether the successful capture anchor is visible in the current response scope.
-  // - true: anchor spike is retained and visible in current API response
-  // - false: anchor spike is not visible (outside filter window, evicted, or suppressed)
+  // AnchorVisible is a legacy alias for anchor_timeline_visible.
+  // It indicates whether the anchor spike row is visible in the user-visible timeline.
+  // - true: anchor spike is in the timeline (same-probe OR cross-probe set)
+  // - false: anchor spike is not visible (evicted, outside window, filtered out)
   anchor_visible: boolean;
+  // AnchorArtifactVisible indicates whether the capture artifact exists/retrievable in the store.
+  // NOTE: This field is NOT used for suppression validity - only AnchorTimelineVisible is.
+  anchor_artifact_visible: boolean;
+  // AnchorTimelineVisible indicates whether the anchor event row is present in the
+  // user-visible mixed HTTP/ICMP timeline response.
+  // SUPPRESSION INVARIANT: skipped_cooldown requires anchor_timeline_visible=true.
+  anchor_timeline_visible: boolean;
   // AnchorVisibilityReason explains why anchor_visible is false.
   // Empty when anchor_visible is true.
   // Values: "retained_visible", "outside_filter_window", "evicted_from_retention", "suppressed_cooldown"
