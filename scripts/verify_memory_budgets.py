@@ -201,7 +201,14 @@ def run_verifier() -> List[str]:
     
     print("\nC. Checking CI baseline evidence traceability...")
     for filename, data in budgets_data.items():
-        check_ci_baseline_evidence_exists(data, filename, REPO_ROOT)
+        trace_errors = check_ci_baseline_evidence_exists(data, filename, REPO_ROOT)
+        if trace_errors:
+            for e in trace_errors:
+                print(f"    CI EVIDENCE ERROR: {e}")
+            all_errors.extend(trace_errors)
+        else:
+            if "ci_idle_baselines" in data:
+                print(f"    CI evidence traceability: OK for {filename}")
     
     return all_errors
 
@@ -317,7 +324,14 @@ def run_self_tests() -> bool:
 
 def main():
     if "--self-test" in sys.argv:
-        sys.exit(0 if run_self_tests() else 1)
+        # Run budget validation self-tests
+        budget_tests_pass = run_self_tests()
+        
+        # Run CI baseline self-tests
+        from verify_memory_budgets_ci_tests import run_ci_baseline_self_tests
+        ci_tests_pass = run_ci_baseline_self_tests()
+        
+        sys.exit(0 if (budget_tests_pass and ci_tests_pass) else 1)
     
     errors = run_verifier()
     

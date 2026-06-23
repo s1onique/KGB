@@ -6,10 +6,13 @@ Validates:
 - CI baseline entries reference real_evidence (not schema fixtures)
 - Environment labels distinguish GitHub-hosted from router/self-hosted evidence
 - Required evidence fields are present in CI baselines
+- Artifact traceability: workflow run, artifact ID, artifact name, service, environment label
 """
 
 import os
-from typing import List, Dict, Any
+import json
+from typing import List, Dict, Any, Optional
+
 
 # Required fields for CI baseline evidence entries
 REQUIRED_CI_BASELINE_EVIDENCE_FIELDS = [
@@ -51,7 +54,6 @@ def validate_ci_baseline_entry(env_label: str, baseline_data: Dict, path: str) -
         if not isinstance(idle_data, dict):
             errors.append(f"ci_idle_baselines.{env_label}.idle must be a dict")
         else:
-            # Check for required memory metrics
             for field in ["rss_kib", "pss_kib"]:
                 if field in idle_data:
                     val = idle_data[field]
@@ -80,7 +82,6 @@ def validate_ci_baseline_entry(env_label: str, baseline_data: Dict, path: str) -
                     )
                     continue
                 
-                # Check required fields in evidence source
                 for field in REQUIRED_CI_BASELINE_EVIDENCE_FIELDS:
                     if field not in source:
                         errors.append(
@@ -88,7 +89,6 @@ def validate_ci_baseline_entry(env_label: str, baseline_data: Dict, path: str) -
                             f"is required"
                         )
                 
-                # Validate environment_label matches parent
                 if "environment_label" in source:
                     if source["environment_label"] != env_label:
                         errors.append(
@@ -97,7 +97,6 @@ def validate_ci_baseline_entry(env_label: str, baseline_data: Dict, path: str) -
                             f"got '{source['environment_label']}'"
                         )
                     
-                    # Check for known environment label
                     if source["environment_label"] not in VALID_ENVIRONMENT_LABELS:
                         errors.append(
                             f"ci_idle_baselines.{env_label}.evidence_sources[{i}]."
@@ -112,7 +111,6 @@ def validate_ci_idle_baselines(data: Dict, path: str) -> List[str]:
     errors = []
     
     if "ci_idle_baselines" not in data:
-        # CI baselines are optional for now - just skip
         return errors
     
     ci_baselines = data["ci_idle_baselines"]
@@ -126,16 +124,177 @@ def validate_ci_idle_baselines(data: Dict, path: str) -> List[str]:
     return errors
 
 
+def _load_artifact(artifact_path: str) -> tuple[List[str], Optional[Dict]]:
+    """Load and parse a JSON artifact file. Returns (errors, data)."""
+    errors = []
+    data = None
+    
+    if not os.path.exists(artifact_path):
+        errors.append(f"Artifact file does not exist: {artifact_path}")
+        return errors, None
+    
+    try:
+        with open(artifact_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        errors.append(f"Artifact is not valid JSON: {artifact_path}: {e}")
+        return errors, None
+    
+    if not isinstance(data, dict):
+        errors.append(f"Artifact must be a JSON object: {artifact_path}")
+        return errors, None
+    
+    return errors, data
+
+
+def _validate_artifact_evidence_kind(artifact_path: str, artifact_data: Dict) -> List[str]:
+    """Validate artifact evidence_kind field. Returns list of errors."""
+    errors = []
+    evidence_kind = artifact_data.get("evidence_kind")
+    
+    if evidence_kind is None:
+        errors.append(f"Artifact missing evidence_kind field: {artifact_path}")
+    elif evidence_kind != "real_evidence":
+        errors.append(
+            f"Artifact evidence_kind must be 'real_evidence', got '{evidence_kind}' "
+            f"in {artifact_path}"
+        )
+    
+    return errors
+
+
+def _validate_artifact_service_name(
+    artifact_path: str, 
+    artifact_data: Dict, 
+    expected_service: str
+) -> List[str]:
+    """Validate artifact service.name matches expected service. Returns list of errors."""
+    errors = []
+    
+    if "service" not in artifact_data:
+        errors.append(f"Artifact missing service field: {artifact_path}")
+        return errors
+    
+    service_data = artifact_data["service"]
+    if not isinstance(service_data, dict):
+        errors.append(f"Artifact service must be a dict: {artifact_path}")
+        return errors
+    
+    artifact_service_name = service_data.get("name")
+    if artifact_service_name is None:
+        errors.append(f"Artifact missing service.name field: {artifact_path}")
+    elif artifact_service_name != expected_service:
+        errors.append(
+            f"Artifact service.name '{artifact_service_name}' does not match "
+            f"budget service '{expected_service}' in {artifact_path}"
+        )
+    
+    return errors
+
+
+def _validate_artifact_environment_label(
+    artifact_path: str, 
+    artifact_data: Dict, 
+    expected_label: str
+) -> List[str]:
+    """Validate artifact environment.environment_label matches expected label."""
+    errors = []
+    
+    if "environment" not in artifact_data:
+        errors.append(f"Artifact missing environment field: {artifact_path}")
+        return errors
+    
+    env_data = artifact_data["environment"]
+    if not isinstance(env_data, dict):
+        errors.append(f"Artifact environment must be a dict: {artifact_path}")
+        return errors
+    
+    artifact_label = env_data.get("environment_label")
+    if artifact_label is None:
+        errors.append(f"Artifact missing environment.environment_label field: {artifact_path}")
+    elif artifact_label != expected_label:
+        errors.append(
+            f"Artifact environment.environment_label '{artifact_label}' does not match "
+            f"baseline label '{expected_label}' in {artifact_path}"
+        )
+    
+    return errors
+
+
+def _validate_artifact_workflow_metadata(
+    artifact_path: str, 
+    artifact_data: Dict, 
+    expected_workflow_run: int,
+    expected_artifact_id: int,
+    expected_artifact_name: str
+) -> List[str]:
+    """Validate artifact workflow/artifact metadata. Returns list of errors."""
+    errors = []
+    
+    if "environment" not in artifact_data:
+        errors.append(f"Artifact missing environment field: {artifact_path}")
+        return errors
+    
+    env_data = artifact_data["environment"]
+    
+    artifact_workflow_run = env_data.get("_github_workflow_run")
+    if artifact_workflow_run is None:
+        errors.append(
+            f"Artifact missing environment._github_workflow_run field: {artifact_path}"
+        )
+    elif artifact_workflow_run != expected_workflow_run:
+        errors.append(
+            f"Artifact _github_workflow_run {artifact_workflow_run} does not match "
+            f"evidence_sources workflow_run {expected_workflow_run} in {artifact_path}"
+        )
+    
+    artifact_id = env_data.get("_github_artifact_id")
+    if artifact_id is None:
+        errors.append(
+            f"Artifact missing environment._github_artifact_id field: {artifact_path}"
+        )
+    elif artifact_id != expected_artifact_id:
+        errors.append(
+            f"Artifact _github_artifact_id {artifact_id} does not match "
+            f"evidence_sources artifact_id {expected_artifact_id} in {artifact_path}"
+        )
+    
+    artifact_name = env_data.get("_github_artifact_name")
+    if artifact_name is None:
+        errors.append(
+            f"Artifact missing environment._github_artifact_name field: {artifact_path}"
+        )
+    elif artifact_name != expected_artifact_name:
+        errors.append(
+            f"Artifact _github_artifact_name '{artifact_name}' does not match "
+            f"evidence_sources artifact_name '{expected_artifact_name}' in {artifact_path}"
+        )
+    
+    return errors
+
+
 def check_ci_baseline_evidence_exists(
     budget_data: Dict, 
     budget_path: str, 
     repo_root: str
 ) -> List[str]:
-    """Check that CI baseline evidence artifacts exist. Returns list of errors."""
+    """
+    Check that CI baseline evidence artifacts exist and are valid.
+    
+    Returns list of hard errors for:
+    - No artifact exists for referenced workflow run
+    - Artifact is not valid JSON
+    - evidence_kind != real_evidence
+    - Artifact service.name doesn't match budget file service
+    - Artifact environment.environment_label doesn't match baseline label
+    - Artifact workflow/artifact metadata doesn't match evidence_sources entry
+    """
     errors = []
     
     if "ci_idle_baselines" not in budget_data:
         return errors
+    
+    budget_service = budget_data.get("service", "")
     
     for env_label, baseline_data in budget_data["ci_idle_baselines"].items():
         if not isinstance(baseline_data, dict):
@@ -153,24 +312,50 @@ def check_ci_baseline_evidence_exists(
             if not workflow_run or not artifact_id or not artifact_name:
                 continue
             
-            # Determine which service directory to look in
-            service = budget_data.get("service", "")
-            if service == "tovarisch":
+            if budget_service == "tovarisch":
                 evidence_dir = os.path.join(repo_root, "artifacts", "memory-labs", "tovarisch")
-            elif service == "uvb76":
+            elif budget_service == "uvb76":
                 evidence_dir = os.path.join(repo_root, "artifacts", "memory-labs", "uvb76")
             else:
+                errors.append(
+                    f"Cannot verify artifact traceability: unknown service '{budget_service}' "
+                    f"in {budget_path}"
+                )
                 continue
             
-            # Check if any artifact exists that matches the workflow run
+            artifact_path = None
             if os.path.isdir(evidence_dir):
-                found = False
                 for entry in os.listdir(evidence_dir):
-                    if str(workflow_run) in entry:
-                        found = True
+                    if str(workflow_run) in entry and entry.endswith(".json"):
+                        artifact_path = os.path.join(evidence_dir, entry)
                         break
-                
-                if not found:
-                    print(f"  WARNING: No artifact found for workflow {workflow_run} in {evidence_dir}")
+            
+            if artifact_path is None:
+                errors.append(
+                    f"No artifact found for workflow run {workflow_run} in {evidence_dir} "
+                    f"(expected artifact name containing '{artifact_name}')"
+                )
+                continue
+            
+            load_errors, artifact_data = _load_artifact(artifact_path)
+            errors.extend(load_errors)
+            
+            if artifact_data is None:
+                continue
+            
+            errors.extend(_validate_artifact_evidence_kind(artifact_path, artifact_data))
+            errors.extend(_validate_artifact_service_name(
+                artifact_path, artifact_data, budget_service
+            ))
+            errors.extend(_validate_artifact_environment_label(
+                artifact_path, artifact_data, env_label
+            ))
+            errors.extend(_validate_artifact_workflow_metadata(
+                artifact_path, 
+                artifact_data, 
+                workflow_run,
+                artifact_id,
+                artifact_name
+            ))
     
     return errors
