@@ -205,12 +205,53 @@ function mapCaptureStatus(capture: DiagCapture): CaptureStatusDisplay {
 }
 
 // ---------------------------------------------------------------------------
+// String Normalization
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize a value to a non-empty string for stable sorting.
+ * Handles missing, empty, and non-string values.
+ */
+function normalizeSortString(value: unknown, fallback: string): string {
+  if (typeof value === 'string' && value.trim() !== '') {
+    return value;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return fallback;
+}
+
+/**
+ * Generate a deterministic fallback event ID from stable row contents.
+ */
+function normalizeEventId(spike: SpikeEventWithCaptures): string {
+  const eventIdFallback = [
+    spike.target_id ?? 'unknown',
+    spike.kind ?? 'unknown',
+    spike.sample_ts ?? spike.collected_at ?? 'unknown',
+  ].join(':');
+  
+  return normalizeSortString(spike.event_id, `missing-event-id:${eventIdFallback}`);
+}
+
+/**
+ * Safe string comparison that handles undefined/null operands.
+ */
+function compareStringKey(a: unknown, b: unknown): number {
+  return String(a ?? '').localeCompare(String(b ?? ''));
+}
+
+// ---------------------------------------------------------------------------
 // Normalization
 // ---------------------------------------------------------------------------
 
 /** Normalize a spike event to a timeline event */
 function normalizeSpikeEvent(spike: SpikeEventWithCaptures): TimelineEvent {
   const { ms, status } = getCanonicalTime(spike);
+  
+  // Normalize event identity - always non-empty string
+  const eventId = normalizeEventId(spike);
   
   // Sort captures: prefer 'captured', then 'suppressed', then others
   const sortedCaptures = [...(spike.captures || [])].sort((a, b) => {
@@ -222,7 +263,7 @@ function normalizeSpikeEvent(spike: SpikeEventWithCaptures): TimelineEvent {
   const captureStatus = primaryCapture ? mapCaptureStatus(primaryCapture) : 'not_attempted';
   
   return {
-    eventId: spike.event_id,
+    eventId,
     targetId: spike.target_id,
     probeKind: spike.kind as ProbeKind,
     severity: spike.severity as Severity,
@@ -243,7 +284,7 @@ function normalizeSpikeEvent(spike: SpikeEventWithCaptures): TimelineEvent {
     timeStatus: status,
     sortProbeKind: spike.kind === 'http' ? 0 : 1,
     sortSeverity: spike.severity === 'warning' ? 0 : 1,
-    sortEventId: spike.event_id,
+    sortEventId: eventId,
   };
 }
 
@@ -285,8 +326,8 @@ export function sortTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
       return a.sortSeverity - b.sortSeverity;
     }
     
-    // Stable tie-break 3: event id
-    return a.sortEventId.localeCompare(b.sortEventId);
+    // Stable tie-break 3: event id (use safe comparator for defense-in-depth)
+    return compareStringKey(a.sortEventId, b.sortEventId);
   });
 }
 
