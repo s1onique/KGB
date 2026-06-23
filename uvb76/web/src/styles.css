@@ -269,21 +269,65 @@ h2 { color: var(--color-text-secondary); margin: 1.5rem 0 1rem; font-weight: 500
     min-width: 0; /* Prevent overflow in grid cell */
 }
 
-/* Compact percentile stats in 2x2 grid inside half-width panels */
+/* Compact percentile stats: 4-column grid for single-line display */
 .latency-panel .percentile-stats {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 0.375rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.25rem;
     margin-bottom: 0.5rem;
 }
 
 .latency-panel .percentile-stat {
-    padding: 0.5rem;
+    padding: 0.35rem 0.45rem;
     background: var(--color-surface);
 }
 
+.latency-panel .percentile-stat .label {
+    font-size: 0.55rem;
+}
+
 .latency-panel .percentile-stat .value {
-    font-size: 1rem;
+    font-size: 0.9rem;
+    line-height: 1.1;
+}
+
+/* Narrow screen fallback: 2x2 grid for percentiles */
+@media (max-width: 700px) {
+    .latency-panel .percentile-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+/* Compact latency footer row: flexbox for inline sample count + warning */
+.latency-footer-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.5rem;
+    margin-top: 0.25rem;
+    font-size: 0.7rem;
+    color: var(--color-text-muted);
+}
+
+.latency-footer-row .graph-subtitle {
+    font-size: 0.7rem;
+}
+
+.latency-footer-row .sample-count {
+    margin-top: 0;
+}
+
+.latency-footer-row .low-sample-warning {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    color: var(--color-warn);
+    font-weight: 600;
+}
+
+.latency-footer-row .low-sample-warning.hidden {
+    display: none;
 }
 
 /* Compact meta info inside panel */

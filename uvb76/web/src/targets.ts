@@ -89,11 +89,13 @@ function latencySectionHTML(targetId: string, kind: 'http' | 'icmp', title: stri
                       No finite latency series points yet
                   </div>
               </div>
-              <div class="graph-subtitle">Trailing windows over retained range</div>
-              <div class="sample-count" id="samples-${kindId}-${targetIdAttr}"></div>
-          </div>
-          <div class="low-sample-warning hidden" id="warning-${kindId}-${targetIdAttr}">
-              Low sample count; tail percentiles are approximate.
+              <div class="latency-footer-row">
+                  <span class="graph-subtitle">Trailing windows over retained range</span>
+                  <span class="sample-count" id="samples-${kindId}-${targetIdAttr}"></span>
+                  <span class="low-sample-warning hidden" id="warning-${kindId}-${targetIdAttr}">
+                      Low sample count; tail percentiles are approximate.
+                  </span>
+              </div>
           </div>
       </div>
   `;
