@@ -116,6 +116,21 @@ export interface SpikeResponse {
 // DiagCaptureStatus represents the status of a diagnostic capture.
 export type DiagCaptureStatus = 'ok' | 'unavailable' | 'timeout' | 'error' | 'disabled' | 'no_peer_mapping';
 
+// AnchorEventSummary provides embedded provenance for a suppressed diagnostic capture.
+// This allows the UI to show why a spike was suppressed even when the anchor is not
+// visible in the current timeline response.
+export interface AnchorEventSummary {
+  event_id?: string;
+  capture_id?: string;
+  probe_kind?: 'http' | 'icmp' | string;
+  severity?: 'warning' | 'critical' | string;
+  latency_ms?: number;
+  sample_ts?: string;
+  capture_status?: string;
+  source?: string;
+  captured_at?: string;
+}
+
 // CaptureCooldownInfo holds metadata about why a spike was suppressed by cooldown.
 // This provides auditable context for UI display.
 export interface CaptureCooldownInfo {
@@ -145,8 +160,18 @@ export interface CaptureCooldownInfo {
   anchor_timeline_visible: boolean;
   // AnchorVisibilityReason explains why anchor_visible is false.
   // Empty when anchor_visible is true.
-  // Values: "retained_visible", "outside_filter_window", "evicted_from_retention", "suppressed_cooldown"
+  // Values: "retained_visible", "pinned_anchor", "embedded_summary", "degraded",
+  //         "outside_filter_window", "evicted_from_retention", "outside_target_filter",
+  //         "outside_probe_filter", "startup_warmup_anchor", "unknown_anchor_not_visible"
   anchor_visibility_reason?: string;
+  // AnchorEventSummary provides embedded anchor provenance when anchor is not visible.
+  // This allows auditable suppression without requiring a separate API call.
+  anchor_event_summary?: AnchorEventSummary | null;
+  // SuppressionDegraded indicates that anchor provenance is incomplete.
+  // When true, the suppression is valid but provenance evidence is degraded.
+  suppression_degraded?: boolean;
+  // SuppressionDegradedReason explains why suppression_degraded is true.
+  suppression_degraded_reason?: string;
   // SkippedAttemptUpdatesCooldown documents the cooldown semantics.
   skipped_attempt_updates_cooldown?: boolean;
   // CooldownSeconds is the configured cooldown duration.
@@ -295,6 +320,10 @@ export interface SpikeResponseWithCaptures {
   spikes: SpikeEventWithCaptures[];
   count: number;
   retention: SpikeRetentionStats;
+  // PinnedAnchors are anchor spike events that justify suppression of other spikes.
+  // These are always included in the response regardless of time window.
+  // They must be rendered in the timeline to provide anchor provenance.
+  pinned_anchors?: SpikeEventWithCaptures[];
 }
 
 // AnchorStatus represents the availability status of an anchor capture.

@@ -1,5 +1,5 @@
 // Diagnostic Timeline Model - Fetch and normalize API responses
-import { api, type SpikeResponseWithCaptures, type SpikeEventWithCaptures, type DiagCapture, type SpikeRetentionStats, type CaptureCooldownInfo } from './api';
+import { api, type SpikeResponseWithCaptures, type SpikeEventWithCaptures, type DiagCapture, type SpikeRetentionStats, type CaptureCooldownInfo, type AnchorEventSummary } from './api';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -59,6 +59,10 @@ export interface TimelineEvent {
   // Distinguishes "legitimate missing optional value" from "wrong DTO shape"
   dataStatus: TimelineEventDataStatus;
   malformedReasons: string[];
+
+  // Pinned anchor flag - true for events from response.pinned_anchors
+  // Backend-pinned anchors are separate response-level anchor spike rows
+  isPinnedAnchor: boolean;
 }
 
 /** Summary card for a probe kind */
@@ -397,21 +401,79 @@ function normalizeSpikeEvent(spike: SpikeEventWithCaptures): NormalizeSpikeEvent
     sortEventId: eventId,
     dataStatus: malformedReasons.length === 0 ? 'ok' : 'malformed',
     malformedReasons,
+    isPinnedAnchor: false, // Default false, overridden by normalizePinnedAnchors
   };
   
   return { event, malformedReasons };
 }
 
-/** Normalize HTTP response - exported for use in effects.ts */
-export function normalizeHttpResponse(response: SpikeResponseWithCaptures | null): TimelineEvent[] {
-  if (!response?.spikes) return [];
-  return response.spikes.map(spike => normalizeSpikeEvent(spike).event);
+/** Normalize a pinned anchor spike event, marking it with isPinnedAnchor=true */
+function normalizePinnedAnchorEvent(spike: SpikeEventWithCaptures): TimelineEvent {
+  const { event } = normalizeSpikeEvent(spike);
+  return {
+    ...event,
+    isPinnedAnchor: true,
+  };
 }
 
-/** Normalize ICMP response - exported for use in effects.ts */
+/** Normalize response.pinned_anchors and merge with regular spikes, deduping by eventId */
+export function normalizeResponseWithPinnedAnchors(
+  response: SpikeResponseWithCaptures | null,
+  isPinnedAnchorsResponse: boolean = false
+): TimelineEvent[] {
+  if (!response) return [];
+  
+  const spikes = response.spikes || [];
+  const pinnedAnchors = response.pinned_anchors || [];
+  
+  // Build event ID set from regular spikes
+  const spikeEventIds = new Set(spikes.map(s => s.event_id).filter(Boolean));
+  
+  // Normalize pinned anchors (only those not already in spikes)
+  const uniquePinnedAnchors = pinnedAnchors.filter(
+    anchor => !spikeEventIds.has(anchor.event_id)
+  );
+  
+  const pinnedAnchorEvents = uniquePinnedAnchors.map(normalizePinnedAnchorEvent);
+  const regularEvents = spikes.map(s => {
+    const { event } = normalizeSpikeEvent(s);
+    return event;
+  });
+  
+  // Merge and deduplicate by eventId
+  const eventMap = new Map<string, TimelineEvent>();
+  for (const event of regularEvents) {
+    eventMap.set(event.eventId, event);
+  }
+  for (const event of pinnedAnchorEvents) {
+    if (!eventMap.has(event.eventId)) {
+      eventMap.set(event.eventId, event);
+    }
+  }
+  
+  return sortTimelineEvents(Array.from(eventMap.values()));
+}
+
+/** Normalize HTTP response with pinned anchors */
+export function normalizeHttpResponseWithPinnedAnchors(response: SpikeResponseWithCaptures | null): TimelineEvent[] {
+  return normalizeResponseWithPinnedAnchors(response);
+}
+
+/** Normalize ICMP response with pinned anchors */
+export function normalizeIcmpResponseWithPinnedAnchors(response: SpikeResponseWithCaptures | null): TimelineEvent[] {
+  return normalizeResponseWithPinnedAnchors(response);
+}
+
+/** Normalize HTTP response - exported for use in effects.ts.
+ * Delegates to WithPinnedAnchors to ensure pinned_anchors are always merged. */
+export function normalizeHttpResponse(response: SpikeResponseWithCaptures | null): TimelineEvent[] {
+  return normalizeHttpResponseWithPinnedAnchors(response);
+}
+
+/** Normalize ICMP response - exported for use in effects.ts.
+ * Delegates to WithPinnedAnchors to ensure pinned_anchors are always merged. */
 export function normalizeIcmpResponse(response: SpikeResponseWithCaptures | null): TimelineEvent[] {
-  if (!response?.spikes) return [];
-  return response.spikes.map(spike => normalizeSpikeEvent(spike).event);
+  return normalizeIcmpResponseWithPinnedAnchors(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -600,4 +662,68 @@ export function getAnchorProbeKind(event: TimelineEvent): string | null {
 export function getSuppressedProbeKind(event: TimelineEvent): string | null {
   const info = getCooldownInfo(event);
   return info?.suppressed_probe_kind || null;
+}
+
+// ---------------------------------------------------------------------------
+// Provenance Helpers
+// ---------------------------------------------------------------------------
+
+/** Check if a suppressed event has anchor provenance through any channel:
+ * - anchor_visible=true (visible/pinned anchor row exists)
+ * - anchor_event_summary is present (embedded anchor summary)
+ * - suppression_degraded=true (degraded but acknowledged)
+ */
+export function hasAnchorProvenance(event: TimelineEvent): boolean {
+  const info = getCooldownInfo(event);
+  if (!info) return false;
+  
+  // Case 1: Visible/pinned anchor exists
+  if (info.anchor_visible) return true;
+  
+  // Case 2: Embedded anchor summary is present
+  if (info.anchor_event_summary) return true;
+  
+  // Case 3: Degraded but acknowledged - still has provenance
+  if (info.suppression_degraded) return true;
+  
+  return false;
+}
+
+/** Get anchor event summary from cooldown info */
+export function getAnchorEventSummary(event: TimelineEvent): AnchorEventSummary | null {
+  const info = getCooldownInfo(event);
+  return info?.anchor_event_summary || null;
+}
+
+/** Check if suppression is degraded (provenance incomplete) */
+export function isSuppressionDegraded(event: TimelineEvent): boolean {
+  const info = getCooldownInfo(event);
+  return info?.suppression_degraded === true;
+}
+
+/** Get the human-readable reason for why a suppression is degraded */
+export function getDegradedReason(event: TimelineEvent): string | null {
+  const info = getCooldownInfo(event);
+  if (!info?.suppression_degraded) return null;
+  return info.suppression_degraded_reason || null;
+}
+
+/** Get anchor visibility reason for display */
+export function getAnchorVisibilityReason(event: TimelineEvent): string | null {
+  const info = getCooldownInfo(event);
+  return info?.anchor_visibility_reason || null;
+}
+
+/** Check if an event is a pinned anchor (rendered with anchor badge).
+ * Checks the model flag first (set during pinned_anchors normalization),
+ * then falls back to checking cooldown_info for suppressed rows.
+ */
+export function isPinnedAnchor(event: TimelineEvent): boolean {
+  // First check the explicit model flag (set for pinned_anchors from response)
+  if (event.isPinnedAnchor) return true;
+  
+  // Fallback: check cooldown_info for suppressed rows marked as pinned
+  const info = getCooldownInfo(event);
+  if (!info) return false;
+  return info.anchor_visibility_reason === 'pinned_anchor';
 }

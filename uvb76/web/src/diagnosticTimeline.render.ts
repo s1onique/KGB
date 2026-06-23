@@ -5,6 +5,7 @@ import type { TimelinePageState } from './diagnosticTimeline';
 import { PAGE_SIZE_OPTIONS } from './diagnosticTimeline';
 import { formatSpikeTime, formatLatencyMs } from './format';
 import { formatLocalDateTime, parseApiInstant, formatRemainingCooldown } from './time';
+import { getCooldownInfo, isSuppressionDegraded, getDegradedReason, getAnchorEventSummary, getAnchorVisibilityReason, isPinnedAnchor } from './diagnosticTimeline.model';
 
 // ---------------------------------------------------------------------------
 // Pagination Types
@@ -86,6 +87,18 @@ function getCaptureStatusLabel(status: string): string {
     case 'not_attempted': return 'not attempted';
     default: return status;
   }
+}
+
+/** Get CSS class for degraded suppression badge */
+function getDegradedBadgeClass(status: string, isDegraded: boolean): string {
+  if (!isDegraded) return getCaptureStatusClass(status);
+  return 'capture-degraded';
+}
+
+/** Get label for degraded suppression badge */
+function getDegradedBadgeLabel(status: string, isDegraded: boolean): string {
+  if (!isDegraded) return getCaptureStatusLabel(status);
+  return 'suppressed (degraded)';
 }
 
 // ---------------------------------------------------------------------------
@@ -481,6 +494,94 @@ function renderNetworkDiagSection(event: TimelineEvent): string {
 }
 
 // ---------------------------------------------------------------------------
+// Anchor Summary Rendering
+// ---------------------------------------------------------------------------
+
+/** Render embedded anchor event summary section */
+function renderAnchorSummarySection(event: TimelineEvent): string {
+  const summary = getAnchorEventSummary(event);
+  if (!summary) return '';
+  
+  let html = '<div class="anchor-summary-section">';
+  html += '<div class="anchor-summary-title">Anchor Provenance (Embedded Summary)</div>';
+  
+  // Suppression by prior capture message
+  const probeKind = upperLabel(summary.probe_kind, 'unknown');
+  html += `<div class="anchor-summary-row"><span class="anchor-summary-text">Suppressed by prior ${probeKind} capture</span></div>`;
+  
+  // Anchor event ID
+  if (summary.event_id) {
+    html += `<div class="anchor-summary-row"><span class="anchor-summary-label">Anchor event ID:</span><span class="anchor-summary-value">${escapeText(summary.event_id)}</span></div>`;
+  }
+  
+  // Anchor capture ID
+  if (summary.capture_id) {
+    html += `<div class="anchor-summary-row"><span class="anchor-summary-label">Anchor capture ID:</span><span class="anchor-summary-value">${escapeText(summary.capture_id)}</span></div>`;
+  }
+  
+  // Anchor sample time
+  if (summary.sample_ts) {
+    html += `<div class="anchor-summary-row"><span class="anchor-summary-label">Anchor sample time:</span><span class="anchor-summary-value">${formatTimelineTime(summary.sample_ts)}</span></div>`;
+  }
+  
+  // Anchor captured at
+  if (summary.captured_at) {
+    html += `<div class="anchor-summary-row"><span class="anchor-summary-label">Anchor captured at:</span><span class="anchor-summary-value">${formatTimelineTime(summary.captured_at)}</span></div>`;
+  }
+  
+  // Anchor latency
+  if (summary.latency_ms !== undefined) {
+    html += `<div class="anchor-summary-row"><span class="anchor-summary-label">Anchor latency:</span><span class="anchor-summary-value">${summary.latency_ms} ms</span></div>`;
+  }
+  
+  // Anchor severity
+  if (summary.severity) {
+    const severityLabel = upperLabel(summary.severity, 'WARNING');
+    html += `<div class="anchor-summary-row"><span class="anchor-summary-label">Anchor severity:</span><span class="anchor-summary-value">${severityLabel}</span></div>`;
+  }
+  
+  // Anchor source
+  if (summary.source) {
+    html += `<div class="anchor-summary-row"><span class="anchor-summary-label">Anchor source:</span><span class="anchor-summary-value">${escapeText(summary.source)}</span></div>`;
+  }
+  
+  // Anchor capture status
+  if (summary.capture_status) {
+    html += `<div class="anchor-summary-row"><span class="anchor-summary-label">Anchor capture status:</span><span class="anchor-summary-value">${escapeText(summary.capture_status)}</span></div>`;
+  }
+  
+  // Visibility reason
+  const visibilityReason = getAnchorVisibilityReason(event);
+  if (visibilityReason) {
+    html += `<div class="anchor-summary-row"><span class="anchor-summary-label">Visibility reason:</span><span class="anchor-summary-value">${escapeText(visibilityReason)}</span></div>`;
+  }
+  
+  html += '</div>';
+  return html;
+}
+
+/** Render degraded suppression warning */
+function renderDegradedWarning(event: TimelineEvent): string {
+  if (!isSuppressionDegraded(event)) return '';
+  
+  const reason = getDegradedReason(event) || 'unknown';
+  const visibilityReason = getAnchorVisibilityReason(event);
+  
+  let html = '<div class="suppression-degraded-warning">';
+  html += '<div class="warning-icon">⚠</div>';
+  html += '<div class="warning-content">';
+  html += '<div class="warning-title">Suppression provenance degraded</div>';
+  html += `<div class="warning-text">Anchor was not visible at response time and no anchor summary was available.</div>`;
+  html += `<div class="warning-reason">Reason: ${escapeText(reason)}</div>`;
+  if (visibilityReason) {
+    html += `<div class="warning-visibility">Visibility: ${escapeText(visibilityReason)}</div>`;
+  }
+  html += '</div></div>';
+  
+  return html;
+}
+
+// ---------------------------------------------------------------------------
 // Expanded Row Rendering
 // ---------------------------------------------------------------------------
 
@@ -488,7 +589,10 @@ function renderNetworkDiagSection(event: TimelineEvent): string {
 export function renderExpandedPanel(event: TimelineEvent, rowIndex: number): string {
   const detailsId = `timeline-details-${rowIndex}`;
   
-  let html = `<div class="timeline-expanded-panel" id="${detailsId}">`;
+  // Check if this is a degraded suppression
+  const degraded = event.captureStatus === 'suppressed' && isSuppressionDegraded(event);
+  
+  let html = `<div class="timeline-expanded-panel ${degraded ? 'panel-degraded' : ''}" id="${detailsId}">`;
   
   // Event metadata
   html += '<div class="event-metadata">';
@@ -504,8 +608,14 @@ export function renderExpandedPanel(event: TimelineEvent, rowIndex: number): str
   
   html += '</div>';
   
+  // Render degraded warning if applicable
+  html += renderDegradedWarning(event);
+  
   // Cross-probe suppression wording
   html += renderCrossProbeSuppression(event);
+  
+  // Anchor summary (embedded anchor provenance)
+  html += renderAnchorSummarySection(event);
   
   // Capture details
   html += renderCaptureDetailsSection(event);
@@ -530,14 +640,28 @@ export function renderExpandedPanel(event: TimelineEvent, rowIndex: number): str
 // Timeline Row Rendering
 // ---------------------------------------------------------------------------
 
+/** Check if event has an anchor badge to display */
+function hasAnchorBadge(event: TimelineEvent): boolean {
+  return isPinnedAnchor(event);
+}
+
+/** Render anchor badge for pinned anchors */
+function renderAnchorBadge(): string {
+  return '<span class="anchor-badge">anchor</span>';
+}
+
 /** Render a single timeline row */
 export function renderTimelineRow(event: TimelineEvent, rowIndex: number): string {
   const time = formatSpikeTime(event.sampleTs);
   const latency = formatLatencyMs(event.latencyMs);
   const probeKindClass = getProbeKindClass(event.probeKind);
   const severityClass = getSeverityClass(event.severity);
-  const captureStatusClass = getCaptureStatusClass(event.captureStatus);
-  const captureStatusLabel = getCaptureStatusLabel(event.captureStatus);
+  
+  // Check for degraded suppression
+  const suppressed = event.captureStatus === 'suppressed';
+  const degraded = suppressed && isSuppressionDegraded(event);
+  const captureStatusClass = getDegradedBadgeClass(event.captureStatus, degraded);
+  const captureStatusLabel = getDegradedBadgeLabel(event.captureStatus, degraded);
   
   // Get error text if failed
   let detailsText = '—';
@@ -552,10 +676,18 @@ export function renderTimelineRow(event: TimelineEvent, rowIndex: number): strin
   const probeKindLabel = upperLabel(event.probeKind, 'HTTP');
   const severityLabel = upperLabel(event.severity, 'WARNING');
   
+  // Render anchor badge if this is a pinned anchor
+  const anchorBadgeHtml = hasAnchorBadge(event) ? renderAnchorBadge() : '';
+  
+  // Build row class with extra classes for pinned/degraded rows
+  const rowClasses = ['timeline-row'];
+  if (degraded) rowClasses.push('timeline-row-degraded');
+  if (hasAnchorBadge(event)) rowClasses.push('timeline-row-pinned');
+  
   return `
-    <tr class="timeline-row" data-row-index="${rowIndex}">
+    <tr class="${rowClasses.join(' ')}" data-row-index="${rowIndex}">
       <td class="timeline-cell time-cell">${time}</td>
-      <td class="timeline-cell probe-cell"><span class="probe-badge ${probeKindClass}">${probeKindLabel}</span></td>
+      <td class="timeline-cell probe-cell"><span class="probe-badge ${probeKindClass}">${probeKindLabel}</span>${anchorBadgeHtml}</td>
       <td class="timeline-cell severity-cell"><span class="severity-badge ${severityClass}">${severityLabel}</span></td>
       <td class="timeline-cell latency-cell">${latency}</td>
       <td class="timeline-cell capture-cell"><span class="capture-badge ${captureStatusClass}">${captureStatusLabel}</span></td>

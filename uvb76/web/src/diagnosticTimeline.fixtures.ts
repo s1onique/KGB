@@ -252,6 +252,7 @@ export function createTimelineEvent(overrides: Partial<{
   canonicalTime: Date;
   dataStatus: 'ok' | 'malformed';
   malformedReasons: string[];
+  isPinnedAnchor: boolean;
 }> = {}): TimelineEvent {
   const eventId = overrides.eventId ?? 'evt-1';
   const probeKind = overrides.probeKind ?? 'http';
@@ -284,6 +285,7 @@ export function createTimelineEvent(overrides: Partial<{
     sortEventId: eventId,
     dataStatus: overrides.dataStatus ?? 'ok',
     malformedReasons: overrides.malformedReasons ?? [],
+    isPinnedAnchor: overrides.isPinnedAnchor ?? false,
   };
 }
 
@@ -419,3 +421,188 @@ export const criticalOnlyFilter: TimelineFilters = {
   captureStatus: 'all',
   severity: 'critical',
 };
+
+// ---------------------------------------------------------------------------
+// Anchor Provenance Fixtures
+// ---------------------------------------------------------------------------
+
+/** AnchorEventSummary - minimal anchor event for summary display */
+export const anchorEventSummaryFixture = {
+  event_id: 'anchor-evt-001',
+  capture_id: 'anchor-cap-001',
+  probe_kind: 'icmp',
+  severity: 'ok',
+  latency_ms: 45,
+  sample_ts: '2026-06-18T11:55:00Z',
+  capture_status: 'ok',
+  source: 'peer-1',
+  captured_at: '2026-06-18T11:55:00Z',
+};
+
+/** Create cooldown info with embedded anchor_event_summary */
+export function createCooldownInfoWithAnchorSummary(overrides: Partial<{
+  anchor_event_summary: typeof anchorEventSummaryFixture;
+  suppression_degraded: boolean;
+  suppression_degraded_reason: string;
+}> = {}): CaptureCooldownInfo {
+  return {
+    scope: 'per_diagnostic_peer',
+    last_successful_capture_at: '2026-06-18T11:00:00Z',
+    next_capture_eligible_at: '2026-06-18T12:05:00Z',
+    remaining_cooldown_ms: 300000,
+    cooldown_key: 'peer-1',
+    anchor_visible: true,
+    anchor_artifact_visible: true,
+    anchor_timeline_visible: true,
+    anchor_visibility_reason: 'retained_visible',
+    skipped_attempt_updates_cooldown: false,
+    cooldown_seconds: 300,
+    anchor_capture_id: 'icmp-anchor-event-001',
+    anchor_target_id: 'test-target',
+    anchor_probe_kind: 'icmp',
+    anchor_source: 'peer-1',
+    suppressed_probe_kind: 'http',
+    is_cross_probe_suppression: false,
+    anchor_event_summary: anchorEventSummaryFixture,
+    suppression_degraded: false,
+    suppression_degraded_reason: '',
+    ...overrides,
+  };
+}
+
+/** Create cooldown info with degraded suppression */
+export function createDegradedCooldownInfo(overrides: Partial<{
+  suppression_degraded_reason: string;
+  anchor_event_summary: typeof anchorEventSummaryFixture;
+}> = {}): CaptureCooldownInfo {
+  return createCooldownInfoWithAnchorSummary({
+    suppression_degraded: true,
+    suppression_degraded_reason: overrides.suppression_degraded_reason ?? 'Anchor capture data incomplete',
+    ...overrides,
+  });
+}
+
+/** Create a capture with anchor provenance (embedded anchor_event_summary) */
+export function createCaptureWithAnchorProvenance(overrides: Partial<DiagCapture> = {}): DiagCapture {
+  return {
+    source: 'peer-1',
+    base_url: 'http://10.0.0.1:8080',
+    capture_started_at: '2026-06-18T12:00:00Z',
+    status: 'ok',
+    suppressed_by_cooldown: true,
+    cooldown_info: createCooldownInfoWithAnchorSummary(),
+    ...overrides,
+  };
+}
+
+/** Create a capture with degraded suppression */
+export function createDegradedSuppressedCapture(overrides: Partial<DiagCapture> = {}): DiagCapture {
+  return {
+    source: 'peer-1',
+    base_url: 'http://10.0.0.1:8080',
+    capture_started_at: '2026-06-18T12:00:00Z',
+    status: 'ok',
+    suppressed_by_cooldown: true,
+    cooldown_info: createDegradedCooldownInfo({
+      suppression_degraded_reason: 'Anchor capture incomplete or degraded quality',
+    }),
+    ...overrides,
+  };
+}
+
+/** Create spike response with pinned anchors.
+ * This fixture simulates the production API response shape where:
+ * - spikes: contains the suppressed row (without anchor visible in timeline)
+ * - pinned_anchors: contains the captured anchor row (separate from spikes for dedup)
+ * 
+ * The renderer should show both rows in the timeline with anchor badges on pinned_anchors.
+ */
+export function createPinnedAnchorsSpikeResponse(): SpikeResponseWithCaptures {
+  // Create the anchor spike event (captured, will be in pinned_anchors)
+  const anchorSpike = createSpikeEvent({
+    event_id: 'anchor-evt-pinned-001',
+    kind: 'icmp',
+    severity: 'warning',
+    latency_ms: 45,
+    sample_ts: '2026-06-18T11:55:00Z',
+    collected_at: '2026-06-18T11:55:00Z',
+    captures: [createOkCapture({
+      source: 'peer-1',
+      duration_ms: 200,
+      network_diag: createNetworkDiag({
+        underlay_tcp: [createTcpSocket({ rtt_ms: 12.5, retransmits: 0 })],
+      }),
+    })],
+  });
+  
+  // Create the suppressed spike event (will be in spikes, cooldown references anchor)
+  const suppressedSpike = createSpikeEvent({
+    event_id: 'evt-suppressed-001',
+    kind: 'http',
+    severity: 'warning',
+    latency_ms: 800,
+    sample_ts: '2026-06-18T12:00:00Z',
+    collected_at: '2026-06-18T12:00:00Z',
+    captures: [createCaptureWithAnchorProvenance({
+      cooldown_info: createCooldownInfoWithAnchorSummary({
+        anchor_visibility_reason: 'pinned_anchor',
+        anchor_capture_id: 'anchor-evt-pinned-001',
+        is_cross_probe_suppression: true,
+      }),
+    })],
+  });
+  
+  return {
+    spikes: [suppressedSpike],
+    pinned_anchors: [anchorSpike],
+    count: 1,
+    retention: { ...defaultRetention, visible_spike_count: 1, protected_capture_count: 1 },
+  };
+}
+
+/** Create spike response with degraded suppression */
+export function createDegradedSuppressionSpikeResponse(): SpikeResponseWithCaptures {
+  return createSpikeResponse(createSpikeEvent({
+    kind: 'http',
+    severity: 'warning',
+    latency_ms: 800,
+    captures: [createDegradedSuppressedCapture()],
+  }));
+}
+
+/** Create spike response with anchor_event_summary in cooldown */
+export function createAnchorEventSummarySpikeResponse(): SpikeResponseWithCaptures {
+  return createSpikeResponse(createSpikeEvent({
+    kind: 'http',
+    severity: 'warning',
+    latency_ms: 800,
+    captures: [createCaptureWithAnchorProvenance()],
+  }));
+}
+
+/** Screenshot class: 0 captured, many suppressed with provenance */
+export function createScreenshotClassSpikeResponse(count: number = 5): SpikeResponseWithCaptures {
+  const spikes = Array.from({ length: count }, (_, i) => createSpikeEvent({
+    event_id: `evt-screenshot-${i + 1}`,
+    kind: 'http',
+    severity: 'warning',
+    latency_ms: 800 + i * 100,
+    sample_ts: new Date(Date.now() - i * 60000).toISOString(),
+    collected_at: new Date(Date.now() - i * 60000).toISOString(),
+    captures: [createCaptureWithAnchorProvenance({
+      cooldown_info: createCooldownInfoWithAnchorSummary({
+        anchor_event_summary: {
+          ...anchorEventSummaryFixture,
+          event_id: `anchor-evt-${i + 1}`,
+          captured_at: new Date(Date.now() - (i + 1) * 60000).toISOString(),
+        },
+      }),
+    })],
+  }));
+  
+  return {
+    spikes,
+    count,
+    retention: { ...defaultRetention, visible_spike_count: count },
+  };
+}
