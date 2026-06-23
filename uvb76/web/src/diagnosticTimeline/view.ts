@@ -21,10 +21,23 @@ function escapeText(s: string | null | undefined): string {
 /** HTML attribute escape helper - escapes text for safe use in HTML attributes */
 function escapeAttr(s: string | null | undefined): string {
   if (!s) return '';
-  // Escape for safe use in HTML double-quoted attributes
-  // Must escape &, ", and ' characters
   const str = String(s);
   return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ---------------------------------------------------------------------------
+// Defense-in-Depth Display Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Safe uppercase label helper - ensures .toUpperCase() never throws.
+ * Defense-in-depth for render code that may receive unexpected values.
+ */
+function upperLabel(value: unknown, fallback = 'UNKNOWN'): string {
+  if (typeof value === 'string' && value.trim() !== '') {
+    return value.toUpperCase();
+  }
+  return fallback;
 }
 
 // ---------------------------------------------------------------------------
@@ -285,8 +298,9 @@ function renderCrossProbeSuppression(event: TimelineEvent): string {
   const info = capture.cooldown_info;
   if (!info.is_cross_probe_suppression) return '';
   
-  const anchorKind = (info.anchor_probe_kind || 'unknown').toUpperCase();
-  const suppressedKind = (info.suppressed_probe_kind || event.probeKind).toUpperCase();
+  // Use upperLabel for defense-in-depth on cooldown info fields
+  const anchorKind = upperLabel(info.anchor_probe_kind, 'UNKNOWN');
+  const suppressedKind = upperLabel(info.suppressed_probe_kind ?? event.probeKind, 'UNKNOWN');
   
   return `
     <div class="cross-probe-explanation">
@@ -351,11 +365,15 @@ function renderTimelineRow(event: TimelineEvent, rowIndex: number): string {
   
   const detailsId = `timeline-details-${rowIndex}`;
   
+  // Use upperLabel for defense-in-depth - ensures .toUpperCase() never throws
+  const probeKindLabel = upperLabel(event.probeKind, 'HTTP');
+  const severityLabel = upperLabel(event.severity, 'WARNING');
+  
   return `
     <tr class="timeline-row" data-row-index="${rowIndex}">
       <td class="timeline-cell time-cell">${time}</td>
-      <td class="timeline-cell probe-cell"><span class="probe-badge ${probeKindClass}">${event.probeKind.toUpperCase()}</span></td>
-      <td class="timeline-cell severity-cell"><span class="severity-badge ${severityClass}">${event.severity.toUpperCase()}</span></td>
+      <td class="timeline-cell probe-cell"><span class="probe-badge ${probeKindClass}">${probeKindLabel}</span></td>
+      <td class="timeline-cell severity-cell"><span class="severity-badge ${severityClass}">${severityLabel}</span></td>
       <td class="timeline-cell latency-cell">${latency}</td>
       <td class="timeline-cell capture-cell"><span class="capture-badge ${captureStatusClass}">${captureStatusLabel}</span></td>
       <td class="timeline-cell details-cell">${escapeText(detailsText)}</td>

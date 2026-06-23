@@ -246,12 +246,49 @@ function compareStringKey(a: unknown, b: unknown): number {
 // Normalization
 // ---------------------------------------------------------------------------
 
+/**
+ * Normalize a probe kind value to a valid ProbeKind.
+ * Handles missing, invalid, or non-string values from API.
+ */
+function normalizeProbeKind(value: unknown): ProbeKind {
+  if (value === 'icmp') return 'icmp';
+  return 'http'; // Default to http for any other value
+}
+
+/**
+ * Normalize a severity value to a valid Severity.
+ * Handles missing, invalid, or non-string values from API.
+ */
+function normalizeSeverity(value: unknown): Severity {
+  if (value === 'critical') return 'critical';
+  return 'warning'; // Default to warning for any other value
+}
+
+/**
+ * Normalize a display string value - always returns a non-empty string.
+ * Handles missing, empty, null, undefined values from API.
+ */
+function normalizeDisplayString(value: unknown, fallback: string): string {
+  if (typeof value === 'string' && value.trim() !== '') {
+    return value;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return fallback;
+}
+
 /** Normalize a spike event to a timeline event */
 function normalizeSpikeEvent(spike: SpikeEventWithCaptures): TimelineEvent {
   const { ms, status } = getCanonicalTime(spike);
   
   // Normalize event identity - always non-empty string
   const eventId = normalizeEventId(spike);
+  
+  // Normalize enum fields at the API boundary - these are rendered with .toUpperCase()
+  const probeKind = normalizeProbeKind(spike.kind);
+  const severity = normalizeSeverity(spike.severity);
+  const targetId = normalizeDisplayString(spike.target_id, 'unknown-target');
   
   // Sort captures: prefer 'captured', then 'suppressed', then others
   const sortedCaptures = [...(spike.captures || [])].sort((a, b) => {
@@ -264,9 +301,9 @@ function normalizeSpikeEvent(spike: SpikeEventWithCaptures): TimelineEvent {
   
   return {
     eventId,
-    targetId: spike.target_id,
-    probeKind: spike.kind as ProbeKind,
-    severity: spike.severity as Severity,
+    targetId,
+    probeKind,
+    severity,
     latencyMs: spike.latency_ms,
     sampleTs: spike.sample_ts,
     collectedAt: spike.collected_at,
@@ -282,8 +319,8 @@ function normalizeSpikeEvent(spike: SpikeEventWithCaptures): TimelineEvent {
     captureStatus,
     canonicalTimeMs: ms,
     timeStatus: status,
-    sortProbeKind: spike.kind === 'http' ? 0 : 1,
-    sortSeverity: spike.severity === 'warning' ? 0 : 1,
+    sortProbeKind: probeKind === 'http' ? 0 : 1,
+    sortSeverity: severity === 'warning' ? 0 : 1,
     sortEventId: eventId,
   };
 }
