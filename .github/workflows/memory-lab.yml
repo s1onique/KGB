@@ -50,7 +50,7 @@ jobs:
           cache: true
 
       - name: Set up Zig
-        uses: ziglibs/action-zig/setup@v1
+        uses: mlugg/setup-zig@v2.2.1
         with:
           version: 0.16.0
 
