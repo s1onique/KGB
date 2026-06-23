@@ -9,6 +9,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderTimelineTable } from './diagnosticTimeline/view';
 import { createTimelineStateWithEvents } from './diagnosticTimeline.fixtures';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 // Mock the api module
 vi.mock('./api', () => ({
@@ -248,6 +250,58 @@ describe('diagnosticTimeline row anchoring', () => {
       
       // Details row is visible (expanded)
       expect(rows[1].style.display).not.toBe('none');
+    });
+  });
+
+  describe('CSS contract: visibility ownership', () => {
+    it('does not hide inline expanded panel content; the table row owns visibility', () => {
+      // Regression test: .timeline-expanded-panel must NOT have display:none
+      // because the row (.timeline-details-row) now owns visibility via inline style.
+      // Bug: Previously, the panel had display:none, making content invisible
+      // even when the row was expanded.
+      const css = readFileSync(resolve(__dirname, 'styles.css'), 'utf8');
+      
+      const panelRuleMatch = css.match(/\.timeline-expanded-panel\s*\{[^}]*\}/);
+      expect(panelRuleMatch).toBeTruthy();
+      
+      const panelRule = panelRuleMatch![0];
+      // The panel rule must not contain display:none
+      expect(panelRule).not.toMatch(/display\s*:\s*none/);
+    });
+
+    it('expanded details row contains visible metadata content when expanded', () => {
+      const state = createTimelineStateWithEvents([
+        { eventId: 'evt-visible', probeKind: 'http', latencyMs: 500, rollingMedianMs: 100 },
+      ]);
+      
+      const expandedIds = new Set(['evt-visible']);
+      const html = renderTimelineTable(state.mergedEvents.slice(0, 1), expandedIds);
+      container.innerHTML = html;
+      
+      const detailsRow = container.querySelector('.timeline-details-row');
+      expect(detailsRow).toBeTruthy();
+      
+      // Row should be visible (not display:none)
+      expect(detailsRow!.style.display).not.toBe('none');
+      
+      // Panel content should be present and visible
+      const panel = detailsRow!.querySelector('.timeline-expanded-panel');
+      expect(panel).toBeTruthy();
+      
+      // Metadata content should be present
+      const metadata = panel!.querySelector('.event-metadata');
+      expect(metadata).toBeTruthy();
+      
+      // Should contain event ID
+      const eventId = panel!.querySelector('.event-id');
+      expect(eventId).toBeTruthy();
+      expect(eventId!.textContent).toBe('evt-visible');
+      
+      // Should contain action buttons
+      const copyBtn = panel!.querySelector('.copy-btn');
+      const downloadBtn = panel!.querySelector('.download-btn');
+      expect(copyBtn).toBeTruthy();
+      expect(downloadBtn).toBeTruthy();
     });
   });
 });

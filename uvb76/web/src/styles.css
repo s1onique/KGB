@@ -1835,8 +1835,9 @@ h2 { color: var(--color-text-secondary); margin: 1.5rem 0 1rem; font-weight: 500
 }
 
 /* Timeline expanded panel content (inside .timeline-details-row) */
+/* NOTE: visibility is controlled by .timeline-details-row via inline style="display:none";
+   this panel must NOT hide itself as it should be visible when the row is expanded */
 .timeline-expanded-panel {
-    display: none;
     padding: 1rem;
     background: var(--color-bg);
     border: 1px solid var(--color-border-muted);
