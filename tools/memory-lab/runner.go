@@ -118,6 +118,11 @@ func Run(cfg RunConfig) (string, error) {
 }
 
 func (r *Runner) run() (string, error) {
+	// Preflight check: verify the binary is valid and supports required commands
+	if err := r.preflightServiceCommand(); err != nil {
+		return "", fmt.Errorf("preflight: %w", err)
+	}
+
 	pid, stdoutPath, err := r.startService()
 	if err != nil {
 		return "", fmt.Errorf("start service: %w", err)
@@ -182,13 +187,25 @@ func (r *Runner) artifactDir() string {
 
 func (r *Runner) buildServiceCommand() *exec.Cmd {
 	if r.cfg.Service == "tovarisch" {
-		return exec.Command(r.cfg.Binary, "serve", fmt.Sprintf("--listen=127.0.0.1:%d", r.cfg.Port))
+		// Note: tovarisch CLI requires space between --listen and address,
+		// not an equals sign. e.g., "--listen 127.0.0.1:18080" not "--listen=127.0.0.1:18080"
+		return exec.Command(r.cfg.Binary, "serve", "--listen", fmt.Sprintf("127.0.0.1:%d", r.cfg.Port))
 	}
 	configPath := r.cfg.ConfigPath
 	if configPath == "" {
 		configPath = "./uvb76/uvb76.example.json"
 	}
 	return exec.Command(r.cfg.Binary, "-config="+configPath)
+}
+
+// preflightServiceCommand verifies the service command is valid by running with --help.
+// Returns an error if the command is invalid.
+func (r *Runner) preflightServiceCommand() error {
+	output, err := exec.Command(r.cfg.Binary, "--help").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("preflight failed for %s: %w\noutput: %s", r.cfg.Binary, err, output)
+	}
+	return nil
 }
 
 func (r *Runner) readinessURL() string {

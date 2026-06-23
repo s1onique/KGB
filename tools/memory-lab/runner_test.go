@@ -140,9 +140,10 @@ func TestBuildServiceCommandTovarisch(t *testing.T) {
 
 	cmd := r.buildServiceCommand()
 
-	// Verify exact argv
-	if len(cmd.Args) != 3 {
-		t.Errorf("len(cmd.Args) = %d, want 3", len(cmd.Args))
+	// Verify exact argv: [binary, "serve", "--listen", "127.0.0.1:18080"]
+	// Note: tovarisch requires space-separated --listen and address, not --listen=addr
+	if len(cmd.Args) != 4 {
+		t.Errorf("len(cmd.Args) = %d, want 4", len(cmd.Args))
 	}
 	if cmd.Args[0] != "./tovarisch/zig-out/bin/tovarisch" {
 		t.Errorf("cmd.Args[0] = %q, want ./tovarisch/zig-out/bin/tovarisch", cmd.Args[0])
@@ -150,8 +151,11 @@ func TestBuildServiceCommandTovarisch(t *testing.T) {
 	if cmd.Args[1] != "serve" {
 		t.Errorf("cmd.Args[1] = %q, want serve", cmd.Args[1])
 	}
-	if cmd.Args[2] != "--listen=127.0.0.1:18080" {
-		t.Errorf("cmd.Args[2] = %q, want --listen=127.0.0.1:18080", cmd.Args[2])
+	if cmd.Args[2] != "--listen" {
+		t.Errorf("cmd.Args[2] = %q, want --listen", cmd.Args[2])
+	}
+	if cmd.Args[3] != "127.0.0.1:18080" {
+		t.Errorf("cmd.Args[3] = %q, want 127.0.0.1:18080", cmd.Args[3])
 	}
 }
 
@@ -263,7 +267,7 @@ func TestReadTailMissingFile(t *testing.T) {
 func TestServiceExitError(t *testing.T) {
 	err := &ServiceExitError{
 		PID:       12345,
-		Argv:      []string{"./tovarisch", "serve", "--listen=127.0.0.1:18080"},
+		Argv:      []string{"./tovarisch", "serve", "--listen", "127.0.0.1:18080"},
 		ExitError: nil,
 		StdoutTail: "error: config missing\n",
 	}
@@ -290,7 +294,7 @@ func TestServiceExitErrorWithExitStatus(t *testing.T) {
 	// Test that ServiceExitError with nil ExitError shows "unknown exit status"
 	err := &ServiceExitError{
 		PID:        12345,
-		Argv:       []string{"./tovarisch", "serve", "--listen=127.0.0.1:18080"},
+		Argv:       []string{"./tovarisch", "serve", "--listen", "127.0.0.1:18080"},
 		ExitError:  nil,
 		StdoutTail: "fatal: serve command not supported\n",
 	}

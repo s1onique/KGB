@@ -36,6 +36,8 @@ func (e *ServiceExitError) Error() string {
 	if e.StdoutTail != "" {
 		buf.WriteString("\nstdout/stderr tail:\n")
 		buf.WriteString(e.StdoutTail)
+	} else {
+		buf.WriteString("\nstdout/stderr tail: <empty>")
 	}
 	return buf.String()
 }
@@ -53,6 +55,8 @@ func (e *ReadinessTimeoutError) Error() string {
 	if e.StdoutTail != "" {
 		buf.WriteString("\nstdout/stderr tail:\n")
 		buf.WriteString(e.StdoutTail)
+	} else {
+		buf.WriteString("\nstdout/stderr tail: <empty>")
 	}
 	return buf.String()
 }
