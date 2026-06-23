@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0",
+  "evidence_kind": "real_evidence",
+  "_workflow_note": "First short-window leak-slope evidence. Workflow run 28018628934.",
+  "_short_window_note": "10-second window, warmup-sensitive. NOT definitive leak proof.",
+  "service": {
+    "name": "tovarisch",
+    "version": "0.1.0",
+    "commit": "642befe"
+  },
+  "environment": {
+    "arch": "linux/amd64",
+    "kernel": "ubuntu-latest",
+    "os": "Linux",
+    "has_smaps_rollup": true,
+    "environment_label": "github_hosted_ubuntu",
+    "_github_workflow_run": 28018628934,
+    "_github_artifact_id": 7817906532,
+    "_github_artifact_name": "tovarisch-memory-lab"
+  },
+  "workload": {
+    "type": "tovarisch-leak-slope",
+    "operations": 100,
+    "errors": 0,
+    "duration_ms": 9984,
+    "interval_ms": 100,
+    "warmup_seconds": 60,
+    "description": "Leak-slope measurement: repeated requests over short window (warmup-sensitive)"
+  },
+  "memory": {
+    "first": {
+      "rss_kib": 8244,
+      "pss_kib": 6212
+    },
+    "max": {
+      "rss_kib": 9160,
+      "pss_kib": 7128
+    },
+    "last": {
+      "rss_kib": 9160,
+      "pss_kib": 7128
+    },
+    "growth": {
+      "rss_kib": 916,
+      "pss_kib": 916,
+      "rss_percent": 11.11
+    }
+  },
+  "leak_slope": {
+    "sampled_points": 101,
+    "duration_seconds": 9.984,
+    "rss_first_kib": 8244,
+    "rss_max_kib": 9160,
+    "rss_last_kib": 9160,
+    "pss_first_kib": 6212,
+    "pss_max_kib": 7128,
+    "pss_last_kib": 7128,
+    "rss_growth_kib": 916,
+    "pss_growth_kib": 916,
+    "rss_slope_kib_per_min": 5503.0,
+    "pss_slope_kib_per_min": 5503.0,
+    "request_count": 100,
+    "request_errors": 0
+  },
+  "runtime": {
+    "allocator": "zig-default"
+  },
+  "decision": {
+    "pass": true,
+    "reason": "Short-window leak-slope baseline: 10s window, warmup-sensitive. RSS slope 5503 KiB/min (short window, NOT definitive leak proof).",
+    "signal_quality": "warmup_sensitive",
+    "short_window_seconds": 10
+  }
+}

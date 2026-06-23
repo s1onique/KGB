@@ -47,6 +47,33 @@ on:
         required: false
         default: 'false'
         type: boolean
+      # === Long-window/manual mode inputs ===
+      leak_slope_profile:
+        description: 'Leak-slope soak profile: short (10s), medium (5min), long (15min), manual_soak (60min)'
+        required: false
+        default: 'short'
+        type: choice
+        options:
+          - short
+          - medium
+          - long
+          - manual_soak
+      # Manual override inputs (used when leak_slope_profile=manual_soak)
+      leak_slope_warmup_seconds:
+        description: 'Warmup seconds for manual leak-slope (default: 300)'
+        required: false
+        default: '300'
+        type: string
+      leak_slope_operations:
+        description: 'Number of operations for manual leak-slope (default: 36000 for 60min)'
+        required: false
+        default: '36000'
+        type: string
+      leak_slope_interval_ms:
+        description: 'Interval between operations in ms (default: 100)'
+        required: false
+        default: '100'
+        type: string
 
 env:
   # Disable Go CGO for cross-compilation compatibility
@@ -106,8 +133,8 @@ jobs:
       # These are optional soaks that measure memory growth slope over repeated requests.
       # They are NOT required for the basic memory-gate but can be enabled manually.
 
-      - name: Run tovarisch leak-slope workload
-        if: ${{ inputs.run_tovarisch_leak_slope }}
+      - name: Run tovarisch leak-slope workload (short window)
+        if: ${{ inputs.run_tovarisch_leak_slope && inputs.leak_slope_profile == 'short' }}
         run: |
           ./tools/memory-lab/memory-lab \
             --service tovarisch \
@@ -116,8 +143,38 @@ jobs:
             --operations 100 \
             --interval-ms 100
 
-      - name: Run tovarisch leak-slope with network_diag
-        if: ${{ inputs.run_tovarisch_leak_slope_netdiag }}
+      - name: Run tovarisch leak-slope workload (medium window)
+        if: ${{ inputs.run_tovarisch_leak_slope && inputs.leak_slope_profile == 'medium' }}
+        run: |
+          ./tools/memory-lab/memory-lab \
+            --service tovarisch \
+            --workload tovarisch-leak-slope \
+            --warmup-secs 120 \
+            --operations 3000 \
+            --interval-ms 100
+
+      - name: Run tovarisch leak-slope workload (long window)
+        if: ${{ inputs.run_tovarisch_leak_slope && inputs.leak_slope_profile == 'long' }}
+        run: |
+          ./tools/memory-lab/memory-lab \
+            --service tovarisch \
+            --workload tovarisch-leak-slope \
+            --warmup-secs 180 \
+            --operations 9000 \
+            --interval-ms 100
+
+      - name: Run tovarisch leak-slope workload (manual soak)
+        if: ${{ inputs.run_tovarisch_leak_slope && inputs.leak_slope_profile == 'manual_soak' }}
+        run: |
+          ./tools/memory-lab/memory-lab \
+            --service tovarisch \
+            --workload tovarisch-leak-slope \
+            --warmup-secs ${{ inputs.leak_slope_warmup_seconds }} \
+            --operations ${{ inputs.leak_slope_operations }} \
+            --interval-ms ${{ inputs.leak_slope_interval_ms }}
+
+      - name: Run tovarisch leak-slope with network_diag (short window)
+        if: ${{ inputs.run_tovarisch_leak_slope_netdiag && inputs.leak_slope_profile == 'short' }}
         run: |
           ./tools/memory-lab/memory-lab \
             --service tovarisch \
@@ -126,8 +183,38 @@ jobs:
             --operations 100 \
             --interval-ms 100
 
-      - name: Run uvb76 leak-slope workload
-        if: ${{ inputs.run_uvb76_leak_slope }}
+      - name: Run tovarisch leak-slope with network_diag (medium window)
+        if: ${{ inputs.run_tovarisch_leak_slope_netdiag && inputs.leak_slope_profile == 'medium' }}
+        run: |
+          ./tools/memory-lab/memory-lab \
+            --service tovarisch \
+            --workload tovarisch-leak-slope-netdiag \
+            --warmup-secs 120 \
+            --operations 3000 \
+            --interval-ms 100
+
+      - name: Run tovarisch leak-slope with network_diag (long window)
+        if: ${{ inputs.run_tovarisch_leak_slope_netdiag && inputs.leak_slope_profile == 'long' }}
+        run: |
+          ./tools/memory-lab/memory-lab \
+            --service tovarisch \
+            --workload tovarisch-leak-slope-netdiag \
+            --warmup-secs 180 \
+            --operations 9000 \
+            --interval-ms 100
+
+      - name: Run tovarisch leak-slope with network_diag (manual soak)
+        if: ${{ inputs.run_tovarisch_leak_slope_netdiag && inputs.leak_slope_profile == 'manual_soak' }}
+        run: |
+          ./tools/memory-lab/memory-lab \
+            --service tovarisch \
+            --workload tovarisch-leak-slope-netdiag \
+            --warmup-secs ${{ inputs.leak_slope_warmup_seconds }} \
+            --operations ${{ inputs.leak_slope_operations }} \
+            --interval-ms ${{ inputs.leak_slope_interval_ms }}
+
+      - name: Run uvb76 leak-slope workload (short window)
+        if: ${{ inputs.run_uvb76_leak_slope && inputs.leak_slope_profile == 'short' }}
         run: |
           ./tools/memory-lab/memory-lab \
             --service uvb76 \
@@ -137,8 +224,41 @@ jobs:
             --operations 100 \
             --interval-ms 100
 
-      - name: Run uvb76 leak-slope with network_diag
-        if: ${{ inputs.run_uvb76_leak_slope_netdiag }}
+      - name: Run uvb76 leak-slope workload (medium window)
+        if: ${{ inputs.run_uvb76_leak_slope && inputs.leak_slope_profile == 'medium' }}
+        run: |
+          ./tools/memory-lab/memory-lab \
+            --service uvb76 \
+            --workload uvb76-leak-slope \
+            --config ./uvb76/uvb76.memory-lab.json \
+            --warmup-secs 120 \
+            --operations 3000 \
+            --interval-ms 100
+
+      - name: Run uvb76 leak-slope workload (long window)
+        if: ${{ inputs.run_uvb76_leak_slope && inputs.leak_slope_profile == 'long' }}
+        run: |
+          ./tools/memory-lab/memory-lab \
+            --service uvb76 \
+            --workload uvb76-leak-slope \
+            --config ./uvb76/uvb76.memory-lab.json \
+            --warmup-secs 180 \
+            --operations 9000 \
+            --interval-ms 100
+
+      - name: Run uvb76 leak-slope workload (manual soak)
+        if: ${{ inputs.run_uvb76_leak_slope && inputs.leak_slope_profile == 'manual_soak' }}
+        run: |
+          ./tools/memory-lab/memory-lab \
+            --service uvb76 \
+            --workload uvb76-leak-slope \
+            --config ./uvb76/uvb76.memory-lab.json \
+            --warmup-secs ${{ inputs.leak_slope_warmup_seconds }} \
+            --operations ${{ inputs.leak_slope_operations }} \
+            --interval-ms ${{ inputs.leak_slope_interval_ms }}
+
+      - name: Run uvb76 leak-slope with network_diag (short window)
+        if: ${{ inputs.run_uvb76_leak_slope_netdiag && inputs.leak_slope_profile == 'short' }}
         run: |
           ./tools/memory-lab/memory-lab \
             --service uvb76 \
@@ -147,6 +267,39 @@ jobs:
             --warmup-secs 60 \
             --operations 100 \
             --interval-ms 100
+
+      - name: Run uvb76 leak-slope with network_diag (medium window)
+        if: ${{ inputs.run_uvb76_leak_slope_netdiag && inputs.leak_slope_profile == 'medium' }}
+        run: |
+          ./tools/memory-lab/memory-lab \
+            --service uvb76 \
+            --workload uvb76-leak-slope-netdiag \
+            --config ./uvb76/uvb76.memory-lab.json \
+            --warmup-secs 120 \
+            --operations 3000 \
+            --interval-ms 100
+
+      - name: Run uvb76 leak-slope with network_diag (long window)
+        if: ${{ inputs.run_uvb76_leak_slope_netdiag && inputs.leak_slope_profile == 'long' }}
+        run: |
+          ./tools/memory-lab/memory-lab \
+            --service uvb76 \
+            --workload uvb76-leak-slope-netdiag \
+            --config ./uvb76/uvb76.memory-lab.json \
+            --warmup-secs 180 \
+            --operations 9000 \
+            --interval-ms 100
+
+      - name: Run uvb76 leak-slope with network_diag (manual soak)
+        if: ${{ inputs.run_uvb76_leak_slope_netdiag && inputs.leak_slope_profile == 'manual_soak' }}
+        run: |
+          ./tools/memory-lab/memory-lab \
+            --service uvb76 \
+            --workload uvb76-leak-slope-netdiag \
+            --config ./uvb76/uvb76.memory-lab.json \
+            --warmup-secs ${{ inputs.leak_slope_warmup_seconds }} \
+            --operations ${{ inputs.leak_slope_operations }} \
+            --interval-ms ${{ inputs.leak_slope_interval_ms }}
 
       - name: Upload memory lab diagnostics
         if: ${{ always() }}

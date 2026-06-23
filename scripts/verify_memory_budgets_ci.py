@@ -3,10 +3,12 @@
 CI Baseline validation module for memory budgets.
 
 Validates:
-- CI baseline entries reference real_evidence (not schema fixtures)
+- CI idle baseline entries reference real_evidence (not schema fixtures)
 - Environment labels distinguish GitHub-hosted from router/self-hosted evidence
 - Required evidence fields are present in CI baselines
 - Artifact traceability: workflow run, artifact ID, artifact name, service, environment label
+
+Note: Leak-slope baseline validation is in verify_memory_budgets_leak_slope_ci.py
 """
 
 import os

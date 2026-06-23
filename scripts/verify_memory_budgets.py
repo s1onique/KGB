@@ -22,10 +22,14 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUDGETS_DIR = os.path.join(REPO_ROOT, "docs", "memory", "budgets")
 
-# Import CI baseline validation from separate module
+# Import CI baseline validation from separate modules
 from verify_memory_budgets_ci import (
     validate_ci_idle_baselines,
     check_ci_baseline_evidence_exists,
+)
+from verify_memory_budgets_leak_slope_ci import (
+    validate_ci_leak_slope_baselines,
+    check_leak_slope_baseline_evidence_exists,
 )
 
 REQUIRED_BUDGET_FILES = [
@@ -185,6 +189,17 @@ def run_verifier() -> List[str]:
                     if "ci_idle_baselines" in data:
                         print(f"    CI baselines: {list(data['ci_idle_baselines'].keys())}")
                 
+                # Validate leak-slope baselines if present
+                leak_slope_errors = validate_ci_leak_slope_baselines(data, path)
+                if leak_slope_errors:
+                    for e in leak_slope_errors:
+                        print(f"    LEAK_SLOPE BASELINE ERROR: {e}")
+                    all_errors.extend(leak_slope_errors)
+                else:
+                    # Check for leak-slope baselines presence
+                    if "ci_leak_slope_baselines" in data:
+                        print(f"    Leak-slope baselines: {list(data['ci_leak_slope_baselines'].keys())}")
+                
                 budgets_data[filename] = data
     
     print("\nB. Checking budget file schema consistency...")
@@ -208,7 +223,19 @@ def run_verifier() -> List[str]:
             all_errors.extend(trace_errors)
         else:
             if "ci_idle_baselines" in data:
-                print(f"    CI evidence traceability: OK for {filename}")
+                print(f"    CI idle evidence traceability: OK for {filename}")
+    
+    print("\nD. Checking leak-slope baseline evidence traceability...")
+    for filename, data in budgets_data.items():
+        if "ci_leak_slope_baselines" not in data:
+            continue
+        leak_trace_errors = check_leak_slope_baseline_evidence_exists(data, filename, REPO_ROOT)
+        if leak_trace_errors:
+            for e in leak_trace_errors:
+                print(f"    LEAK_SLOPE EVIDENCE ERROR: {e}")
+            all_errors.extend(leak_trace_errors)
+        else:
+            print(f"    Leak-slope evidence traceability: OK for {filename}")
     
     return all_errors
 

@@ -37,31 +37,121 @@ ci_idle_baselines:
         duration_seconds: 120
         environment_label: github_hosted_ubuntu
 
-# GitHub-hosted CI leak-slope thresholds (WARNING-ONLY)
-# Leak-slope thresholds detect memory growth patterns under repeated requests.
-# These are WARNING-ONLY thresholds; no real leak-slope evidence artifact exists yet.
-# Run Memory Lab with leak-slope inputs enabled to generate actual baselines.
+# GitHub-hosted CI leak-slope baselines (first evidence run 28018628934)
+# These are SHORT-WINDOW baselines labeled as warmup_sensitive.
+# NOT definitive leak proof - use medium/long manual mode for actual leak signal quality.
+ci_leak_slope_baselines:
+  github_hosted_ubuntu:
+    # First short-window leak-slope evidence: workflow 28018628934, artifact 7817907256
+    # Labeled as short_window / warmup_sensitive - NOT definitive leak proof
+    evidence_status: short_window_evidence
+    signal_quality: warmup_sensitive
+    short_window_seconds: 10
+    uvb76_leak_slope:
+      rss_slope_kib_per_min: 770.9
+      pss_slope_kib_per_min: 771.5
+      rss_max_kib: 11820
+      pss_max_kib: 11812
+      rss_growth_kib: 128
+      pss_growth_kib: 128
+      operations: 100
+      errors: 0
+      duration_ms: 9959
+      notes: |
+        Short-window baseline (10s). warmup_sensitive - NOT definitive leak proof.
+        Stable growth in short window, low slope.
+        Use medium/long manual mode for actual leak signal quality.
+        Source: workflow run 28018628934, artifact uvb76-memory-lab (ID 7817907256).
+    uvb76_leak_slope_netdiag:
+      rss_slope_kib_per_min: 794.8
+      pss_slope_kib_per_min: 795.4
+      rss_max_kib: 11824
+      pss_max_kib: 11816
+      rss_growth_kib: 132
+      pss_growth_kib: 132
+      operations: 100
+      errors: 0
+      duration_ms: 9959
+      notes: |
+        Short-window baseline with network_diag (10s). warmup_sensitive - NOT definitive leak proof.
+        Stable growth similar to non-netdiag variant.
+        Use medium/long manual mode for actual leak signal quality.
+        Source: workflow run 28018628934, artifact uvb76-memory-lab (ID 7817907256).
+    evidence_sources:
+      - workflow_run: 28018628934
+        artifact_id: 7817907256
+        artifact_name: uvb76-memory-lab
+        service_version: "1.0.0"
+        service_commit: "642befe"
+        workload: uvb76-leak-slope
+        duration_seconds: 9.959
+        environment_label: github_hosted_ubuntu
+        workload_type: uvb76_leak_slope
+        short_window_seconds: 10
+        signal_quality: warmup_sensitive
+      - workflow_run: 28018628934
+        artifact_id: 7817907256
+        artifact_name: uvb76-memory-lab
+        service_version: "1.0.0"
+        service_commit: "642befe"
+        workload: uvb76-leak-slope-netdiag
+        duration_seconds: 9.959
+        environment_label: github_hosted_ubuntu
+        workload_type: uvb76_leak_slope_netdiag
+        short_window_seconds: 10
+        signal_quality: warmup_sensitive
+
+# Proposed warning thresholds (for medium/long manual mode)
+# Router/embedded leak-slope baselines remain baseline_required
 ci_leak_slope_thresholds:
   github_hosted_ubuntu:
-    # Proposed warning thresholds for leak-slope detection
-    # slope is measured in KiB/minute
     evidence_status: proposed_thresholds
     uvb76_leak_slope:
       rss_slope_warning_kib_per_min: 200.0
       pss_slope_warning_kib_per_min: 180.0
       max_growth_kib: 1000
       notes: |
-        Proposed warning-only threshold. No real leak-slope artifact yet.
-        Run Memory Lab workflow with run_uvb76_leak_slope=true to generate real baseline.
+        Proposed warning-only threshold for medium/long manual mode.
         Router/embedded leak-slope baselines remain baseline_required.
     uvb76_leak_slope_netdiag:
       rss_slope_warning_kib_per_min: 300.0
       pss_slope_warning_kib_per_min: 250.0
       max_growth_kib: 1500
       notes: |
-        Proposed warning-only threshold. No real leak-slope artifact yet.
-        Run Memory Lab workflow with run_uvb76_leak_slope_netdiag=true to generate real baseline.
+        Proposed warning-only threshold for medium/long manual mode.
         Router/embedded leak-slope baselines remain baseline_required.
+
+# Manual mode presets for medium/long leak-slope soaks
+# These are guidance only - actual thresholds should come from real evidence
+manual_leak_slope_profiles:
+  short:
+    # Default: 10-second window (as used in CI)
+    warmup_seconds: 60
+    operations: 100
+    interval_ms: 100
+    duration_seconds: 10
+    notes: "Short window - warmup-sensitive, not definitive leak proof"
+  medium:
+    # 5-minute soak for better leak signal quality
+    warmup_seconds: 120
+    operations: 3000
+    interval_ms: 100
+    duration_seconds: 300
+    notes: "Medium window - better signal, still warmup-influenced"
+  long:
+    # 15-minute soak for actual leak detection
+    warmup_seconds: 180
+    operations: 9000
+    interval_ms: 100
+    duration_seconds: 900
+    notes: "Long window - warmup settles, actual leak signal visible"
+  manual_soak:
+    # User-configurable soak (specify operations/interval directly)
+    warmup_seconds: 300
+    operations: 36000
+    interval_ms: 100
+    duration_seconds: 3600
+    notes: "60-minute manual soak - use for definitive leak analysis"
 
 # Architecture-specific budgets
 arch_budgets:

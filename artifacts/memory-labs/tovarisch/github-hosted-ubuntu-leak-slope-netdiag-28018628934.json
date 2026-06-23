@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0",
+  "evidence_kind": "real_evidence",
+  "_workflow_note": "First short-window leak-slope-netdiag evidence. Workflow run 28018628934.",
+  "_short_window_note": "10-second window, warmup-sensitive. NOT definitive leak proof.",
+  "service": {
+    "name": "tovarisch",
+    "version": "0.1.0",
+    "commit": "642befe"
+  },
+  "environment": {
+    "arch": "linux/amd64",
+    "kernel": "ubuntu-latest",
+    "os": "Linux",
+    "has_smaps_rollup": true,
+    "environment_label": "github_hosted_ubuntu",
+    "_github_workflow_run": 28018628934,
+    "_github_artifact_id": 7817906532,
+    "_github_artifact_name": "tovarisch-memory-lab"
+  },
+  "workload": {
+    "type": "tovarisch-leak-slope-netdiag",
+    "operations": 100,
+    "errors": 0,
+    "duration_ms": 9985,
+    "interval_ms": 100,
+    "warmup_seconds": 60,
+    "description": "Leak-slope with network_diag: repeated requests over short window (warmup-sensitive)"
+  },
+  "memory": {
+    "first": {
+      "rss_kib": 8964,
+      "pss_kib": 6965
+    },
+    "max": {
+      "rss_kib": 9080,
+      "pss_kib": 7081
+    },
+    "last": {
+      "rss_kib": 9080,
+      "pss_kib": 7081
+    },
+    "growth": {
+      "rss_kib": 116,
+      "pss_kib": 116,
+      "rss_percent": 1.29
+    }
+  },
+  "leak_slope": {
+    "sampled_points": 101,
+    "duration_seconds": 9.985,
+    "rss_first_kib": 8964,
+    "rss_max_kib": 9080,
+    "rss_last_kib": 9080,
+    "pss_first_kib": 6965,
+    "pss_max_kib": 7081,
+    "pss_last_kib": 7081,
+    "rss_growth_kib": 116,
+    "pss_growth_kib": 116,
+    "rss_slope_kib_per_min": 696.9,
+    "pss_slope_kib_per_min": 696.9,
+    "request_count": 100,
+    "request_errors": 0
+  },
+  "runtime": {
+    "allocator": "zig-default"
+  },
+  "decision": {
+    "pass": true,
+    "reason": "Short-window leak-slope baseline with network_diag: 10s window, warmup-sensitive. RSS slope 697 KiB/min (short window, NOT definitive leak proof).",
+    "signal_quality": "warmup_sensitive",
+    "short_window_seconds": 10
+  }
+}
