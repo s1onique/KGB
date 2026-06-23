@@ -21,3 +21,5 @@ CLI-0021,scripts/verify_manifesto_axiom_coverage.py,python,subprocess module,too
 CLI-0022,scripts/verify_cli_composition_inventory.py,python,subprocess module,tooling,build_test,rare,yes,CLI composition inventory verification; developer tooling,yes,yes,no,no,verified,CLI composition inventory checker
 CLI-0023,scripts/,shell,shebang,scripts,ci_cd,periodic,yes,All shell scripts in scripts/ directory for CI/CD and tooling,yes,yes,no,no,verified,Shell scripts for CI/CD and tooling
 CLI-0024,uvb76/scripts/,shell,shebang,uvb76,ci_cd,periodic,yes,All shell scripts in uvb76/scripts/ for web embedding verification,yes,yes,no,no,verified,UVB-76 shell scripts for tooling
+CLI-0025,tools/memory-lab/runner.go,go,os/exec import,lab,diagnostic_runtime,rare,yes,Memory lab harness to launch tovarisch/uvb76 binaries; developer/test tooling,yes,yes,no,no,verified,Lab-only process spawning for memory measurement
+CLI-0026,tools/memory-lab/util.go,go,os/exec import,lab,diagnostic_runtime,rare,yes,Memory lab helper utilities for process management; developer tooling,yes,yes,no,no,verified,Lab-only process utilities

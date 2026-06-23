@@ -300,11 +300,16 @@ verify-memory-lab-artifacts:
 	@echo "=== Memory Lab Artifact Verifier ==="
 	python3 scripts/verify_memory_lab_artifact.py
 
+verify-memory-lab-config:
+	@echo "=== Memory Lab Config Verifier ==="
+	python3 scripts/verify_memory_lab_config.py --self-test
+	python3 scripts/verify_memory_lab_config.py
+
 verify-memory-ownership:
 	@echo "=== Memory Ownership Hygiene Gate ==="
 	bash scripts/check_memory_ownership.sh
 
-memory-gate: verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-lab-test
+memory-gate: verify-memory-budgets verify-memory-lab-artifacts verify-memory-lab-config verify-memory-ownership memory-lab-test
 	@echo "=== memory-gate passed ==="
 
 # === Go Memory Lab Runner ===
@@ -342,5 +347,9 @@ lab-uvb76-memory: memory-lab
 		echo "[SKIP] Memory labs require Linux (needs /proc)"; \
 		exit 0; \
 	fi
-	@./tools/memory-lab/memory-lab --service uvb76 --workload uvb76-idle-warmup --warmup-secs 120
+	@./tools/memory-lab/memory-lab \
+		--service uvb76 \
+		--workload uvb76-idle-warmup \
+		--config ./uvb76/uvb76.memory-lab.json \
+		--warmup-secs 120
 
