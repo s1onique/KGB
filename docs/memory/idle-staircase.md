@@ -213,6 +213,21 @@ The attribution test suite (`idle_memory_attribution_tests.zig`) covers:
 - `BGP export delta computation does not leak` - BGP export rebuild
 - `repeated status check render does not leak` - Status rendering (negative control)
 
+## File Structure
+
+The idle staircase lab is split into multiple files for LLM-friendliness:
+
+| File | Purpose |
+|------|---------|
+| `scripts/lab_tovarisch_idle_memory.sh` | Public shell entrypoint (thin launcher) |
+| `scripts/idle_staircase_analyzer.py` | Verdict analysis logic (Python) |
+| `scripts/verify_idle_staircase_artifact.py` | CLI wrapper for artifact verification |
+| `scripts/idle_staircase_verifier/` | Verifier package |
+| `scripts/idle_staircase_verifier/schema.py` | Constants and thresholds |
+| `scripts/idle_staircase_verifier/artifact_checks.py` | Artifact validation checks |
+| `scripts/idle_staircase_verifier/correlation.py` | Memory step detection and event correlation |
+| `scripts/idle_staircase_verifier/self_tests.py` | Self-test fixtures (25+ tests) |
+
 ## Artifact Verification
 
 ### Self-Test

@@ -19,6 +19,7 @@ const _status_network_diag_wiring_tests = @import("status_network_diag_wiring_te
 
 // Memory regression tests (ACT: Attribute and fix tovarisch idle/background staircase memory growth)
 const _heartbeat_idle_memory_regression_tests = @import("http/heartbeat_idle_memory_regression_tests.zig");
+const _idle_memory_attribution_tests = @import("http/idle_memory_attribution_tests.zig");
 
 // Force test discovery
 test { std.testing.refAllDecls(@import("http/response.zig")); }
@@ -30,3 +31,4 @@ test { std.testing.refAllDecls(@import("runtime/telemetry.zig")); }
 test { std.testing.refAllDecls(@import("runtime/heartbeat_log.zig")); }
 test { std.testing.refAllDecls(@import("status_network_diag_wiring_tests.zig")); }
 test { std.testing.refAllDecls(@import("http/heartbeat_idle_memory_regression_tests.zig")); }
+test { std.testing.refAllDecls(@import("http/idle_memory_attribution_tests.zig")); }
