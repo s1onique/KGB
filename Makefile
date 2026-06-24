@@ -394,3 +394,45 @@ verify-uvb76-memory-attribution:
 	@echo "=== UVB-76 Memory Attribution Artifact Verifier ==="
 	@python3 scripts/verify_uvb76_memory_attribution_artifacts.py --self-test
 
+# === Tovarisch Idle Staircase Memory Lab ===
+# ACT: Attribute and fix tovarisch idle/background staircase memory growth
+#
+# This lab runs tovarisch in idle mode and samples RSS/VmData to detect
+# stepwise memory growth patterns.
+#
+# Usage:
+#   make lab-tovarisch-idle-memory                    # 10 min idle (default)
+#   make lab-tovarisch-idle-memory DURATION=1800     # 30 min idle
+#   make lab-tovarisch-idle-memory STATUS_BURST=true # Include /status burst test
+#   make lab-tovarisch-idle-memory STRACE=true       # Include syscall tracing
+#
+# Artifacts: artifacts/memory-labs/tovarisch/idle-staircase/<run-id>/
+#
+# NOT part of make gate - manual execution only.
+# Requires Linux with /proc filesystem.
+
+DURATION ?= 600
+STATUS_BURST ?= false
+STRACE ?= false
+
+lab-tovarisch-idle-memory:
+	@echo "=== Tovarisch Idle Staircase Memory Lab ==="
+	@echo "Duration: ${DURATION}s ($(shell echo $$(( ${DURATION} / 60 ))) min)"
+	@if [ "$$(uname -s)" != "Linux" ]; then \
+		echo "[SKIP] Idle staircase lab requires Linux (needs /proc)"; \
+		exit 0; \
+	fi
+	@chmod +x scripts/lab_tovarisch_idle_memory.sh
+	@./scripts/lab_tovarisch_idle_memory.sh \
+		--duration ${DURATION} \
+		--run-id "idle-$$(date +%Y%m%d-%H%M%S)" \
+		$(if $(filter true,${STATUS_BURST}),--status-burst,) \
+		$(if $(filter true,${STRACE}),--strace,)
+
+# === Idle Staircase Artifact Verifier ===
+# Verifies idle staircase memory lab artifacts (self-test + validation).
+
+verify-idle-staircase-artifact:
+	@echo "=== Idle Staircase Artifact Verifier ==="
+	@python3 scripts/verify_idle_staircase_artifact.py --self-test
+

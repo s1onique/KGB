@@ -47,3 +47,4 @@ scripts/lab_uvb76_capture_netns_result_helpers.sh,keep_wrapper,none,none,
 scripts/lab_uvb76_capture_netns_defect.sh,keep_wrapper,none,none,
 scripts/lab_uvb76_capture_netns_phase_capture_helpers.sh,keep_wrapper,none,none,
 scripts/lab_uvb76_capture_netns_contract_assertions.sh,keep_wrapper,none,none,
+scripts/lab_tovarisch_idle_memory.sh,grandfathered_needs_owner,polling_loop,SRE,Linux-only memory profiling harness for tovarisch idle staircase detection

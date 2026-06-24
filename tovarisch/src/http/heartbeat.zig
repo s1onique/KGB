@@ -91,13 +91,37 @@ pub const TunnelSummary = struct {
 /// This function mirrors the tunnel observation path used by metrics rendering,
 /// ensuring heartbeat logs are consistent with /metrics.json output.
 ///
-/// Returns tunnel summary with aggregated counters.
-pub fn collectTunnelSummary(allocator: std.mem.Allocator, sysfs_root: []const u8) TunnelSummary {
+/// **MEMORY OWNERSHIP**: The caller MUST call freeTunnelSummarySnapshots() with
+/// the same allocator after using the returned TunnelSummaryWithStats, before
+/// the next call to collectTunnelSummaryWithStats(). This is required because
+/// the stats snapshot must be freed to prevent memory growth on each heartbeat.
+///
+/// Returns tunnel summary with aggregated counters plus owned stats snapshots.
+pub const TunnelSummaryWithStats = struct {
+    summary: TunnelSummary,
+    stats: []linux_interface_stats.InterfaceStatsSnapshot,
+};
+
+/// Frees tunnel summary stats returned by collectTunnelSummaryWithStats().
+/// Must be called by the caller after processing the summary.
+pub fn freeTunnelSummarySnapshots(allocator: std.mem.Allocator, result: TunnelSummaryWithStats) void {
+    linux_interface_stats.freeInterfaceStatsSnapshots(allocator, result.stats);
+}
+
+/// Collects tunnel interface stats with owned snapshots for deterministic memory management.
+///
+/// This is the preferred API for repeated heartbeat calls. The caller must:
+/// 1. Call this function to get the summary and owned snapshots
+/// 2. Process the summary
+/// 3. Call freeTunnelSummarySnapshots() to release memory
+///
+/// Failure to call freeTunnelSummarySnapshots() will cause memory growth
+/// on each heartbeat cycle (approximately 1-2KB per cycle per interface).
+pub fn collectTunnelSummaryWithStats(allocator: std.mem.Allocator, sysfs_root: []const u8) TunnelSummaryWithStats {
     const stats = linux_interface_stats.collectInterfaceStats(allocator, sysfs_root) catch {
         // On collection failure, return zero summary (metrics will show warning)
-        return .{ .count = 0, .rx_bytes = 0, .tx_bytes = 0 };
+        return .{ .summary = .{ .count = 0, .rx_bytes = 0, .tx_bytes = 0 }, .stats = &.{} };
     };
-    defer linux_interface_stats.freeInterfaceStatsSnapshots(allocator, stats);
 
     var summary = TunnelSummary{ .count = 0, .rx_bytes = 0, .tx_bytes = 0 };
     for (stats) |snap| {
@@ -107,6 +131,22 @@ pub fn collectTunnelSummary(allocator: std.mem.Allocator, sysfs_root: []const u8
             summary.tx_bytes += snap.stats.tx_bytes;
         }
     }
+    return .{ .summary = summary, .stats = stats };
+}
+
+/// Legacy tunnel summary collector for single-shot use cases.
+///
+/// This function properly frees the stats snapshots before returning,
+/// so it's safe for repeated calls without leaking memory.
+/// Exists for API compatibility; prefer collectTunnelSummaryWithStats()
+/// when you need access to the raw stats snapshots.
+///
+/// Returns tunnel summary with aggregated counters.
+pub fn collectTunnelSummary(allocator: std.mem.Allocator, sysfs_root: []const u8) TunnelSummary {
+    const result = collectTunnelSummaryWithStats(allocator, sysfs_root);
+    const summary = result.summary;
+    // Free the snapshots immediately since this is single-shot use
+    linux_interface_stats.freeInterfaceStatsSnapshots(allocator, result.stats);
     return summary;
 }
 
@@ -164,10 +204,12 @@ fn emitHeartbeatToFd(uptime_seconds: u64) void {
 
     // Collect tunnel summary using the same interface enumeration as /metrics.json
     // This ensures heartbeat logs are consistent with metrics output.
-    //
-    // MemoryOwnership: Transient allocation within heartbeat emit cycle.
-    // Memory is released after JSON formatting completes.
-    const tunnel_summary = collectTunnelSummary(std.heap.page_allocator, "/sys/class/net");
+    // MemoryOwnership: page_allocator used with collectTunnelSummaryWithStats.
+    // The freeTunnelSummarySnapshots() deferred call releases memory immediately
+    // after use, before the next heartbeat cycle. Memory is bounded/fixed per cycle.
+    const tunnel_result = collectTunnelSummaryWithStats(std.heap.page_allocator, "/sys/class/net");
+    defer freeTunnelSummarySnapshots(std.heap.page_allocator, tunnel_result);
+    const tunnel_summary = tunnel_result.summary;
 
     // Format the heartbeat JSON into our own 4096-byte buffer
     // This is separate from logging.BufferedWriter to avoid any shared state
