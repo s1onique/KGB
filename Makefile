@@ -436,3 +436,53 @@ verify-idle-staircase-artifact:
 	@echo "=== Idle Staircase Artifact Verifier ==="
 	@python3 scripts/verify_idle_staircase_artifact.py --self-test
 
+# === Tovarisch Idle Memory Attribution Matrix ===
+# Long-window memory attribution matrix that runs multiple lab variants to compare
+# native runtime toggles and determine whether idle RSS/PSS growth is caused by a
+# specific subsystem or is only bounded allocator/warmup behavior.
+#
+# Variants run:
+#   - all_enabled:     All subsystems (heartbeat, WG checks, BGP, BFD) enabled
+#   - heartbeat_disabled:  Heartbeat disabled
+#   - wg_disabled:        WG checks disabled
+#   - bgp_disabled:       BGP disabled
+#   - bfd_disabled:       BFD disabled
+#   - bgp_bfd_disabled:   BGP+BFD disabled
+#   - no_periodic:        All optional periodic subsystems disabled
+#
+# Usage:
+#   make lab-memory-attribution-matrix                          # 10 min per variant (default)
+#   make lab-memory-attribution-matrix MATRIX_DURATION=1800     # 30 min per variant
+#   make lab-memory-attribution-matrix MATRIX_INTERVAL=10       # 10s sample interval
+#   make lab-memory-attribution-matrix MATRIX_RUN_ID=my-test    # Custom run ID
+#
+# Artifacts: artifacts/memory-labs/tovarisch/idle-matrix/<run-id>/
+#
+# NOT part of make gate - manual execution only.
+# Requires Linux with /proc filesystem.
+
+MATRIX_DURATION ?= 600
+MATRIX_INTERVAL ?= 5
+MATRIX_RUN_ID ?= ""
+
+lab-memory-attribution-matrix:
+	@echo "=== Tovarisch Idle Memory Attribution Matrix ==="
+	@echo "Duration: ${MATRIX_DURATION}s per variant ($(shell echo $$(( ${MATRIX_DURATION} / 60 ))) min)"
+	@echo "Interval: ${MATRIX_INTERVAL}s"
+	@if [ "$$(uname -s)" != "Linux" ]; then \
+		echo "[SKIP] Memory attribution matrix requires Linux (needs /proc)"; \
+		exit 0; \
+	fi
+	@chmod +x scripts/lab_memory_attribution_matrix.sh
+	@./scripts/lab_memory_attribution_matrix.sh \
+		--duration ${MATRIX_DURATION} \
+		--interval ${MATRIX_INTERVAL} \
+		$(if $(MATRIX_RUN_ID),--run-id ${MATRIX_RUN_ID},)
+
+# === Memory Attribution Matrix Verifier ===
+# Verifies matrix artifacts (self-test + validation).
+
+verify-memory-attribution-matrix:
+	@echo "=== Memory Attribution Matrix Verifier ==="
+	@python3 scripts/verify_memory_attribution_matrix.py --self-test
+

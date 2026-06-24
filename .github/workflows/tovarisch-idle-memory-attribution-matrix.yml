@@ -1,0 +1,252 @@
+# tovarisch-idle-memory-attribution-matrix.yml
+# GitHub Actions workflow for long-window memory attribution matrix.
+#
+# Runs multiple idle memory lab variants to compare native runtime toggles and
+# determine whether idle RSS/PSS growth is caused by a specific subsystem or is
+# only bounded allocator/warmup behavior.
+#
+# Variants run:
+#   - all_enabled:     All subsystems (heartbeat, WG checks, BGP, BFD) enabled
+#   - heartbeat_disabled:  Heartbeat disabled
+#   - wg_disabled:        WG checks disabled
+#   - bgp_disabled:       BGP disabled
+#   - bfd_disabled:       BFD disabled
+#   - bgp_bfd_disabled:   BGP+BFD disabled
+#   - no_periodic:        All optional periodic subsystems disabled
+#
+# Manual trigger only (workflow_dispatch).
+# Does NOT run on push/PR - this is a manual investigation workflow.
+#
+# Artifacts:
+#   - artifacts/memory-labs/tovarisch/idle-matrix/<run-id>/
+#     - matrix-summary.md
+#     - all_enabled/
+#     - heartbeat_disabled/
+#     - wg_disabled/
+#     - bgp_disabled/
+#     - bfd_disabled/
+#     - bgp_bfd_disabled/
+#     - no_periodic/
+#
+# Platform: Linux with /proc required.
+# Timeout: 2 hours (allows for 7 x ~15 min variants with overhead)
+
+name: Tovarisch Idle Memory Attribution Matrix
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: "Duration per variant in seconds"
+        required: false
+        default: "600"
+        type: string
+      interval:
+        description: "Memory sample interval in seconds"
+        required: false
+        default: "5"
+        type: string
+      run_id:
+        description: "Custom matrix run ID (optional)"
+        required: false
+        default: ""
+        type: string
+      upload_artifacts:
+        description: "Upload lab artifacts"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      verify_only:
+        description: "Verify existing artifacts only (no re-run)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  memory-attribution-matrix:
+    name: Memory attribution matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      MATRIX_DURATION: ${{ inputs.duration }}
+      MATRIX_INTERVAL: ${{ inputs.interval }}
+      MATRIX_RUN_ID: ${{ inputs.run_id }}
+      MATRIX_ROOT: artifacts/memory-labs/tovarisch/idle-matrix
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Linux preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          uname -a
+          test "$(uname -s)" = "Linux"
+          test -d /proc
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Tool versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          zig version
+          make --version
+          python3 --version
+          bash --version | head -1
+
+      - name: Preflight checks
+        if: inputs.verify_only != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/lab_memory_attribution_matrix.sh
+          python3 -m py_compile scripts/lab_memory_attribution_matrix.py
+          python3 -m py_compile scripts/verify_memory_attribution_matrix.py
+
+      - name: Self-test verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_memory_attribution_matrix.py --self-test
+
+      - name: Build tovarisch
+        if: inputs.verify_only != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          make tovarisch-build
+          make tovarisch-status
+
+      - name: Run memory attribution matrix
+        if: inputs.verify_only != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          
+          # Build command using array (safer than eval)
+          cmd=(python3 scripts/lab_memory_attribution_matrix.py)
+          cmd+=(--duration "${MATRIX_DURATION}")
+          cmd+=(--interval "${MATRIX_INTERVAL}")
+          
+          if [[ -n "${MATRIX_RUN_ID}" ]]; then
+            cmd+=(--run-id "${MATRIX_RUN_ID}")
+          fi
+          
+          printf 'Command:'
+          printf ' %q' "${cmd[@]}"
+          printf '\n'
+          
+          # Run matrix (this takes a while)
+          "${cmd[@]}"
+
+      - name: Verify matrix artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          
+          # Find the matrix root
+          if [[ -n "${MATRIX_RUN_ID}" ]]; then
+            MATRIX_DIR="${MATRIX_ROOT}/${MATRIX_RUN_ID}"
+          else
+            # Find most recent matrix run
+            MATRIX_DIR=$(ls -td "${MATRIX_ROOT}"/matrix-* 2>/dev/null | head -1)
+          fi
+          
+          echo "Verifying matrix: ${MATRIX_DIR}"
+          
+          if [[ ! -d "${MATRIX_DIR}" ]]; then
+            echo "ERROR: Matrix directory not found: ${MATRIX_DIR}"
+            exit 1
+          fi
+          
+          python3 scripts/verify_memory_attribution_matrix.py "${MATRIX_DIR}"
+
+      - name: Print matrix summary
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          
+          # Find the matrix root
+          if [[ -n "${MATRIX_RUN_ID}" ]]; then
+            MATRIX_DIR="${MATRIX_ROOT}/${MATRIX_RUN_ID}"
+          else
+            MATRIX_DIR=$(ls -td "${MATRIX_ROOT}"/matrix-* 2>/dev/null | head -1)
+          fi
+          
+          echo ""
+          echo "=== Matrix Summary ==="
+          if [[ -f "${MATRIX_DIR}/matrix-summary.md" ]]; then
+            cat "${MATRIX_DIR}/matrix-summary.md"
+          else
+            echo "Summary not found at: ${MATRIX_DIR}/matrix-summary.md"
+          fi
+          
+          echo ""
+          echo "=== Per-Variant Verdicts ==="
+          for variant in all_enabled heartbeat_disabled wg_disabled bgp_disabled bfd_disabled bgp_bfd_disabled no_periodic; do
+            if [[ -f "${MATRIX_DIR}/${variant}/verdict.txt" ]]; then
+              echo ""
+              echo "--- ${variant} ---"
+              head -5 "${MATRIX_DIR}/${variant}/verdict.txt"
+            fi
+          done
+
+      - name: Evidence summary
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          
+          # Find the matrix root
+          if [[ -n "${MATRIX_RUN_ID}" ]]; then
+            MATRIX_DIR="${MATRIX_ROOT}/${MATRIX_RUN_ID}"
+          else
+            MATRIX_DIR=$(ls -td "${MATRIX_ROOT}"/matrix-* 2>/dev/null | head -1)
+          fi
+          
+          {
+            echo "## Tovarisch idle memory attribution matrix"
+            echo ""
+            echo "### Matrix Root"
+            echo "\`${MATRIX_DIR}\`"
+            echo ""
+            
+            if [[ -f "${MATRIX_DIR}/matrix-summary.md" ]]; then
+              echo "### Summary"
+              echo '```markdown'
+              head -50 "${MATRIX_DIR}/matrix-summary.md"
+              echo '```'
+            fi
+            
+            echo ""
+            echo "### Variant Artifacts"
+            for variant in all_enabled heartbeat_disabled wg_disabled bgp_disabled bfd_disabled bgp_bfd_disabled no_periodic; do
+              echo "- \`${variant}/\`"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload matrix artifacts
+        if: always() && inputs.upload_artifacts == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tovarisch-idle-memory-attribution-matrix-${{ github.run_id }}
+          path: |
+            artifacts/memory-labs/tovarisch/idle-matrix/**
+          if-no-files-found: warn
+          retention-days: 30

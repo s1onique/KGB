@@ -87,7 +87,7 @@ Status (lab/debug only):
 ## Verdict Meanings
 
 | Verdict | Meaning | Required Evidence |
-|---------|---------|------------------|
+|---------|---------|-------------------|
 | `confirmed_leak` | Detected staircase steps with **native event attribution** | Native events from real runtime, correlated with memory steps |
 | `bounded_warmup_or_allocator_highwater` | Minimal growth, likely bounded | Evidence of plateau or <200 KiB total |
 | `inconclusive` | Growth pattern unclear or owner unattributed | Reason explaining unattribution |
@@ -313,6 +313,131 @@ native_disable_bfd: true
    - `inconclusive` with all disabled: Allocator warmup or unknown source
    - `bounded_warmup_or_allocator_highwater`: Normal behavior
 
+## Memory Attribution Matrix
+
+The **Memory Attribution Matrix** runs multiple lab variants in sequence to systematically attribute idle memory growth.
+
+### Matrix Variants
+
+| Variant | Heartbeat | WG Checks | BGP | BFD |
+|---------|-----------|-----------|-----|-----|
+| `all_enabled` | ✓ | ✓ | ✓ | ✓ |
+| `heartbeat_disabled` | ✗ | ✓ | ✓ | ✓ |
+| `wg_disabled` | ✓ | ✗ | ✓ | ✓ |
+| `bgp_disabled` | ✓ | ✓ | ✗ | ✓ |
+| `bfd_disabled` | ✓ | ✓ | ✓ | ✗ |
+| `bgp_bfd_disabled` | ✓ | ✓ | ✗ | ✗ |
+| `no_periodic` | ✗ | ✗ | ✗ | ✗ |
+
+### Matrix Verdicts
+
+| Verdict | Meaning |
+|---------|---------|
+| `no_growth` | No significant memory growth detected in any variant |
+| `bounded_warmup_or_allocator_highwater` | Growth present but bounded. Consistent with allocator settling behavior. |
+| `subsystem_correlated_growth` | Growth correlates with specific subsystem(s). Evidence points to periodic background paths. |
+| `inconclusive` | Cannot determine attribution. More data needed. |
+
+### Evidence Contract
+
+The matrix proves or disproves:
+
+1. **Bounded allocator/warmup**: If `no_periodic` variant shows bounded growth (~<500 KiB, ~<5 steps) while `all_enabled` shows none, the growth is likely allocator settling.
+
+2. **Subsystem attribution**: If disabling a specific subsystem eliminates growth while other variants show growth, that subsystem is the likely owner.
+
+3. **Global leak**: This matrix does NOT claim "no leak". It only classifies what the evidence shows.
+
+### Running the Matrix
+
+```bash
+# Full matrix with 10-minute variants (default)
+./scripts/lab_memory_attribution_matrix.sh
+
+# Longer observation (30 minutes)
+./scripts/lab_memory_attribution_matrix.sh --duration 1800
+
+# Custom run ID
+./scripts/lab_memory_attribution_matrix.sh --run-id my-test
+
+# Specific variants only
+./scripts/lab_memory_attribution_matrix.sh --variants all_enabled no_periodic
+```
+
+### Matrix Artifacts
+
+```
+artifacts/memory-labs/tovarisch/idle-matrix/<run-id>/
+├── matrix-summary.md          # Consolidated matrix results
+├── all_enabled/               # Variant artifact
+│   ├── manifest.yaml
+│   ├── memory_samples.tsv
+│   ├── native_event_timeline.tsv
+│   └── verdict.txt
+├── heartbeat_disabled/
+│   └── ...
+└── no_periodic/
+    └── ...
+```
+
+### Matrix Interpretation Guide
+
+#### Scenario 1: `no_growth` verdict
+```
+Growth: None
+All variants: <100 KiB growth, <3 steps
+```
+**Conclusion**: No idle memory growth detected. System is stable.
+
+#### Scenario 2: `bounded_warmup_or_allocator_highwater` verdict
+```
+all_enabled growth: 800 KiB, 8 steps
+no_periodic growth: 400 KiB, 3 steps
+Other variants: Similar to all_enabled
+```
+**Conclusion**: Growth is bounded even with all periodic paths disabled. Likely allocator warmup settling. Not caused by specific subsystem.
+
+#### Scenario 3: `subsystem_correlated_growth` verdict
+```
+all_enabled growth: 1200 KiB, 10 steps
+heartbeat_disabled growth: 100 KiB, 1 step
+no_periodic growth: 50 KiB, 0 steps
+```
+**Conclusion**: Heartbeat is the likely owner. When heartbeat is disabled, growth largely disappears.
+
+#### Scenario 4: `inconclusive` verdict
+```
+Mixed results across variants
+Unable to attribute growth to specific subsystem
+```
+**Conclusion**: More data needed. Run longer duration or investigate allocator behavior.
+
+### Fail Conditions
+
+The matrix **fails closed** if:
+
+1. **Native event capture configured but missing**: `native_event_timeline.tsv` not created when native events enabled
+2. **Disabled subsystem emits events**: Heartbeat/WG/BGP/BFD events present when that subsystem is disabled
+3. **Sample count too low**: Fewer than `duration/60` samples (should be at least 1 per minute)
+4. **Duration below minimum**: Duration < 300 seconds (5 minutes)
+5. **Analyzer cannot parse run**: Verdict.txt missing or invalid format
+
+### GitHub Actions Matrix Workflow
+
+The **Tovarisch Idle Memory Attribution Matrix** workflow runs the matrix on Linux:
+
+1. **Manual trigger only** (`workflow_dispatch`)
+2. **Configurable duration** per variant (default: 600s)
+3. **Artifact upload** with `if: always()` for post-mortem analysis
+4. **Timeout**: 120 minutes (allows 7 x ~15 min variants with overhead)
+
+```bash
+# Trigger via GitHub CLI
+gh workflow run tovarisch-idle-memory-attribution-matrix.yml \
+  --field duration=600 \
+  --field interval=5
+```
+
 ## Artifact Verification
 
 ### Self-Test
@@ -325,9 +450,16 @@ python3 scripts/verify_idle_staircase_artifact.py --self-test
 python3 scripts/verify_idle_staircase_artifact.py artifacts/memory-labs/tovarisch/idle-staircase/<run-id>
 ```
 
-### Make Target
+### Verify Matrix
+```bash
+python3 scripts/verify_memory_attribution_matrix.py artifacts/memory-labs/tovarisch/idle-matrix/<run-id>
+python3 scripts/verify_memory_attribution_matrix.py --self-test
+```
+
+### Make Targets
 ```bash
 make verify-idle-staircase-artifact
+make verify-memory-attribution-matrix
 ```
 
 ## Native Heartbeat Smoke Verification
@@ -358,10 +490,12 @@ python3 scripts/verify_idle_staircase_native_heartbeat_smoke.py \
 
 **Native infrastructure**: Implemented and ready for use
 
+**Matrix runner**: Implemented for systematic attribution
+
 **Next steps**:
-1. Run lab with `--native-events` to capture native events
-2. Run isolation modes to identify which subsystem correlates with growth
-3. If growth persists with all periodic paths disabled, investigate allocator behavior
+1. Run memory attribution matrix to identify subsystem owner
+2. If growth persists with all periodic paths disabled, investigate allocator behavior
+3. Use matrix verdict to guide further investigation
 
 ## File Structure
 
@@ -379,6 +513,9 @@ python3 scripts/verify_idle_staircase_native_heartbeat_smoke.py \
 | `scripts/lab_runner/validation.py` | Output verification, final summary |
 | `scripts/lab_runner/self_tests.py` | Self-test suite |
 | `scripts/lab_runner/main.py` | Main entry point |
+| `scripts/lab_memory_attribution_matrix.py` | Matrix runner for systematic attribution |
+| `scripts/lab_memory_attribution_matrix.sh` | Thin shell wrapper for matrix runner |
+| `scripts/verify_memory_attribution_matrix.py` | Matrix artifact verifier |
 | `scripts/idle_staircase_analyzer.py` | Verdict analysis logic (Python) |
 | `scripts/idle_staircase_analyzer_cli.py` | CLI wrapper for analyzer |
 | `scripts/verify_idle_staircase_artifact.py` | CLI wrapper for artifact verification |
