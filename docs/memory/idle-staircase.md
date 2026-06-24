@@ -363,38 +363,36 @@ python3 scripts/verify_idle_staircase_native_heartbeat_smoke.py \
 2. Run isolation modes to identify which subsystem correlates with growth
 3. If growth persists with all periodic paths disabled, investigate allocator behavior
 
-## Known Limitations
-
-### Without Live Production Access
-- **Cannot reproduce exact production process**: No access to `london2`, `10.149.149.1`, real WireGuard, real BIRD
-- **Local testing uses stubbed paths**: The lab runs tovarisch with minimal configuration
-- **Event correlation is probabilistic**: Memory steps may not perfectly align with events due to sampling interval
-
-### Platform Constraints
-- Lab requires **Linux with /proc** for memory sampling
-- On non-Linux, lab prints SKIP and exits cleanly before starting processes
-- strace mode is Linux-only and optional
-
 ## File Structure
 
 | File | Purpose |
 |------|---------|
-| `scripts/lab_tovarisch_idle_memory.sh` | Public shell entrypoint (thin launcher) |
+| `scripts/lab_tovarisch_idle_memory.sh` | Thin shell wrapper (delegates to Python) |
+| `scripts/lab_tovarisch_idle_memory.py` | Entry point (delegates to lab_runner package) |
+| `scripts/lab_runner/` | **Python-owned lab runner package** |
+| `scripts/lab_runner/config.py` | LabRunConfig dataclass, parse_args(), LabError |
+| `scripts/lab_runner/proc.py` | require_linux_proc(), read_proc_status() |
+| `scripts/lab_runner/artifacts.py` | Config/manifest/event writing |
+| `scripts/lab_runner/tovarisch.py` | Process lifecycle (start, wait, terminate) |
+| `scripts/lab_runner/loop.py` | Idle sampling loop, status burst |
+| `scripts/lab_runner/analyzer.py` | Analyzer CLI invocation |
+| `scripts/lab_runner/validation.py` | Output verification, final summary |
+| `scripts/lab_runner/self_tests.py` | Self-test suite |
+| `scripts/lab_runner/main.py` | Main entry point |
 | `scripts/idle_staircase_analyzer.py` | Verdict analysis logic (Python) |
+| `scripts/idle_staircase_analyzer_cli.py` | CLI wrapper for analyzer |
 | `scripts/verify_idle_staircase_artifact.py` | CLI wrapper for artifact verification |
 | `scripts/idle_staircase_verifier/` | Verifier package |
-| `scripts/idle_staircase_verifier/schema.py` | Constants and thresholds |
-| `scripts/idle_staircase_verifier/artifact_checks.py` | Artifact validation checks |
-| `scripts/idle_staircase_verifier/correlation.py` | Memory step detection and event correlation |
-| `scripts/idle_staircase_verifier/self_tests.py` | Self-test fixtures (30+ tests) |
 | `tovarisch/src/runtime/lab_events.zig` | Native event ring buffer |
 | `tovarisch/src/config.zig` | Lab config parsing with native settings |
+
+## Lab Runner Architecture
+
+See [idle-staircase-architecture.md](./idle-staircase-architecture.md) for detailed architecture documentation.
 
 ## Related Documentation
 
 - [Memory Budgets](./memory-budgets.md)
 - [Memory Lab Infrastructure](../labs/memory-lab.md)
+- [Lab Architecture](./idle-staircase-architecture.md)
 - [Embedded Memory Frugality](../doctrine/embedded-memory-frugality.md)
-- [Heartbeat Module](../../tovarisch/src/http/heartbeat.zig)
-- [Native Events Module](../../tovarisch/src/runtime/lab_events.zig)
-- [Attribution Tests](../../tovarisch/src/http/idle_memory_attribution_tests.zig)
