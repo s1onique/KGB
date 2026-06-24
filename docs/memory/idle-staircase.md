@@ -13,6 +13,60 @@ Live tovarisch (version `0.1.1-rc51+05902ce`) exhibited stepwise heap/data growt
 **Note**: The root cause of the observed staircase pattern is not conclusively attributed.
 Owner attribution requires event correlation analysis and targeted testing.
 
+## Native Event Attribution Infrastructure
+
+### Event Source Types
+
+The lab supports two distinct event sources:
+
+| Source | Description | Attribution Use |
+|--------|-------------|-----------------|
+| **Shell-side synthetic** | Events emitted by lab shell script on fixed schedule | Bookkeeping only, cannot produce `confirmed_leak` |
+| **Tovarisch-native** | Events emitted from real tovarisch runtime paths | Required for `confirmed_leak` attribution |
+
+### Native Event Architecture
+
+Native events are emitted from actual tovarisch runtime code:
+
+- **Bounded ring buffer**: Maximum 256 events to prevent unbounded growth
+- **Low overhead**: Event emission is a no-op when disabled
+- **Bounded details**: Max 128 byte detail strings (no unbounded command output)
+- **Process PID**: Included for multi-process lab scenarios
+- **Monotonic time**: Uses elapsed milliseconds, not wall clock
+
+### Native Event Names
+
+Heartbeat:
+- `heartbeat_tick_start` - Start of heartbeat tick cycle
+- `heartbeat_tick_end` - Successful heartbeat tick completion
+- `heartbeat_tick_failed` - Heartbeat tick failure
+
+WireGuard:
+- `wg_check_start` - Start of WG check cycle
+- `wg_check_end` - Successful WG check completion
+- `wg_check_failed` - WG check failure with error class
+
+Health/status:
+- `health_collect_start` - Start of health collection
+- `health_collect_end` - Successful health collection
+- `health_collect_failed` - Health collection failure
+
+BGP:
+- `bgp_maintenance_start` - Start of BGP maintenance loop
+- `bgp_maintenance_end` - Successful BGP maintenance
+- `bgp_maintenance_failed` - BGP maintenance failure
+- `bgp_reconnect_start` - BGP reconnect attempt
+- `bgp_reconnect_end` - BGP reconnect complete
+
+BFD:
+- `bfd_tick_start` - Start of BFD tick
+- `bfd_tick_end` - Successful BFD tick
+- `bfd_tick_failed` - BFD tick failure
+
+Status (lab/debug only):
+- `status_request_start` - Start of status request
+- `status_request_end` - Status request complete
+
 ## Investigation Status
 
 ### Completed Audits
@@ -23,22 +77,18 @@ Owner attribution requires event correlation analysis and targeted testing.
 
 3. **Status rendering**: Uses `page_allocator` with proper cleanup via `defer diag.deinit(allocator)` and `defer linux_interface_stats.freeInterfaceStatsSnapshots()`.
 
-### Attribution Framework
+### Native Event Infrastructure Added
 
-The lab provides local attribution infrastructure:
-
-- **Event attribution hooks**: Subsystem event logging (`heartbeat_tick`, `wg_check`, `bgp_maintenance`, `bfd_tick`, etc.)
-- **Subsystem toggles**: Control synthetic event emission (NOT actual tovarisch runtime behavior)
-- **Correlated event analysis**: Matches memory steps to subsystem events
-- **Focused regression tests**: Validates each periodic path doesn't leak on repeated execution
-
-> ⚠️ **Important**: The subsystem toggles (`--heartbeat-only`, `--wg-only`, etc.) only control **synthetic shell-side event logging**. They do NOT disable actual tovarisch periodic paths (heartbeat, WG checks, BGP/BFD). The events logged are on fixed intervals and cannot be used for real attribution. Real attribution requires tovarisch-native event emission.
+1. **Tovarisch-native event ring buffer** (`tovarisch/src/runtime/lab_events.zig`): Bounded event stream for attribution
+2. **Real runtime toggles** (config `[lab]` section): `disable_heartbeat`, `disable_wg_checks`, `disable_bgp`, `disable_bfd`
+3. **Native event emission** in heartbeat thread around actual tick cycle
+4. **Config file support** for lab settings
 
 ## Verdict Meanings
 
 | Verdict | Meaning | Required Evidence |
 |---------|---------|------------------|
-| `confirmed_leak` | Detected staircase steps with **explicit owner attribution** | Non-empty owner, memory steps, correlated events |
+| `confirmed_leak` | Detected staircase steps with **native event attribution** | Native events from real runtime, correlated with memory steps |
 | `bounded_warmup_or_allocator_highwater` | Minimal growth, likely bounded | Evidence of plateau or <200 KiB total |
 | `inconclusive` | Growth pattern unclear or owner unattributed | Reason explaining unattribution |
 
@@ -48,99 +98,100 @@ A `confirmed_leak` verdict requires ALL of:
 
 1. **Non-empty owner** (not "unknown")
 2. **Memory step evidence** (`steps_detected` >= 3, `total_growth_kib` > 500)
-3. **Event timeline evidence** - owner subsystem events in timeline
-4. **Owner evidence text** - description of attribution reasoning
-5. **Correlated events** - at least one event from owner subsystem near a memory step (within 30 seconds)
-6. **Real tovarisch-native events** - NOT shell-side synthetic events
+3. **Native events enabled**: `native_events_enabled: true` in manifest
+4. **Native event timeline**: `native_event_timeline.tsv` exists with data rows
+5. **Correlated native events**: At least one native event from owner subsystem near a memory step
+6. **Runtime toggle state**: Manifest shows actual toggles used (`native_disable_*` fields)
+7. **No shell-only synthetic attribution**: Shell-side events cannot produce `confirmed_leak`
 
-The verifier rejects `confirmed_leak` with:
-- `owner: unknown`
-- Only synthetic/shell-side events
-- Missing correlated events
+### Confirmed Leak Rejection Criteria
+
+The verifier rejects `confirmed_leak` if:
+- `native_events_enabled` is `false` or missing
+- `native_event_timeline.tsv` is missing or has no data rows
+- Artifact contains shell-side synthetic events with `subsystem_config` marker
+- Owner is `unknown` or empty
+- Steps detected < 3 or total growth <= 500 KiB
+- No native events correlate with memory steps
 
 ## How to Run Local Idle Memory Lab
 
-### Quick Run (10 minutes)
+### Quick Run (10 minutes) - Shell Synthetic Only
 ```bash
 make lab-tovarisch-idle-memory
 ```
 
-### Extended Run (30 minutes)
+### Native Events Enabled (Required for Attribution)
 ```bash
-make lab-tovarisch-idle-memory DURATION=1800
+./scripts/lab_tovarisch_idle_memory.sh --native-events --duration 600
 ```
 
-### With /status Burst Test
+### Native Isolation Modes
+
+**Heartbeat only** (disable WG, BGP, BFD):
 ```bash
-make lab-tovarisch-idle-memory DURATION=600 STATUS_BURST=true
+./scripts/lab_tovarisch_idle_memory.sh --native-heartbeat-only
 ```
 
-### With Syscall Tracing (Linux only)
+**WireGuard only** (disable heartbeat, BGP, BFD):
 ```bash
-make lab-tovarisch-idle-memory DURATION=600 STRACE=true
+./scripts/lab_tovarisch_idle_memory.sh --native-wg-only
 ```
 
-### Direct Script Usage
+**No periodic paths** (baseline measurement):
 ```bash
-./scripts/lab_tovarisch_idle_memory.sh --duration 600 --interval 5
+./scripts/lab_tovarisch_idle_memory.sh --native-no-periodic
 ```
 
-## Targeted Attribution Testing
-
-### Subsystem Toggles (Synthetic Event Labeling)
-
-The subsystem toggles (`--heartbeat-only`, `--wg-only`, `--bgp-bfd-only`, `--no-subsystems`) **only control shell-side synthetic event emission** to the event timeline. They do **NOT** disable actual tovarisch runtime periodic paths.
-
-These toggles are useful for **synthetic event-label experiments** only - not for subsystem isolation.
+### Individual Native Toggles
 
 ```bash
-# Synthetic-only: emit only heartbeat events
-./scripts/lab_tovarisch_idle_memory.sh --heartbeat-only
+# Enable native events
+./scripts/lab_tovarisch_idle_memory.sh --native-events
 
-# Synthetic-only: emit only WG check events  
-./scripts/lab_tovarisch_idle_memory.sh --wg-only
+# Disable specific subsystems
+./scripts/lab_tovarisch_idle_memory.sh --native-events --disable-heartbeat
+./scripts/lab_tovarisch_idle_memory.sh --native-events --disable-wg-checks
+./scripts/lab_tovarisch_idle_memory.sh --native-events --disable-bgp
+./scripts/lab_tovarisch_idle_memory.sh --native-events --disable-bfd
 
-# Synthetic-only: emit only BGP/BFD events
-./scripts/lab_tovarisch_idle_memory.sh --bgp-bfd-only
-
-# Synthetic-only: suppress all synthetic events
-./scripts/lab_tovarisch_idle_memory.sh --no-subsystems
+# Custom native event output path
+./scripts/lab_tovarisch_idle_memory.sh --native-events --native-events-path /tmp/my_events.tsv
 ```
 
-> ⚠️ **Important**: `--no-subsystems` does NOT disable actual tovarisch periodic paths. It only suppresses synthetic shell-side event logging. To confirm growth without periodic paths, you would need actual tovarisch-native subsystem toggles (not yet implemented).
-
-### Environment Variables
+## Environment Variables
 
 ```bash
+# Native event emission
+NATIVE_EVENTS=true
+NATIVE_EVENTS_PATH=/path/to/native_event_timeline.tsv
+
+# Real runtime toggles
+DISABLE_HEARTBEAT=true
+DISABLE_WG_CHECKS=true
+DISABLE_BGP=true
+DISABLE_BFD=true
+
 # Force WG command not-found path
 TOVARISCH_WG_COMMAND_PATH=/nonexistent ./scripts/lab_tovarisch_idle_memory.sh
 
 # Custom port
 LAB_TOVARISCH_PORT=8318 ./scripts/lab_tovarisch_idle_memory.sh
-
-# Synthetic event toggles via env
-HEARTBEAT_ENABLED=false WG_CHECK_ENABLED=true BGP_BFD_ENABLED=false ./scripts/lab_tovarisch_idle_memory.sh
 ```
 
-### Attribution Strategy
+## Config File Settings
 
-Shell-side synthetic events can **enrich inconclusive artifacts** but **cannot produce `confirmed_leak` verdicts**. Real attribution requires:
+Native lab settings can be configured in the tovarisch config file:
 
-1. **Tovariisch-native event emission** - events emitted from within tovarisch code, not shell-side
-2. **Correlation with memory steps** - events near memory step timestamps
-3. **Verdict enforcement** - the verifier rejects any `confirmed_leak` artifact with shell-side synthetic events
-
-## Understanding Staircase vs Linear Growth
-
-### Staircase Growth (Leak Pattern)
-- **Shape**: Step-wise increases separated by flat periods
-- **Implication**: Periodic/background allocation without proper deallocation
-- **Owner detection**: Correlate steps with periodic intervals (heartbeat=30s, BGP keepalive=60s)
-
-### Linear Growth (Warmup Pattern)
-- **Shape**: Gradual upward slope
-- **Implication**: Normal allocator warmup or GC high-water mark settling
-- **Acceptable**: Under ~200 KiB total growth in first 10 minutes
+```ini
+[lab]
+native_events_enabled = true
+native_events_path = "/tmp/native_event_timeline.tsv"
+disable_heartbeat = false
+disable_wg_checks = true
+disable_bgp = true
+disable_bfd = true
+```
 
 ## Artifact Format
 
@@ -153,80 +204,114 @@ artifacts/memory-labs/tovarisch/idle-staircase/<run-id>/
 
 | File | Description |
 |------|-------------|
-| `manifest.yaml` | Lab configuration, build info, git state, subsystem toggles |
+| `manifest.yaml` | Lab configuration, build info, git state, subsystem toggles, native event state |
 | `memory_samples.tsv` | RSS/VmData samples with timestamps |
-| `event_timeline.tsv` | Timestamped events (heartbeat ticks, WG checks, etc.) |
+| `event_timeline.tsv` | Shell-side synthetic events (for bookkeeping) |
+| `native_event_timeline.tsv` | Tovarisch-native events (for attribution) |
 | `verdict.txt` | Verdict with growth analysis and attribution |
+| `tovarisch_lab.conf` | Config file used for native settings |
 | `strace.log` | (Optional) Syscall trace if STRACE=true |
 
-### Event Types in Timeline
-
-The lab logs these event types for attribution:
-
-| Event | Subsystem | Trigger |
-|-------|-----------|---------|
-| `heartbeat_tick` | heartbeat | Every 30 seconds if heartbeat enabled |
-| `wg_check` | wireguard | Every 60 seconds if WG checks enabled |
-| `bgp_maintenance` | bgp | Every 10 seconds if BGP enabled |
-| `bfd_tick` | bfd | Every 10 seconds if BFD enabled |
-| `status_burst_start/complete` | status | During /status burst test |
-
-### Enhanced Verdict Fields
-
-Verdicts include these attribution fields:
+### Manifest Native Fields
 
 ```yaml
-suspected_owner: heartbeat       # Identified owner (or empty)
-owner_evidence: "Dominant subsystem: heartbeat (20 events)..."  # Attribution reasoning
-correlated_events: heartbeat=20,wg=10,bgp=0,bfd=0  # Event counts by subsystem
-enabled_subsystems: heartbeat=true,wg=true,bgp_bfd=false  # Subsystems enabled
-disabled_subsystems: bgp_bfd  # Subsystems disabled for this run
+# Native event source
+native_events_enabled: true
+native_events_path: "/path/to/native_event_timeline.tsv"
+
+# Runtime toggle state
+native_disable_heartbeat: false
+native_disable_wg_checks: true
+native_disable_bgp: true
+native_disable_bfd: true
 ```
 
-## Regression Tests
+### Native Event Timeline Format
 
-### Focused Allocator Tests
-
-Run targeted tests for periodic paths:
-
-```bash
-# Test WG check error paths
-cd tovarisch && zig build test -- test_name="repeated failed WG"
-
-# Test heartbeat tunnel summary
-cd tovarisch && zig build test -- test_name="repeated heartbeat tunnel summary"
-
-# Test BGP export delta
-cd tovarisch && zig build test -- test_name="BGP export delta"
-
-# Run all attribution tests
-cd tovarisch && zig build test -- test_name="memory attribution"
+```
+timestamp	elapsed_millis	event	subsystem	detail	pid
+2026-01-01T00:00:30.000	30000	heartbeat_tick_start	heartbeat		1234
+2026-01-01T00:00:30.000	30000	heartbeat_tick_end	heartbeat		1234
+2026-01-01T00:01:00.000	60000	heartbeat_tick_start	heartbeat		1234
+2026-01-01T00:01:00.000	60000	heartbeat_tick_end	heartbeat		1234
 ```
 
-### Test Coverage
+## Verdict Interpretation
 
-The attribution test suite (`idle_memory_attribution_tests.zig`) covers:
+### With Native Events: `confirmed_leak`
 
-- `repeated failed WG check does not leak memory` - WG command-not-found path
-- `repeated heartbeat tunnel summary collection does not leak` - Heartbeat cycle
-- `repeated interface stats collection does not leak` - Health collection
-- `BGP export delta computation does not leak` - BGP export rebuild
-- `repeated status check render does not leak` - Status rendering (negative control)
+```
+verdict: confirmed_leak
+owner: heartbeat
+reason: Native events from heartbeat subsystem correlate with 3 memory steps.
+steps_detected: 3
+total_growth_kib: 600
+native_events_enabled: true
+native_event_count: 6
+```
 
-## File Structure
+**Interpretation**: Native events from heartbeat correlate with memory steps. Owner is attributed.
 
-The idle staircase lab is split into multiple files for LLM-friendliness:
+### With Native Events: `inconclusive`
 
-| File | Purpose |
-|------|---------|
-| `scripts/lab_tovarisch_idle_memory.sh` | Public shell entrypoint (thin launcher) |
-| `scripts/idle_staircase_analyzer.py` | Verdict analysis logic (Python) |
-| `scripts/verify_idle_staircase_artifact.py` | CLI wrapper for artifact verification |
-| `scripts/idle_staircase_verifier/` | Verifier package |
-| `scripts/idle_staircase_verifier/schema.py` | Constants and thresholds |
-| `scripts/idle_staircase_verifier/artifact_checks.py` | Artifact validation checks |
-| `scripts/idle_staircase_verifier/correlation.py` | Memory step detection and event correlation |
-| `scripts/idle_staircase_verifier/self_tests.py` | Self-test fixtures (25+ tests) |
+```
+verdict: inconclusive
+owner: 
+reason: Native events present but none correlate with memory steps.
+native_events_enabled: true
+```
+
+**Interpretation**: Native events exist but don't correlate with growth. Owner remains unknown.
+
+### Without Native Events: `inconclusive`
+
+```
+verdict: inconclusive
+owner: 
+reason: Shell-side synthetic events cannot produce confirmed_leak. 
+        Need tovarisch-native event emission to identify the periodic background owner.
+native_events_enabled: false
+```
+
+**Interpretation**: Shell-only artifacts cannot produce `confirmed_leak`. Native events required.
+
+### All Periodic Paths Disabled: `inconclusive`
+
+```
+verdict: inconclusive
+owner: 
+reason: Growth persists with all periodic paths disabled. May be allocator warmup.
+native_events_enabled: true
+native_disable_heartbeat: true
+native_disable_wg_checks: true
+native_disable_bgp: true
+native_disable_bfd: true
+```
+
+**Interpretation**: Growth continues even when all known periodic paths are disabled. Suggests allocator warmup or unknown source.
+
+## Attribution Strategy
+
+1. **Run with all periodic paths enabled** (baseline):
+   ```bash
+   ./scripts/lab_tovarisch_idle_memory.sh --native-events
+   ```
+   Expected: Staircase growth with native events from active subsystems.
+
+2. **Run with one subsystem at a time**:
+   ```bash
+   # Heartbeat only
+   ./scripts/lab_tovarisch_idle_memory.sh --native-heartbeat-only
+   
+   # No periodic paths
+   ./scripts/lab_tovarisch_idle_memory.sh --native-no-periodic
+   ```
+   Expected: If growth disappears when heartbeat disabled and appears when enabled, heartbeat is the owner.
+
+3. **Analyze verdict**:
+   - `confirmed_leak` with native events: Owner attributed
+   - `inconclusive` with all disabled: Allocator warmup or unknown source
+   - `bounded_warmup_or_allocator_highwater`: Normal behavior
 
 ## Artifact Verification
 
@@ -245,6 +330,17 @@ python3 scripts/verify_idle_staircase_artifact.py artifacts/memory-labs/tovarisc
 make verify-idle-staircase-artifact
 ```
 
+## Current Status
+
+**Verdict**: `inconclusive` (without native events)
+
+**Native infrastructure**: Implemented and ready for use
+
+**Next steps**:
+1. Run lab with `--native-events` to capture native events
+2. Run isolation modes to identify which subsystem correlates with growth
+3. If growth persists with all periodic paths disabled, investigate allocator behavior
+
 ## Known Limitations
 
 ### Without Live Production Access
@@ -257,19 +353,20 @@ make verify-idle-staircase-artifact
 - On non-Linux, lab prints SKIP and exits cleanly before starting processes
 - strace mode is Linux-only and optional
 
-## Current Verdict
+## File Structure
 
-**Verdict**: `inconclusive`
-
-**Reason**: Staircase growth detected (N steps, X KiB total) but owner is unattributed. Shell-side synthetic events cannot be used for attribution. Real attribution requires tovarisch-native event emission.
-
-**Next Steps (Future Work)**:
-1. **Add tovarisch-native event emission** - emit events from within tovarisch code (heartbeat, WG checks, BGP/BFD ticks)
-2. **Add actual runtime subsystem toggles** - allow disabling real periodic paths (not just shell-side synthetic events)
-3. **Re-run attribution with real events** - correlate tovarisch-native events with memory steps
-4. **If growth persists with real subsystems disabled**, investigate allocator warmup behavior
-
-> ⚠️ Current shell-side toggles (`--heartbeat-only`, `--no-subsystems`, etc.) do NOT disable actual tovarisch runtime paths. They only suppress synthetic shell-side event logging.
+| File | Purpose |
+|------|---------|
+| `scripts/lab_tovarisch_idle_memory.sh` | Public shell entrypoint (thin launcher) |
+| `scripts/idle_staircase_analyzer.py` | Verdict analysis logic (Python) |
+| `scripts/verify_idle_staircase_artifact.py` | CLI wrapper for artifact verification |
+| `scripts/idle_staircase_verifier/` | Verifier package |
+| `scripts/idle_staircase_verifier/schema.py` | Constants and thresholds |
+| `scripts/idle_staircase_verifier/artifact_checks.py` | Artifact validation checks |
+| `scripts/idle_staircase_verifier/correlation.py` | Memory step detection and event correlation |
+| `scripts/idle_staircase_verifier/self_tests.py` | Self-test fixtures (30+ tests) |
+| `tovarisch/src/runtime/lab_events.zig` | Native event ring buffer |
+| `tovarisch/src/config.zig` | Lab config parsing with native settings |
 
 ## Related Documentation
 
@@ -277,5 +374,5 @@ make verify-idle-staircase-artifact
 - [Memory Lab Infrastructure](../labs/memory-lab.md)
 - [Embedded Memory Frugality](../doctrine/embedded-memory-frugality.md)
 - [Heartbeat Module](../../tovarisch/src/http/heartbeat.zig)
-- [WireGuard Collector](../../tovarisch/src/net/wg_show_collector.zig)
+- [Native Events Module](../../tovarisch/src/runtime/lab_events.zig)
 - [Attribution Tests](../../tovarisch/src/http/idle_memory_attribution_tests.zig)

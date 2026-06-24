@@ -59,6 +59,11 @@ const _net_ss_parser = @import("net/ss_parser.zig");
 const _net_route_diag = @import("net/route_diag.zig");
 const _net_extended_interface_stats = @import("net/extended_interface_stats.zig");
 const _net_wg_dump_collector = @import("net/wg_dump_collector.zig");
+
+// Lab events (idle staircase memory lab)
+const _runtime_lab_events = @import("runtime/lab_events.zig");
+const _runtime_lab_events_tests = @import("runtime/lab_events_tests.zig");
+
 const _status_network_diag = @import("status_network_diag.zig");
 const _status_network_diag_types = @import("status_network_diag_types.zig");
 const _status_network_diag_events = @import("status_network_diag_events.zig");
@@ -122,3 +127,5 @@ test { std.testing.refAllDecls(@import("status_network_diag_ownership_tests.zig"
 test { std.testing.refAllDecls(@import("net/route_diag.zig")); }
 test { std.testing.refAllDecls(@import("net/extended_interface_stats.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_dump_collector.zig")); }
+test { std.testing.refAllDecls(@import("runtime/lab_events.zig")); }
+test { std.testing.refAllDecls(@import("runtime/lab_events_tests.zig")); }

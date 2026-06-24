@@ -10,6 +10,7 @@ const status = @import("../status.zig");
 const serve_context = @import("serve_context.zig");
 const tovarisch_config = @import("../config.zig");
 const network_diag_config = @import("../net/network_diag_config.zig");
+const lab_events = @import("../runtime/lab_events.zig");
 
 // Re-export ServeContext for external use
 pub const ServeContext = serve_context.ServeContext;
@@ -294,6 +295,8 @@ pub fn serveForeverWithContext(
 /// Daemon-style serve loop with full runtime inputs and lab config.
 ///
 /// When lab_config.lab_mode is true, the /lab/probe endpoint is enabled.
+/// When lab_config.native_events_enabled is true, native events are emitted
+/// from real runtime paths (heartbeat, WG, BGP, BFD) and exposed via /status.json.
 pub fn serveForeverWithContextAndLab(
     config: Config,
     inputs: status.RuntimeStatusInputs,
@@ -303,6 +306,25 @@ pub fn serveForeverWithContextAndLab(
 ) !void {
     var server = Server.init(config);
     defer server.deinit();
+
+    // Initialize lab event emitter if native events are enabled.
+    // The emitter is owned by this function and deinitialized via defer.
+    // Uses std.time.monoTime() internally for real elapsed time measurement.
+    var lab_emitter_opt: ?*lab_events.LabEventEmitter = null;
+    var lab_emitter_storage: lab_events.LabEventEmitter = undefined;
+    if (lab_config.native_events_enabled) {
+        const emitter_config = lab_events.LabEventsConfig{
+            .enabled = true,
+            .output_path = lab_config.native_events_path,
+        };
+        lab_emitter_storage = lab_events.LabEventEmitter.init(emitter_config);
+        lab_emitter_opt = &lab_emitter_storage;
+    }
+    defer {
+        if (lab_emitter_opt) |emitter| {
+            emitter.deinit();
+        }
+    }
 
     // Initialize serve context with full runtime inputs (BFD + config check + BGP bundle + lab config + network diag config).
     // MemoryOwnership: Startup-only one-time allocation at daemon init.
@@ -316,6 +338,8 @@ pub fn serveForeverWithContextAndLab(
         lab_config,
         network_diag_cfg,
     );
+    // Wire lab event emitter into serve context for /status exposure
+    serve_ctx.lab_event_emitter = lab_emitter_opt;
     defer serve_ctx.deinit();
 
     try server.listen();
@@ -328,18 +352,41 @@ pub fn serveForeverWithContextAndLab(
 
     // Heartbeat thread: only spawn in normal mode.
     // In statonly mode, we skip heartbeat to keep output clean.
+    // When lab emitter is available, use heartbeatThreadWithEvents for native event emission.
+    // Skip heartbeat if lab_config.disable_heartbeat is true (lab runtime toggle).
     var log_buf = logging.BufferedWriter.init();
-    if (config.log_mode == .normal) {
-        if (std.Thread.spawn(.{}, heartbeat.heartbeatThread, .{})) |thread| {
-            thread.detach();
-        } else |spawn_err| {
-            log_buf.reset();
-            logging.emit(.heartbeat_thread_start_failed, &log_buf, &.{
-                .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(spawn_err) } },
-                .{ .name = "detail", .value = logging.FieldValue{ .string = "heartbeat spawn failed, continuing without heartbeat" } },
-            }) catch {};
-            writeLogRecord(out_writer, log_buf.slice()) catch {};
+    if (config.log_mode == .normal and !lab_config.disable_heartbeat) {
+        if (lab_emitter_opt) |emitter| {
+            if (std.Thread.spawn(.{}, heartbeat.heartbeatThreadWithEvents, .{emitter})) |thread| {
+                thread.detach();
+            } else |spawn_err| {
+                log_buf.reset();
+                logging.emit(.heartbeat_thread_start_failed, &log_buf, &.{
+                    .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(spawn_err) } },
+                    .{ .name = "detail", .value = logging.FieldValue{ .string = "heartbeat spawn failed, continuing without heartbeat" } },
+                }) catch {};
+                writeLogRecord(out_writer, log_buf.slice()) catch {};
+            }
+        } else {
+            if (std.Thread.spawn(.{}, heartbeat.heartbeatThread, .{})) |thread| {
+                thread.detach();
+            } else |spawn_err| {
+                log_buf.reset();
+                logging.emit(.heartbeat_thread_start_failed, &log_buf, &.{
+                    .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(spawn_err) } },
+                    .{ .name = "detail", .value = logging.FieldValue{ .string = "heartbeat spawn failed, continuing without heartbeat" } },
+                }) catch {};
+                writeLogRecord(out_writer, log_buf.slice()) catch {};
+            }
         }
+    } else if (lab_config.disable_heartbeat) {
+        // Log when heartbeat is disabled via lab runtime toggle
+        log_buf.reset();
+        logging.emit(.heartbeat_thread_start_failed, &log_buf, &.{
+            .{ .name = "error", .value = logging.FieldValue{ .string = "disabled" } },
+            .{ .name = "detail", .value = logging.FieldValue{ .string = "heartbeat disabled via lab_config.disable_heartbeat" } },
+        }) catch {};
+        writeLogRecord(out_writer, log_buf.slice()) catch {};
     }
 
     // Branch based on log mode

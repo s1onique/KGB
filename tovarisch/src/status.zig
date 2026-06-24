@@ -31,6 +31,8 @@ const bgp_serve = @import("cli/bgp_serve.zig");
 const bgp_diag = @import("status_bgp_diagnostics.zig");
 const status_network_diag = @import("status_network_diag.zig");
 const network_diag_config = @import("net/network_diag_config.zig");
+const lab_events = @import("runtime/lab_events.zig");
+const tovarisch_config = @import("config.zig");
 
 // Re-export BGP diagnostics from separate module for LLM-friendly file sizes.
 pub const BgpDiagnostics = bgp_diag.BgpDiagnostics;
@@ -175,18 +177,47 @@ pub fn getLocalChecksWithBgp(
     bgp_state: bgp_status.BgpStatusState,
     scratch: *StatusScratch,
 ) []const Check {
+    return getLocalChecksWithBgpAndLab(bfd_runtime, config_check_injected, bgp_state, scratch, .{});
+}
+
+pub fn getLocalChecksWithBgpAndLab(
+    bfd_runtime: ?*const bfd_status.BfdRuntime,
+    config_check_injected: Check,
+    bgp_state: bgp_status.BgpStatusState,
+    scratch: *StatusScratch,
+    lab_config: tovarisch_config.LabConfig,
+) []const Check {
     scratch.checks[0] = process_check;
     scratch.checks[1] = binary_check;
     scratch.checks[2] = config_check_injected;
     scratch.checks[3] = getStateDirCheck();
     scratch.checks[4] = http_check;
     scratch.checks[5] = tunnel_check.getTunnelCheckDefault();
-    // MemoryOwnership: page_allocator is used to collect WireGuard diagnostics.
-    // The getWgPeersCheck() function deallocates via defer diag.deinit(allocator)
-    // before returning, so memory is released within the same call scope.
-    scratch.checks[6] = status_checks.getWgPeersCheck(std.heap.page_allocator);
-    scratch.checks[7] = getBfdCheck(bfd_runtime, &scratch.bfd_detail);
-    scratch.checks[8] = getBgpCheck(bgp_state, &scratch.bgp_detail);
+
+    // WireGuard check: return "disabled" if lab toggle is set
+    if (lab_config.disable_wg_checks) {
+        scratch.checks[6] = Check{ .name = "wg_peers", .status = .warn, .detail = "disabled via lab_config" };
+    } else {
+        // MemoryOwnership: page_allocator is used to collect WireGuard diagnostics.
+        // The getWgPeersCheck() function deallocates via defer diag.deinit(allocator)
+        // before returning, so memory is released within the same call scope.
+        scratch.checks[6] = status_checks.getWgPeersCheck(std.heap.page_allocator);
+    }
+
+    // BFD check: return "disabled" if lab toggle is set
+    if (lab_config.disable_bfd) {
+        scratch.checks[7] = Check{ .name = "bfd", .status = .warn, .detail = "disabled via lab_config" };
+    } else {
+        scratch.checks[7] = getBfdCheck(bfd_runtime, &scratch.bfd_detail);
+    }
+
+    // BGP check: return "disabled" if lab toggle is set
+    if (lab_config.disable_bgp) {
+        scratch.checks[8] = Check{ .name = "bgp", .status = .warn, .detail = "disabled via lab_config" };
+    } else {
+        scratch.checks[8] = getBgpCheck(bgp_state, &scratch.bgp_detail);
+    }
+
     return scratch.checks[0..LOCAL_CHECKS_COUNT];
 }
 
@@ -206,6 +237,14 @@ pub const RuntimeStatusInputs = struct {
     /// Network diagnostics configuration parsed from daemon config.
     /// When null, network diagnostics are not included in status response.
     network_diag_config: network_diag_config.NetworkDiagConfig = .{},
+    /// Lab config for runtime toggles and native event emission.
+    /// When lab_config.disable_wg_checks is true, WG check returns "disabled".
+    /// When lab_config.disable_bgp is true, BGP check returns "disabled".
+    /// When lab_config.disable_bfd is true, BFD check returns "disabled".
+    lab_config: tovarisch_config.LabConfig = .{},
+    /// Optional lab event emitter for native event exposure in status JSON.
+    /// When provided, native events are included in the status response.
+    lab_event_emitter: ?*const lab_events.LabEventEmitter = null,
 };
 
 // Status building
@@ -221,7 +260,7 @@ fn deriveBgpFromResult(result: bgp_serve.BgpLoadResult) ?BgpDiagnostics {
 pub fn buildStatusWithInputs(inputs: RuntimeStatusInputs, scratch: *StatusScratch) Status {
     const config_check_built = buildConfigCheck(inputs.config_check);
     const live_bgp_state = bgp_status.statusStateFromLoadResult(inputs.bgp_result);
-    const checks = getLocalChecksWithBgp(inputs.bfd_runtime, config_check_built, live_bgp_state, scratch);
+    const checks = getLocalChecksWithBgpAndLab(inputs.bfd_runtime, config_check_built, live_bgp_state, scratch, inputs.lab_config);
     return Status{
         .service = "tovarisch",
         .version = build_info.version,
@@ -393,5 +432,14 @@ pub fn renderPayloadWithContextAndDiag(
     } else {
         try writer.writeAll(",\"rss_kib\":null");
     }
-    try writer.writeAll("}}\n");
+    try writer.writeAll("}");
+
+    // Note: Native lab events are NOT exposed via /status JSON until JSON escaping
+    // is properly implemented. Detail strings contain raw bytes from subsystem output
+    // (e.g., wg_show output) that could contain quotes or control characters.
+    // Native events are written to the TSV output file instead, which is the
+    // primary channel for idle staircase lab attribution.
+    // TODO: Add JSON escaping to enable status exposure in future hardening ACT.
+
+    try writer.writeAll("}\n");
 }

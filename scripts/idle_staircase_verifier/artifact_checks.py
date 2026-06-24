@@ -7,6 +7,7 @@ from typing import Optional
 
 from .schema import (
     REQUIRED_FILES,
+    NATIVE_ARTIFACT_FILES,
     REQUIRED_EVENT_COLS,
     TERMINAL_EVENTS,
     VALID_VERDICTS,
@@ -15,7 +16,62 @@ from .schema import (
     BOUNDED_MAX_GROWTH_KIB,
     BOUNDED_MAX_STEPS,
 )
-from .correlation import is_shell_synthetic_artifact, find_correlated_events
+from .correlation import (
+    is_shell_synthetic_artifact,
+    find_correlated_events,
+    find_correlated_native_events,
+    count_native_events_by_subsystem,
+)
+
+
+def verify_manifest(artifact_path: Path) -> tuple[bool, Optional[str]]:
+    """Verify manifest.yaml is present and non-empty."""
+    manifest_path = artifact_path / "manifest.yaml"
+    
+    if not manifest_path.exists():
+        return False, f"manifest.yaml missing in {artifact_path}"
+    
+    content = manifest_path.read_text()
+    if len(content.strip()) < 10:
+        return False, "manifest.yaml is empty or too small"
+    
+    required_fields = ["run_id:", "platform:", "commit_sha:"]
+    for field in required_fields:
+        if field not in content:
+            return False, f"manifest.yaml missing required field: {field}"
+    
+    return True, None
+
+
+def check_native_events_enabled(manifest_content: str) -> bool:
+    """Check if manifest indicates native events are enabled."""
+    # Look for native_events_enabled: true in manifest
+    match = re.search(r'native_events_enabled:\s*(true|false)', manifest_content, re.IGNORECASE)
+    if match:
+        return match.group(1).lower() == 'true'
+    return False
+
+
+def verify_native_event_timeline(artifact_path: Path) -> tuple[bool, Optional[str]]:
+    """Verify native_event_timeline.tsv has required structure."""
+    tsv_path = artifact_path / "native_event_timeline.tsv"
+    
+    if not tsv_path.exists():
+        return False, "native_event_timeline.tsv missing (required for native event artifacts)"
+    
+    content = tsv_path.read_text()
+    lines = content.strip().split('\n')
+    
+    if len(lines) < 2:
+        return False, "native_event_timeline.tsv has no data rows (only header)"
+    
+    header = lines[0]
+    required_cols = ["timestamp", "elapsed_millis", "event", "subsystem"]
+    for col in required_cols:
+        if col not in header:
+            return False, f"native_event_timeline.tsv missing required column: {col}"
+    
+    return True, None
 
 
 def verify_manifest(artifact_path: Path) -> tuple[bool, Optional[str]]:
@@ -199,15 +255,22 @@ def verify_verdict(artifact_path: Path) -> tuple[bool, Optional[str]]:
         if event_timeline_path.exists() and is_shell_synthetic_artifact(event_timeline_path):
             return False, "verdict=confirmed_leak rejected: artifact contains shell-side synthetic events. Shell-side events may enrich inconclusive artifacts but cannot produce confirmed_leak. Real attribution requires tovarisch-native event emission."
         
-        # Check for correlated events near memory steps
-        correlation = find_correlated_events(
-            event_timeline_path,
+        # CRITICAL: confirmed_leak must be proven from native_event_timeline.tsv
+        # Shell-side event_timeline.tsv correlation is NOT sufficient for confirmed_leak
+        native_event_timeline_path = artifact_path / "native_event_timeline.tsv"
+        
+        if not native_event_timeline_path.exists():
+            return False, "verdict=confirmed_leak requires native_event_timeline.tsv. Native events from tovarisch runtime are required for confirmed attribution."
+        
+        # Check for correlated native events near memory steps
+        native_correlation = find_correlated_native_events(
+            native_event_timeline_path,
             artifact_path / "memory_samples.tsv",
             owner
         )
         
-        if not correlation:
-            return False, f"verdict=confirmed_leak with owner='{owner}' requires at least one correlated event near a memory step, or targeted red/green test reference"
+        if not native_correlation:
+            return False, f"verdict=confirmed_leak with owner='{owner}' requires native events from native_event_timeline.tsv that correlate with memory steps. Shell-side event correlation is not sufficient for confirmed attribution."
     
     # For bounded verdict, require evidence and reject obvious continued staircase
     if verdict == "bounded_warmup_or_allocator_highwater":
@@ -261,12 +324,23 @@ def verify_artifact(artifact_path: Path) -> tuple[bool, Optional[str]]:
         if not filepath.exists():
             return False, f"Required file missing: {filename}"
     
+    # Read manifest to check if native events are enabled
+    manifest_path = artifact_path / "manifest.yaml"
+    manifest_content = manifest_path.read_text() if manifest_path.exists() else ""
+    native_events_enabled = check_native_events_enabled(manifest_content)
+    
     checks = [
         ("manifest", verify_manifest),
         ("memory_samples", verify_memory_samples),
         ("event_timeline", verify_event_timeline),
         ("verdict", verify_verdict),
     ]
+    
+    # If native events are enabled, verify native_event_timeline.tsv
+    if native_events_enabled:
+        valid, error = verify_native_event_timeline(artifact_path)
+        if not valid:
+            return False, f"[native_event_timeline] {error}"
     
     for name, check_fn in checks:
         valid, error = check_fn(artifact_path)

@@ -275,6 +275,18 @@ pub const LabConfig = struct {
     /// Path to the failure file. When this file exists, /lab/probe returns 503.
     /// Required when lab_mode is true.
     lab_probe_failure_file: []const u8 = "",
+    /// Enable native event emission (for idle staircase lab).
+    native_events_enabled: bool = false,
+    /// Path for native event timeline TSV output.
+    native_events_path: []const u8 = "",
+    /// Disable heartbeat thread when true.
+    disable_heartbeat: bool = false,
+    /// Disable WG periodic checks when true.
+    disable_wg_checks: bool = false,
+    /// Disable BGP maintenance when true.
+    disable_bgp: bool = false,
+    /// Disable BFD tick loop when true.
+    disable_bfd: bool = false,
 };
 
 /// Parse the [lab] section from raw config into LabConfig.
@@ -292,6 +304,28 @@ pub fn parseLabConfig(raw: *const RawConfig) ConfigError!LabConfig {
             try requireNonEmpty(value);
             cfg.lab_probe_failure_file = value;
         } else return ConfigError.MissingKey;
+    }
+
+    // Native events toggle
+    if (getString(section, "native_events_enabled")) |value| {
+        cfg.native_events_enabled = try parseBool(value);
+    }
+    if (getString(section, "native_events_path")) |value| {
+        cfg.native_events_path = value;
+    }
+
+    // Runtime subsystem toggles for idle staircase lab
+    if (getString(section, "disable_heartbeat")) |value| {
+        cfg.disable_heartbeat = try parseBool(value);
+    }
+    if (getString(section, "disable_wg_checks")) |value| {
+        cfg.disable_wg_checks = try parseBool(value);
+    }
+    if (getString(section, "disable_bgp")) |value| {
+        cfg.disable_bgp = try parseBool(value);
+    }
+    if (getString(section, "disable_bfd")) |value| {
+        cfg.disable_bfd = try parseBool(value);
     }
 
     return cfg;

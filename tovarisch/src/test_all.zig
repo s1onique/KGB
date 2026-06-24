@@ -52,6 +52,8 @@ const _heartbeat_idle_memory_regression_tests = @import("http/heartbeat_idle_mem
 const _idle_memory_attribution_tests = @import("http/idle_memory_attribution_tests.zig");
 const _runtime_telemetry = @import("runtime/telemetry.zig");
 const _runtime_heartbeat_log = @import("runtime/heartbeat_log.zig");
+const _runtime_lab_events = @import("runtime/lab_events.zig");
+const _runtime_lab_events_tests = @import("runtime/lab_events_tests.zig");
 
 // BFD multihop module tests
 const _bfd_packet = @import("bfd/packet.zig");
@@ -112,6 +114,8 @@ test { std.testing.refAllDecls(@import("http/server.zig")); }
 test { std.testing.refAllDecls(@import("http/heartbeat.zig")); }
 test { std.testing.refAllDecls(@import("runtime/telemetry.zig")); }
 test { std.testing.refAllDecls(@import("runtime/heartbeat_log.zig")); }
+test { std.testing.refAllDecls(@import("runtime/lab_events.zig")); }
+test { std.testing.refAllDecls(@import("runtime/lab_events_tests.zig")); }
 test { std.testing.refAllDecls(@import("logging.zig")); }
 
 // BFD module tests

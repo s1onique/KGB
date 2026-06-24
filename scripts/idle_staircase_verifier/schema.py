@@ -11,6 +11,11 @@ REQUIRED_FILES: Final[list[str]] = [
     "verdict.txt",
 ]
 
+# Required files for native event artifacts (when native_events_enabled=true)
+NATIVE_ARTIFACT_FILES: Final[list[str]] = [
+    "native_event_timeline.tsv",
+]
+
 # Valid verdict values
 VALID_VERDICTS: Final[list[str]] = [
     "confirmed_leak",

@@ -164,6 +164,14 @@ pub fn collectTunnelSummary(allocator: std.mem.Allocator, sysfs_root: []const u8
 /// mutable state adds complexity without benefit. The thread runs until process
 /// exit; local state is sufficient.
 pub fn heartbeatThread() void {
+    heartbeatThreadWithEvents(null);
+}
+
+/// Heartbeat thread entry point with native event emission support.
+///
+/// When lab_emitter is provided and enabled, emits native events around
+/// the heartbeat tick for idle staircase memory lab attribution.
+pub fn heartbeatThreadWithEvents(lab_emitter: ?*anyopaque) void {
     var uptime_seconds: u64 = 0;
 
     while (true) {
@@ -180,8 +188,33 @@ pub fn heartbeatThread() void {
         // Increment uptime (local state, no mutex needed)
         uptime_seconds += HEARTBEAT_INTERVAL_SECS;
 
+        // Convert uptime to milliseconds for native event emission
+        const elapsed_millis = @as(u32, @intCast(uptime_seconds * 1000));
+
+        // Emit heartbeat tick start event if lab emitter is available
+        if (lab_emitter) |emitter| {
+            const LabEventEmitter = @import("../runtime/lab_events.zig").LabEventEmitter;
+            const emitter_ptr: *LabEventEmitter = @ptrCast(@alignCast(emitter));
+            if (emitter_ptr.shouldEmit()) {
+                emitter_ptr.emitHeartbeatStart(elapsed_millis);
+            }
+        }
+
         // Emit heartbeat log to stdout fd (fd=1).
-        emitHeartbeatToFd(uptime_seconds);
+        const emit_result = emitHeartbeatToFdResult(uptime_seconds);
+
+        // Emit heartbeat tick end or failed event if lab emitter is available
+        if (lab_emitter) |emitter| {
+            const LabEventEmitter = @import("../runtime/lab_events.zig").LabEventEmitter;
+            const emitter_ptr: *LabEventEmitter = @ptrCast(@alignCast(emitter));
+            if (emitter_ptr.shouldEmit()) {
+                if (emit_result) {
+                    emitter_ptr.emitHeartbeatEnd(elapsed_millis);
+                } else {
+                    emitter_ptr.emitHeartbeatFailed(elapsed_millis, "emit_failed");
+                }
+            }
+        }
     }
 }
 
@@ -198,6 +231,12 @@ pub fn heartbeatThread() void {
 /// journald already provides accurate receipt timestamps; a fake fixed
 /// timestamp in the payload would be misleading to operators.
 fn emitHeartbeatToFd(uptime_seconds: u64) void {
+    _ = emitHeartbeatToFdResult(uptime_seconds);
+}
+
+/// Emit heartbeat log and return success/failure.
+/// Used by heartbeatThreadWithEvents to report emit status to lab events.
+fn emitHeartbeatToFdResult(uptime_seconds: u64) bool {
     // Get current status from the same derivation as /status
     var scratch = status.StatusScratch{};
     const current_status = status.buildStatus(&scratch);
@@ -233,9 +272,13 @@ fn emitHeartbeatToFd(uptime_seconds: u64) void {
     writeDecimalToHeartbeat(&log_buf, tunnel_summary.tx_bytes);
     log_buf.writeAll("}\n");
 
-    // Write to stdout fd. Ignore partial writes to not disrupt thread.
+    // Write to stdout fd. Return true if non-empty bytes written, false otherwise.
     const bytes = log_buf.slice();
-    _ = c.write(1, bytes.ptr, bytes.len);
+    if (bytes.len > 0) {
+        _ = c.write(1, bytes.ptr, bytes.len);
+        return true;
+    }
+    return false;
 }
 
 // --- Tests ---

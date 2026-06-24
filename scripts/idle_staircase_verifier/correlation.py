@@ -178,3 +178,91 @@ def correlated_events_to_string(counts: dict[str, int]) -> str:
     """Format subsystem event counts as correlation string."""
     parts = [f"{k}={counts[k]}" for k in SUBSYSTEM_KEYS if counts[k] > 0 or k in ["heartbeat", "wireguard", "bgp", "bfd"]]
     return ",".join(parts) if parts else ""
+
+
+def find_correlated_native_events(
+    native_event_timeline_path: Path,
+    memory_samples_path: Path,
+    owner: str,
+    correlation_window_millis: int = 30000
+) -> Optional[str]:
+    """
+    Find native events from the specified owner subsystem that correlate with memory steps.
+    
+    Native events use elapsed_millis (not elapsed_sec), so correlation window is in milliseconds.
+    
+    Returns a description of the correlation if found, None otherwise.
+    """
+    # Get memory step timestamps (in seconds)
+    rss_values = extract_rss_values(memory_samples_path)
+    _, step_timestamps = detect_memory_steps(rss_values)
+    
+    if not step_timestamps:
+        return None
+    
+    # Get event prefixes for owner
+    prefixes = OWNER_TO_PREFIXES.get(owner.lower(), [])
+    if not prefixes:
+        return None
+    
+    # Parse native event timeline
+    if not native_event_timeline_path.exists():
+        return None
+    
+    lines = native_event_timeline_path.read_text().strip().split('\n')
+    correlated = []
+    
+    # Skip header
+    for line in lines[1:]:
+        cols = line.split('\t')
+        if len(cols) >= 4:
+            try:
+                event = cols[2]
+                elapsed_millis = int(cols[1])
+                
+                if any(event.startswith(p) for p in prefixes):
+                    # Check if near a memory step (convert step timestamps to millis)
+                    for step_ts in step_timestamps:
+                        step_ts_millis = step_ts * 1000
+                        if abs(elapsed_millis - step_ts_millis) <= correlation_window_millis:
+                            correlated.append((elapsed_millis, event))
+                            break
+            except (ValueError, IndexError):
+                pass
+    
+    if correlated:
+        return f"{len(correlated)} native events correlated with memory steps"
+    
+    return None
+
+
+def count_native_events_by_subsystem(native_event_timeline_path: Path) -> dict[str, int]:
+    """Count native events by subsystem from native event timeline."""
+    counts = {k: 0 for k in SUBSYSTEM_KEYS}
+    
+    if not native_event_timeline_path.exists():
+        return counts
+    
+    lines = native_event_timeline_path.read_text().strip().split('\n')
+    # Skip header
+    for line in lines[1:]:
+        cols = line.split('\t')
+        if len(cols) >= 4:
+            event = cols[2]
+            subsystem = cols[3]
+            
+            # Match event patterns to subsystem
+            if any(event.startswith(p) for p in ["heartbeat_", "heartbeat"]):
+                counts["heartbeat"] += 1
+            elif any(event.startswith(p) for p in ["wg_", "wg"]):
+                counts["wireguard"] += 1
+            elif any(event.startswith(p) for p in ["bgp_", "bgp"]):
+                counts["bgp"] += 1
+            elif any(event.startswith(p) for p in ["bfd_", "bfd"]):
+                counts["bfd"] += 1
+            elif any(event.startswith(p) for p in ["health_", "health"]):
+                counts["health"] += 1
+            elif any(event.startswith(p) for p in ["status_", "status"]):
+                counts["status"] += 1
+    
+    return counts

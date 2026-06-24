@@ -15,6 +15,7 @@ const bgp_status = @import("../bgp/status.zig");
 const status = @import("../status.zig");
 const config = @import("../config.zig");
 const network_diag_config = @import("../net/network_diag_config.zig");
+const lab_events = @import("../runtime/lab_events.zig");
 
 /// Context passed to HTTP route handlers.
 ///
@@ -55,6 +56,12 @@ pub const ServeContext = struct {
     /// This config is passed to the /status endpoint for network diagnostics collection.
     /// Default-initialized to disabled state when no config is provided.
     network_diag_config: network_diag_config.NetworkDiagConfig = .{},
+
+    /// Native lab event emitter for idle staircase memory lab attribution.
+    /// When native_events_enabled is true in lab_config, this emitter collects
+    /// events from real runtime paths (heartbeat, WG, BGP, BFD).
+    /// Null when native events are disabled.
+    lab_event_emitter: ?*lab_events.LabEventEmitter = null,
 
     /// Initialize serve context with allocator.
     /// Uses default no_config state since no config path is available.

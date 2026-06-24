@@ -140,6 +140,8 @@ pub fn handleStatus(fd: i32, state: *anyopaque, include_network_diag: bool) !voi
         .config_check = ctx.config_check,
         .bgp_result = ctx.bgp_result,
         .network_diag_config = ctx.network_diag_config,
+        .lab_config = ctx.lab_config,
+        .lab_event_emitter = ctx.lab_event_emitter,
         // MemoryOwnership: Transient allocation for network_diag within HTTP request handler scope.
         // The renderPayloadWithContextAndDiag() function releases all memory via defer before returning.
     }, std.heap.page_allocator, include_network_diag);

@@ -388,6 +388,20 @@ if (c.getenv("TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE") != null) {
 
 ---
 
+## 2026-06-24 — std.time.monoTime() not available in Zig 0.16.0
+
+- **Symptom:** `std.time.monoTime()` is not available in Zig 0.16.0's `std.time` namespace.
+- **Wrong assumption:** Attempted to use `std.time.monoTime()` for real monotonic time in lab event timestamps.
+- **Working fix:** Use caller-supplied elapsed milliseconds.
+  - Heartbeat thread passes `uptime_seconds * 1000` to `emit()`.
+  - This gives real elapsed time without depending on `std.time.monoTime()`.
+  - Count-based derivation was rejected: it creates false correlations between memory steps and event timing.
+  - Design constraint: elapsed time must come from a clock seam, not from event count.
+- **Files affected:** `tovarisch/src/runtime/lab_events.zig`, `tovarisch/src/http/heartbeat.zig`
+- **Promote to field manual?** Yes — timing patterns are common, and the false-correlation risk from count-based timing should be documented.
+
+---
+
 Recording field notes from Zig 0.16 experiments. Confidence varies; do not promote to field manual until verified with a minimal reproducer.
 
 Old entries have been promoted to `zig-0.16-field-manual.md`. This file tracks experimental observations.
