@@ -124,7 +124,8 @@ pub const LabEventEmitter = struct {
         // MemoryCopySafety: src=dynamic dst=stack buf=4096
         @memcpy(path_buf[0..self.config.output_path.len], self.config.output_path);
         path_buf[self.config.output_path.len] = 0;
-        const flags = @as(std.c.O, @bitCast(@as(u32, 0o100000 | 0o1 | 0o200)));
+        // O_LARGEFILE | O_WRONLY | O_CREAT | O_TRUNC
+        const flags = @as(std.c.O, @bitCast(@as(u32, 0o100000 | 0o1 | 0o100 | 0o1000)));
         const fd = std.c.open(
             @as([*:0]const u8, @ptrCast(&path_buf)),
             flags,
@@ -135,6 +136,7 @@ pub const LabEventEmitter = struct {
             const header = "timestamp\telapsed_millis\tevent\tsubsystem\tdetail\tpid\n";
             _ = std.c.write(fd, @ptrCast(header), header.len);
         }
+        // Note: caller handles logging of open failures via lab_native_events_open_failed
     }
 
     pub fn deinit(self: *Self) void {

@@ -151,3 +151,17 @@ test "LabEventEmitter renderTsv header" {
         try std.testing.expectEqual(@as(u16, 4), record.detail_len);
     }
 }
+
+test "LabEventEmitter opens output file when path provided" {
+    // Verify O_CREAT flag works: output_file should be non-null when valid path provided
+    const tmp_path = "/tmp/lab_events_regression_test.tmp";
+    const config = LabEventsConfig{
+        .enabled = true,
+        .output_path = tmp_path,
+    };
+    var emitter = LabEventEmitter.init(config);
+    defer emitter.deinit();
+
+    // Verify file was opened successfully
+    try std.testing.expect(emitter.output_file != null);
+}
