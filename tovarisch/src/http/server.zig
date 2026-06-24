@@ -11,6 +11,7 @@ const serve_context = @import("serve_context.zig");
 const tovarisch_config = @import("../config.zig");
 const network_diag_config = @import("../net/network_diag_config.zig");
 const lab_events = @import("../runtime/lab_events.zig");
+const startup_logs = @import("startup_logs.zig");
 
 // Re-export ServeContext for external use
 pub const ServeContext = serve_context.ServeContext;
@@ -209,42 +210,6 @@ fn acceptOneBlocking(server: *Server, state: *anyopaque) !void {
     handleConnection(conn_fd, state);
 }
 
-/// Write a log record to the output and flush.
-fn writeLogRecord(out_writer: anytype, bytes: []const u8) !void {
-    try out_writer.writeAll(bytes);
-
-    // Flush if the writer supports it (not BufferedWriter).
-    if (comptime @TypeOf(out_writer) == *logging.BufferedWriter) {
-        // No-op: BufferedWriter doesn't have flush
-    } else {
-        out_writer.flush() catch {};
-    }
-}
-
-/// Emit startup log events after successful server listen.
-fn emitStartupLogs(config: Config, out_writer: anytype) !void {
-    var log_buf = logging.BufferedWriter.init();
-    try logging.emit(.http_server_listening, &log_buf, &.{
-        .{ .name = "bind_address", .value = logging.FieldValue{ .string = config.address } },
-        .{ .name = "port", .value = logging.FieldValue{ .integer = config.port } },
-    });
-    try writeLogRecord(out_writer, log_buf.slice());
-
-    log_buf.reset();
-    try logging.emit(.uvb76_signal_ready, &log_buf, &.{
-        .{ .name = "signal", .value = logging.FieldValue{ .string = "🚩📻" } },
-        .{ .name = "message", .value = logging.FieldValue{ .string = "Listen to UVB-76 signals..." } },
-    });
-    try writeLogRecord(out_writer, log_buf.slice());
-}
-
-/// Emit startup logs only in normal mode (not statonly).
-fn emitStartupLogsIfNormal(config: Config, out_writer: anytype) !void {
-    if (config.log_mode == .normal) {
-        try emitStartupLogs(config, out_writer);
-    }
-}
-
 /// Log a critical error message.
 fn logCritical(out_writer: anytype, comptime fmt: []const u8, args: anytype) void {
     out_writer.print("critical: " ++ fmt, args) catch {};
@@ -257,7 +222,7 @@ pub fn serve(config: Config, out_writer: anytype) !void {
     defer server.deinit();
 
     try server.listen();
-    try emitStartupLogs(config, out_writer);
+    try startup_logs.emitStartupLogs(config.port, config.address, out_writer);
 }
 
 /// Daemon-style serve loop for production CLI use with persistent state.
@@ -319,6 +284,27 @@ pub fn serveForeverWithContextAndLab(
         };
         lab_emitter_storage = lab_events.LabEventEmitter.init(emitter_config);
         lab_emitter_opt = &lab_emitter_storage;
+
+        // Emit startup diagnostics for native events.
+        // This makes file-open success/failure visible in logs.
+        var lab_log_buf = logging.BufferedWriter.init();
+        if (lab_emitter_storage.output_file != null) {
+            // File opened successfully - log with file_output=opened
+            logging.emit(.lab_native_events_enabled, &lab_log_buf, &.{
+                .{ .name = "path", .value = logging.FieldValue{ .string = lab_config.native_events_path } },
+                .{ .name = "file_output", .value = logging.FieldValue{ .string = "opened" } },
+                .{ .name = "detail", .value = logging.FieldValue{ .string = "native event timeline enabled" } },
+            }) catch {};
+            out_writer.writeAll(lab_log_buf.slice()) catch {};
+        } else if (lab_config.native_events_path.len > 0) {
+            // File open failed but path was provided - log error
+            logging.emit(.lab_native_events_open_failed, &lab_log_buf, &.{
+                .{ .name = "path", .value = logging.FieldValue{ .string = lab_config.native_events_path } },
+                .{ .name = "error", .value = logging.FieldValue{ .string = "file_open_failed" } },
+                .{ .name = "detail", .value = logging.FieldValue{ .string = "native events enabled but file could not be opened" } },
+            }) catch {};
+            out_writer.writeAll(lab_log_buf.slice()) catch {};
+        }
     }
     defer {
         if (lab_emitter_opt) |emitter| {
@@ -345,7 +331,7 @@ pub fn serveForeverWithContextAndLab(
     try server.listen();
 
     // Emit startup logs only if not in statonly mode
-    try emitStartupLogsIfNormal(config, out_writer);
+    try startup_logs.emitStartupLogsIfNormal(config.log_mode, config.port, config.address, out_writer);
 
     // Get opaque pointer to ServeContext for passing to route handlers.
     const ctx_ptr: *anyopaque = &serve_ctx;
@@ -365,7 +351,7 @@ pub fn serveForeverWithContextAndLab(
                     .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(spawn_err) } },
                     .{ .name = "detail", .value = logging.FieldValue{ .string = "heartbeat spawn failed, continuing without heartbeat" } },
                 }) catch {};
-                writeLogRecord(out_writer, log_buf.slice()) catch {};
+                startup_logs.writeLogRecord(out_writer, log_buf.slice()) catch {};
             }
         } else {
             if (std.Thread.spawn(.{}, heartbeat.heartbeatThread, .{})) |thread| {
@@ -376,7 +362,7 @@ pub fn serveForeverWithContextAndLab(
                     .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(spawn_err) } },
                     .{ .name = "detail", .value = logging.FieldValue{ .string = "heartbeat spawn failed, continuing without heartbeat" } },
                 }) catch {};
-                writeLogRecord(out_writer, log_buf.slice()) catch {};
+                startup_logs.writeLogRecord(out_writer, log_buf.slice()) catch {};
             }
         }
     } else if (lab_config.disable_heartbeat) {
@@ -386,7 +372,7 @@ pub fn serveForeverWithContextAndLab(
             .{ .name = "error", .value = logging.FieldValue{ .string = "disabled" } },
             .{ .name = "detail", .value = logging.FieldValue{ .string = "heartbeat disabled via lab_config.disable_heartbeat" } },
         }) catch {};
-        writeLogRecord(out_writer, log_buf.slice()) catch {};
+        startup_logs.writeLogRecord(out_writer, log_buf.slice()) catch {};
     }
 
     // Branch based on log mode
@@ -423,7 +409,7 @@ fn serveForeverNormal(
     out_writer: anytype,
 ) !void {
     try logging.emit(.http_accept_loop_started, log_buf, &.{});
-    try writeLogRecord(out_writer, log_buf.slice());
+    try startup_logs.writeLogRecord(out_writer, log_buf.slice());
 
     // Blocking accept loop - stays alive until interrupted.
     while (true) {
@@ -432,7 +418,7 @@ fn serveForeverNormal(
             try logging.emit(.http_accept_loop_error, log_buf, &.{
                 .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(err) } },
             });
-            try writeLogRecord(out_writer, log_buf.slice());
+            try startup_logs.writeLogRecord(out_writer, log_buf.slice());
         };
     }
 }

@@ -54,6 +54,10 @@ pub const Event = enum(u8) {
     bgp_outgoing_update_parse_failed,
     /// BGP failed to decode frame.
     bgp_outgoing_update_decode_failed,
+    /// Native lab events enabled at startup.
+    lab_native_events_enabled,
+    /// Failed to open native event output file.
+    lab_native_events_open_failed,
 };
 
 /// Get the log level string for a given event.
@@ -81,7 +85,10 @@ fn levelFor(event: Event) []const u8 {
         .heartbeat_init_failed,
         .heartbeat_thread_start_failed,
         .bgp_outgoing_update_parse_failed,
-        .bgp_outgoing_update_decode_failed => "error",
+        .bgp_outgoing_update_decode_failed,
+        .lab_native_events_open_failed => "error",
+
+        .lab_native_events_enabled => "info",
     };
 }
 

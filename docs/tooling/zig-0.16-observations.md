@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-06-24 — Timekeeping notes moved
+
+Detailed Zig 0.16 timekeeping observations now live in
+`docs/tooling/zig-0.16-timekeeping-observations.md`.
+
+Key rule: native lab event elapsed time must come from a caller-supplied clock seam,
+not from event count.
+
+---
+
 ## 2026-06-07 — Socket address structures and byte swap APIs for UDP transport
 
 - **Context:** Implementing real Linux UDP transport for BFD multihop in `tovarisch/src/bfd/transport.zig`.
@@ -312,7 +322,7 @@ defer _ = std.c.closedir(dir);
 
 ## 2026-05-24 — Zig 0.16 environment variable reading
 
-**symptom:** Attempting `std.os.getenv`, `std.process.getenv`, `std.posix.getenv` all fail with "has no member named 'getenv'"
+**symptom:** Attempting `std.os.getenv`, `std.process.getenv`, `std.posix.getenv` all fail with "has no member named 'getenv'`
 
 **wrong assumption:** Standard Zig API patterns for environment variable access would be available under common namespaces
 
@@ -386,24 +396,5 @@ if (c.getenv("TOVARISCH_ENABLE_HEARTBEAT_THREAD_UNSAFE") != null) {
 
 - **Promote to field manual?** Yes — variadic C function call patterns are common.
 
----
-
-## 2026-06-24 — std.time.monoTime() not available in Zig 0.16.0
-
-- **Symptom:** `std.time.monoTime()` is not available in Zig 0.16.0's `std.time` namespace.
-- **Wrong assumption:** Attempted to use `std.time.monoTime()` for real monotonic time in lab event timestamps.
-- **Working fix:** Use caller-supplied elapsed milliseconds.
-  - Heartbeat thread passes `uptime_seconds * 1000` to `emit()`.
-  - This gives real elapsed time without depending on `std.time.monoTime()`.
-  - Count-based derivation was rejected: it creates false correlations between memory steps and event timing.
-  - Design constraint: elapsed time must come from a clock seam, not from event count.
-- **Files affected:** `tovarisch/src/runtime/lab_events.zig`, `tovarisch/src/http/heartbeat.zig`
-- **Promote to field manual?** Yes — timing patterns are common, and the false-correlation risk from count-based timing should be documented.
-
----
-
-Recording field notes from Zig 0.16 experiments. Confidence varies; do not promote to field manual until verified with a minimal reproducer.
-
-Old entries have been promoted to `zig-0.16-field-manual.md`. This file tracks experimental observations.
-
-
+Recording field notes from Zig 0.16 experiments. Confidence varies; do not promote to field manual until verified.
+Old entries have been promoted to `zig-0.16-field-manual.md`.

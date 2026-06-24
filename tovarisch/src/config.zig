@@ -10,28 +10,24 @@
 
 const std = @import("std");
 const bfd_config = @import("bfd/config_parse.zig");
+const config_parse_helpers = @import("config_parse_helpers.zig");
+const config_lab = @import("config_lab.zig");
 
 /// Re-export BFD config types for backwards compatibility.
 pub const BfdConfig = bfd_config.BfdConfig;
 pub const parseBfdConfig = bfd_config.parseBfdConfig;
 
-/// Configuration parse errors
-pub const ConfigError = error{
-    /// Section does not exist in config
-    SectionNotFound,
-    /// Required key is missing
-    MissingKey,
-    /// Value failed to parse (e.g., invalid boolean, port out of range)
-    InvalidValue,
-    /// Empty string when non-empty required
-    EmptyValue,
-    /// CIDR notation is invalid
-    InvalidCidr,
-    /// Port number out of valid range (1..65535)
-    InvalidPort,
-    /// WireGuard key is invalid (not 44 base64 characters)
-    InvalidKey,
-};
+/// Re-export config_parse_helpers types for backwards compatibility.
+pub const ConfigError = config_parse_helpers.ConfigError;
+pub const parseBool = config_parse_helpers.parseBool;
+pub const parsePort = config_parse_helpers.parsePort;
+pub const parseCidr = config_parse_helpers.parseCidr;
+pub const requireNonEmpty = config_parse_helpers.requireNonEmpty;
+pub const getString = config_parse_helpers.getString;
+pub const isValidInterfaceName = config_parse_helpers.isValidInterfaceName;
+
+/// Re-export LabConfig from config_lab for backwards compatibility.
+pub const LabConfig = config_lab.LabConfig;
 
 /// Raw section store for INI parsing.
 /// Sections are stored as map of key=value strings.
@@ -86,89 +82,6 @@ pub const VpnMasqueradeConfig = struct {
     /// Public egress interface for MASQUERADE rule (e.g., "eth0").
     public_interface: []const u8 = "",
 };
-
-/// Parse a boolean value from a string.
-/// Accepts: "true", "false", "1", "0" (case-insensitive).
-pub fn parseBool(value: []const u8) ConfigError!bool {
-    const trimmed = std.mem.trim(u8, value, " \t\r\n");
-    if (std.ascii.eqlIgnoreCase(trimmed, "true") or std.mem.eql(u8, trimmed, "1")) {
-        return true;
-    }
-    if (std.ascii.eqlIgnoreCase(trimmed, "false") or std.mem.eql(u8, trimmed, "0")) {
-        return false;
-    }
-    return ConfigError.InvalidValue;
-}
-
-/// Parse a port number from a string. Port must be in range 1..65535.
-pub fn parsePort(value: []const u8) ConfigError!u16 {
-    const trimmed = std.mem.trim(u8, value, " \t\r\n");
-    const port = std.fmt.parseInt(u16, trimmed, 10) catch {
-        return ConfigError.InvalidPort;
-    };
-    if (port < 1 or port > 65535) {
-        return ConfigError.InvalidPort;
-    }
-    return port;
-}
-
-/// Parse CIDR notation. Returns address and prefix length.
-pub fn parseCidr(value: []const u8) ConfigError!struct { address: []const u8, prefix: u8 } {
-    const trimmed = std.mem.trim(u8, value, " \t\r\n");
-    const slash_idx = std.mem.indexOfScalar(u8, trimmed, '/') orelse {
-        return ConfigError.InvalidCidr;
-    };
-    const address_part = trimmed[0..slash_idx];
-    const prefix_part = trimmed[slash_idx + 1 ..];
-
-    if (address_part.len == 0) return ConfigError.InvalidCidr;
-
-    var octets: [4]u8 = undefined;
-    var octet_count: usize = 0;
-    var start: usize = 0;
-
-    for (address_part, 0..) |c, i| {
-        if (c == '.') {
-            if (i == start) return ConfigError.InvalidCidr;
-            const octet_str = address_part[start..i];
-            const octet = std.fmt.parseInt(u8, octet_str, 10) catch return ConfigError.InvalidCidr;
-            if (octet_count >= 4) return ConfigError.InvalidCidr;
-            octets[octet_count] = octet;
-            octet_count += 1;
-            start = i + 1;
-        } else if (c < '0' or c > '9') {
-            return ConfigError.InvalidCidr;
-        }
-    }
-
-    if (start >= address_part.len) return ConfigError.InvalidCidr;
-    if (address_part.len > 0 and address_part[address_part.len - 1] == '.') return ConfigError.InvalidCidr;
-    const last_octet = std.fmt.parseInt(u8, address_part[start..], 10) catch return ConfigError.InvalidCidr;
-    if (octet_count >= 4) return ConfigError.InvalidCidr;
-    octets[octet_count] = last_octet;
-    octet_count += 1;
-
-    if (octet_count != 4) return ConfigError.InvalidCidr;
-
-    const prefix = std.fmt.parseInt(u8, prefix_part, 10) catch return ConfigError.InvalidCidr;
-    if (prefix > 32) return ConfigError.InvalidCidr;
-
-    return .{ .address = address_part, .prefix = prefix };
-}
-
-/// Validate a non-empty string value.
-pub fn requireNonEmpty(value: []const u8) ConfigError!void {
-    const trimmed = std.mem.trim(u8, value, " \t\r\n");
-    if (trimmed.len == 0) return ConfigError.EmptyValue;
-}
-
-/// Get a string value from a section, trimming whitespace.
-pub fn getString(section: anytype, key: []const u8) ?[]const u8 {
-    if (section.get(key)) |value| {
-        return std.mem.trim(u8, value, " \t\r\n");
-    }
-    return null;
-}
 
 /// Parse the [wg] section from raw config into WgConfig.
 pub fn parseWgConfig(raw: *const RawConfig) ConfigError!WgConfig {
@@ -249,86 +162,11 @@ pub fn parseVpnMasqueradeConfig(raw: *const RawConfig) ConfigError!VpnMasquerade
     return cfg;
 }
 
-/// Validates a network interface name conservatively.
-/// Local conservative validator kept here to avoid config depending on net/iptables.
-fn isValidInterfaceName(name: []const u8) bool {
-    if (name.len == 0 or name.len > 15) return false;
-
-    for (name) |c| {
-        // Allow only conservative interface-name characters: [A-Za-z0-9_.-]
-        if (c >= 'A' and c <= 'Z') continue;
-        if (c >= 'a' and c <= 'z') continue;
-        if (c >= '0' and c <= '9') continue;
-        if (c == '_' or c == '.' or c == '-') continue;
-        return false;
-    }
-
-    return true;
-}
-
-/// LabConfig represents the [lab] section parsed from tovarisch.conf.
-/// This enables the /lab/probe endpoint for KGB netns lab testing.
-/// When lab_mode is false/absent, /lab/probe returns 404 (not a production control surface).
-pub const LabConfig = struct {
-    /// Whether lab mode is enabled. When false, /lab/probe returns 404.
-    lab_mode: bool = false,
-    /// Path to the failure file. When this file exists, /lab/probe returns 503.
-    /// Required when lab_mode is true.
-    lab_probe_failure_file: []const u8 = "",
-    /// Enable native event emission (for idle staircase lab).
-    native_events_enabled: bool = false,
-    /// Path for native event timeline TSV output.
-    native_events_path: []const u8 = "",
-    /// Disable heartbeat thread when true.
-    disable_heartbeat: bool = false,
-    /// Disable WG periodic checks when true.
-    disable_wg_checks: bool = false,
-    /// Disable BGP maintenance when true.
-    disable_bgp: bool = false,
-    /// Disable BFD tick loop when true.
-    disable_bfd: bool = false,
-};
-
 /// Parse the [lab] section from raw config into LabConfig.
+/// Delegates to config_lab.parseLabConfigSection for the actual parsing.
 pub fn parseLabConfig(raw: *const RawConfig) ConfigError!LabConfig {
     const section = raw.get("lab") orelse return LabConfig{};
-
-    var cfg = LabConfig{};
-    if (getString(section, "lab_mode")) |value| {
-        cfg.lab_mode = try parseBool(value);
-    }
-
-    // If lab_mode is enabled, failure_file is required
-    if (cfg.lab_mode) {
-        if (getString(section, "lab_probe_failure_file")) |value| {
-            try requireNonEmpty(value);
-            cfg.lab_probe_failure_file = value;
-        } else return ConfigError.MissingKey;
-    }
-
-    // Native events toggle
-    if (getString(section, "native_events_enabled")) |value| {
-        cfg.native_events_enabled = try parseBool(value);
-    }
-    if (getString(section, "native_events_path")) |value| {
-        cfg.native_events_path = value;
-    }
-
-    // Runtime subsystem toggles for idle staircase lab
-    if (getString(section, "disable_heartbeat")) |value| {
-        cfg.disable_heartbeat = try parseBool(value);
-    }
-    if (getString(section, "disable_wg_checks")) |value| {
-        cfg.disable_wg_checks = try parseBool(value);
-    }
-    if (getString(section, "disable_bgp")) |value| {
-        cfg.disable_bgp = try parseBool(value);
-    }
-    if (getString(section, "disable_bfd")) |value| {
-        cfg.disable_bfd = try parseBool(value);
-    }
-
-    return cfg;
+    return config_lab.parseLabConfigSection(section);
 }
 
 // --- Tests ---
@@ -414,56 +252,3 @@ test "getString returns null for missing key" {
     defer map.deinit(std.heap.page_allocator);
     try std.testing.expect(getString(&map, "missing") == null);
 }
-
-// --- LabConfig tests ---
-
-test "parseLabConfig absent section returns defaults" {
-    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
-    defer raw.deinit(std.heap.page_allocator);
-    const cfg = try parseLabConfig(&raw);
-    try std.testing.expect(!cfg.lab_mode);
-    try std.testing.expect(cfg.lab_probe_failure_file.len == 0);
-}
-
-test "parseLabConfig lab_mode=false" {
-    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
-    defer raw.deinit(std.heap.page_allocator);
-    try raw.put(std.heap.page_allocator, "lab", std.StringArrayHashMapUnmanaged([]const u8){});
-    var lab_section = std.StringArrayHashMapUnmanaged([]const u8){};
-    try lab_section.put(std.heap.page_allocator, "lab_mode", "false");
-    try raw.put(std.heap.page_allocator, "lab", lab_section);
-    const cfg = try parseLabConfig(&raw);
-    try std.testing.expect(!cfg.lab_mode);
-}
-
-test "parseLabConfig lab_mode=true requires lab_probe_failure_file" {
-    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
-    defer raw.deinit(std.heap.page_allocator);
-    var lab_section = std.StringArrayHashMapUnmanaged([]const u8){};
-    try lab_section.put(std.heap.page_allocator, "lab_mode", "true");
-    try raw.put(std.heap.page_allocator, "lab", lab_section);
-    try std.testing.expectError(ConfigError.MissingKey, parseLabConfig(&raw));
-}
-
-test "parseLabConfig lab_mode=true with file path" {
-    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
-    defer raw.deinit(std.heap.page_allocator);
-    var lab_section = std.StringArrayHashMapUnmanaged([]const u8){};
-    try lab_section.put(std.heap.page_allocator, "lab_mode", "true");
-    try lab_section.put(std.heap.page_allocator, "lab_probe_failure_file", "/tmp/probe-failing");
-    try raw.put(std.heap.page_allocator, "lab", lab_section);
-    const cfg = try parseLabConfig(&raw);
-    try std.testing.expect(cfg.lab_mode);
-    try std.testing.expectEqualStrings("/tmp/probe-failing", cfg.lab_probe_failure_file);
-}
-
-test "parseLabConfig lab_mode=true rejects empty failure file" {
-    var raw = std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged([]const u8)){};
-    defer raw.deinit(std.heap.page_allocator);
-    var lab_section = std.StringArrayHashMapUnmanaged([]const u8){};
-    try lab_section.put(std.heap.page_allocator, "lab_mode", "true");
-    try lab_section.put(std.heap.page_allocator, "lab_probe_failure_file", "   ");
-    try raw.put(std.heap.page_allocator, "lab", lab_section);
-    try std.testing.expectError(ConfigError.EmptyValue, parseLabConfig(&raw));
-}
-
