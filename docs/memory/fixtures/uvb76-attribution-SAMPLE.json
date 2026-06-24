@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "evidence_kind": "schema_fixture",
+  "_schema_fixture_note": "SAMPLE artifact for attribution lab schema validation. Run make lab-uvb76-memory-attribution to generate real evidence.",
+  "_attribution_note": "UVB-76 memory attribution lab captures forced-GC memstats, heap profiles, goroutine dumps, and RSS/PSS samples over time.",
+  "service": {
+    "name": "uvb76",
+    "version": "1.0.0-placeholder",
+    "commit": "f231216"
+  },
+  "environment": {
+    "arch": "linux/arm64",
+    "kernel": "5.15.0-generic",
+    "os": "Linux",
+    "has_smaps_rollup": true,
+    "environment_label": "github_hosted_ubuntu"
+  },
+  "workload": {
+    "type": "uvb76-attribution",
+    "operations": 0,
+    "errors": 0,
+    "duration_ms": 600000,
+    "warmup_seconds": 0,
+    "description": "UVB-76 memory attribution lab - long-running observation"
+  },
+  "memory": {
+    "first": {
+      "rss_kib": 18432,
+      "pss_kib": 17000
+    },
+    "max": {
+      "rss_kib": 22000,
+      "pss_kib": 20000
+    },
+    "last": {
+      "rss_kib": 21000,
+      "pss_kib": 19500
+    },
+    "growth": {
+      "rss_kib": 2568,
+      "pss_kib": 2500,
+      "rss_percent": 13.9
+    }
+  },
+  "attribution": {
+    "checkpoint_count": 3,
+    "sample_count": 120,
+    "pss_available": true,
+    "forced_gc_performed": true,
+    "manifest_path": "manifest.yaml"
+  },
+  "decision": {
+    "pass": true,
+    "reason": "Attribution lab complete: 120 samples over 600 seconds. Growth analysis deferred to later analysis step."
+  }
+}

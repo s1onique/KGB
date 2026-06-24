@@ -39,6 +39,10 @@ func run(args []string) error {
 	intervalMs := fs.Int("interval-ms", 100, "Interval between operations in ms")
 	artifactDir := fs.String("artifacts-dir", "", "Artifact output directory")
 	
+	// Attribution-specific flags
+	attributionDuration := fs.Int("attribution-duration", 600, "Attribution lab duration in seconds (default: 600 for 10 min)")
+	attributionSampleInterval := fs.Int("attribution-sample-ms", 5000, "Attribution RSS/PSS sampling interval in ms")
+	
 	// Help flag
 	help := fs.Bool("help", false, "Show help")
 	
@@ -103,9 +107,51 @@ func run(args []string) error {
 	fmt.Printf("Port: %d\n", cfg.Port)
 	fmt.Printf("Warmup: %ds\n", cfg.WarmupSecs)
 	
+	// Check if this is an attribution workload
+	if isAttributionWorkload(wt) {
+		// Attribution workloads require uvb76
+		if *service != "uvb76" {
+			return fmt.Errorf("attribution workloads are only supported for uvb76")
+		}
+		
+		// Determine duration based on workload type (can be overridden by --attribution-duration flag)
+		durationSecs := *attributionDuration
+		sampleIntervalMs := *attributionSampleInterval
+		
+		switch wt {
+		case WorkloadUVB76AttributionSoak30:
+			if *attributionDuration == 600 { // Default was not changed
+				durationSecs = 30 * 60 // 30 minutes
+				sampleIntervalMs = 10000
+			}
+		case WorkloadUVB76AttributionSoak60:
+			if *attributionDuration == 600 { // Default was not changed
+				durationSecs = 60 * 60 // 60 minutes
+				sampleIntervalMs = 10000
+			}
+		}
+		
+		attrCfg := AttributionConfig{
+			DurationSeconds:   durationSecs,
+			SampleIntervalMs: sampleIntervalMs,
+		}
+		
+		fmt.Printf("Attribution mode: duration=%ds (%dm), sample_interval=%dms\n", 
+			attrCfg.DurationSeconds, attrCfg.DurationSeconds/60, attrCfg.SampleIntervalMs)
+		_, err := RunAttribution(cfg, attrCfg)
+		return err
+	}
+	
 	// Run the lab
 	_, err := Run(cfg)
 	return err
+}
+
+// isAttributionWorkload returns true if the workload type is an attribution workload.
+func isAttributionWorkload(wt WorkloadType) bool {
+	return wt == WorkloadUVB76Attribution ||
+		wt == WorkloadUVB76AttributionSoak30 ||
+		wt == WorkloadUVB76AttributionSoak60
 }
 
 func validWorkload(service string, wt WorkloadType) bool {
@@ -121,7 +167,10 @@ func validWorkload(service string, wt WorkloadType) bool {
 			wt == WorkloadUVB76StatusAPIPolling ||
 			wt == WorkloadUVB76DiagnosticCaptureLoop ||
 			wt == WorkloadUVB76LeakSlope ||
-			wt == WorkloadUVB76LeakSlopeNetDiag
+			wt == WorkloadUVB76LeakSlopeNetDiag ||
+			wt == WorkloadUVB76Attribution ||
+			wt == WorkloadUVB76AttributionSoak30 ||
+			wt == WorkloadUVB76AttributionSoak60
 	default:
 		return false
 	}
@@ -133,29 +182,44 @@ func printUsage() {
 Usage: memory-lab [flags]
 
 Flags:
-  --service NAME       Service to test: tovarisch or uvb76 (required)
-  --workload TYPE      Workload type (required)
-  --binary PATH        Path to service binary
-  --config PATH        Path to config file (uvb76 only, default: ./uvb76/uvb76.example.json)
-  --port PORT          Listen port (default: 18080 for tovarisch, 18081 for uvb76)
-  --warmup-secs N      Warmup period in seconds (default: 60)
-  --operations N       Number of HTTP operations (default: 100)
-  --interval-ms N      Interval between operations in ms (default: 100)
-  --artifacts-dir DIR  Artifact output directory
-  --help               Show this help
+  --service NAME              Service to test: tovarisch or uvb76 (required)
+  --workload TYPE             Workload type (required)
+  --binary PATH               Path to service binary
+  --config PATH               Path to config file (uvb76 only)
+  --port PORT                 Listen port (default: 18080/18081)
+  --warmup-secs N             Warmup period in seconds (default: 60)
+  --operations N              Number of HTTP operations (default: 100)
+  --interval-ms N             Interval between operations in ms (default: 100)
+  --artifacts-dir DIR         Artifact output directory
+  --attribution-duration N    Attribution lab duration in seconds (default: 600)
+  --attribution-sample-ms N   Attribution RSS/PSS sampling interval in ms (default: 5000)
+  --help                      Show this help
 
 Tovarisch workloads:
-  idle-warmup                  Idle memory footprint after warmup
-  status-json-warmup           Repeated /status calls
-  status-json-network-diag     Repeated /status.json?include=network_diag
+  tovarisch-idle-warmup                  Idle memory footprint after warmup
+  status-json-warmup                     Repeated /status calls
+  status-json-network-diag               Repeated /status.json?include=network_diag
 
 UVB-76 workloads:
-  idle-warmup                  Idle memory footprint after warmup
-  status-api-polling           Repeated /api/v1/status polling
-  diagnostic-capture-loop      Repeated status with network_diag
+  uvb76-idle-warmup                      Idle memory footprint after warmup
+  status-api-polling                     Repeated /api/v1/status polling
+  diagnostic-capture-loop                 Repeated status with network_diag
+  uvb76-leak-slope                       Leak slope measurement (short window)
+  uvb76-attribution                      Long-running attribution (default: 10 min)
+  uvb76-attribution-30min                Long-running attribution (30 min)
+  uvb76-attribution-60min                Long-running attribution (60 min)
+
+Attribution labs capture:
+  - Forced-GC memstats at start/midpoint/end checkpoints
+  - pprof heap profiles at each checkpoint
+  - Goroutine dumps at each checkpoint
+  - RSS/PSS samples over time
+  - YAML manifest with metadata
 
 Examples:
   memory-lab --service tovarisch --workload tovarisch-idle-warmup
   memory-lab --service uvb76 --workload status-api-polling --operations 200
+  memory-lab --service uvb76 --workload uvb76-attribution --attribution-duration 600
+  memory-lab --service uvb76 --workload uvb76-attribution --attribution-duration 1800
 `)
 }

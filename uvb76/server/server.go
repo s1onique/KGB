@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 	"sync"
@@ -18,6 +19,11 @@ import (
 	"github.com/s1onique/KGB/uvb76/scraper"
 	"github.com/s1onique/KGB/uvb76/state"
 )
+
+// getCurrentPID returns the current process PID. Overridden in tests.
+var getCurrentPID = func() int {
+	return os.Getpid()
+}
 
 // webContent is the embedded web filesystem, set by main.go.
 var webContent fs.FS
@@ -89,6 +95,12 @@ func (s *Server) Start() error {
 	// Diagnostics API endpoints
 	protected.Handle("/diagnostics/capture-cooldown", http.HandlerFunc(s.handleCaptureCooldownDiagnostics)).Methods(http.MethodGet)
 	protected.Handle("/diagnostics/cooldown/anchors/{peer_name}", http.HandlerFunc(s.handleGetCooldownAnchorForPeer)).Methods(http.MethodGet)
+
+	// Memory attribution diagnostic endpoints (dev-only for memory lab)
+	// Moved to diagnostics_handlers.go
+	protected.Handle("/diagnostics/memstats", http.HandlerFunc(s.handleMemStatsSnapshot)).Methods(http.MethodGet)
+	protected.Handle("/diagnostics/heap-profile", http.HandlerFunc(s.handleHeapProfile)).Methods(http.MethodGet)
+	protected.Handle("/diagnostics/goroutine-dump", http.HandlerFunc(s.handleGoroutineDump)).Methods(http.MethodGet)
 
 	// Capture lookup endpoints
 	protected.Handle("/captures/{capture_id}/anchor", http.HandlerFunc(s.handleGetAnchorCapture)).Methods(http.MethodGet)
@@ -203,6 +215,11 @@ func (s *Server) Stop() {
 	if s.server != nil {
 		s.server.Close()
 	}
+}
+
+// getPID returns the PID of the UVB-76 process.
+func (s *Server) getPID() int {
+	return getCurrentPID()
 }
 
 // handleHealthz returns the server health status.
@@ -386,10 +403,6 @@ func (s *Server) handleTargetSnapshot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(snap)
 }
-
-// =============================================================================
-// Cooldown Diagnostics
-// =============================================================================
 
 // CaptureCooldownDiagnostics represents the diagnostics output for cooldown state.
 type CaptureCooldownDiagnostics struct {

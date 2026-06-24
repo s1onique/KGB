@@ -90,6 +90,11 @@ const (
 	WorkloadTovarischLeakSlopeNetDiag WorkloadType = "tovarisch-leak-slope-netdiag"
 	WorkloadUVB76LeakSlope            WorkloadType = "uvb76-leak-slope"
 	WorkloadUVB76LeakSlopeNetDiag     WorkloadType = "uvb76-leak-slope-netdiag"
+
+	// Attribution workloads (long-running memory attribution for UVB-76)
+	WorkloadUVB76Attribution         WorkloadType = "uvb76-attribution"
+	WorkloadUVB76AttributionSoak30  WorkloadType = "uvb76-attribution-30min"
+	WorkloadUVB76AttributionSoak60  WorkloadType = "uvb76-attribution-60min"
 )
 
 // ServiceConfig holds service-specific configuration.

@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate memory-lab memory-lab-test lab-tovarisch-memory lab-uvb76-memory
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate memory-lab memory-lab-test lab-tovarisch-memory lab-uvb76-memory lab-uvb76-memory-attribution verify-uvb76-memory-attribution
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 87
@@ -352,4 +352,45 @@ lab-uvb76-memory: memory-lab
 		--workload uvb76-idle-warmup \
 		--config ./uvb76/uvb76.memory-lab.json \
 		--warmup-secs 120
+
+# === UVB-76 Memory Attribution Lab ===
+# Long-running memory attribution lab that captures forced-GC memstats,
+# heap profiles, goroutine dumps, and RSS/PSS samples over time.
+# NOT part of make gate - manual CI target for 30-60 minute soak tests.
+#
+# Short smoke (default 10 min):
+#   make lab-uvb76-memory-attribution
+#
+# 30-minute soak:
+#   make lab-uvb76-memory-attribution ATTRIBUTION_DURATION=1800
+#
+# 60-minute soak:
+#   make lab-uvb76-memory-attribution ATTRIBUTION_DURATION=3600
+
+ATTRIBUTION_DURATION ?= 600
+ATTRIBUTION_SAMPLE_MS ?= 5000
+
+lab-uvb76-memory-attribution: memory-lab
+	@echo "=== UVB-76 Memory Attribution Lab ==="
+	@echo "Duration: $(ATTRIBUTION_DURATION)s ($(shell echo $$(( $(ATTRIBUTION_DURATION) / 60 ))) min)"
+	@echo "Sample interval: $(ATTRIBUTION_SAMPLE_MS)ms"
+	@if [ "$$(uname -s)" != "Linux" ]; then \
+		echo "[SKIP] Attribution labs require Linux (needs /proc)"; \
+		exit 0; \
+	fi
+	@./tools/memory-lab/memory-lab \
+		--service uvb76 \
+		--workload uvb76-attribution \
+		--config ./uvb76/uvb76.memory-lab.json \
+		--attribution-duration $(ATTRIBUTION_DURATION) \
+		--attribution-sample-ms $(ATTRIBUTION_SAMPLE_MS) \
+		--artifacts-dir ./artifacts/memory-labs/uvb76/attribution
+
+# === UVB-76 Memory Attribution Verifier ===
+# Verifies attribution lab artifacts (self-test + fixture validation).
+# Self-tests run in make gate; real evidence validation is manual.
+
+verify-uvb76-memory-attribution:
+	@echo "=== UVB-76 Memory Attribution Artifact Verifier ==="
+	@python3 scripts/verify_uvb76_memory_attribution_artifacts.py --self-test
 
