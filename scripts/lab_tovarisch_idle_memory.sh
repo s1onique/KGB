@@ -101,7 +101,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TOVARISCH_BINARY="${REPO_ROOT}/tovarisch/zig-out/bin/tovarisch"
 ARTIFACT_DIR="${REPO_ROOT}/artifacts/memory-labs/tovarisch/idle-staircase"
-ANALYZER_SCRIPT="${SCRIPT_DIR}/idle_staircase_analyzer.py"
+ANALYZER_SCRIPT="${SCRIPT_DIR}/idle_staircase_analyzer_cli.py"
 LAB_PORT="${LAB_TOVARISCH_PORT:-8317}"
 LAB_BIND="${LAB_BIND:-127.0.0.1}"
 
@@ -136,15 +136,28 @@ log_event() {
 # Build tovarisch config file for native event/lab settings
 build_tovarisch_config() {
     local config_path="$1"
-    cat > "${config_path}" <<EOF
+    local native_path_val="${NATIVE_EVENTS_PATH:-}"
+    # Omit quotes if path is empty to avoid parsing issues
+    if [[ -n "${native_path_val}" ]]; then
+        cat > "${config_path}" <<EOF
 [lab]
 native_events_enabled = ${NATIVE_EVENTS}
-native_events_path = "${NATIVE_EVENTS_PATH:-}"
+native_events_path = "${native_path_val}"
 disable_heartbeat = ${DISABLE_HEARTBEAT}
 disable_wg_checks = ${DISABLE_WG_CHECKS}
 disable_bgp = ${DISABLE_BGP}
 disable_bfd = ${DISABLE_BFD}
 EOF
+    else
+        cat > "${config_path}" <<EOF
+[lab]
+native_events_enabled = ${NATIVE_EVENTS}
+disable_heartbeat = ${DISABLE_HEARTBEAT}
+disable_wg_checks = ${DISABLE_WG_CHECKS}
+disable_bgp = ${DISABLE_BGP}
+disable_bfd = ${DISABLE_BFD}
+EOF
+    fi
 }
 
 # ============================================================================
@@ -182,6 +195,11 @@ main() {
     # Build tovarisch config for native settings
     local tovarisch_config="${artifact_path}/tovarisch_lab.conf"
     build_tovarisch_config "${tovarisch_config}"
+
+    # Print config for diagnostics
+    echo "=== Tovarisch Config ==="
+    cat "${tovarisch_config}"
+    echo "========================"
 
     # Write manifest
     cat > "${artifact_path}/manifest.yaml" <<EOF
@@ -233,6 +251,16 @@ EOF
     local tovarisch_pid=$!
     sleep 2
     if ! kill -0 "${tovarisch_pid}" 2>/dev/null; then echo "ERROR: tovarisch failed to start"; exit 3; fi
+
+    # Guard: ensure tovarisch_pid is valid before sampling loop
+    if [[ -z "${tovarisch_pid:-}" ]]; then
+        echo "ERROR: tovarisch PID is empty" >&2
+        exit 3
+    fi
+    if ! [[ -d "/proc/${tovarisch_pid}" ]]; then
+        echo "ERROR: tovarisch process ${tovarisch_pid} is not running (proc missing)" >&2
+        exit 3
+    fi
 
     # Start strace if requested
     local strace_pid=""
@@ -313,9 +341,17 @@ EOF
     echo ""
     echo "Analyzing memory samples..."
     local verdict
+    local analyzer_status=0
     verdict=$(python3 "${ANALYZER_SCRIPT}" "${artifact_path}/memory_samples.tsv" "${artifact_path}" "${artifact_path}/event_timeline.tsv" \
         --duration "${DURATION}" --heartbeat-enabled "${HEARTBEAT_ENABLED}" --wg-enabled "${WG_CHECK_ENABLED}" --bgp-bfd-enabled "${BGP_BFD_ENABLED}" \
-        --native-events "${NATIVE_EVENTS}" --native-event-timeline "${artifact_path}/native_event_timeline.tsv" 2>&1)
+        --native-events "${NATIVE_EVENTS}" --native-event-timeline "${artifact_path}/native_event_timeline.tsv" 2>&1) || analyzer_status=$?
+
+    # Fail-closed: analyzer must produce verdict.txt
+    if ! [[ -f "${artifact_path}/verdict.txt" ]]; then
+        echo "ERROR: analyzer did not create verdict.txt (exit=${analyzer_status})" >&2
+        echo "Analyzer output: ${verdict}" >&2
+        exit 3
+    fi
 
     echo ""
     echo "=== Lab Complete ==="
