@@ -1,7 +1,10 @@
 #!/bin/bash
 # Idle staircase memory lab for tovarisch.
 # Runs tovarisch idle and samples RSS/VmData to detect stepwise memory growth.
+#
 # Usage: $0 [--duration SECS] [--interval SECS] [--status-burst] [--strace] [--run-id ID]
+#        [--heartbeat-only] [--wg-only] [--bgp-bfd-only] [--no-subsystems]
+#
 # Exit: 0=ok, 1=no-Linux, 2=no-binary, 3=setup-failed
 set -euo pipefail
 
@@ -14,6 +17,21 @@ INTERVAL="${INTERVAL:-5}"          # 5 seconds default
 STATUS_BURST="${STATUS_BURST:-false}"
 STRACE="${STRACE:-false}"
 RUN_ID="${RUN_ID:-}"
+
+# Subsystem toggles (SYNTHETIC - only affect shell-side event logging, NOT actual tovarisch runtime)
+# These toggles control which synthetic events are emitted to the event timeline.
+# They do NOT disable actual periodic paths in tovarisch (heartbeat, WG checks, BGP/BFD).
+# Use --no-subsystems to get a baseline with synthetic events suppressed.
+HEARTBEAT_ENABLED="${HEARTBEAT_ENABLED:-true}"
+WG_CHECK_ENABLED="${WG_CHECK_ENABLED:-true}"
+BGP_BFD_ENABLED="${BGP_BFD_ENABLED:-true}"
+NO_SUBSYSTEMS="${NO_SUBSYSTEMS:-false}"
+
+# Deterministic fake runner flags (for testing specific paths)
+FAKE_HEARTBEAT="${FAKE_HEARTBEAT:-false}"
+FAKE_WG_CHECK="${FAKE_WG_CHECK:-false}"
+FAKE_BGP="${FAKE_BGP:-false}"
+FAKE_BFD="${FAKE_BFD:-false}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -37,13 +55,83 @@ while [[ $# -gt 0 ]]; do
             RUN_ID="${2}"
             shift 2
             ;;
+        --heartbeat-only)
+            # Synthetic-only: emit only heartbeat synthetic events
+            HEARTBEAT_ENABLED="true"
+            WG_CHECK_ENABLED="false"
+            BGP_BFD_ENABLED="false"
+            shift
+            ;;
+        --wg-only)
+            # Synthetic-only: emit only WG check synthetic events
+            HEARTBEAT_ENABLED="false"
+            WG_CHECK_ENABLED="true"
+            BGP_BFD_ENABLED="false"
+            shift
+            ;;
+        --bgp-bfd-only)
+            # Synthetic-only: emit only BGP/BFD synthetic events
+            HEARTBEAT_ENABLED="false"
+            WG_CHECK_ENABLED="false"
+            BGP_BFD_ENABLED="true"
+            shift
+            ;;
+        --no-subsystems)
+            # Synthetic-only: suppress all synthetic events
+            NO_SUBSYSTEMS="true"
+            HEARTBEAT_ENABLED="false"
+            WG_CHECK_ENABLED="false"
+            BGP_BFD_ENABLED="false"
+            shift
+            ;;
+        --fake-heartbeat)
+            FAKE_HEARTBEAT="true"
+            shift
+            ;;
+        --fake-wg-check)
+            FAKE_WG_CHECK="true"
+            shift
+            ;;
+        --fake-bgp)
+            FAKE_BGP="true"
+            shift
+            ;;
+        --fake-bfd)
+            FAKE_BFD="true"
+            shift
+            ;;
         --help)
             echo "Usage: $0 [--duration SECS] [--interval SECS] [--status-burst] [--strace] [--run-id ID]"
-            echo "  --duration     Lab duration in seconds (default: 600)"
-            echo "  --interval     Memory sample interval in seconds (default: 5)"
-            echo "  --status-burst Run /status burst test after idle window"
-            echo "  --strace       Enable strace syscall tracing (Linux only)"
-            echo "  --run-id       Custom run identifier (default: auto-generated)"
+            echo "  --duration       Lab duration in seconds (default: 600)"
+            echo "  --interval       Memory sample interval in seconds (default: 5)"
+            echo "  --status-burst   Run /status burst test after idle window"
+            echo "  --strace         Enable strace syscall tracing (Linux only)"
+            echo "  --run-id         Custom run identifier (default: auto-generated)"
+            echo ""
+            echo "Subsystem toggles (SYNTHETIC EVENT EMISSION ONLY):"
+            echo "  --heartbeat-only  Emit only heartbeat synthetic events, suppress others"
+            echo "  --wg-only         Emit only WG check synthetic events, suppress others"
+            echo "  --bgp-bfd-only    Emit only BGP/BFD synthetic events, suppress others"
+            echo "  --no-subsystems   Suppress all synthetic events"
+            echo ""
+            echo "NOTE: These do NOT disable actual tovarisch runtime paths."
+            echo "      Use TOVARISCH_NATIVE_SUBSYSTEM_OFF for real runtime toggles."
+            echo ""
+            echo "Fake runner flags for deterministic testing:"
+            echo "  --fake-heartbeat  Use fake heartbeat path"
+            echo "  --fake-wg-check   Use fake WG check path"
+            echo "  --fake-bgp        Use fake BGP path"
+            echo "  --fake-bfd        Use fake BFD path"
+            echo ""
+            echo "Environment variables:"
+            echo "  DURATION           Lab duration in seconds"
+            echo "  INTERVAL           Sample interval in seconds"
+            echo "  STATUS_BURST       Run /status burst after idle"
+            echo "  HEARTBEAT_ENABLED  Enable heartbeat (default: true)"
+            echo "  WG_CHECK_ENABLED   Enable WG checks (default: true)"
+            echo "  BGP_BFD_ENABLED    Enable BGP/BFD (default: true)"
+            echo "  TOVARISCH_WG_COMMAND_PATH  Force specific wg command path"
+            echo "  LAB_TOVARISCH_PORT        Override server port"
             exit 0
             ;;
         *)
@@ -54,6 +142,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Apply --no-subsystems override
+if [[ "${NO_SUBSYSTEMS}" == "true" ]]; then
+    HEARTBEAT_ENABLED="false"
+    WG_CHECK_ENABLED="false"
+    BGP_BFD_ENABLED="false"
+fi
+
 # Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -62,7 +157,7 @@ ARTIFACT_DIR="${REPO_ROOT}/artifacts/memory-labs/tovarisch/idle-staircase"
 
 # Lab defaults
 DEFAULT_PORT=8317
-LAB_PORT="${LAB_PORT:-${DEFAULT_PORT}}"
+LAB_PORT="${LAB_TOVARISCH_PORT:-${DEFAULT_PORT}}"
 LAB_BIND="${LAB_BIND:-127.0.0.1}"
 
 # ============================================================================
@@ -107,6 +202,23 @@ status_burst: ${STATUS_BURST}
 strace_enabled: ${STRACE}
 lab_port: ${LAB_PORT}
 lab_bind: ${LAB_BIND}
+
+# Event source classification (CRITICAL for attribution)
+# Shell-side synthetic events CANNOT produce confirmed_leak verdicts
+event_source: shell_synthetic
+
+# Subsystem toggles (CONTROL SHELL-SIDE SYNTHETIC EVENTS ONLY)
+# These do NOT disable actual tovarisch runtime paths
+heartbeat_enabled: ${HEARTBEAT_ENABLED}
+wg_check_enabled: ${WG_CHECK_ENABLED}
+bgp_bfd_enabled: ${BGP_BFD_ENABLED}
+no_subsystems: ${NO_SUBSYSTEMS}
+
+# Fake runner flags (for deterministic testing)
+fake_heartbeat: ${FAKE_HEARTBEAT}
+fake_wg_check: ${FAKE_WG_CHECK}
+fake_bgp: ${FAKE_BGP}
+fake_bfd: ${FAKE_BFD}
 
 # Build info
 tovarisch_binary: "${TOVARISCH_BINARY}"
@@ -195,9 +307,77 @@ log_event() {
     echo -e "${timestamp}\t${elapsed}\t${event}\t${subsystem}\t${detail}" >> "${tsv_path}"
 }
 
+# ============================================================================
+# Event Attribution Helpers
+# ============================================================================
+
+# Log heartbeat-specific events
+log_heartbeat_event() {
+    local tsv_path="$1"
+    local elapsed="$2"
+    local event_type="$3"  # tick_start, tick_end, emit
+    local detail="${4:-}"
+    log_event "${tsv_path}" "${elapsed}" "heartbeat_${event_type}" "heartbeat" "${detail}"
+}
+
+# Log WG check events
+log_wg_event() {
+    local tsv_path="$1"
+    local elapsed="$2"
+    local event_type="$3"  # check_start, check_failed, check_end
+    local detail="${4:-}"
+    log_event "${tsv_path}" "${elapsed}" "wg_${event_type}" "wireguard" "${detail}"
+}
+
+# Log health/status collection events
+log_health_event() {
+    local tsv_path="$1"
+    local elapsed="$2"
+    local event_type="$3"  # collect_start, collect_end
+    local detail="${4:-}"
+    log_event "${tsv_path}" "${elapsed}" "health_${event_type}" "health" "${detail}"
+}
+
+# Log BGP maintenance events
+log_bgp_event() {
+    local tsv_path="$1"
+    local elapsed="$2"
+    local event_type="$3"  # maintenance_start, maintenance_end, reconnect
+    local detail="${4:-}"
+    log_event "${tsv_path}" "${elapsed}" "bgp_${event_type}" "bgp" "${detail}"
+}
+
+# Log BFD tick events
+log_bfd_event() {
+    local tsv_path="$1"
+    local elapsed="$2"
+    local event_type="$3"  # tick_start, tick_end
+    local detail="${4:-}"
+    log_event "${tsv_path}" "${elapsed}" "bfd_${event_type}" "bfd" "${detail}"
+}
+
+# Log status burst events
+log_status_event() {
+    local tsv_path="$1"
+    local elapsed="$2"
+    local event_type="$3"  # burst_start, burst_complete
+    local detail="${4:-}"
+    log_event "${tsv_path}" "${elapsed}" "status_${event_type}" "status" "${detail}"
+}
+
+# Log log emission events (for logging path attribution)
+log_log_emit_event() {
+    local tsv_path="$1"
+    local elapsed="$2"
+    local event_type="$3"  # emit
+    local detail="${4:-}"
+    log_event "${tsv_path}" "${elapsed}" "log_${event_type}" "logging" "${detail}"
+}
+
 analyze_staircase() {
     local tsv_path="$1"
     local artifact_path="$2"
+    local event_timeline="$3"
     
     # Extract RSS values and detect staircase pattern
     local rss_values=()
@@ -236,39 +416,72 @@ analyze_staircase() {
         fi
     fi
     
-    # Determine verdict
+    # Analyze event correlation
+    local suspected_owner=""
+    local owner_evidence=""
+    local correlated_events=""
+    
+    # Count events by subsystem
+    local heartbeat_count=0
+    local wg_count=0
+    local bgp_count=0
+    local bfd_count=0
+    local health_count=0
+    local status_count=0
+    
+    while IFS=$'\t' read -r ts elapsed event subsystem detail; do
+        case "${event}" in
+            heartbeat_*) heartbeat_count=$((heartbeat_count + 1)) ;;
+            wg_*) wg_count=$((wg_count + 1)) ;;
+            bgp_*) bgp_count=$((bgp_count + 1)) ;;
+            bfd_*) bfd_count=$((bfd_count + 1)) ;;
+            health_*) health_count=$((health_count + 1)) ;;
+            status_*) status_count=$((status_count + 1)) ;;
+        esac
+    done < <(tail -n +2 "${event_timeline}" 2>/dev/null || true)
+    
+    # Determine verdict based on evidence
     local verdict="inconclusive"
-    local owner=""
     local reason=""
     
-    # Note: We emit confirmed_leak ONLY if we have explicit owner evidence.
-    # Staircase growth with unknown owner must be inconclusive - the verifier
-    # rejects confirmed_leak without proper attribution.
+    # NOTE: Shell-side synthetic events CANNOT produce confirmed_leak.
+    # Real attribution requires tovarisch-native event emission.
+    # Shell-side events may only enrich an inconclusive artifact.
     if [[ ${steps_detected} -ge 3 ]] && [[ ${total_growth} -gt 500 ]]; then
-        # Staircase pattern detected but owner requires event correlation to attribute
         verdict="inconclusive"
-        owner=""
-        reason="Staircase growth detected (${steps_detected} steps, ${total_growth} KiB total, ${growth_rate_per_min} KiB/min) but owner is unattributed. Event correlation required to identify the periodic background owner."
+        reason="Staircase growth detected (${steps_detected} steps, ${total_growth} KiB total, ${growth_rate_per_min} KiB/min) but owner is unattributed. Events are shell-side synthetic and cannot be used for attribution. Need tovarisch-native event emission to identify the periodic background owner."
+    elif [[ ${steps_detected} -ge 5 ]] && [[ ${total_growth} -gt 200 ]]; then
+        # Medium confidence: multiple steps but less growth
+        verdict="inconclusive"
+        reason="Possible staircase pattern: ${steps_detected} steps, ${total_growth} KiB. Event counts: heartbeat=${heartbeat_count}, wg=${wg_count}, bgp=${bgp_count}, bfd=${bfd_count}. Need longer observation or targeted testing."
     elif [[ ${total_growth} -gt 1000 ]]; then
         verdict="bounded_warmup_or_allocator_highwater"
-        reason="Detected ${total_growth} KiB growth but no clear staircase pattern (may be normal warmup)"
+        reason="Detected ${total_growth} KiB growth but no clear staircase pattern (may be normal warmup or allocator high water mark settling). Event counts: heartbeat=${heartbeat_count}, wg=${wg_count}, bgp=${bgp_count}, bfd=${bfd_count}."
     elif [[ ${total_growth} -lt 200 ]]; then
         verdict="bounded_warmup_or_allocator_highwater"
-        reason="Minimal growth detected (${total_growth} KiB) - likely bounded by allocator high water mark"
+        reason="Minimal growth detected (${total_growth} KiB) - likely bounded by allocator high water mark or normal warmup. Event counts: heartbeat=${heartbeat_count}, wg=${wg_count}, bgp=${bgp_count}, bfd=${bfd_count}."
     else
         verdict="inconclusive"
-        reason="Growth pattern unclear: ${total_growth} KiB over ${DURATION}s"
+        reason="Growth pattern unclear: ${total_growth} KiB over ${DURATION}s with ${steps_detected} steps. Event counts: heartbeat=${heartbeat_count}, wg=${wg_count}, bgp=${bgp_count}, bfd=${bfd_count}."
     fi
     
-    # Write verdict
+    # Build correlated events string
+    correlated_events="heartbeat=${heartbeat_count},wg=${wg_count},bgp=${bgp_count},bfd=${bfd_count},health=${health_count},status=${status_count}"
+    
+    # Write verdict with enhanced attribution fields
     cat > "${artifact_path}/verdict.txt" <<EOF
 verdict: ${verdict}
-owner: ${owner}
+owner: ${suspected_owner}
 reason: ${reason}
 steps_detected: ${steps_detected}
 total_growth_kib: ${total_growth}
 growth_rate_kib_per_min: ${growth_rate_per_min}
 samples_count: ${#rss_values[@]}
+suspected_owner: ${suspected_owner}
+owner_evidence: ${owner_evidence}
+correlated_events: ${correlated_events}
+enabled_subsystems: heartbeat=${HEARTBEAT_ENABLED},wg=${WG_CHECK_ENABLED},bgp_bfd=${BGP_BFD_ENABLED}
+disabled_subsystems: heartbeat=$([[ "${HEARTBEAT_ENABLED}" == "false" ]] && echo "heartbeat" || echo ""),wg=$([[ "${WG_CHECK_ENABLED}" == "false" ]] && echo "wg" || echo ""),bgp_bfd=$([[ "${BGP_BFD_ENABLED}" == "false" ]] && echo "bgp_bfd" || echo "")
 EOF
     
     echo "${verdict}"
@@ -291,7 +504,7 @@ run_with_strace() {
         return 0
     fi
     
-    # Trace memory-related syscalls: brk, mmap, munmap
+    # Trace memory-related syscalls: brk, mmap, munmap, mremap
     # Also trace execve for wg command
     strace -p "${pid}" -f \
         -e trace=brk,mmap,mmap2,mremap,munmap,execve \
@@ -310,6 +523,15 @@ main() {
     echo "Duration: ${DURATION}s, Interval: ${INTERVAL}s"
     echo "Status burst: ${STATUS_BURST}"
     echo "Strace: ${STRACE}"
+    echo ""
+    echo "Subsystem toggles (SYNTHETIC - shell-side event logging only):"
+    echo "  Heartbeat: ${HEARTBEAT_ENABLED}"
+    echo "  WG checks: ${WG_CHECK_ENABLED}"
+    echo "  BGP/BFD:   ${BGP_BFD_ENABLED}"
+    echo "  No-subsystems (baseline): ${NO_SUBSYSTEMS}"
+    echo ""
+    echo "NOTE: These toggles only affect synthetic event emission to the event timeline."
+    echo "      They do NOT disable actual tovarisch periodic paths (heartbeat, WG, BGP/BFD)."
     echo ""
     
     # Check Linux requirement
@@ -341,10 +563,22 @@ main() {
     write_memory_header "${artifact_path}/memory_samples.tsv"
     write_event_header "${artifact_path}/event_timeline.tsv"
     
+    # Build environment for tovarisch
+    local tovarisch_env=()
+    if [[ -n "${TOVARISCH_WG_COMMAND_PATH:-}" ]]; then
+        echo "Forcing WG command path: ${TOVARISCH_WG_COMMAND_PATH}"
+        tovarisch_env+=("TOVARISCH_WG_COMMAND_PATH=${TOVARISCH_WG_COMMAND_PATH}")
+    fi
+    
     # Start tovarisch in background
     echo "Starting tovarisch on ${LAB_BIND}:${LAB_PORT}..."
     local tovarisch_pid
-    "${TOVARISCH_BINARY}" serve --bind "${LAB_BIND}:${LAB_PORT}" &
+    
+    if [[ ${#tovarisch_env[@]} -gt 0 ]]; then
+        env "${tovarisch_env[@]}" "${TOVARISCH_BINARY}" serve --bind "${LAB_BIND}:${LAB_PORT}" &
+    else
+        "${TOVARISCH_BINARY}" serve --bind "${LAB_BIND}:${LAB_PORT}" &
+    fi
     tovarisch_pid=$!
     
     # Wait for startup
@@ -363,8 +597,16 @@ main() {
         strace_pid=$(run_with_strace "${tovarisch_pid}" "${artifact_path}/strace.log")
     fi
     
+    # Log lab start event
     log_event "${artifact_path}/event_timeline.tsv" 0 "lab_started" "lab" "tovarisch PID=${tovarisch_pid}"
-    log_event "${artifact_path}/event_timeline.tsv" 0 "heartbeat_enabled" "heartbeat" "30-second heartbeat interval"
+    
+    # Log subsystem configuration
+    log_event "${artifact_path}/event_timeline.tsv" 0 "subsystem_config" "lab" "heartbeat=${HEARTBEAT_ENABLED},wg=${WG_CHECK_ENABLED},bgp_bfd=${BGP_BFD_ENABLED}"
+    
+    # Log periodic heartbeat events (every ~30 seconds) - but track whether it's actually enabled
+    if [[ "${HEARTBEAT_ENABLED}" == "true" ]]; then
+        log_event "${artifact_path}/event_timeline.tsv" 0 "heartbeat_enabled" "heartbeat" "30-second heartbeat interval"
+    fi
     
     echo "Running idle for ${DURATION} seconds..."
     
@@ -372,6 +614,9 @@ main() {
     local start_time
     start_time=$(date +%s)
     local sample_count=0
+    local heartbeat_tick_count=0
+    local last_wg_check=0
+    local last_heartbeat_log=0
     
     while kill -0 "${tovarisch_pid}" 2>/dev/null; do
         local elapsed=$(( $(date +%s) - start_time ))
@@ -387,9 +632,29 @@ main() {
         echo -e "${timestamp}\t${elapsed}\t${rss}\t${vmdata}\t${vmhwm}\t${vmswap}\t${vmpeak}\t${vmrss_peak}" >> "${artifact_path}/memory_samples.tsv"
         sample_count=$((sample_count + 1))
         
-        # Log periodic heartbeat events (every ~30 seconds)
-        if (( elapsed > 0 && elapsed % 30 == 0 )); then
-            log_event "${artifact_path}/event_timeline.tsv" "${elapsed}" "heartbeat_tick" "heartbeat" "uptime=${elapsed}s"
+        # Log heartbeat tick events (every 30 seconds) - if heartbeat is enabled
+        if [[ "${HEARTBEAT_ENABLED}" == "true" ]]; then
+            if (( elapsed > 0 && elapsed % 30 == 0 && elapsed != last_heartbeat_log )); then
+                heartbeat_tick_count=$((heartbeat_tick_count + 1))
+                log_heartbeat_event "${artifact_path}/event_timeline.tsv" "${elapsed}" "tick" "uptime=${elapsed}s,tick=${heartbeat_tick_count}"
+                last_heartbeat_log=${elapsed}
+            fi
+        fi
+        
+        # Log periodic WG check events (every 60 seconds) - if WG checks enabled
+        if [[ "${WG_CHECK_ENABLED}" == "true" ]]; then
+            if (( elapsed > 0 && elapsed % 60 == 0 && elapsed != last_wg_check )); then
+                log_wg_event "${artifact_path}/event_timeline.tsv" "${elapsed}" "check" "periodic_60s_check"
+                last_wg_check=${elapsed}
+            fi
+        fi
+        
+        # Log periodic BGP/BFD events (every 100ms) - if enabled, but at 10s intervals for noise reduction
+        if [[ "${BGP_BFD_ENABLED}" == "true" ]]; then
+            if (( elapsed > 0 && elapsed % 10 == 0 )); then
+                log_bgp_event "${artifact_path}/event_timeline.tsv" "${elapsed}" "maintenance" "periodic_maintenance"
+                log_bfd_event "${artifact_path}/event_timeline.tsv" "${elapsed}" "tick" "periodic_tick"
+            fi
         fi
         
         # Check if duration reached
@@ -405,7 +670,7 @@ main() {
     # Optional: status burst test
     if [[ "${STATUS_BURST}" == "true" ]]; then
         echo "Running /status burst test..."
-        log_event "${artifact_path}/event_timeline.tsv" "${elapsed:-${DURATION}}" "status_burst_start" "status" "5000 requests"
+        log_status_event "${artifact_path}/event_timeline.tsv" "${elapsed:-${DURATION}}" "burst_start" "5000 requests"
         
         local burst_start
         burst_start=$(date +%s)
@@ -421,7 +686,7 @@ main() {
         local final_elapsed=$(( $(date +%s) - start_time ))
         echo -e "$(date +%Y-%m-%dT%H:%M:%S.%3N)\t${final_elapsed}\t${rss}\t${vmdata}\t${vmhwm}\t${vmswap}\t${vmpeak}\t${vmrss_peak}" >> "${artifact_path}/memory_samples.tsv"
         
-        log_event "${artifact_path}/event_timeline.tsv" "${final_elapsed}" "status_burst_complete" "status" "duration=${burst_duration}s"
+        log_status_event "${artifact_path}/event_timeline.tsv" "${final_elapsed}" "burst_complete" "duration=${burst_duration}s"
     fi
     
     # Stop strace if running
@@ -434,11 +699,11 @@ main() {
     kill "${tovarisch_pid}" 2>/dev/null || true
     wait "${tovarisch_pid}" 2>/dev/null || true
     
-    # Analyze results
+    # Analyze results with event correlation
     echo ""
-    echo "Analyzing memory samples..."
+    echo "Analyzing memory samples with event correlation..."
     local verdict
-    verdict=$(analyze_staircase "${artifact_path}/memory_samples.tsv" "${artifact_path}")
+    verdict=$(analyze_staircase "${artifact_path}/memory_samples.tsv" "${artifact_path}" "${artifact_path}/event_timeline.tsv")
     
     echo ""
     echo "=== Lab Complete ==="

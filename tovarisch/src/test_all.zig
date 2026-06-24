@@ -49,6 +49,7 @@ const _http_routes_tests = @import("http/routes_tests.zig");
 const _http_server = @import("http/server.zig");
 const _http_heartbeat = @import("http/heartbeat.zig");
 const _heartbeat_idle_memory_regression_tests = @import("http/heartbeat_idle_memory_regression_tests.zig");
+const _idle_memory_attribution_tests = @import("http/idle_memory_attribution_tests.zig");
 const _runtime_telemetry = @import("runtime/telemetry.zig");
 const _runtime_heartbeat_log = @import("runtime/heartbeat_log.zig");
 
