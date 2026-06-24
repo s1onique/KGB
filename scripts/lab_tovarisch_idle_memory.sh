@@ -302,8 +302,11 @@ EOF
     wait "${tovarisch_pid}" 2>/dev/null || true
 
     # Copy native event timeline if exists
+    # Safe: skip copy if source and destination are the same file (when default path is used)
     if [[ "${NATIVE_EVENTS}" == "true" ]] && [[ -n "${NATIVE_EVENTS_PATH}" ]] && [[ -f "${NATIVE_EVENTS_PATH}" ]]; then
-        cp "${NATIVE_EVENTS_PATH}" "${artifact_path}/native_event_timeline.tsv"
+        if [[ "${NATIVE_EVENTS_PATH}" != "${artifact_path}/native_event_timeline.tsv" ]]; then
+            cp "${NATIVE_EVENTS_PATH}" "${artifact_path}/native_event_timeline.tsv"
+        fi
     fi
 
     # Analyze verdict

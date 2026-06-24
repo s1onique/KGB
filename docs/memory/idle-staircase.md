@@ -330,6 +330,21 @@ python3 scripts/verify_idle_staircase_artifact.py artifacts/memory-labs/tovarisc
 make verify-idle-staircase-artifact
 ```
 
+## Native Heartbeat Smoke Verification
+
+```bash
+make tovarisch-compile-linux
+./scripts/lab_tovarisch_idle_memory.sh --native-events --duration 95 --run-id heartbeat-native-enabled-smoke
+./scripts/lab_tovarisch_idle_memory.sh --native-events --disable-heartbeat --duration 65 --run-id heartbeat-native-disabled-smoke
+python3 scripts/verify_idle_staircase_native_heartbeat_smoke.py \
+  --enabled artifacts/.../heartbeat-native-enabled-smoke \
+  --disabled artifacts/.../heartbeat-native-disabled-smoke
+```
+
+**Enabled**: `native_event_timeline.tsv` has `heartbeat_tick_start/end` (elapsed >= 30000ms).
+**Disabled**: manifest shows `native_disable_heartbeat: true`, no heartbeat native events.
+**Platform**: Lab requires Linux with `/proc`; macOS prints SKIP and exits.
+
 ## Current Status
 
 **Verdict**: `inconclusive` (without native events)
