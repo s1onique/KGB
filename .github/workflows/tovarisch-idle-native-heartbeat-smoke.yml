@@ -1,0 +1,218 @@
+# tovarisch-idle-native-heartbeat-smoke.yml
+# GitHub Actions workflow for heartbeat-native idle lab smoke proof.
+#
+# Runs the Linux-only native heartbeat smoke test that:
+# 1. Captures enabled heartbeat-native events
+# 2. Captures disabled heartbeat-native events
+# 3. Verifies both artifacts with the smoke verifier
+#
+# Manual trigger only (workflow_dispatch).
+# Does NOT run on push/PR - this is a manual proof workflow.
+#
+# Artifacts:
+#   - artifacts/memory-labs/tovarisch/idle-staircase/heartbeat-native-enabled-smoke/
+#   - artifacts/memory-labs/tovarisch/idle-staircase/heartbeat-native-disabled-smoke/
+#
+# Platform: Linux with /proc required.
+# Timeout: 20 minutes.
+
+name: Tovarisch Idle Native Heartbeat Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      enabled_duration:
+        description: "Enabled heartbeat lab duration in seconds"
+        required: false
+        default: "95"
+        type: string
+      disabled_duration:
+        description: "Disabled heartbeat lab duration in seconds"
+        required: false
+        default: "65"
+        type: string
+      interval:
+        description: "Memory sample interval in seconds"
+        required: false
+        default: "5"
+        type: string
+      upload_artifacts:
+        description: "Upload lab artifacts"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      extra_debug:
+        description: "Print extra debug output"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  heartbeat-native-smoke:
+    name: Heartbeat-native idle lab smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      ENABLED_DURATION: ${{ inputs.enabled_duration }}
+      DISABLED_DURATION: ${{ inputs.disabled_duration }}
+      INTERVAL: ${{ inputs.interval }}
+      ENABLED_ARTIFACT: artifacts/memory-labs/tovarisch/idle-staircase/heartbeat-native-enabled-smoke
+      DISABLED_ARTIFACT: artifacts/memory-labs/tovarisch/idle-staircase/heartbeat-native-disabled-smoke
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Linux preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          uname -a
+          test "$(uname -s)" = "Linux"
+          test -d /proc
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Tool versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          zig version
+          make --version
+          python3 --version
+          bash --version | head -1
+
+      - name: Preflight checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/lab_tovarisch_idle_memory.sh
+          python3 -m py_compile scripts/verify_idle_staircase_native_heartbeat_smoke.py
+          python3 scripts/verify_idle_staircase_native_heartbeat_smoke.py --self-test
+
+      - name: Build tovarisch
+        shell: bash
+        run: |
+          set -euo pipefail
+          make tovarisch-build
+          make tovarisch-status
+
+      - name: Run enabled heartbeat-native smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/lab_tovarisch_idle_memory.sh \
+            --native-events \
+            --duration "${ENABLED_DURATION}" \
+            --interval "${INTERVAL}" \
+            --run-id heartbeat-native-enabled-smoke
+
+          test -d "${ENABLED_ARTIFACT}"
+          test -f "${ENABLED_ARTIFACT}/manifest.yaml"
+          test -f "${ENABLED_ARTIFACT}/tovarisch_lab.conf"
+          test -f "${ENABLED_ARTIFACT}/memory_samples.tsv"
+          test -f "${ENABLED_ARTIFACT}/event_timeline.tsv"
+          test -f "${ENABLED_ARTIFACT}/native_event_timeline.tsv"
+          grep -q 'heartbeat_tick_start' "${ENABLED_ARTIFACT}/native_event_timeline.tsv"
+          grep -q 'heartbeat_tick_end' "${ENABLED_ARTIFACT}/native_event_timeline.tsv"
+
+      - name: Run disabled heartbeat-native smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/lab_tovarisch_idle_memory.sh \
+            --native-events \
+            --disable-heartbeat \
+            --duration "${DISABLED_DURATION}" \
+            --interval "${INTERVAL}" \
+            --run-id heartbeat-native-disabled-smoke
+
+          test -d "${DISABLED_ARTIFACT}"
+          test -f "${DISABLED_ARTIFACT}/manifest.yaml"
+          test -f "${DISABLED_ARTIFACT}/tovarisch_lab.conf"
+          grep -q 'native_disable_heartbeat: true' "${DISABLED_ARTIFACT}/manifest.yaml"
+          grep -q 'disable_heartbeat = true' "${DISABLED_ARTIFACT}/tovarisch_lab.conf"
+
+          if [[ -f "${DISABLED_ARTIFACT}/native_event_timeline.tsv" ]]; then
+            if grep -E 'heartbeat_tick_start|heartbeat_tick_end|heartbeat_tick_failed' "${DISABLED_ARTIFACT}/native_event_timeline.tsv"; then
+              echo "FAIL: disabled run emitted heartbeat native events"
+              exit 1
+            fi
+          fi
+
+      - name: Verify heartbeat-native smoke artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_idle_staircase_native_heartbeat_smoke.py \
+            --enabled "${ENABLED_ARTIFACT}" \
+            --disabled "${DISABLED_ARTIFACT}"
+
+      - name: Evidence summary
+        if: always()
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "## Tovarisch idle native heartbeat smoke"
+            echo ""
+            echo "### Enabled artifact"
+            echo "\`${ENABLED_ARTIFACT}\`"
+            echo ""
+            echo "### Disabled artifact"
+            echo "\`${DISABLED_ARTIFACT}\`"
+            echo ""
+            echo "### Enabled manifest"
+            echo '```yaml'
+            cat "${ENABLED_ARTIFACT}/manifest.yaml"
+            echo '```'
+            echo ""
+            echo "### Enabled native events"
+            echo '```text'
+            cat "${ENABLED_ARTIFACT}/native_event_timeline.tsv"
+            echo '```'
+            echo ""
+            echo "### Disabled manifest"
+            echo '```yaml'
+            cat "${DISABLED_ARTIFACT}/manifest.yaml"
+            echo '```'
+            echo ""
+            echo "### Disabled native events"
+            echo '```text'
+            cat "${DISABLED_ARTIFACT}/native_event_timeline.tsv" 2>/dev/null || echo "<missing or no native events>"
+            echo '```'
+            echo ""
+            echo "### Verdicts"
+            echo '```text'
+            echo "-- enabled --"
+            cat "${ENABLED_ARTIFACT}/verdict.txt" 2>/dev/null
+            echo ""
+            echo "-- disabled --"
+            cat "${DISABLED_ARTIFACT}/verdict.txt" 2>/dev/null
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload lab artifacts
+        if: always() && inputs.upload_artifacts == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tovarisch-idle-native-heartbeat-smoke-${{ github.run_id }}
+          path: |
+            artifacts/memory-labs/tovarisch/idle-staircase/heartbeat-native-enabled-smoke
+            artifacts/memory-labs/tovarisch/idle-staircase/heartbeat-native-disabled-smoke
+          if-no-files-found: warn
+          retention-days: 14

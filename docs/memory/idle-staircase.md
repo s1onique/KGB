@@ -332,7 +332,14 @@ make verify-idle-staircase-artifact
 
 ## Native Heartbeat Smoke Verification
 
+### Manual GitHub Actions Workflow
+
+A manual GitHub Actions workflow, **"Tovarisch Idle Native Heartbeat Smoke"**, runs the Linux-only native heartbeat smoke proof and uploads enabled/disabled artifacts.
+
+Trigger: `workflow_dispatch` only — not scheduled or PR-gated.
+
 ```bash
+# Or run locally on Linux:
 make tovarisch-compile-linux
 ./scripts/lab_tovarisch_idle_memory.sh --native-events --duration 95 --run-id heartbeat-native-enabled-smoke
 ./scripts/lab_tovarisch_idle_memory.sh --native-events --disable-heartbeat --duration 65 --run-id heartbeat-native-disabled-smoke

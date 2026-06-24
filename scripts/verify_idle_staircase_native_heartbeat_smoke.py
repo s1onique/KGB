@@ -195,42 +195,23 @@ def create_enabled_fixture(tmpdir: Path, include_valid_events: bool = True,
     artifact = tmpdir / name
     artifact.mkdir(exist_ok=True)
     
-    # manifest.yaml
     (artifact / "manifest.yaml").write_text(
         'run_id: test\nplatform: Linux\ncommit_sha: abc123\n'
-        'native_events_enabled: true\n'
-        'native_disable_heartbeat: false\n'
+        'native_events_enabled: true\nnative_disable_heartbeat: false\n'
     )
-    
-    # tovarisch_lab.conf
     (artifact / "tovarisch_lab.conf").write_text(
-        "[lab]\n"
-        "native_events_enabled = true\n"
-        "native_events_path = \"\"\n"
-        "disable_heartbeat = false\n"
-        "disable_wg_checks = true\n"
-        "disable_bgp = true\n"
-        "disable_bfd = true\n"
+        "[lab]\nnative_events_enabled = true\nnative_events_path = \"\"\n"
+        "disable_heartbeat = false\ndisable_wg_checks = true\n"
+        "disable_bgp = true\ndisable_bfd = true\n"
     )
-    
-    # memory_samples.tsv (minimal)
     (artifact / "memory_samples.tsv").write_text(
-        "timestamp\telapsed_sec\trss_kib\tvmdata_kib\n"
-        "2026-01-01T00:00:00\t0\t1000\t2000\n"
+        "timestamp\telapsed_sec\trss_kib\tvmdata_kib\n2026-01-01T00:00:00\t0\t1000\t2000\n"
     )
-    
-    # event_timeline.tsv (minimal)
     (artifact / "event_timeline.tsv").write_text(
-        "timestamp\telapsed_sec\tevent\tsubsystem\n"
-        "2026-01-01T00:00:00\t0\tlab_started\tlab\n"
+        "timestamp\telapsed_sec\tevent\tsubsystem\n2026-01-01T00:00:00\t0\tlab_started\tlab\n"
     )
+    (artifact / "verdict.txt").write_text("verdict: inconclusive\n")
     
-    # verdict.txt
-    (artifact / "verdict.txt").write_text(
-        "verdict: inconclusive\n"
-    )
-    
-    # native_event_timeline.tsv
     if include_valid_events:
         pid = "1234" if not missing_pids else "not_numeric"
         subsystem = "heartbeat" if not wrong_subsystem else "wireguard"
@@ -242,11 +223,9 @@ def create_enabled_fixture(tmpdir: Path, include_valid_events: bool = True,
             f"2026-01-01T00:01:00.000\t60000\theartbeat_tick_end\t{subsystem}\t\t{pid}\n"
         )
     else:
-        # Header only
         (artifact / "native_event_timeline.tsv").write_text(
             "timestamp\telapsed_millis\tevent\tsubsystem\tdetail\tpid\n"
         )
-    
     return artifact
 
 
@@ -257,42 +236,23 @@ def create_disabled_fixture(tmpdir: Path, include_heartbeat: bool = False,
     artifact = tmpdir / name
     artifact.mkdir(exist_ok=True)
     
-    # manifest.yaml
     (artifact / "manifest.yaml").write_text(
         'run_id: test\nplatform: Linux\ncommit_sha: abc123\n'
-        'native_events_enabled: true\n'
-        'native_disable_heartbeat: true\n'
+        'native_events_enabled: true\nnative_disable_heartbeat: true\n'
     )
-    
-    # tovarisch_lab.conf
     (artifact / "tovarisch_lab.conf").write_text(
-        "[lab]\n"
-        "native_events_enabled = true\n"
-        "native_events_path = \"\"\n"
-        "disable_heartbeat = true\n"
-        "disable_wg_checks = true\n"
-        "disable_bgp = true\n"
-        "disable_bfd = true\n"
+        "[lab]\nnative_events_enabled = true\nnative_events_path = \"\"\n"
+        "disable_heartbeat = true\ndisable_wg_checks = true\n"
+        "disable_bgp = true\ndisable_bfd = true\n"
     )
-    
-    # memory_samples.tsv (minimal)
     (artifact / "memory_samples.tsv").write_text(
-        "timestamp\telapsed_sec\trss_kib\tvmdata_kib\n"
-        "2026-01-01T00:00:00\t0\t1000\t2000\n"
+        "timestamp\telapsed_sec\trss_kib\tvmdata_kib\n2026-01-01T00:00:00\t0\t1000\t2000\n"
     )
-    
-    # event_timeline.tsv (minimal)
     (artifact / "event_timeline.tsv").write_text(
-        "timestamp\telapsed_sec\tevent\tsubsystem\n"
-        "2026-01-01T00:00:00\t0\tlab_started\tlab\n"
+        "timestamp\telapsed_sec\tevent\tsubsystem\n2026-01-01T00:00:00\t0\tlab_started\tlab\n"
     )
+    (artifact / "verdict.txt").write_text("verdict: inconclusive\n")
     
-    # verdict.txt
-    (artifact / "verdict.txt").write_text(
-        "verdict: inconclusive\n"
-    )
-    
-    # native_event_timeline.tsv
     if not missing_timeline:
         if include_heartbeat:
             (artifact / "native_event_timeline.tsv").write_text(
@@ -300,11 +260,9 @@ def create_disabled_fixture(tmpdir: Path, include_heartbeat: bool = False,
                 "2026-01-01T00:00:30.000\t30000\theartbeat_tick_start\theartbeat\t\t1234\n"
             )
         else:
-            # Header only or empty
             (artifact / "native_event_timeline.tsv").write_text(
                 "timestamp\telapsed_millis\tevent\tsubsystem\tdetail\tpid\n"
             )
-    
     return artifact
 
 
