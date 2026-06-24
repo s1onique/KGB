@@ -211,7 +211,7 @@ analyze_staircase() {
             if [[ ${prev_rss} -gt 0 ]]; then
                 local delta=$((rss - prev_rss))
                 if [[ ${delta} -gt 50 ]]; then  # > 50 KiB step threshold
-                    ((steps_detected++))
+                    steps_detected=$((steps_detected + 1))
                 fi
                 rss_deltas+=("${delta}")
             fi
@@ -241,10 +241,14 @@ analyze_staircase() {
     local owner=""
     local reason=""
     
+    # Note: We emit confirmed_leak ONLY if we have explicit owner evidence.
+    # Staircase growth with unknown owner must be inconclusive - the verifier
+    # rejects confirmed_leak without proper attribution.
     if [[ ${steps_detected} -ge 3 ]] && [[ ${total_growth} -gt 500 ]]; then
-        verdict="confirmed_leak"
-        owner="unknown"  # Leak confirmed but owner requires event correlation to attribute
-        reason="Detected ${steps_detected} staircase steps with ${total_growth} KiB total growth (${growth_rate_per_min} KiB/min). Owner requires event correlation."
+        # Staircase pattern detected but owner requires event correlation to attribute
+        verdict="inconclusive"
+        owner=""
+        reason="Staircase growth detected (${steps_detected} steps, ${total_growth} KiB total, ${growth_rate_per_min} KiB/min) but owner is unattributed. Event correlation required to identify the periodic background owner."
     elif [[ ${total_growth} -gt 1000 ]]; then
         verdict="bounded_warmup_or_allocator_highwater"
         reason="Detected ${total_growth} KiB growth but no clear staircase pattern (may be normal warmup)"
@@ -381,7 +385,7 @@ main() {
         timestamp=$(date +%Y-%m-%dT%H:%M:%S.%3N)
         
         echo -e "${timestamp}\t${elapsed}\t${rss}\t${vmdata}\t${vmhwm}\t${vmswap}\t${vmpeak}\t${vmrss_peak}" >> "${artifact_path}/memory_samples.tsv"
-        ((sample_count++))
+        sample_count=$((sample_count + 1))
         
         # Log periodic heartbeat events (every ~30 seconds)
         if (( elapsed > 0 && elapsed % 30 == 0 )); then
