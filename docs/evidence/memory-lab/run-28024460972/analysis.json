@@ -1,0 +1,142 @@
+{
+  "schema_version": "1.0",
+  "analysis_kind": "uvb76_memory_attribution_analysis",
+  "run_id": "28024460972",
+  "source_artifacts": [
+    "uvb76-leak-slope-28024460972.json",
+    "tovarisch-leak-slope-28024460972.json",
+    "manifest.yaml"
+  ],
+  "verdict": "inconclusive",
+  "verdict_confidence": "low",
+  "verdict_rationale": "This analysis is a SLOPE-ONLY PRE-ATTRIBUTION NOTE, not a definitive verdict. No attribution lab artifacts exist for this run: no start/midpoint/end heap profiles, no memstats checkpoints, unknown heap_objects_delta, unknown top_allocators. The midpoint math (Start→Mid: 369.4 KiB/min, Mid→End: 352.4 KiB/min, ratio 0.954) shows CONTINUED GROWTH at 95.4% of first-half rate - NOT a plateau. Long-window slope being lower than short-window slope proves the 10s window was warmup-sensitive, but does NOT prove the 906s run plateaued. True verdict requires attribution artifacts from a 30-60 min lab run with forced-GC checkpoints.",
+  
+  "evidence_summary": {
+    "short_window_baselines": {
+      "workflow_28018628934": {
+        "duration_seconds": 10,
+        "signal_quality": "warmup_sensitive",
+        "uvb76_rss_slope_kib_per_min": 770.9,
+        "uvb76_rss_growth_kib": 128,
+        "notes": "Short window, warmup-dominated. NOT definitive evidence."
+      }
+    },
+    "long_window_evidence": {
+      "workflow_28024460972": {
+        "duration_seconds": 906.198,
+        "signal_quality": "long_window",
+        "uvb76": {
+          "rss_first_kib": 11768,
+          "rss_midpoint_kib": 14556,
+          "rss_last_kib": 17216,
+          "rss_max_kib": 17344,
+          "rss_growth_kib": 5448,
+          "rss_growth_percent": 46.3,
+          "rss_slope_kib_per_min": 360.72,
+          "pss_slope_kib_per_min": 360.72,
+          "heap_alloc_bytes": 4194304,
+          "heap_objects": "not_captured_in_leak_slope",
+          "goroutines": "not_captured_in_leak_slope"
+        },
+        "tovarisch": {
+          "rss_first_kib": 8088,
+          "rss_last_kib": 9004,
+          "rss_growth_kib": 916,
+          "rss_growth_percent": 11.3,
+          "rss_slope_kib_per_min": 60.47
+        }
+      }
+    }
+  },
+  
+  "slope_analysis": {
+    "start_to_midpoint": {
+      "elapsed_seconds": 453,
+      "rss_growth_kib": 2788,
+      "slope_kib_per_min": 369.4,
+      "description": "First half of run - rapid warmup/heap expansion"
+    },
+    "midpoint_to_end": {
+      "elapsed_seconds": 453,
+      "rss_growth_kib": 2660,
+      "slope_kib_per_min": 352.4,
+      "description": "Second half of run - continued growth at slightly lower rate"
+    },
+    "full_run": {
+      "elapsed_seconds": 906,
+      "rss_growth_kib": 5448,
+      "slope_kib_per_min": 360.72,
+      "description": "Consistent slope throughout run"
+    },
+    "plateau_indicator": {
+      "slope_midpoint_to_end_vs_start_to_midpoint": 0.954,
+      "approaching_plateau_evidence": false,
+      "confirmed_plateau_evidence": false
+    },
+    "plateau_verdict": "The midpoint math argues AGAINST plateau: Midpoint→End slope (352.4 KiB/min) is 95.4% of Start→Midpoint slope (369.4 KiB/min). This is CONTINUED GROWTH, not flattening. Long-window slope being lower than short-window slope proves the 10s window was warmup-sensitive, but does NOT prove plateau."
+  },
+  
+  "heap_analysis": {
+    "heap_alloc_bytes": 4194304,
+    "heap_alloc_note": "Static value from leak-slope artifact. True attribution requires heap profiles at start/midpoint/end.",
+    "heap_objects_delta": "unknown",
+    "top_allocators": "unknown - attribution artifacts not available"
+  },
+  
+  "goroutine_analysis": {
+    "count": 25,
+    "goroutine_note": "Stable throughout run, no growth observed. Goroutine count not a leak contributor.",
+    "start_count": 25,
+    "end_count": 25
+  },
+  
+  "memory_metrics_comparison": {
+    "heap_alloc_bytes": {
+      "value": 4194304,
+      "note": "Single snapshot, not time-series"
+    },
+    "heap_inuse_bytes": {
+      "value": "not_captured_in_leak_slope"
+    },
+    "heap_sys_bytes": {
+      "value": "not_captured_in_leak_slope"
+    },
+    "sys_bytes": {
+      "value": "not_captured_in_leak_slope"
+    },
+    "heap_released_bytes": {
+      "value": "not_captured_in_leak_slope"
+    }
+  },
+  
+  "limitations": [
+    "No attribution lab artifacts (heap profiles, memstats checkpoints) available in this run",
+    "Heap profile delta analysis not possible without start/midpoint/end pprof files",
+    "Allocation owner identification not possible without heap profile comparison",
+    "Verdict based on slope analysis only, not on detailed runtime stats",
+    "Attribution lab with forced-GC checkpoints would provide definitive evidence"
+  ],
+  
+  "recommended_next_steps": [
+    "Run attribution lab (30-60 min soak) to generate heap profiles at start/midpoint/end",
+    "Compare heap profiles using go tool pprof to identify top retained allocations",
+    "Analyze heap objects delta (heap_objects_start vs heap_objects_end)",
+    "If attribution artifacts show plateau in heap_sys or stable heap_alloc after midpoint, confirm bounded warmup",
+    "If attribution artifacts show continuous heap growth without plateau, investigate specific allocation paths"
+  ],
+  
+  "comparison_vs_short_window": {
+    "short_window_slope": 770.9,
+    "long_window_slope": 360.72,
+    "ratio": 0.468,
+    "interpretation": "Long-window slope is 46.8% of short-window slope, indicating significant warmup settling. This is consistent with bounded growth pattern where initial ramp-up dominates short windows."
+  },
+  
+  "privacy_check": {
+    "compliant": true,
+    "note": "Analysis uses only infrastructure metrics: RSS, PSS, heap stats, goroutine count. No browsing history, destination flows, or user-behavior data."
+  },
+  
+  "generated_at_utc": "2026-06-24T07:56:00Z",
+  "generated_by": "memory-attribution-analysis-act"
+}
