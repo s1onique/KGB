@@ -2,6 +2,7 @@
 
 import type { TimelineEvent } from '../diagnosticTimeline.model';
 import type { ProbeKind, CaptureStatusDisplay, Severity } from '../diagnosticTimeline.model';
+import { SAFE_PAGE_SIZES, type SafePageSize } from './storage';
 
 // ---------------------------------------------------------------------------
 // Filter State
@@ -25,9 +26,12 @@ export const defaultFilters: TimelineFilterState = {
 // Pagination State
 // ---------------------------------------------------------------------------
 
-/** Available page size options */
-export const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
-export type PageSizeOption = typeof PAGE_SIZE_OPTIONS[number];
+/** Available page size options - aligned with storage.ts SAFE_PAGE_SIZES */
+export const PAGE_SIZE_OPTIONS = SAFE_PAGE_SIZES;
+export type PageSizeOption = SafePageSize;
+
+/** Default page size - must match the first element of PAGE_SIZE_OPTIONS */
+export const DEFAULT_PAGE_SIZE: SafePageSize = 10;
 
 /** Pagination state for the timeline table */
 export interface TimelinePageState {
@@ -38,7 +42,7 @@ export interface TimelinePageState {
 /** Default pagination state */
 export const defaultPagination: TimelinePageState = {
   pageIndex: 0,
-  pageSize: 20,
+  pageSize: DEFAULT_PAGE_SIZE,
 };
 
 // ---------------------------------------------------------------------------

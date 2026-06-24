@@ -1,7 +1,7 @@
 // Diagnostic Timeline Update - Pure state transition functions
 
 import type { TimelineModel, TimelinePageState, TimelineFilterState } from './model';
-import { computeProbeKindSummary, applyFilters, clampPageIndex, getFirstVisibleRow, getPageIndexForRow } from './model';
+import { computeProbeKindSummary, applyFilters, clampPageIndex, PAGE_SIZE_OPTIONS } from './model';
 import type { TimelineEvent } from '../diagnosticTimeline.model';
 import type { TimelineMsg } from './msg';
 
@@ -119,40 +119,21 @@ function handlePageChanged(model: TimelineModel, page: number): UpdateResult {
   };
 }
 
-/** Handle page size change - preserves first visible row when possible */
+/**
+ * Handle page size change.
+ * 
+ * Per requirement: changing rows-per-page should reset current page to 1.
+ * This is simpler than preserving the first visible row and matches user expectation
+ * that changing page size typically means "show more/fewer rows from the start".
+ */
 function handlePageSizeChanged(model: TimelineModel, pageSize: number): UpdateResult {
-  const filteredCount = applyFilters(model.mergedEvents, model.filters).length;
-  
-  if (filteredCount === 0) {
-    return {
-      model: {
-        ...model,
-        pagination: {
-          pageIndex: 0,
-          pageSize,
-        },
-      },
-    };
-  }
-
-  // Calculate the first visible row before changing page size
-  const firstVisibleRow = getFirstVisibleRow(model.pagination.pageIndex, model.pagination.pageSize);
-  
-  // Update page size
-  const newPagination: TimelinePageState = {
-    pageIndex: model.pagination.pageIndex,
-    pageSize,
-  };
-  
-  // Calculate new page index that preserves the first visible row
-  const newPageIndex = getPageIndexForRow(firstVisibleRow, pageSize);
-  const newTotalPages = Math.max(1, Math.ceil(filteredCount / pageSize));
-  newPagination.pageIndex = clampPageIndex(newPageIndex, newTotalPages);
-  
   return {
     model: {
       ...model,
-      pagination: newPagination,
+      pagination: {
+        pageIndex: 0, // Reset to first page when page size changes
+        pageSize,
+      },
     },
   };
 }
@@ -241,8 +222,8 @@ export function verifyInvariants(model: TimelineModel): string[] {
     errors.push(`Page index should never be negative: ${model.pagination.pageIndex}`);
   }
   
-  // Page size should be valid
-  if (![10, 20, 50, 100].includes(model.pagination.pageSize)) {
+  // Page size should be valid (must be one of the safe page sizes)
+  if (!PAGE_SIZE_OPTIONS.includes(model.pagination.pageSize)) {
     errors.push(`Invalid page size: ${model.pagination.pageSize}`);
   }
   

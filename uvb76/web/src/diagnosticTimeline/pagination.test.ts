@@ -71,7 +71,7 @@ function createModelWithEvents(events: TimelineEvent[], overrides?: Partial<Time
 describe('pagination utilities', () => {
   describe('PAGE_SIZE_OPTIONS', () => {
     it('contains expected page size options', () => {
-      expect(PAGE_SIZE_OPTIONS).toEqual([10, 20, 50, 100]);
+      expect(PAGE_SIZE_OPTIONS).toEqual([10, 25, 50, 100]);
     });
   });
 
@@ -189,7 +189,8 @@ describe('update pagination invariants', () => {
       const model = createModelWithEvents(events);
       const result = update(model, { type: 'PageChanged', page: 100 });
       
-      expect(result.model.pagination.pageIndex).toBe(2);
+      // 50 events / 10 pageSize = 5 pages (indices 0-4), so max valid index is 4
+      expect(result.model.pagination.pageIndex).toBe(4);
     });
 
     it('clamps negative page index to 0', () => {
@@ -203,36 +204,47 @@ describe('update pagination invariants', () => {
   describe('PageSizeChanged', () => {
     it('updates page size', () => {
       const model = createModelWithEvents([createTestEvent()]);
-      const result = update(model, { type: 'PageSizeChanged', pageSize: 50 });
+      const result = update(model, { type: 'PageSizeChanged', pageSize: 25 });
       
-      expect(result.model.pagination.pageSize).toBe(50);
+      expect(result.model.pagination.pageSize).toBe(25);
     });
 
-    it('preserves first visible row when increasing page size', () => {
+    it('resets page index to 0 when page size changes', () => {
+      // Start on page 3 of 5 pages
       const events = Array(100).fill(null).map((_, i) => createTestEvent({ eventId: `evt-${i}` }));
-      const model = createModelWithEvents(events, { pagination: { pageIndex: 2, pageSize: 20 } });
-      const result = update(model, { type: 'PageSizeChanged', pageSize: 50 });
+      const model = createModelWithEvents(events, { pagination: { pageIndex: 3, pageSize: 10 } });
       
-      // First visible row (40) should be on page 0 with size 50
+      // Change page size
+      const result = update(model, { type: 'PageSizeChanged', pageSize: 25 });
+      
+      // Page should reset to 0
       expect(result.model.pagination.pageIndex).toBe(0);
-      expect(result.model.pagination.pageSize).toBe(50);
+      expect(result.model.pagination.pageSize).toBe(25);
     });
 
-    it('preserves first visible row when decreasing page size', () => {
-      const events = Array(100).fill(null).map((_, i) => createTestEvent({ eventId: `evt-${i}` }));
-      const model = createModelWithEvents(events, { pagination: { pageIndex: 1, pageSize: 20 } });
-      const result = update(model, { type: 'PageSizeChanged', pageSize: 10 });
+    it('resets page index to 0 from any page', () => {
+      const model = createModelWithEvents([createTestEvent()], { pagination: { pageIndex: 99, pageSize: 10 } });
+      const result = update(model, { type: 'PageSizeChanged', pageSize: 50 });
       
-      // First visible row (20) should be on page 2 with size 10
-      expect(result.model.pagination.pageIndex).toBe(2);
-      expect(result.model.pagination.pageSize).toBe(10);
+      expect(result.model.pagination.pageIndex).toBe(0);
     });
 
     it('resets to page 0 when no events', () => {
-      const model = createModelWithEvents([], { pagination: { pageIndex: 5, pageSize: 20 } });
+      const model = createModelWithEvents([], { pagination: { pageIndex: 5, pageSize: 10 } });
       const result = update(model, { type: 'PageSizeChanged', pageSize: 50 });
       
       expect(result.model.pagination.pageIndex).toBe(0);
+      expect(result.model.pagination.pageSize).toBe(50);
+    });
+
+    it('accepts all valid page sizes (10, 25, 50, 100)', () => {
+      const model = createModelWithEvents([createTestEvent()]);
+      
+      for (const size of [10, 25, 50, 100]) {
+        const result = update(model, { type: 'PageSizeChanged', pageSize: size });
+        expect(result.model.pagination.pageSize).toBe(size);
+        expect(result.model.pagination.pageIndex).toBe(0);
+      }
     });
   });
 

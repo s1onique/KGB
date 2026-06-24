@@ -180,7 +180,7 @@ describe('update', () => {
       expect(result.model.pagination.pageSize).toBe(50);
     });
 
-    it('preserves first visible row when decreasing page size', () => {
+    it('resets to page 0 when page size changes', () => {
       // Start on page 1 with page size 20 (rows 20-39 visible)
       const model = createModelWithEvents(
         Array(100).fill(null).map((_, i) => createTestEvent({ eventId: `evt-${i}` })),
@@ -191,8 +191,8 @@ describe('update', () => {
       
       const result = update(model, { type: 'PageSizeChanged', pageSize: 10 });
       
-      // First visible row (20) should be on page 2 with size 10
-      expect(result.model.pagination.pageIndex).toBe(2);
+      // Page should reset to 0 when page size changes (per requirement)
+      expect(result.model.pagination.pageIndex).toBe(0);
       expect(result.model.pagination.pageSize).toBe(10);
     });
 

@@ -2203,3 +2203,114 @@ h2 { color: var(--color-text-secondary); margin: 1.5rem 0 1rem; font-weight: 500
 .panel-degraded {
     border-left-color: var(--color-error);
 }
+
+/* ==========================================================================
+   Diagnostic Timeline Pagination Toolbar
+   ========================================================================== */
+
+/* Single-line pagination toolbar */
+.diagnostic-timeline-pagination {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: nowrap;
+    padding: 0.65rem 1rem;
+    border-top: 1px solid var(--color-border-muted);
+    border-bottom: 1px solid var(--color-border-muted);
+    background: rgba(255, 255, 255, 0.025);
+}
+
+/* Rows per page selector group */
+.diagnostic-timeline-pagination__rows {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.diagnostic-timeline-pagination__rows label {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+}
+
+.diagnostic-timeline-pagination__rows select {
+    border: 1px solid var(--color-border);
+    border-radius: 0.45rem;
+    background: var(--color-surface);
+    color: var(--color-text);
+    min-height: 2rem;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.diagnostic-timeline-pagination__rows select:hover {
+    border-color: var(--color-text-secondary);
+}
+
+.diagnostic-timeline-pagination__rows select:focus {
+    outline: none;
+    border-color: var(--color-accent);
+}
+
+/* Range display text */
+.diagnostic-timeline-pagination__range {
+    color: var(--color-text-muted);
+    white-space: nowrap;
+    font-size: 0.75rem;
+}
+
+/* Navigation buttons container */
+.diagnostic-timeline-pagination__nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-left: auto;
+}
+
+/* Page navigation buttons */
+.diagnostic-timeline-pagination__nav .page-nav-btn {
+    border: 1px solid var(--color-border);
+    border-radius: 0.45rem;
+    background: var(--color-surface);
+    color: var(--color-text);
+    min-height: 2rem;
+    min-width: 2rem;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.diagnostic-timeline-pagination__nav .page-nav-btn:hover:not(:disabled) {
+    background: var(--color-border);
+    border-color: var(--color-text-secondary);
+}
+
+.diagnostic-timeline-pagination__nav .page-nav-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+/* Page indicator text */
+.diagnostic-timeline-pagination__nav .page-indicator {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    padding: 0 0.5rem;
+    white-space: nowrap;
+}
+
+/* Mobile responsive: allow toolbar to wrap on narrow screens */
+@media (max-width: 640px) {
+    .diagnostic-timeline-pagination {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        justify-content: flex-start;
+    }
+
+    .diagnostic-timeline-pagination__nav {
+        margin-left: 0;
+        width: 100%;
+        justify-content: center;
+    }
+}

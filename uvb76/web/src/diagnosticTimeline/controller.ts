@@ -6,6 +6,7 @@ import type { TimelineMsg } from './msg';
 import { update } from './update';
 import { executeEffect } from './effects';
 import { renderTimeline, renderShell } from './view';
+import { loadRowsPerPage, saveRowsPerPage, type SafePageSize } from './storage';
 
 // ---------------------------------------------------------------------------
 // Controller
@@ -20,12 +21,21 @@ export class DiagnosticTimelineController {
   
   constructor(targetId: string) {
     this.targetId = targetId;
+    
+    // Create initial model and restore page size from localStorage
     this.model = createInitialModel();
+    this.applyStoredPageSize();
     
     // Dispatch function: update model, render, then execute effects
     this.dispatch = (msg: TimelineMsg) => {
       const result = update(this.model, msg);
       this.model = result.model;
+      
+      // Handle storage side effects for page size changes
+      if (msg.type === 'PageSizeChanged') {
+        // Save to localStorage when page size changes
+        saveRowsPerPage(msg.pageSize as SafePageSize);
+      }
       
       // Render based on state
       if (this.container) {
@@ -38,6 +48,20 @@ export class DiagnosticTimelineController {
         executeEffect({ type: 'FetchTimeline', targetId: this.targetId }, this.dispatch);
       }
     };
+  }
+  
+  /** Apply stored page size from localStorage to the model */
+  private applyStoredPageSize(): void {
+    const storedPageSize = loadRowsPerPage();
+    if (storedPageSize !== null) {
+      this.model = {
+        ...this.model,
+        pagination: {
+          ...this.model.pagination,
+          pageSize: storedPageSize,
+        },
+      };
+    }
   }
 
   /** Get the target ID (useful for testing) */

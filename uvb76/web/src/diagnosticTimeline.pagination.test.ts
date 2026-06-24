@@ -132,7 +132,7 @@ describe('getFirstVisibleRow', () => {
 
 describe('PAGE_SIZE_OPTIONS', () => {
   it('contains expected page size options', () => {
-    expect(PAGE_SIZE_OPTIONS).toEqual([10, 20, 50, 100]);
+    expect(PAGE_SIZE_OPTIONS).toEqual([10, 25, 50, 100]);
   });
 
   it('is a readonly tuple', () => {
@@ -143,7 +143,7 @@ describe('PAGE_SIZE_OPTIONS', () => {
 describe('defaultPagination', () => {
   it('has correct default values', () => {
     expect(defaultPagination.pageIndex).toBe(0);
-    expect(defaultPagination.pageSize).toBe(20);
+    expect(defaultPagination.pageSize).toBe(10);
   });
 
   it('has page size from PAGE_SIZE_OPTIONS', () => {

@@ -239,7 +239,7 @@ function renderPageNumbers(currentPage: number, totalPages: number): string {
   }).join('');
 }
 
-/** Render pagination controls */
+/** Render pagination controls as a single-line toolbar */
 function renderPaginationControls(
   pagination: TimelineModel['pagination'],
   totalPages: number,
@@ -259,43 +259,36 @@ function renderPaginationControls(
   }).join('');
   
   return `
-    <nav class="timeline-pagination" aria-label="Timeline pagination">
-      <div class="pagination-left">
-        <label class="pagination-label">
-          Rows:
-          <select class="page-size-select" aria-label="Rows per page">
-            ${pageSizeOptions}
-          </select>
-        </label>
+    <div class="diagnostic-timeline-pagination">
+      <div class="diagnostic-timeline-pagination__rows">
+        <label for="diagnostic-timeline-page-size">Rows</label>
+        <select id="diagnostic-timeline-page-size" class="page-size-select" aria-label="Rows per page">
+          ${pageSizeOptions}
+        </select>
       </div>
-      <div class="pagination-center">
-        <span class="showing-text" aria-live="polite">
-          Showing ${displayStart}–${displayEnd} of ${filteredCount}
-        </span>
+
+      <div class="diagnostic-timeline-pagination__range" aria-live="polite">
+        Showing ${displayStart}–${displayEnd} of ${filteredCount}
       </div>
-      <div class="pagination-right">
-        <button class="page-nav-btn" data-action="page-first" ${isFirstPage ? 'disabled' : ''} aria-label="First page">
-          « First
+
+      <nav class="diagnostic-timeline-pagination__nav" aria-label="Diagnostic timeline pagination">
+        <button type="button" class="page-nav-btn" data-action="page-first" ${isFirstPage ? 'disabled' : ''} aria-label="Go to first page">
+          ‹‹
         </button>
-        <button class="page-nav-btn" data-action="page-prev" ${isFirstPage ? 'disabled' : ''} aria-label="Previous page">
-          ‹ Prev
+        <button type="button" class="page-nav-btn" data-action="page-prev" ${isFirstPage ? 'disabled' : ''} aria-label="Go to previous page">
+          ‹
         </button>
-        <span class="page-indicator" aria-label="Current page">
+        <span class="page-indicator" aria-current="page" aria-label="Current page">
           Page ${displayCurrentPage} of ${totalPages}
         </span>
-        ${totalPages > 1 ? `
-          <div class="page-numbers">
-            ${renderPageNumbers(safePageIndex, totalPages)}
-          </div>
-        ` : ''}
-        <button class="page-nav-btn" data-action="page-next" ${isLastPage ? 'disabled' : ''} aria-label="Next page">
-          Next ›
+        <button type="button" class="page-nav-btn" data-action="page-next" ${isLastPage ? 'disabled' : ''} aria-label="Go to next page">
+          ›
         </button>
-        <button class="page-nav-btn" data-action="page-last" ${isLastPage ? 'disabled' : ''} aria-label="Last page">
-          Last »
+        <button type="button" class="page-nav-btn" data-action="page-last" ${isLastPage ? 'disabled' : ''} aria-label="Go to last page">
+          ››
         </button>
-      </div>
-    </nav>
+      </nav>
+    </div>
   `;
 }
 
