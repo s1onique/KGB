@@ -84,8 +84,7 @@ test "repeated failed WG check does not leak memory" {
     }
 }
 
-test "repeated WG check error paths do not leak" {
-    // Test all error paths don't leak
+test "WG collector error cases are typed for idle attribution path" {
     const error_cases = [_]wg_show_collector.CollectError{
         error.CommandNotFound,
         error.CommandFailed,
@@ -93,16 +92,9 @@ test "repeated WG check error paths do not leak" {
         error.ForkFailed,
         error.ExecFailed,
     };
-    
-    for (error_cases) |err| {
-        // Simulate what happens when each error occurs
-        // (We can't actually trigger these without mocking, but we can verify
-        // the collector API doesn't leak on repeated calls)
-        _ = err;
-    }
-    
-    // This test passes if compilation succeeds - API is leak-free
-    try testing.expect(true);
+
+    // Verify error type count is stable (5 expected errors)
+    try testing.expect(error_cases.len == 5);
 }
 
 // ============================================================================
@@ -205,7 +197,10 @@ test "BFD session tick path compiles and is safe" {
     
     // Verify BFD runtime type exists
     const BfdRuntime = @import("../bfd/runtime.zig").BfdRuntime;
-    try testing.expect(BfdRuntime.MaxPeers > 0);
+    _ = BfdRuntime; // Mark as used for type existence check
+    // MaxPeers is a module-level constant, not a struct member
+    const MaxPeers = @import("../bfd/runtime.zig").MaxPeers;
+    try testing.expect(MaxPeers > 0);
     
     // Verify tick function signature exists
     // The actual tick test would require BFD transport setup
