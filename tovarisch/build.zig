@@ -251,6 +251,36 @@ pub fn build(b: *std.Build) void {
     );
     install_bgp_tcp_test_step.dependOn(&install_bgp_tcp_tests.step);
 
+    // ============================================================================
+    // WireGuard generic-netlink proof binary (privileged Linux lab target)
+    //
+    // This binary directly calls GenericNetlinkBackend to prove the netlink
+    // backend works against a real WireGuard kernel interface.
+    //
+    // NOT part of make gate - requires CAP_NET_ADMIN and WireGuard kernel module.
+    // ============================================================================
+
+    const wg_netlink_proof = b.addExecutable(.{
+        .name = "wg_netlink_proof",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/wg_netlink_proof.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    wg_netlink_proof.root_module.addOptions("build_options", build_options);
+
+    const install_wg_netlink_proof = b.addInstallArtifact(wg_netlink_proof, .{
+        .dest_dir = .{ .override = .{ .custom = "bin" } },
+        .dest_sub_path = "wg_netlink_proof",
+    });
+    const wg_netlink_proof_step = b.step(
+        "wg-netlink-proof",
+        "Build wg_netlink_proof binary (privileged lab target, NOT in gate)",
+    );
+    wg_netlink_proof_step.dependOn(&install_wg_netlink_proof.step);
+
     const bgp_integration_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/test_suite_bgp_integration.zig"),

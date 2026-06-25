@@ -49,6 +49,7 @@ const _net_wg_status_boundary = @import("net/wg_status_boundary.zig");
 const _net_wg_status_boundary_cli = @import("net/wg_status_boundary_cli.zig");
 const _net_wg_status_boundary_netlink = @import("net/wg_status_boundary_netlink.zig");
 const _net_wg_status_boundary_netlink_tests = @import("net/wg_status_boundary_netlink_tests.zig");
+const _net_wg_status_boundary_netlink_runtime_tests = @import("net/wg_status_boundary_netlink_runtime_tests.zig");
 const _net_private_interface_stats = @import("net/private_interface_stats.zig");
 const _net_private_interface_stats_tests = @import("net/private_interface_stats_tests.zig");
 const _net_iptables = @import("net/iptables.zig");
@@ -137,3 +138,4 @@ test { std.testing.refAllDecls(@import("net/extended_interface_stats.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_dump_collector.zig")); }
 test { std.testing.refAllDecls(@import("runtime/lab_events.zig")); }
 test { std.testing.refAllDecls(@import("runtime/lab_events_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_status_boundary_netlink_runtime_tests.zig")); }

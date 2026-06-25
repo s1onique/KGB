@@ -486,3 +486,38 @@ verify-memory-attribution-matrix:
 	@echo "=== Memory Attribution Matrix Verifier ==="
 	@python3 scripts/verify_memory_attribution_matrix.py --self-test
 
+# === WireGuard Generic-Netlink Lab ===
+# Runtime proof harness for GenericNetlinkBackend against real WireGuard kernel interface.
+#
+# Prerequisites:
+#   - Linux kernel
+#   - WireGuard kernel module (wireguard.ko)
+#   - CAP_NET_ADMIN or root
+#
+# NOT part of make gate - manual CI target for privileged runners.
+# Artifacts: artifacts/wg-netlink-lab/
+
+WG_NETLINK_LAB := ./tools/wg-netlink-lab/wg-netlink-lab
+WG_NETLINK_PROOF := ./tovarisch/zig-out/bin/wg_netlink_proof
+
+# Build the Zig proof binary for GenericNetlinkBackend
+wg-netlink-proof:
+	cd tovarisch && zig build wg-netlink-proof
+
+# Build the Go lab harness
+$(WG_NETLINK_LAB):
+	cd tools/wg-netlink-lab && go build -o wg-netlink-lab .
+
+# Full WireGuard generic-netlink lab: build harness, then run full proof on Linux
+.PHONY: lab-wg-netlink
+lab-wg-netlink: $(WG_NETLINK_LAB)
+	@echo "=== WireGuard Generic-Netlink Lab ==="
+	@if [ "$$(uname -s)" != "Linux" ]; then \
+		echo "[SKIP] WireGuard netlink lab requires Linux"; \
+		echo "[INFO] Preflight only:"; \
+		$(WG_NETLINK_LAB) preflight || true; \
+		exit 0; \
+	fi; \
+	$(MAKE) wg-netlink-proof; \
+	$(WG_NETLINK_LAB) full
+

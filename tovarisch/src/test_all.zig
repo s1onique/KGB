@@ -126,6 +126,7 @@ test { std.testing.refAllDecls(@import("net/wg_status_boundary.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_status_boundary_cli.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_status_boundary_netlink.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_status_boundary_netlink_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_status_boundary_netlink_runtime_tests.zig")); }
 
 // BFD module tests
 test { std.testing.refAllDecls(@import("bfd/packet.zig")); }
