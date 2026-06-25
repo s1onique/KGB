@@ -512,6 +512,7 @@ CLI001,scripts/test.sh,shell,shebang,test,lab_infrastructure,once,yes,test only,
         print("\nTest 11: Go comment with os/exec does not match")
         test_go_comment = tmppath / "comment_test.go"
         test_go_comment.write_text('// This file avoids os/exec for better performance\npackage main\nfunc main() {}\n')
+        test_go_real = tmppath / "real_import.go"  # Initialize for later cleanup
         with open(inventory_file, 'w') as f:
             f.write("""id,path,language,pattern,owner_area,runtime_classification,frequency,allowed,justification,timeout_bounded,output_bounded,redaction_required,replacement_candidate,status,notes
 CLI001,comment_test.go,go,os/exec import,test,lab_infrastructure,once,yes,test,yes,yes,no,no,verified,comment-only test
@@ -523,6 +524,10 @@ CLI001,comment_test.go,go,os/exec import,test,lab_infrastructure,once,yes,test,y
 
         # Test 12: Go real import line matches
         print("\nTest 12: Go real import matches")
+        # Clean up previous test files to avoid pollution
+        for f in [test_go, test_go_comment]:
+            if f.exists():
+                f.unlink()
         test_go_real = tmppath / "real_import.go"
         test_go_real.write_text('package main\nimport "os/exec"\nfunc main() { exec.Command("echo") }\n')
         with open(inventory_file, 'w') as f:
@@ -534,6 +539,103 @@ CLI002,scripts/,shell,shebang,test,lab_infrastructure,once,yes,test,yes,yes,no,n
         detected = scan_codebase(tmppath)
         errors, _, _ = verify_inventory(entries, detected, tmppath)
         assert_test(len(errors) == 0, "Real import matches", f"Errors: {errors}")
+
+        # Test 13: Native-owned iptables boundary - owned module passes
+        print("\nTest 13: Native-owned iptables boundary - owned module passes")
+        # Clean up previous test files
+        if test_go_real.exists():
+            test_go_real.unlink()
+        # Clean up previous tovarisch directory if exists
+        import shutil
+        tovarisch_dir = tmppath / "tovarisch"
+        if tovarisch_dir.exists():
+            shutil.rmtree(tovarisch_dir)
+        tovarisch_dir.mkdir()
+        src_dir = tovarisch_dir / "src"
+        src_dir.mkdir()
+        net_dir = src_dir / "net"
+        net_dir.mkdir()
+        # Owned module with execve pattern (should pass)
+        iptables_owned = net_dir / "iptables.zig"
+        iptables_owned.write_text(
+            '// Native-owned iptables boundary\n'
+            'const std = @import("std");\n'
+            'pub fn runIptablesReal(argv: []const []const u8) !c_int {\n'
+            '    // execve syscall - owned boundary\n'
+            '    return 0;\n'
+            '}\n'
+        )
+        with open(inventory_file, 'w') as f:
+            f.write("""id,path,language,pattern,owner_area,runtime_classification,frequency,allowed,justification,timeout_bounded,output_bounded,redaction_required,replacement_candidate,status,notes
+CLI001,tovarisch/src/net/iptables.zig,zig,execve syscall,tovarisch,critical_runtime,rare,yes,NATIVE-OWNED: typed API boundary,yes,yes,no,yes,verified,NATIVE-OWNED iptables boundary
+CLI002,scripts/,shell,shebang,tooling,ci_cd,periodic,yes,All shell scripts,yes,yes,no,no,verified,Shell scripts
+""")
+        entries, load_errors = load_inventory(inventory_file)
+        detected = scan_codebase(tmppath)
+        errors, _, _ = verify_inventory(entries, detected, tmppath)
+        assert_test(len(errors) == 0, "Owned iptables module passes", f"Errors: {errors}")
+
+        # Test 14: Native-owned boundary rejects ad-hoc iptables outside owned module
+        print("\nTest 14: Native-owned boundary rejects ad-hoc iptables outside owned module")
+        # Create a file with execve but NOT in the owned module
+        other_file = src_dir / "other.zig"
+        other_file.write_text(
+            'const std = @import("std");\n'
+            'pub fn someFunction() void {\n'
+            '    // Direct execve outside owned boundary - should fail\n'
+            '    _ = std.c.execve("/sbin/iptables", args, &.{});\n'
+            '}\n'
+        )
+        # Inventory only has the owned module
+        with open(inventory_file, 'w') as f:
+            f.write("""id,path,language,pattern,owner_area,runtime_classification,frequency,allowed,justification,timeout_bounded,output_bounded,redaction_required,replacement_candidate,status,notes
+CLI001,tovarisch/src/net/iptables.zig,zig,execve syscall,tovarisch,critical_runtime,rare,yes,NATIVE-OWNED: typed API boundary,yes,yes,no,yes,verified,NATIVE-OWNED iptables boundary
+CLI002,scripts/,shell,shebang,tooling,ci_cd,periodic,yes,All shell scripts,yes,yes,no,no,verified,Shell scripts
+""")
+        entries, load_errors = load_inventory(inventory_file)
+        detected = scan_codebase(tmppath)
+        errors, _, _ = verify_inventory(entries, detected, tmppath)
+        # Should fail because other.zig has execve but no inventory entry
+        assert_test(len(errors) > 0, "Rejects ad-hoc iptables outside owned module", f"Errors: {errors}")
+
+        # Test 15: Native-owned boundary allows docs references
+        print("\nTest 15: Native-owned boundary allows docs references")
+        # Clean up tovarisch directory first
+        if tovarisch_dir.exists():
+            shutil.rmtree(tovarisch_dir)
+        # Re-create the tovarisch directory with the iptables.zig file
+        # so the inventory entry with status=verified passes
+        tovarisch_dir.mkdir()
+        src_dir = tovarisch_dir / "src"
+        src_dir.mkdir()
+        net_dir = src_dir / "net"
+        net_dir.mkdir()
+        iptables_owned = net_dir / "iptables.zig"
+        # Include 'execve' pattern so it's detected
+        iptables_owned.write_text(
+            '// Native-owned iptables boundary\n'
+            'const std = @import("std");\n'
+            'pub fn runIptablesReal(argv: []const []const u8) !c_int {\n'
+            '    _ = std.c.execve("/sbin/iptables", args, &.{});\n'
+            '    return 0;\n'
+            '}\n'
+        )
+        docs_dir = tmppath / "docs"
+        docs_dir.mkdir()
+        inventory_md = docs_dir / "cli-composition-inventory.csv"
+        inventory_md.write_text("""id,path,language,pattern,owner_area,runtime_classification,frequency,allowed,justification,timeout_bounded,output_bounded,redaction_required,replacement_candidate,status,notes
+CLI001,tovarisch/src/net/iptables.zig,zig,execve syscall,tovarisch,critical_runtime,rare,yes,NATIVE-OWNED,yes,yes,no,yes,verified,NATIVE-OWNED
+CLI002,scripts/,shell,shebang,tooling,ci_cd,periodic,yes,All shell scripts,yes,yes,no,no,verified,Shell scripts
+""")
+        with open(inventory_file, 'w') as f:
+            f.write("""id,path,language,pattern,owner_area,runtime_classification,frequency,allowed,justification,timeout_bounded,output_bounded,redaction_required,replacement_candidate,status,notes
+CLI001,tovarisch/src/net/iptables.zig,zig,execve syscall,tovarisch,critical_runtime,rare,yes,NATIVE-OWNED,yes,yes,no,yes,verified,NATIVE-OWNED
+CLI002,scripts/,shell,shebang,tooling,ci_cd,periodic,yes,All shell scripts,yes,yes,no,no,verified,Shell scripts
+""")
+        entries, load_errors = load_inventory(inventory_file)
+        detected = scan_codebase(tmppath)
+        errors, _, _ = verify_inventory(entries, detected, tmppath)
+        assert_test(len(errors) == 0, "Allows docs inventory references", f"Errors: {errors}")
 
     print(f"\n=== Self-Test Results ===")
     print(f"Passed: {tests_passed}")

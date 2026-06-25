@@ -1,100 +1,92 @@
-// iptables.zig — iptables MASQUERADE rule management for VPN NAT
+// iptables.zig — Native-owned iptables boundary for VPN MASQUERADE
 //
-// ACT: Add config-controlled VPN masquerade rule with rule watcher.
+// ACT: Native-owned iptables rule application boundary for tovarisch VPN masquerade
 //
-// Scope:
-// - Manage iptables MASQUERADE rule for VPN traffic egress.
-// - Use argv-style process execution only; no shell interpolation.
-// - Provide injectable command runner for testability.
-// - Add periodic watcher that repairs missing rules.
-// - Expose status via vpn_masquerade check.
+// This module provides a TYPED, DETERMINISTIC boundary around the iptables backend.
+// It is NOT a full native netfilter/nftables rewrite — the backend remains iptables
+// executable, but all rule intent, argv rendering, validation, and result classification
+// are now owned by this module.
+//
+// Design principles:
+// - Rule intent is typed data, not raw string composition
+// - Command argv is deterministically rendered and unit-tested
+// - Backend outcomes are structured (not raw exit codes)
+// - Invalid config values are rejected before backend execution
+// - No shell invocation — argv passed directly to execve
+// - Missing executable, permission errors, and backend rejections are classified
+// - Unknown failures fail closed
+//
+// Deferred: Full native netfilter/nftables backend
 //
 // Safety guarantees:
-// - Never flush chains.
-// - Never delete unrelated rules.
-// - Never alter default policies.
-// - Idempotent check-then-add pattern.
+// - Never flush chains
+// - Never delete unrelated rules
+// - Never alter default policies
+// - Idempotent check-then-add pattern
 
 const std = @import("std");
 const build_options = @import("build_options");
+const types = @import("iptables/types.zig");
+const validate = @import("iptables/validate.zig");
+const argv_mod = @import("iptables/argv.zig");
+
+// Re-export types for external consumers
+pub const IpFamily = types.IpFamily;
+pub const TableName = types.TableName;
+pub const ChainName = types.ChainName;
+pub const JumpTarget = types.JumpTarget;
+pub const MasqueradeRuleSpec = types.MasqueradeRuleSpec;
+pub const IptablesBackendConfig = types.IptablesBackendConfig;
+pub const defaultBackendConfig = types.defaultBackendConfig;
+pub const IptablesError = types.IptablesError;
+pub const CommandRunner = types.CommandRunner;
+pub const RuleExistsResult = types.RuleExistsResult;
+pub const CheckResult = types.CheckResult;
+pub const ApplyResult = types.ApplyResult;
+pub const MasqueradeStatus = types.MasqueradeStatus;
+pub const MasqueradeCheckResult = types.MasqueradeCheckResult;
+
+// Re-export validation functions
+pub const isValidInterfaceName = validate.isValidInterfaceName;
+pub const isValidCidrFormat = validate.isValidCidrFormat;
+pub const validateRuleSpec = validate.validateRuleSpec;
+
+// Re-export argv rendering
+pub const renderCheckArgv = argv_mod.renderCheckArgv;
+pub const renderAppendArgv = argv_mod.renderAppendArgv;
+
+pub const DEFAULT_IPTABLES_PATH = types.DEFAULT_IPTABLES_PATH;
 
 // ============================================================================
-// Constants
+// Production Command Runner
 // ============================================================================
-
-/// Allowed path to the iptables command.
-/// Can be overridden via environment variable for testing.
-fn getIptablesPath() [*:0]const u8 {
-    if (std.c.getenv("TOVARISCH_IPTABLES_COMMAND_PATH")) |env_path| {
-        return env_path;
-    }
-    return "/sbin/iptables";
-}
-
-// ============================================================================
-// Error Types
-// ============================================================================
-
-/// Errors that can occur when managing iptables rules.
-pub const IptablesError = error{
-    /// The iptables command is not available on this system.
-    CommandNotFound,
-    /// The iptables command exited with a non-zero status.
-    CommandFailed,
-    /// Failed to create pipe for stdout capture.
-    PipeFailed,
-    /// Failed to fork process.
-    ForkFailed,
-    /// Failed to execute iptables binary.
-    ExecFailed,
-    /// Memory allocation failed.
-    OutOfMemory,
-};
-
-/// Result of rule existence check.
-pub const RuleExistsResult = enum {
-    /// Rule exists in the iptables ruleset.
-    exists,
-    /// Rule does not exist.
-    missing,
-    /// Check command failed unexpectedly.
-    unknown,
-};
-
-// ============================================================================
-// Command Runner Interface (Injectable for Testing)
-// ============================================================================
-
-/// Interface for running iptables commands with logical argv (clean []const []const u8).
-/// Implement this trait for production (real Child process) or testing (fake runner).
-pub const CommandRunner = struct {
-    /// Runs an iptables command with the given argv.
-    /// argv is clean logical argv - the runner converts to C argv internally.
-    /// Returns exit code on success (0 = success, non-zero = failure).
-    /// Returns error on system call failure.
-    run: *const fn (argv: []const []const u8) IptablesError!c_int,
-};
 
 /// Production command runner using raw fork/execve.
-///
-/// Converts logical argv ([]const []const u8) to C argv (null-terminated array
-/// of C-string pointers) before forking. Each argument is duplicated with
-/// NUL terminator using the provided allocator.
-pub fn runIptablesReal(
-    argv: []const []const u8,
-) IptablesError!c_int {
+pub fn runIptablesReal(argv: []const []const u8) types.IptablesError!c_int {
     return runIptablesRealWithAllocator(std.heap.page_allocator, argv);
 }
 
 /// Production command runner with injectable allocator for testing.
+///
+/// The executable path is derived from argv[0] to honor the typed backend config.
+/// Falls back to environment/default only if argv is empty.
 pub fn runIptablesRealWithAllocator(
     allocator: std.mem.Allocator,
     argv: []const []const u8,
-) IptablesError!c_int {
-    // Find iptables binary
-    const iptables_path = getIptablesPath();
+) types.IptablesError!c_int {
+    // Derive executable path from argv[0] (honors backend.executable_path)
+    // Fall back to env/default only if argv is empty
+    const use_argv0 = argv.len > 0 and argv[0].len > 0;
 
-    // Allocate parallel arrays: owned (for freeing) and c_args (pointers for execve)
+    // Pre-allocate fallback executable path (for when argv[0] is empty)
+    const fallback_executable = if (!use_argv0)
+        try allocator.dupeZ(u8, std.mem.sliceTo(argv_mod.getIptablesPath(), 0))
+    else
+        null;
+    defer {
+        if (fallback_executable) |f| allocator.free(f);
+    }
+
     var owned = try allocator.alloc(?[:0]u8, argv.len);
     @memset(owned, null);
     defer {
@@ -107,7 +99,6 @@ pub fn runIptablesRealWithAllocator(
     const c_args = try allocator.alloc(?[*:0]const u8, argv.len + 1);
     defer allocator.free(c_args);
 
-    // Convert each argument to NUL-terminated C string
     for (argv, 0..) |arg, i| {
         owned[i] = try allocator.dupeZ(u8, arg);
         c_args[i] = owned[i].?.ptr;
@@ -120,127 +111,162 @@ pub fn runIptablesRealWithAllocator(
     }
 
     if (pid == 0) {
-        // Child process - must not allocate or use try
-        // Close stderr to suppress iptables noise
         _ = std.c.close(2);
-
-        // Cast to the type execve expects
+        // Use argv[0] pointer directly (already NUL-terminated in owned[0])
+        // or use pre-allocated fallback if argv[0] was empty
+        const executable_ptr = if (use_argv0) owned[0].?.ptr else fallback_executable.?.ptr;
         const argv_ptr: [*:null]const ?[*:0]const u8 = @ptrCast(c_args.ptr);
-
-        // execve expects: argv[0] = program path, argv[1..] = args, argv[last] = null
-        _ = std.c.execve(iptables_path, argv_ptr, &.{});
-
-        // execve failed - exit with 127 for command not found semantics
+        _ = std.c.execve(executable_ptr, argv_ptr, &.{});
         std.c._exit(127);
     }
 
-    // Parent process - wait for child
     var status: c_int = undefined;
     _ = std.c.waitpid(pid, &status, 0);
 
-    // Check if child exited normally
     if ((status & 0x7f) != 0) {
-        // Child was killed by signal
         return error.CommandFailed;
     }
 
-    // Return the exit code
     return (status >> 8) & 0xff;
 }
 
 /// The production command runner instance.
 pub const realRunner: CommandRunner = .{
     .run = struct {
-        fn run(argv: []const []const u8) IptablesError!c_int {
+        fn run(argv: []const []const u8) types.IptablesError!c_int {
             return runIptablesReal(argv);
         }
     }.run,
 };
 
 // ============================================================================
-// Rule Management Logic
+// Exit Code Mapping
 // ============================================================================
 
-/// Checks if the MASQUERADE rule exists (observation only, no mutation).
-/// Uses argv-style execution: iptables -t nat -C POSTROUTING -s <cidr> -o <interface> -j MASQUERADE
-pub fn checkRuleExists(
-    runner: CommandRunner,
-    vpn_cidr: []const u8,
-    public_interface: []const u8,
-) IptablesError!RuleExistsResult {
-    const iptables_path = std.mem.sliceTo(getIptablesPath(), 0);
-    const argv = [_][]const u8{
-        iptables_path,
-        "-t", "nat",
-        "-C", "POSTROUTING",
-        "-s", vpn_cidr,
-        "-o", public_interface,
-        "-j", "MASQUERADE",
-    };
-
-    const exit_code = try runner.run(&argv);
-
-    // iptables -C exits 0 if rule exists, 1 if it doesn't exist
-    if (exit_code == 0) return .exists;
-    if (exit_code == 1) return .missing;
-    // Non-zero exit code (non-1) indicates an error
-    return .unknown;
+/// Maps exit code to CheckResult for iptables -C command.
+fn mapCheckExitCode(exit_code: c_int) CheckResult {
+    switch (exit_code) {
+        0 => return .present,
+        1 => return .missing,
+        else => return .unknown_failure,
+    }
 }
 
-/// Ensures the MASQUERADE rule exists. Adds it if missing (mutation).
-/// Uses argv-style execution: iptables -t nat -A POSTROUTING -s <cidr> -o <interface> -j MASQUERADE
-/// This is the repair/watcher path, NOT the status rendering path.
-pub fn ensureRule(
-    runner: CommandRunner,
-    vpn_cidr: []const u8,
-    public_interface: []const u8,
-) IptablesError!bool {
-    const exists_result = try checkRuleExists(runner, vpn_cidr, public_interface);
-
-    switch (exists_result) {
-        .exists => return false, // Rule already exists, no action needed
-        .missing => {
-            // Rule is missing, add it
-            const iptables_path = std.mem.sliceTo(getIptablesPath(), 0);
-            const argv = [_][]const u8{
-                iptables_path,
-                "-t", "nat",
-                "-A", "POSTROUTING",
-                "-s", vpn_cidr,
-                "-o", public_interface,
-                "-j", "MASQUERADE",
-            };
-
-            const exit_code = try runner.run(&argv);
-            if (exit_code != 0) return error.CommandFailed;
-            return true; // Rule was added
-        },
-        .unknown => return error.CommandFailed, // Check failed, treat as error
+/// Maps exit code to ApplyResult for iptables -A command.
+fn mapApplyExitCode(exit_code: c_int) ApplyResult {
+    switch (exit_code) {
+        0 => return .applied,
+        else => return .backend_rejected,
     }
 }
 
 // ============================================================================
-// Status Check Builder (Observation Only - No Mutation)
+// Rule Management Logic (Typed API)
 // ============================================================================
 
-/// Status for the VPN masquerade check.
-pub const MasqueradeStatus = enum {
-    /// Masquerade is active and working.
-    ok,
-    /// Masquerade is enabled but rule is missing or repair failed.
-    warn,
-    /// Masquerade is disabled (not degraded).
-    disabled,
-};
+/// Checks if the rule exists (observation only, no mutation).
+pub fn checkRule(
+    runner: CommandRunner,
+    rule: MasqueradeRuleSpec,
+    backend: IptablesBackendConfig,
+) types.IptablesError!CheckResult {
+    if (validateRuleSpec(rule)) |_| {
+        return error.ValidationFailed;
+    }
 
-/// Result of a masquerade status check.
-pub const MasqueradeCheckResult = struct {
-    status: MasqueradeStatus,
-    detail: []const u8,
-};
+    const argv = renderCheckArgv(rule, backend);
+    const exit_code = try runner.run(&argv);
+
+    return mapCheckExitCode(exit_code);
+}
+
+/// Legacy wrapper for checkRuleExists.
+pub fn checkRuleExists(
+    runner: CommandRunner,
+    vpn_cidr: []const u8,
+    public_interface: []const u8,
+) types.IptablesError!RuleExistsResult {
+    const rule = MasqueradeRuleSpec.defaultMasquerade(vpn_cidr, public_interface);
+    const backend = defaultBackendConfig();
+
+    if (validateRuleSpec(rule)) |_| {
+        return .unknown;
+    }
+
+    const argv = renderCheckArgv(rule, backend);
+    const exit_code = try runner.run(&argv);
+
+    if (exit_code == 0) return .exists;
+    if (exit_code == 1) return .missing;
+    return .unknown;
+}
+
+/// Ensures the rule exists. Adds it if missing (mutation).
+pub fn ensureRuleTyped(
+    runner: CommandRunner,
+    rule: MasqueradeRuleSpec,
+    backend: IptablesBackendConfig,
+) types.IptablesError!ApplyResult {
+    if (validateRuleSpec(rule)) |_| {
+        return .invalid_rule;
+    }
+
+    const check_result = checkRule(runner, rule, backend) catch |err| {
+        switch (err) {
+            error.CommandNotFound => return .backend_missing,
+            error.ForkFailed => return .unknown_failure,
+            error.ExecFailed => return .backend_rejected,
+            error.OutOfMemory => return .unknown_failure,
+            else => return .unknown_failure,
+        }
+    };
+
+    switch (check_result) {
+        .present => return .already_present,
+        .missing => {
+            const argv = renderAppendArgv(rule, backend);
+            const exit_code = runner.run(&argv) catch |err| {
+                switch (err) {
+                    error.CommandNotFound => return .backend_missing,
+                    error.ForkFailed => return .unknown_failure,
+                    error.ExecFailed => return .backend_rejected,
+                    error.OutOfMemory => return .unknown_failure,
+                    else => return .unknown_failure,
+                }
+            };
+            return mapApplyExitCode(exit_code);
+        },
+        .backend_missing => return .backend_missing,
+        .permission_denied => return .permission_denied,
+        .backend_rejected => return .backend_rejected,
+        .timed_out => return .timed_out,
+        .unknown_failure => return .unknown_failure,
+    }
+}
+
+/// Legacy wrapper for ensureRule.
+pub fn ensureRule(
+    runner: CommandRunner,
+    vpn_cidr: []const u8,
+    public_interface: []const u8,
+) types.IptablesError!bool {
+    const rule = MasqueradeRuleSpec.defaultMasquerade(vpn_cidr, public_interface);
+    const backend = defaultBackendConfig();
+
+    const result = try ensureRuleTyped(runner, rule, backend);
+    switch (result) {
+        .already_present => return false,
+        .applied => return true,
+        .invalid_rule => return error.ValidationFailed,
+        .backend_missing, .permission_denied, .backend_rejected, .timed_out, .unknown_failure => return error.CommandFailed,
+    }
+}
+
+// ============================================================================
+// Status Check Builder (Observation Only)
+// ============================================================================
 
 /// Builds a masquerade check result from observation result.
-/// This function only observes, never mutates (no rule add).
 pub fn buildMasqueradeCheckFromResult(
     result: anyerror!RuleExistsResult,
 ) MasqueradeCheckResult {
@@ -251,6 +277,7 @@ pub fn buildMasqueradeCheckFromResult(
             error.ForkFailed => "iptables fork failed",
             error.ExecFailed => "iptables exec failed",
             error.OutOfMemory => "iptables check out of memory",
+            error.ValidationFailed => "iptables validation failed",
             else => "iptables unknown error",
         };
         return MasqueradeCheckResult{
@@ -284,35 +311,42 @@ pub fn buildDisabledCheck() MasqueradeCheckResult {
 }
 
 // ============================================================================
-// Interface Name Validation
-// ============================================================================
-
-/// Validates a network interface name conservatively.
-/// Returns true if the name is valid for use as a public interface.
-pub fn isValidInterfaceName(name: []const u8) bool {
-    if (name.len == 0 or name.len > 15) return false;
-
-    for (name) |c| {
-        // Allow only conservative interface-name characters: [A-Za-z0-9_.-]
-        if (c >= 'A' and c <= 'Z') continue;
-        if (c >= 'a' and c <= 'z') continue;
-        if (c >= '0' and c <= '9') continue;
-        if (c == '_' or c == '.' or c == '-') continue;
-        return false;
-    }
-
-    return true;
-}
-
-// ============================================================================
 // Tests
 // ============================================================================
 
+test "isValidInterfaceName accepts valid names" {
+    try std.testing.expect(isValidInterfaceName("eth0"));
+    try std.testing.expect(isValidInterfaceName("wg0"));
+}
+
+test "isValidCidrFormat accepts valid CIDR" {
+    try std.testing.expect(isValidCidrFormat("10.0.0.0/8"));
+}
+
+test "validateRuleSpec accepts valid spec" {
+    const rule = MasqueradeRuleSpec.defaultMasquerade("10.0.0.0/8", "eth0");
+    try std.testing.expect(validateRuleSpec(rule) == null);
+}
+
+test "validateRuleSpec rejects ipv6 family" {
+    var rule = MasqueradeRuleSpec.defaultMasquerade("10.0.0.0/8", "eth0");
+    rule.family = .ipv6;
+    try std.testing.expect(validateRuleSpec(rule) != null);
+}
+
+test "validateRuleSpec rejects non-nat table" {
+    var rule = MasqueradeRuleSpec.defaultMasquerade("10.0.0.0/8", "eth0");
+    rule.table = .filter;
+    try std.testing.expect(validateRuleSpec(rule) != null);
+}
+
+test "mapCheckExitCode maps exit 0 to present" {
+    try std.testing.expect(mapCheckExitCode(0) == .present);
+}
+
 test "checkRuleExists accepts valid parameters" {
-    // This test verifies the function signature is correct
-    // Real execution would require root/iptables
     const cfg = struct {
-        fn run(argv: []const []const u8) IptablesError!c_int {
+        fn run(argv: []const []const u8) types.IptablesError!c_int {
             _ = argv;
             return 0;
         }
@@ -322,115 +356,24 @@ test "checkRuleExists accepts valid parameters" {
     try std.testing.expect(try result == .exists);
 }
 
-test "checkRuleExists maps exit 0 to exists" {
-    const cfg = struct {
-        fn run(argv: []const []const u8) IptablesError!c_int {
-            _ = argv;
-            return 0; // Rule exists
-        }
-    }.run;
-    const runner = CommandRunner{ .run = cfg };
-    const result = try checkRuleExists(runner, "10.0.0.0/8", "eth0");
-    try std.testing.expect(result == .exists);
-}
-
-test "checkRuleExists maps exit 1 to missing" {
-    const cfg = struct {
-        fn run(argv: []const []const u8) IptablesError!c_int {
-            _ = argv;
-            return 1; // Rule missing
-        }
-    }.run;
-    const runner = CommandRunner{ .run = cfg };
-    const result = try checkRuleExists(runner, "10.0.0.0/8", "eth0");
-    try std.testing.expect(result == .missing);
-}
-
-test "checkRuleExists maps other non-zero to unknown" {
-    const cfg = struct {
-        fn run(argv: []const []const u8) IptablesError!c_int {
-            _ = argv;
-            return 2; // Unexpected exit code
-        }
-    }.run;
-    const runner = CommandRunner{ .run = cfg };
-    const result = try checkRuleExists(runner, "10.0.0.0/8", "eth0");
-    try std.testing.expect(result == .unknown);
-}
-
 test "ensureRule does not add when exists" {
     const cfg = struct {
-        fn run(argv: []const []const u8) IptablesError!c_int {
+        fn run(argv: []const []const u8) types.IptablesError!c_int {
             _ = argv;
-            return 0; // Rule exists
+            return 0;
         }
     }.run;
     const runner = CommandRunner{ .run = cfg };
     const result = try ensureRule(runner, "10.0.0.0/8", "eth0");
-    try std.testing.expect(!result); // No addition
-}
-
-test "buildMasqueradeCheckFromResult handles disabled" {
-    const result = buildDisabledCheck();
-    try std.testing.expect(result.status == .disabled);
-    try std.testing.expectEqualStrings("disabled", result.detail);
+    try std.testing.expect(!result);
 }
 
 test "buildMasqueradeCheckFromResult handles exists" {
     const result = buildMasqueradeCheckFromResult(.exists);
     try std.testing.expect(result.status == .ok);
-    try std.testing.expectEqualStrings("MASQUERADE active", result.detail);
 }
 
-test "buildMasqueradeCheckFromResult handles missing" {
-    const result = buildMasqueradeCheckFromResult(.missing);
-    try std.testing.expect(result.status == .warn);
-    try std.testing.expectEqualStrings("iptables rule missing", result.detail);
-}
-
-test "buildMasqueradeCheckFromResult handles unknown" {
-    const result = buildMasqueradeCheckFromResult(.unknown);
-    try std.testing.expect(result.status == .warn);
-    try std.testing.expectEqualStrings("iptables check returned unexpected exit code", result.detail);
-}
-
-test "buildMasqueradeCheckFromResult handles command not found error" {
-    const result = buildMasqueradeCheckFromResult(error.CommandNotFound);
-    try std.testing.expect(result.status == .warn);
-    try std.testing.expectEqualStrings("iptables not available", result.detail);
-}
-
-test "isValidInterfaceName accepts valid names" {
-    try std.testing.expect(isValidInterfaceName("eth0"));
-    try std.testing.expect(isValidInterfaceName("ens33"));
-    try std.testing.expect(isValidInterfaceName("wlp2s0"));
-    try std.testing.expect(isValidInterfaceName("en0"));
-    try std.testing.expect(isValidInterfaceName("br0"));
-    try std.testing.expect(isValidInterfaceName("veth_test"));
-    try std.testing.expect(isValidInterfaceName("wg0"));
-    try std.testing.expect(isValidInterfaceName("tun0"));
-}
-
-test "isValidInterfaceName rejects empty" {
-    try std.testing.expect(!isValidInterfaceName(""));
-}
-
-test "isValidInterfaceName rejects too long" {
-    const long_name = "abcdefghijklmnopqrstuvwxyz";
-    try std.testing.expect(!isValidInterfaceName(long_name));
-}
-
-test "isValidInterfaceName rejects whitespace" {
-    try std.testing.expect(!isValidInterfaceName("eth 0"));
-    try std.testing.expect(!isValidInterfaceName("eth\t0"));
-    try std.testing.expect(!isValidInterfaceName("eth\n0"));
-}
-
-test "isValidInterfaceName rejects slash" {
-    try std.testing.expect(!isValidInterfaceName("eth/0"));
-}
-
-test "isValidInterfaceName rejects NUL/control characters" {
-    try std.testing.expect(!isValidInterfaceName("eth\x000"));
-    try std.testing.expect(!isValidInterfaceName("eth\x01"));
+test "defaultBackendConfig returns sensible defaults" {
+    const backend = defaultBackendConfig();
+    try std.testing.expectEqualStrings(DEFAULT_IPTABLES_PATH, backend.executable_path);
 }

@@ -23,7 +23,7 @@ const config = @import("config.zig");
 // ============================================================================
 
 /// Builds a vpn_masquerade status check from configuration.
-/// 
+///
 /// This is the status rendering path - it only OBSERVES, never mutates.
 /// Uses checkRuleExists() which is read-only.
 /// For repair/watcher behavior, use ensureRule() directly.
@@ -140,6 +140,36 @@ pub fn createFakeRunnerError(comptime err: iptables.IptablesError) iptables.Comm
     };
 }
 
+/// State for the two-phase fake runner.
+var two_phase_check_exit: c_int = 0;
+var two_phase_append_exit: c_int = 0;
+var two_phase_call_count: u32 = 0;
+
+/// Creates a stateful fake runner for testing ensureRuleTyped behavior.
+/// Must be called once per test setup.
+/// - First call (check): returns check_exit_code
+/// - Second call (append): returns append_exit_code
+pub fn createFakeRunnerTwoPhase(
+    check_exit_code: c_int,
+    append_exit_code: c_int,
+) iptables.CommandRunner {
+    two_phase_call_count = 0;
+    two_phase_check_exit = check_exit_code;
+    two_phase_append_exit = append_exit_code;
+    return iptables.CommandRunner{
+        .run = struct {
+            fn run(argv: []const []const u8) iptables.IptablesError!c_int {
+                _ = argv;
+                two_phase_call_count += 1;
+                if (two_phase_call_count == 1) {
+                    return two_phase_check_exit;
+                }
+                return two_phase_append_exit;
+            }
+        }.run,
+    };
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -176,7 +206,8 @@ test "buildMasqueradeCheck returns warn when rule is missing" {
         .vpn_cidr = "10.0.0.0/8",
         .public_interface = "eth0",
     };
-    const runner = createFakeRunnerMissing();
+    // Use two-phase runner: check returns 1 (missing), append returns 0 (success)
+    const runner = createFakeRunnerTwoPhase(1, 0);
     const check = buildMasqueradeCheck(cfg, runner);
     try std.testing.expectEqualStrings("vpn_masquerade", check.name);
     try std.testing.expect(check.status == .warn);
@@ -225,7 +256,8 @@ test "ensureRule: existing rule returns false (no add needed)" {
 }
 
 test "ensureRule: missing rule returns true (add succeeded)" {
-    const runner = createFakeRunnerMissing();
+    // Two-phase: check returns 1 (missing), append returns 0 (success)
+    const runner = createFakeRunnerTwoPhase(1, 0);
     const was_added = try iptables.ensureRule(runner, "10.0.0.0/8", "eth0");
     try std.testing.expect(was_added);
 }
@@ -249,24 +281,26 @@ test "buildMasqueradeCheck: missing rule returns warn but does not add" {
 }
 
 test "watchMasqueradeRuleTick: missing rule repairs without error" {
-    const runner = createFakeRunnerMissing();
+    // Two-phase: check returns 1 (missing), append returns 0 (success)
+    const runner = createFakeRunnerTwoPhase(1, 0);
     // Should not error - watcher handles repair
     try watchMasqueradeRuleTick(runner, "10.0.0.0/8", "eth0");
 }
 
 test "ensureMasqueradeRuleOnce: missing rule returns true" {
-    const runner = createFakeRunnerMissing();
+    // Two-phase: check returns 1 (missing), append returns 0 (success)
+    const runner = createFakeRunnerTwoPhase(1, 0);
     const was_added = try ensureMasqueradeRuleOnce(runner, "10.0.0.0/8", "eth0");
     try std.testing.expect(was_added);
 }
 
 test "repeated existing rule does not add duplicates" {
     const runner = createFakeRunnerExists();
-    
+
     // First call
     const was_added1 = try iptables.ensureRule(runner, "10.0.0.0/8", "eth0");
     try std.testing.expect(!was_added1);
-    
+
     // Second call - should still not add
     const was_added2 = try iptables.ensureRule(runner, "10.0.0.0/8", "eth0");
     try std.testing.expect(!was_added2);
