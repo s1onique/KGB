@@ -32,6 +32,8 @@ const _net_wg_show_parser = @import("net/wg_show_parser.zig");
 const _net_wg_show_parser_tests = @import("net/wg_show_parser_tests.zig");
 const _net_wg_show_collector = @import("net/wg_show_collector.zig");
 const _net_wg_show_collector_tests = @import("net/wg_show_collector_tests.zig");
+const _net_wg_status_boundary = @import("net/wg_status_boundary.zig");
+const _net_wg_status_boundary_cli = @import("net/wg_status_boundary_cli.zig");
 const _net_private_interface_stats = @import("net/private_interface_stats.zig");
 const _net_private_interface_stats_tests = @import("net/private_interface_stats_tests.zig");
 const _metrics = @import("metrics.zig");
@@ -117,6 +119,10 @@ test { std.testing.refAllDecls(@import("runtime/heartbeat_log.zig")); }
 test { std.testing.refAllDecls(@import("runtime/lab_events.zig")); }
 test { std.testing.refAllDecls(@import("runtime/lab_events_tests.zig")); }
 test { std.testing.refAllDecls(@import("logging.zig")); }
+
+// WireGuard status boundary tests
+test { std.testing.refAllDecls(@import("net/wg_status_boundary.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_status_boundary_cli.zig")); }
 
 // BFD module tests
 test { std.testing.refAllDecls(@import("bfd/packet.zig")); }
