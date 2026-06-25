@@ -22,7 +22,7 @@ def write_matrix_summary(
     table_rows = []
     for name, data in sorted(results.items()):
         if not data.get("success"):
-            status = "❌ FAILED"
+            status = "FAIL"
             growth = "N/A"
             rate = "N/A"
             steps = "N/A"
@@ -33,7 +33,7 @@ def write_matrix_summary(
             bgp_count = "N/A"
             bfd_count = "N/A"
         else:
-            status = "✓ OK"
+            status = "OK"
             vd = data.get("verdict", {})
             nc = data.get("native_counts", {})
             growth = vd.get("total_growth_kib", 0)
@@ -41,6 +41,9 @@ def write_matrix_summary(
             steps = vd.get("steps_detected", 0)
             verdict_cell = vd.get("verdict", "unknown")
             owner = vd.get("owner", "-")
+            # Fix: if owner is blank/empty string, use "-" not "reason:"
+            if not owner:
+                owner = "-"
             hb_count = nc.get("heartbeat", 0)
             wg_count = nc.get("wireguard", 0)
             bgp_count = nc.get("bgp", 0)
@@ -75,7 +78,7 @@ def write_matrix_summary(
 
 {table_header}
 {table_sep}
-{"".join(table_rows)}
+{"\n".join(table_rows)}
 
 ## Native Event Counts
 
@@ -103,10 +106,26 @@ def write_matrix_summary(
         content += f"- Steps: {vd.get('steps_detected', 'N/A')}\n"
         content += f"- Samples: {vd.get('samples_count', 'N/A')}\n"
         content += f"- Verdict: {vd.get('verdict', 'unknown')}\n"
-        content += f"- Owner: {vd.get('owner', '-')}\n"
         
+        # Fix: owner is already validated above, but be explicit here
+        owner_val = vd.get("owner", "-")
+        if not owner_val:
+            owner_val = "-"
+        content += f"- Owner: {owner_val}\n"
+        
+        # Fix: Remove synthetic/analyzer "Event counts:" from reason text for ALL variants
+        # Native event counts are authoritative for runtime activity
+        # Never render analyzer/synthetic counts as runtime truth
         if vd.get("reason"):
-            content += f"\n**Reason**: {vd['reason']}\n"
+            reason_text = vd['reason']
+            # Strip "Event counts: ..." suffix from reason text if present
+            # This is analyzer/synthetic output, not verified native runtime events
+            if "Event counts:" in reason_text:
+                # Remove everything after "Event counts:" including the phrase
+                reason_text = reason_text.split("Event counts:")[0].strip()
+            
+            if reason_text:
+                content += f"\n**Reason**: {reason_text}\n"
         
         content += f"\n**Manifest Config**:\n"
         content += f"- native_events_enabled: {manifest.get('native_events_enabled', 'N/A')}\n"
@@ -116,11 +135,11 @@ def write_matrix_summary(
         content += f"- disable_bfd: {manifest.get('native_disable_bfd', 'N/A')}\n"
         
         nc = data.get("native_counts", {})
-        content += f"\n**Native Events**: HB={nc.get('heartbeat', 0)}, WG={nc.get('wireguard', 0)}, BGP={nc.get('bgp', 0)}, BFD={nc.get('bfd', 0)}\n"
+        content += f"\n**Native Events** (verified runtime): HB={nc.get('heartbeat', 0)}, WG={nc.get('wireguard', 0)}, BGP={nc.get('bgp', 0)}, BFD={nc.get('bfd', 0)}\n"
         
         leak = data.get("disabled_leak", "")
         if leak:
-            content += f"\n**⚠️ FAIL**: {leak}\n"
+            content += f"\n**FAIL**: {leak}\n"
     
     content += f"""
 

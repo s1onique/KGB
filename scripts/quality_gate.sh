@@ -333,6 +333,19 @@ echo "[gate] checking memory lab artifacts schema self-test"
 
 python3 scripts/verify_memory_lab_artifact.py --self-test
 
+echo "[gate] checking memory attribution matrix verifier self-test"
+
+python3 scripts/verify_memory_attribution_matrix.py --self-test
+
+echo "[gate] checking memory attribution matrix workflow shape self-test"
+
+python3 scripts/verify_memory_matrix_workflow_shape.py --self-test
+
+echo "[gate] checking memory attribution matrix workflow shape"
+
+python3 scripts/verify_memory_matrix_workflow_shape.py \
+  --workflow .github/workflows/tovarisch-idle-memory-attribution-matrix.yml
+
 echo "[gate] checking memory allocation ownership hygiene"
 
 bash scripts/check_memory_ownership.sh

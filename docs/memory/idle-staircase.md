@@ -256,6 +256,42 @@ timestamp	elapsed_millis	event	subsystem	detail	pid
 
 The **Memory Attribution Matrix** runs multiple lab variants to systematically attribute idle memory growth. See [idle-memory-attribution-matrix.md](./idle-memory-attribution-matrix.md) for full documentation.
 
+### Full 7-Variant Linux Matrix Evidence
+
+The full 7-variant Linux matrix completed and verified successfully:
+
+| Property | Value |
+|----------|-------|
+| **Run ID** | `matrix-20260624-205327` |
+| **Overall Verdict** | `bounded_warmup_or_allocator_highwater` |
+| **Artifact ID** | `7863558444` |
+| **Artifact SHA256** | `3223ea64d912393046b3128c18a4a760da33973aa838871604712112171de07a` |
+| **Variants** | all_enabled, heartbeat_disabled, wg_disabled, bgp_disabled, bfd_disabled, bgp_bfd_disabled, no_periodic |
+| **Duration** | 600s per variant |
+| **Interval** | 5s |
+
+**Key Results**:
+
+- Heartbeat-enabled variants showed only `116 KiB` total growth, `1` step, about `11 KiB/min`
+- `heartbeat_disabled` showed `0 KiB` growth
+- `no_periodic` showed `0 KiB` growth
+- Matrix verifier result: `VERIFICATION PASSED`
+
+**Caveats**:
+
+- Artifact retention is time-bounded (30 days)
+- Result is workload/window-specific, not a global no-leak theorem
+- This matrix does **not** prove "no leaks globally"
+- It proves that this 10-minute-per-variant idle matrix did not find an unbounded idle leak
+
+### Workflow Safety
+
+The long-running matrix lab (`tovarisch-idle-memory-attribution-matrix.yml`) is:
+- **Manual-only**: Triggered via `workflow_dispatch`
+- **NOT wired into push/PR/schedule**
+- **Verifier self-test**: Runs in `make gate` to catch regressions
+- **Workflow shape verification**: Ensures manual-only safety gate
+
 ## Artifact Verification
 
 ### Self-Test
@@ -304,16 +340,15 @@ python3 scripts/verify_idle_staircase_native_heartbeat_smoke.py \
 
 ## Current Status
 
-**Verdict**: `inconclusive` (without native events)
+**Matrix Verdict**: `bounded_warmup_or_allocator_highwater` (run `matrix-20260624-205327`)
 
-**Native infrastructure**: Implemented and ready for use
+**Native infrastructure**: Implemented and verified
 
-**Matrix runner**: Implemented for systematic attribution
+**Matrix runner**: Implemented and verified with full 7-variant run
 
-**Next steps**:
-1. Run memory attribution matrix to identify subsystem owner
-2. If growth persists with all periodic paths disabled, investigate allocator behavior
-3. Use matrix verdict to guide further investigation
+**Matrix verifier**: Self-tests pass, gated in `make gate`
+
+**Workflow safety**: Manual-only via `workflow_dispatch`
 
 ## File Structure
 
@@ -334,10 +369,13 @@ python3 scripts/verify_idle_staircase_native_heartbeat_smoke.py \
 | `scripts/lab_memory_attribution_matrix.py` | Matrix runner for systematic attribution |
 | `scripts/lab_memory_attribution_matrix.sh` | Thin shell wrapper for matrix runner |
 | `scripts/verify_memory_attribution_matrix.py` | Matrix artifact verifier |
+| `scripts/verify_memory_matrix_workflow_shape.py` | Workflow shape verifier (manual-only safety) |
 | `scripts/idle_staircase_analyzer.py` | Verdict analysis logic (Python) |
 | `scripts/idle_staircase_analyzer_cli.py` | CLI wrapper for analyzer |
 | `scripts/verify_idle_staircase_artifact.py` | CLI wrapper for artifact verification |
 | `scripts/idle_staircase_verifier/` | Verifier package |
+| `scripts/memory_attribution_matrix/` | Matrix runner package |
+| `scripts/memory_attribution_matrix_verifier/` | Matrix verifier package |
 | `tovarisch/src/runtime/lab_events.zig` | Native event ring buffer |
 | `tovarisch/src/config.zig` | Lab config parsing with native settings |
 

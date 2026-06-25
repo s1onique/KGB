@@ -28,45 +28,84 @@ def read_file(path):
 
 def parse_verdict(content):
     result = {"verdict": "unknown"}
-    verdict_match = re.search(r'verdict:\s*(\S+)', content)
-    if verdict_match:
-        result["verdict"] = verdict_match.group(1)
-    owner_match = re.search(r'owner:\s*(\S+)', content)
-    if owner_match:
-        result["owner"] = owner_match.group(1)
-    steps_match = re.search(r'steps_detected:\s*(\d+)', content)
-    if steps_match:
-        result["steps_detected"] = int(steps_match.group(1))
-    growth_match = re.search(r'total_growth_kib:\s*(\d+)', content)
-    if growth_match:
-        result["total_growth_kib"] = int(growth_match.group(1))
-    rate_match = re.search(r'growth_rate_kib_per_min:\s*(\d+)', content)
-    if rate_match:
-        result["growth_rate_kib_per_min"] = int(rate_match.group(1))
-    samples_match = re.search(r'samples_count:\s*(\d+)', content)
-    if samples_match:
-        result["samples_count"] = int(samples_match.group(1))
-    reason_match = re.search(r'reason:\s*(.+?)(?:\n\n|$)', content, re.DOTALL)
-    if reason_match:
-        result["reason"] = reason_match.group(1).strip()
+    
+    # Fix: Use line-bound parsing to avoid capturing across newlines
+    # owner: blank should not capture "reason:" from the next line
+    
+    # Parse line by line to ensure proper line-bound behavior
+    lines = content.split('\n')
+    for line in lines:
+        stripped = line.strip()
+        
+        if stripped.startswith("verdict:"):
+            # Extract verdict value (everything after "verdict:")
+            val = stripped[len("verdict:"):].strip()
+            if val:
+                result["verdict"] = val
+        
+        elif stripped.startswith("owner:"):
+            # Extract owner value - everything after "owner:" on THIS line only
+            val = stripped[len("owner:"):].strip()
+            if val:
+                result["owner"] = val
+            else:
+                result["owner"] = ""  # Explicitly blank
+        
+        elif stripped.startswith("steps_detected:"):
+            val = stripped[len("steps_detected:"):].strip()
+            if val.isdigit():
+                result["steps_detected"] = int(val)
+        
+        elif stripped.startswith("total_growth_kib:"):
+            val = stripped[len("total_growth_kib:"):].strip()
+            if val.isdigit():
+                result["total_growth_kib"] = int(val)
+        
+        elif stripped.startswith("growth_rate_kib_per_min:"):
+            val = stripped[len("growth_rate_kib_per_min:"):].strip()
+            if val.isdigit():
+                result["growth_rate_kib_per_min"] = int(val)
+        
+        elif stripped.startswith("samples_count:"):
+            val = stripped[len("samples_count:"):].strip()
+            if val.isdigit():
+                result["samples_count"] = int(val)
+        
+        elif stripped.startswith("reason:"):
+            # Capture reason - everything on this line after "reason:"
+            val = stripped[len("reason:"):].strip()
+            if val:
+                result["reason"] = val
+    
     return result
 
 
 def parse_manifest(content):
     result = {}
-    for field in ["run_id", "platform", "commit_sha"]:
-        match = re.search(rf'{field}:\s*(.+)', content)
-        if match:
-            result[field] = match.group(1).strip()
-    for field in ["native_events_enabled", "native_disable_heartbeat", 
-                  "native_disable_wg_checks", "native_disable_bgp", "native_disable_bfd"]:
-        match = re.search(rf'{field}:\s*(.+)', content)
-        if match:
-            val = match.group(1).strip().lower()
-            result[field] = val == "true"
-    duration_match = re.search(r'duration_seconds:\s*(\d+)', content)
-    if duration_match:
-        result["duration_seconds"] = int(duration_match.group(1))
+    for line in content.split('\n'):
+        stripped = line.strip()
+        
+        if stripped.startswith("run_id:"):
+            result["run_id"] = stripped[len("run_id:"):].strip()
+        elif stripped.startswith("platform:"):
+            result["platform"] = stripped[len("platform:"):].strip()
+        elif stripped.startswith("commit_sha:"):
+            result["commit_sha"] = stripped[len("commit_sha:"):].strip()
+        elif stripped.startswith("native_events_enabled:"):
+            result["native_events_enabled"] = stripped[len("native_events_enabled:"):].strip().lower() == "true"
+        elif stripped.startswith("native_disable_heartbeat:"):
+            result["native_disable_heartbeat"] = stripped[len("native_disable_heartbeat:"):].strip().lower() == "true"
+        elif stripped.startswith("native_disable_wg_checks:"):
+            result["native_disable_wg_checks"] = stripped[len("native_disable_wg_checks:"):].strip().lower() == "true"
+        elif stripped.startswith("native_disable_bgp:"):
+            result["native_disable_bgp"] = stripped[len("native_disable_bgp:"):].strip().lower() == "true"
+        elif stripped.startswith("native_disable_bfd:"):
+            result["native_disable_bfd"] = stripped[len("native_disable_bfd:"):].strip().lower() == "true"
+        elif stripped.startswith("duration_seconds:"):
+            val = stripped[len("duration_seconds:"):].strip()
+            if val.isdigit():
+                result["duration_seconds"] = int(val)
+    
     return result
 
 

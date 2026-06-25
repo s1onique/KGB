@@ -21,3 +21,6 @@ scripts/verify_shell_containment/__pycache__/
 uvb76/cmd/uvb76-capture-netns-polling/uvb76-capture-netns-polling
 tools/memory-lab/memory-lab
 scripts/idle_staircase_verifier/__pycache__
+scripts/memory_attribution_matrix_verifier/__pycache__/
+*.pyc
+**/__pycache__/**
