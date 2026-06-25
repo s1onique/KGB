@@ -1,0 +1,191 @@
+name: WireGuard Generic-Netlink Lab
+
+on:
+  workflow_dispatch:
+    inputs:
+      verbose:
+        description: 'Verbose mode'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  wg-netlink-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      ZIG_VERSION: "0.16.0"
+      # Artifacts directory relative to repo root
+      ARTIFACTS_DIR: ./artifacts/wg-netlink-lab
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Show Zig version
+        run: zig version
+
+      - name: Show Go version
+        run: go version
+
+      - name: Install lab dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            iproute2 \
+            wireguard-tools \
+            kmod
+
+      - name: Check WireGuard kernel module
+        run: |
+          echo "=== WireGuard Kernel Module Status ==="
+          if [ -d /sys/module/wireguard ]; then
+            echo "WireGuard module is loaded"
+          else
+            echo "Attempting to load WireGuard module..."
+            modprobe wireguard 2>/dev/null || echo "Could not load wireguard module"
+          fi
+          
+          # Final check
+          if [ -d /sys/module/wireguard ]; then
+            echo "WireGuard module: LOADED"
+          else
+            echo "WireGuard module: NOT LOADED"
+          fi
+
+      - name: Build wg-netlink-proof binary
+        run: |
+          echo "=== Building wg_netlink_proof ==="
+          cd tovarisch
+          zig build wg-netlink-proof --summary all
+
+      - name: Verify proof binary exists
+        run: |
+          PROOF_BIN="./tovarisch/zig-out/bin/wg_netlink_proof"
+          if [ -f "$PROOF_BIN" ]; then
+            echo "Proof binary exists: $PROOF_BIN"
+            ls -lh "$PROOF_BIN"
+          else
+            echo "Proof binary NOT found at $PROOF_BIN"
+            exit 1
+          fi
+
+      - name: Build Go lab harness
+        run: |
+          echo "=== Building wg-netlink-lab ==="
+          cd tools/wg-netlink-lab
+          go build -o wg-netlink-lab .
+
+      - name: Verify lab harness exists
+        run: |
+          HARNESS="./tools/wg-netlink-lab/wg-netlink-lab"
+          if [ -f "$HARNESS" ]; then
+            echo "Lab harness exists: $HARNESS"
+            ls -lh "$HARNESS"
+          else
+            echo "Lab harness NOT found at $HARNESS"
+            exit 1
+          fi
+
+      - name: Run WireGuard generic-netlink full lab
+        run: |
+          echo "=== Running WireGuard Generic-Netlink Lab ==="
+          ./tools/wg-netlink-lab/wg-netlink-lab full
+
+      - name: Check preflight artifact exists (fail-closed)
+        run: |
+          PREFLIGHT="${{ env.ARTIFACTS_DIR }}/preflight.json"
+          echo "=== Checking preflight.json ==="
+          if [ ! -f "$PREFLIGHT" ]; then
+            echo "FAIL: preflight.json NOT found"
+            exit 1
+          fi
+          echo "preflight.json found:"
+          cat "$PREFLIGHT"
+          
+          # Fail-closed: check can_run
+          CAN_RUN=$(python3 -c "import json,sys; d=json.load(open('$PREFLIGHT')); print('true' if d.get('can_run', False) else 'false')")
+          if [ "$CAN_RUN" != "true" ]; then
+            echo "FAIL: preflight.can_run=false (prerequisites not met)"
+            exit 1
+          fi
+          echo "PASS: preflight.can_run=true"
+
+      - name: Check interface-state artifact exists (fail-closed)
+        run: |
+          ISTATE="${{ env.ARTIFACTS_DIR }}/interface-state.json"
+          echo "=== Checking interface-state.json ==="
+          if [ ! -f "$ISTATE" ]; then
+            echo "FAIL: interface-state.json NOT found"
+            exit 1
+          fi
+          echo "interface-state.json found:"
+          cat "$ISTATE"
+
+      - name: Check backend-status artifact exists (fail-closed)
+        run: |
+          BSTATUS="${{ env.ARTIFACTS_DIR }}/backend-status.json"
+          echo "=== Checking backend-status.json ==="
+          if [ ! -f "$BSTATUS" ]; then
+            echo "FAIL: backend-status.json NOT found"
+            exit 1
+          fi
+          echo "backend-status.json found:"
+          cat "$BSTATUS"
+          
+          # Fail-closed: check success
+          SUCCESS=$(python3 -c "import json,sys; d=json.load(open('$BSTATUS')); print('true' if d.get('success', False) else 'false')")
+          if [ "$SUCCESS" != "true" ]; then
+            echo "FAIL: backend-status.success=false"
+            exit 1
+          fi
+          echo "PASS: backend-status.success=true"
+
+      - name: Run artifact verifier
+        run: |
+          echo "=== Running Artifact Verifier ==="
+          python3 scripts/verify_wg_netlink_lab_artifact.py \
+            --artifacts-dir "${{ env.ARTIFACTS_DIR }}" \
+            --mode linux-proof
+          if [ $? -ne 0 ]; then
+            echo "FAIL: Artifact verifier failed"
+            exit 1
+          fi
+          echo "PASS: Artifact verifier passed"
+
+      - name: Make artifacts readable
+        if: always()
+        run: |
+          chmod -R a+rX "${{ env.ARTIFACTS_DIR }}" 2>/dev/null || true
+          ls -la "${{ env.ARTIFACTS_DIR }}/"
+
+      - name: Upload lab artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wg-netlink-lab-artifacts-${{ github.run_id }}
+          path: |
+            ${{ env.ARTIFACTS_DIR }}/*.json
+          retention-days: 7
+
+      - name: Summary
+        run: |
+          echo "=== WireGuard Generic-Netlink Lab Summary ==="
+          echo "Artifacts directory: ${{ env.ARTIFACTS_DIR }}"
+          echo ""
+          echo "All checks passed:"
+          echo "- preflight.can_run=true"
+          echo "- backend-status.success=true"
+          echo "- backend-status.backend_kind=generic_netlink"
+          echo "- Artifact verifier passed"
+          echo ""
+          echo "Note: This lab proves empty-interface/single-response native"
+          echo "backend runtime behavior. It does NOT prove multipart peer"
+          echo "coalescing. Production default remains CLI until multipart"
+          echo "handling is implemented and proven."

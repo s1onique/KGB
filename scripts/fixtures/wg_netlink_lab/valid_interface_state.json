@@ -1,0 +1,6 @@
+{
+  "interface": "wg-kgb0",
+  "pre_existing": false,
+  "created_by_lab": true,
+  "teardown_action": "deleted"
+}

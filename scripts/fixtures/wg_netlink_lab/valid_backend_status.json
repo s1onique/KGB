@@ -1,0 +1,8 @@
+{
+  "success": true,
+  "interface": "wg-kgb0",
+  "peer_count": 0,
+  "listen_port": null,
+  "backend_kind": "generic_netlink",
+  "no_sensitive_data": true
+}

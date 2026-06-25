@@ -1,0 +1,9 @@
+{
+  "can_run": true,
+  "reason": "ok",
+  "kernel": "5.15.0-generic",
+  "wg_module_loaded": true,
+  "has_cap_net_admin": true,
+  "has_ip_command": true,
+  "in_netns": false
+}

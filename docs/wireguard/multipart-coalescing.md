@@ -86,3 +86,43 @@ This limitation is documented in fixture tests:
 - Linux netlink(7) manual
 - WireGuard UAPI: `include/uapi/linux/wireguard.h`
 - Generic netlink: `include/net/genetlink.h`
+
+## Lab Workflow for Empty-Interface Proof
+
+A privileged Linux CI workflow proves empty-interface/single-response native backend runtime behavior.
+
+### Workflow: `.github/workflows/wg-netlink-lab.yml`
+
+- **Trigger**: Manual (`workflow_dispatch`)
+- **Runner**: Ubuntu latest with privileged operations
+- **Artifacts**: `artifacts/wg-netlink-lab/`
+
+### What the Lab Proves
+
+The lab proves:
+- `GenericNetlinkBackend` initializes correctly on Linux
+- Querying an empty `wg-kgb0` interface via generic netlink succeeds
+- Backend returns `backend_kind: "generic_netlink"`
+- `peer_count: 0` for empty interface
+- `no_sensitive_data: true` — no keys or endpoints emitted
+
+### What the Lab Does NOT Prove
+
+- Multipart peer coalescing (multiple messages, `NLMSG_DONE` handling)
+- Interfaces with real peers
+- Performance under load
+- Error recovery from malformed responses
+
+### Running the Lab
+
+```bash
+# Local (skips on non-Linux)
+make lab-wg-netlink
+
+# GitHub Actions (manual trigger)
+gh workflow run wg-netlink-lab.yml
+```
+
+### Production Default
+
+Production remains `cli` until multipart/coalescing is implemented and proven.
