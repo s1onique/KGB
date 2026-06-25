@@ -167,9 +167,8 @@ pub fn main(init: std.process.Init) !void {
     // Call wireguardStatus directly
     const status_result = trait.wireguardStatus(arena);
 
-    const result: ProofResult = status_result catch |err| {
-        // Structured error - emit proof with error
-        const result = ProofResult{
+    const wg_result: wg.WireGuardStatusResult = status_result catch |err| {
+        const proof_error = ProofResult{
             .success = false,
             .backend_kind = "generic_netlink",
             .interface = interface_name,
@@ -181,25 +180,25 @@ pub fn main(init: std.process.Init) !void {
             .@"error" = mapErrorToString(err),
             .no_sensitive_data = true,
         };
-        try emitProof(stdout, result);
+        try emitProof(stdout, proof_error);
         try stdout.flush();
         std.process.exit(1);
     };
 
     // Success - verify no sensitive data
-    const no_sensitive = result.status.public_key_redacted.len == 0;
+    const no_sensitive = wg_result.status.public_key_redacted.len == 0;
 
     // Verify returned interface matches requested interface
-    if (!std.mem.eql(u8, result.status.interface, interface_name)) {
+    if (!std.mem.eql(u8, wg_result.status.interface, interface_name)) {
         const mismatch_result = ProofResult{
             .success = false,
             .backend_kind = "generic_netlink",
-            .interface = result.status.interface,
-            .peer_count = result.status.peer_count,
-            .latest_handshake_epoch_sec = result.status.latest_handshake_epoch_sec,
-            .rx_bytes = result.status.rx_bytes,
-            .tx_bytes = result.status.tx_bytes,
-            .listen_port = result.status.listen_port,
+            .interface = wg_result.status.interface,
+            .peer_count = wg_result.status.peer_count,
+            .latest_handshake_epoch_sec = wg_result.status.latest_handshake_epoch_sec,
+            .rx_bytes = wg_result.status.rx_bytes,
+            .tx_bytes = wg_result.status.tx_bytes,
+            .listen_port = wg_result.status.listen_port,
             .@"error" = "interface_mismatch",
             .no_sensitive_data = true,
         };
@@ -211,12 +210,12 @@ pub fn main(init: std.process.Init) !void {
     const proof = ProofResult{
         .success = true,
         .backend_kind = "generic_netlink",
-        .interface = result.status.interface,
-        .peer_count = result.status.peer_count,
-        .latest_handshake_epoch_sec = result.status.latest_handshake_epoch_sec,
-        .rx_bytes = result.status.rx_bytes,
-        .tx_bytes = result.status.tx_bytes,
-        .listen_port = result.status.listen_port,
+        .interface = wg_result.status.interface,
+        .peer_count = wg_result.status.peer_count,
+        .latest_handshake_epoch_sec = wg_result.status.latest_handshake_epoch_sec,
+        .rx_bytes = wg_result.status.rx_bytes,
+        .tx_bytes = wg_result.status.tx_bytes,
+        .listen_port = wg_result.status.listen_port,
         .@"error" = null,
         .no_sensitive_data = no_sensitive,
     };
