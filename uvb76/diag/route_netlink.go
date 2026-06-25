@@ -14,6 +14,11 @@ import (
 	"unsafe"
 )
 
+// negativeErrno converts a syscall.Errno to its negative representation as used in netlink error codes.
+func negativeErrno(errno syscall.Errno) int32 {
+	return -int32(errno)
+}
+
 // RouteLookupNative performs a native route lookup using NETLINK_ROUTE.
 // This is the preferred implementation that avoids CLI composition.
 //
@@ -46,11 +51,13 @@ func RouteLookupNative(ctx context.Context, target string) *NetlinkRouteResult {
 	}
 	defer syscall.Close(fd)
 
-	// Set receive timeout
-	tv := syscall.Timeval{Sec: 2, Usec: 0}
+	// Set receive timeout using NsecToTimeval for platform-correct field types
+	tv := syscall.NsecToTimeval(2 * time.Second)
 	if deadline, ok := ctx.Deadline(); ok {
 		timeout := deadline.Sub(time.Now())
-		tv = syscall.Timeval{Sec: int(timeout.Seconds()), Usec: int(timeout.Nanoseconds() / 1000)}
+		if timeout > 0 {
+			tv = syscall.NsecToTimeval(timeout.Nanoseconds())
+		}
 	}
 	if err := syscall.SetsockoptTimeval(fd, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, &tv); err != nil {
 		result.Error = &NetlinkError{Kind: "open_failed", Message: fmt.Sprintf("setsockopt: %v", err)}
@@ -200,7 +207,7 @@ func parseRouteResponse(buf []byte, result *NetlinkRouteResult) *NetlinkRouteRes
 			}
 			err := (*int32)(unsafe.Pointer(&buf[off+16]))
 			if *err != 0 {
-				if *err == -syscall.ENOENT {
+				if *err == negativeErrno(syscall.ENOENT) {
 					result.Error = ErrNetlinkNoRoute
 				} else {
 					result.Error = &NetlinkError{

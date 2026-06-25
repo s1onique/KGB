@@ -289,6 +289,50 @@ func TestParseRouteResponse_NLMSG_ERROR(t *testing.T) {
 	}
 }
 
+// TestNegativeErrno_Helper verifies the helper correctly converts syscall.Errno to negative int32.
+func TestNegativeErrno_Helper(t *testing.T) {
+	// ENOENT is errno 2 on Linux. In netlink error domain, it must be -2.
+	enoentNeg := negativeErrno(syscall.ENOENT)
+	if enoentNeg != -2 {
+		t.Errorf("expected ENOENT as -2, got %d", enoentNeg)
+	}
+}
+
+// TestNegativeErrno_OtherErrors verifies other errno values are correctly negated.
+func TestNegativeErrno_OtherErrors(t *testing.T) {
+	// EINVAL (22 on Linux) should become -22
+	einvalNeg := negativeErrno(syscall.EINVAL)
+	if einvalNeg != -22 {
+		t.Errorf("expected EINVAL as -22, got %d", einvalNeg)
+	}
+
+	// ENOMEM (12 on Linux) should become -12
+	enomemNeg := negativeErrno(syscall.ENOMEM)
+	if enomemNeg != -12 {
+		t.Errorf("expected ENOMEM as -12, got %d", enomemNeg)
+	}
+}
+
+// TestParseRouteResponse_ENOENTViaHelper verifies ENOENT detection uses the negativeErrno helper.
+func TestParseRouteResponse_ENOENTViaHelper(t *testing.T) {
+	data := make([]byte, 20)
+	nlmsg := (*nlmsghdr)(unsafe.Pointer(&data[0]))
+	nlmsg.Len = 20
+	nlmsg.Type = uint16(syscall.NLMSG_ERROR)
+	// ENOENT = 2, negated via helper = -2 (0xFE 0xFF 0xFF 0xFF in little-endian)
+	negErrno := negativeErrno(syscall.ENOENT)
+	data[16] = byte(negErrno)
+	data[17] = byte(negErrno >> 8)
+	data[18] = byte(negErrno >> 16)
+	data[19] = byte(negErrno >> 24)
+
+	result := &NetlinkRouteResult{}
+	parsed := parseRouteResponse(data, result)
+	if parsed.Error == nil || parsed.Error.Kind != "no_route" {
+		t.Errorf("expected no_route error via helper, got %v", parsed.Error)
+	}
+}
+
 func TestParseRtMsg_MalformedAttributes(t *testing.T) {
 	// Truncated attribute
 	data := make([]byte, 12+3)
