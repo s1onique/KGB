@@ -34,13 +34,15 @@ jobs:
       - name: Show Go version
         run: go version
 
-      - name: Install lab dependencies
+      - name: Prepare Linux network lab dependencies
+        run: |
+          chmod +x ./scripts/install_linux_net_lab_deps.sh
+          ./scripts/install_linux_net_lab_deps.sh
+
+      - name: Install WireGuard kernel module loader
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            iproute2 \
-            wireguard-tools \
-            kmod
+          sudo apt-get install -y --no-install-recommends kmod
 
       - name: Check WireGuard kernel module
         run: |

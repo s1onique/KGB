@@ -13,13 +13,19 @@ import (
 
 // PreflightResult captures prerequisite check results.
 type PreflightResult struct {
-	CanRun         bool   `json:"can_run"`
-	Reason         string `json:"reason"`
-	Kernel         string `json:"kernel,omitempty"`
-	WGModuleLoaded bool   `json:"wg_module_loaded"`
-	HasCapNetAdmin bool   `json:"has_cap_net_admin"`
-	HasIPCommand   bool   `json:"has_ip_command"`
-	InNetns        bool   `json:"in_netns"`
+	CanRun           bool   `json:"can_run"`
+	Reason           string `json:"reason"`
+	Kernel           string `json:"kernel,omitempty"`
+	WGModuleLoaded   bool   `json:"wg_module_loaded"`
+	HasCapNetAdmin   bool   `json:"has_cap_net_admin"`
+	HasIPCommand     bool   `json:"has_ip_command"`
+	InNetns          bool   `json:"in_netns"`
+	// Enhanced diagnostics for debugging missing_ip_command failures
+	PathEnv          string `json:"path_env,omitempty"`
+	IPCommandPath    string `json:"ip_command_path,omitempty"`
+	IPVersion        string `json:"ip_version,omitempty"`
+	IPRoute2Package  string `json:"iproute2_package,omitempty"`
+	CandidateIPPaths string `json:"candidate_ip_paths,omitempty"`
 }
 
 // InterfaceState captures interface ownership for teardown decisions.
@@ -62,6 +68,9 @@ func runPreflight() error {
 
 	// Check if ip command is available
 	result.HasIPCommand = checkIPCommand()
+
+	// Collect diagnostics unconditionally so passing artifacts prove which ip was used
+	collectIPDiagnostics(&result)
 
 	// Check if in network namespace
 	result.InNetns = checkNetns()
@@ -157,11 +166,53 @@ func checkCapNetAdmin() bool {
 	return false
 }
 
-// checkIPCommand checks if the `ip` command is available.
+// collectIPDiagnostics gathers enhanced diagnostics for missing_ip_command failures.
+func collectIPDiagnostics(result *PreflightResult) {
+	// PATH environment variable
+	result.PathEnv = os.Getenv("PATH")
+
+	// exec.LookPath for ip (reliable, no shell needed)
+	if path, err := exec.LookPath("ip"); err == nil {
+		result.IPCommandPath = path
+	}
+
+	// ip -Version output (if available)
+	cmdVersion := exec.Command("ip", "-Version")
+	if output, err := cmdVersion.CombinedOutput(); err == nil {
+		// Take only first line to keep artifact small
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		if len(lines) > 0 {
+			result.IPVersion = lines[0]
+		}
+	}
+
+	// dpkg-query iproute2 version (if available)
+	cmdPkg := exec.Command("dpkg-query", "-W", "-f=${Version}", "iproute2")
+	if version, err := cmdPkg.Output(); err == nil {
+		result.IPRoute2Package = strings.TrimSpace(string(version))
+	}
+
+	// Check candidate ip binary paths
+	candidatePaths := []string{
+		"/sbin/ip",
+		"/usr/sbin/ip",
+		"/bin/ip",
+		"/usr/bin/ip",
+	}
+	var found []string
+	for _, p := range candidatePaths {
+		if _, err := os.Stat(p); err == nil {
+			found = append(found, p)
+		}
+	}
+	if len(found) > 0 {
+		result.CandidateIPPaths = strings.Join(found, ",")
+	}
+}
+
+// checkIPCommand checks if the `ip` command is available using LookPath.
 func checkIPCommand() bool {
-	cmd := exec.Command("ip", "-version")
-	// Just check if command exists, not if it works
-	err := cmd.Run()
+	_, err := exec.LookPath("ip")
 	return err == nil
 }
 

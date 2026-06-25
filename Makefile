@@ -508,7 +508,7 @@ wg-netlink-proof:
 $(WG_NETLINK_LAB):
 	cd tools/wg-netlink-lab && go build -o wg-netlink-lab .
 
-# Full WireGuard generic-netlink lab: build harness, then run full proof on Linux
+# Full WireGuard generic-netlink lab: build harness, prepare deps, then run full proof on Linux
 .PHONY: lab-wg-netlink
 lab-wg-netlink: $(WG_NETLINK_LAB)
 	@echo "=== WireGuard Generic-Netlink Lab ==="
@@ -517,7 +517,10 @@ lab-wg-netlink: $(WG_NETLINK_LAB)
 		echo "[INFO] Preflight only:"; \
 		$(WG_NETLINK_LAB) preflight || true; \
 		exit 0; \
-	fi; \
-	$(MAKE) wg-netlink-proof; \
-	$(WG_NETLINK_LAB) full
+	fi
+	@echo "=== Preparing Linux network lab dependencies ==="
+	@chmod +x ./scripts/install_linux_net_lab_deps.sh
+	@./scripts/install_linux_net_lab_deps.sh
+	@$(MAKE) wg-netlink-proof
+	@$(WG_NETLINK_LAB) full
 
