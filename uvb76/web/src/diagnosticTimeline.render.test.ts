@@ -13,7 +13,7 @@ import {
   renderEmptyState,
   renderTimeline,
 } from './diagnosticTimeline.render';
-import { createTimelineStateWithEvents, createEmptyTimelineState, createLoadingTimelineState, createHttpTimelineEvent, createIcmpTimelineEvent, createCriticalTimelineEvent, createPinnedAnchorsSpikeResponse, defaultTestFilters } from './diagnosticTimeline.fixtures';
+import { createTimelineStateWithEvents, createEmptyTimelineState, createLoadingTimelineState, createHttpTimelineEvent, createIcmpTimelineEvent, createCriticalTimelineEvent, createPinnedAnchorsSpikeResponse, defaultTestFilters, createNativeTcpQuality, createSsTcpQuality, createSyntheticTcpQuality, createUnavailableTcpQuality } from './diagnosticTimeline.fixtures';
 import { normalizeHttpResponse } from './diagnosticTimeline.model';
 import type { TimelineEvent, ProbeKindSummary } from './diagnosticTimeline.model';
 import type { TimelineFilters } from './diagnosticTimeline.filters';
@@ -583,6 +583,214 @@ describe('diagnosticTimeline.render', () => {
       
       // Verify suppressed event is also rendered
       expect(html).toContain('evt-suppressed-001');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // TCP Quality Section Render Tests
+  // -------------------------------------------------------------------------
+
+  describe('TCP Quality Section Rendering', () => {
+    it('renders "Actual HTTP probe socket TCP_INFO" label for native_tcp_info', () => {
+      const event = createHttpTimelineEvent({
+        eventId: 'evt-native-tcp',
+        latencyMs: 2500,
+        sampleTs: '2026-06-18T12:00:00Z',
+        collectedAt: '2026-06-18T12:00:01Z',
+        rollingMedianMs: 100,
+        nativeTcpQuality: createNativeTcpQuality({
+          rtt_us: 50000,
+          rttvar_us: 5000,
+          retransmits_current: 0,
+          retransmits_total: 0,
+          snd_cwnd: 10,
+          congestion_algorithm: 'cubic',
+        }),
+      });
+      
+      const html = renderExpandedPanel(event, 0);
+      
+      // Should render TCP Path Quality section
+      expect(html).toContain('tcp-quality-section');
+      expect(html).toContain('TCP Path Quality');
+      // Should render native badge label
+      expect(html).toContain('Actual HTTP probe socket TCP_INFO');
+      expect(html).toContain('tcp-quality-native');
+      // Should render RTT
+      expect(html).toContain('RTT:');
+      expect(html).toContain('50.0 ms');
+    });
+
+    it('renders RTT and other metrics for native TCP quality', () => {
+      const event = createHttpTimelineEvent({
+        eventId: 'evt-native-metrics',
+        latencyMs: 3000,
+        nativeTcpQuality: createNativeTcpQuality({
+          rtt_us: 100000,
+          rttvar_us: 10000,
+          retransmits_current: 5,
+          retransmits_total: 20,
+          snd_cwnd: 20,
+          congestion_algorithm: 'bbr',
+          delivery_rate_bps: 2000000,
+          send_queue_bytes: 1000,
+          recv_queue_bytes: 2000,
+          lost: 3,
+          unacked: 5,
+        }),
+      });
+      
+      const html = renderExpandedPanel(event, 0);
+      
+      // Should render all metrics
+      expect(html).toContain('100.0 ms'); // RTT
+      expect(html).toContain('10.0 ms'); // RTT variance
+      expect(html).toContain('Retransmits (current):');
+      expect(html).toContain('5');
+      expect(html).toContain('Retransmits (total):');
+      expect(html).toContain('20');
+      expect(html).toContain('Congestion window:');
+      expect(html).toContain('20');
+      expect(html).toContain('Congestion algorithm:');
+      expect(html).toContain('bbr');
+      expect(html).toContain('Delivery rate:');
+      expect(html).toContain('2.00 Mbps');
+      expect(html).toContain('Send queue:');
+      expect(html).toContain('1000 bytes');
+      expect(html).toContain('Receive queue:');
+      expect(html).toContain('2000 bytes');
+      expect(html).toContain('Lost packets:');
+      expect(html).toContain('3');
+      expect(html).toContain('Unacked:');
+      expect(html).toContain('5');
+    });
+
+    it('renders "Synthetic diagnostic TCP_INFO" for synthetic_tcp_info', () => {
+      const event = createHttpTimelineEvent({
+        eventId: 'evt-synthetic-tcp',
+        latencyMs: 2000,
+        nativeTcpQuality: createSyntheticTcpQuality({
+          rtt_us: 60000,
+          rttvar_us: 6000,
+          retransmits_current: 1,
+        }),
+      });
+      
+      const html = renderExpandedPanel(event, 0);
+      
+      // Should render synthetic badge label
+      expect(html).toContain('TCP Path Quality');
+      expect(html).toContain('Synthetic diagnostic TCP_INFO');
+      expect(html).toContain('tcp-quality-synthetic');
+      // Should render metrics
+      expect(html).toContain('RTT:');
+      expect(html).toContain('60.0 ms');
+    });
+
+    it('renders "ss fallback TCP info" for ss-tcp-info', () => {
+      const event = createHttpTimelineEvent({
+        eventId: 'evt-ss-tcp',
+        latencyMs: 1500,
+        nativeTcpQuality: createSsTcpQuality({
+          rtt_us: 75000,
+          retransmits_current: 2,
+        }),
+      });
+      
+      const html = renderExpandedPanel(event, 0);
+      
+      // Should render ss badge label
+      expect(html).toContain('ss fallback TCP info');
+      expect(html).toContain('tcp-quality-synthetic');
+      // Should render metrics
+      expect(html).toContain('RTT:');
+      expect(html).toContain('75.0 ms');
+    });
+
+    it('renders "TCP quality unavailable" for unavailable source with error', () => {
+      const event = createHttpTimelineEvent({
+        eventId: 'evt-unavailable-tcp',
+        latencyMs: 3000,
+        nativeTcpQuality: createUnavailableTcpQuality({
+          error_kind: 'no_matching_socket',
+          error: 'No matching TCP socket found for probe connection',
+        }),
+      });
+      
+      const html = renderExpandedPanel(event, 0);
+      
+      // Should render unavailable badge
+      expect(html).toContain('TCP Path Quality');
+      expect(html).toContain('TCP quality unavailable');
+      expect(html).toContain('tcp-quality-unavailable');
+      // Should render error message
+      expect(html).toContain('tcp-quality-error');
+      expect(html).toContain('No matching TCP socket found for probe connection');
+    });
+
+    it('renders unavailable with error_kind when no error message', () => {
+      const event = createHttpTimelineEvent({
+        eventId: 'evt-unavailable-kind',
+        latencyMs: 2500,
+        nativeTcpQuality: {
+          kind: 'http',
+          lookup_target: 'example.com',
+          matched_socket: false,
+          source: 'unavailable',
+          error_kind: 'permission_denied',
+          collected_at: '2026-06-18T12:00:00Z',
+        },
+      });
+      
+      const html = renderExpandedPanel(event, 0);
+      
+      // Should render error_kind when error is not present
+      expect(html).toContain('permission_denied');
+    });
+
+    it('does not render TCP Path Quality section when nativeTcpQuality is null', () => {
+      const event = createHttpTimelineEvent({
+        eventId: 'evt-no-tcp',
+        latencyMs: 1234,
+        nativeTcpQuality: null,
+      });
+      
+      const html = renderExpandedPanel(event, 0);
+      
+      // Should NOT render TCP quality section
+      expect(html).not.toContain('tcp-quality-section');
+      expect(html).not.toContain('TCP Path Quality');
+    });
+
+    it('renders socket state when available', () => {
+      const event = createHttpTimelineEvent({
+        eventId: 'evt-state-tcp',
+        latencyMs: 2000,
+        nativeTcpQuality: createNativeTcpQuality({
+          state: 'TIME_WAIT',
+        }),
+      });
+      
+      const html = renderExpandedPanel(event, 0);
+      
+      // Should render state
+      expect(html).toContain('State:');
+      expect(html).toContain('TIME_WAIT');
+    });
+
+    it('renders collected timestamp', () => {
+      const event = createHttpTimelineEvent({
+        eventId: 'evt-collected-tcp',
+        latencyMs: 2000,
+        nativeTcpQuality: createNativeTcpQuality({
+          collected_at: '2026-06-18T12:00:00Z',
+        }),
+      });
+      
+      const html = renderExpandedPanel(event, 0);
+      
+      // Should render collected timestamp
+      expect(html).toContain('Collected:');
     });
   });
 });

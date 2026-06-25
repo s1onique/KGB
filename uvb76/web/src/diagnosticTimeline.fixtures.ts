@@ -1,7 +1,7 @@
 // Diagnostic Timeline Test Fixtures - Shared frontend test fixtures
 import type { TimelineEvent, ProbeKindSummary, TimelineState } from './diagnosticTimeline.model';
 import type { TimelineFilters } from './diagnosticTimeline.filters';
-import type { SpikeResponseWithCaptures, DiagCapture, CaptureCooldownInfo, NetworkDiagData, TcpSocketDiagData, SpikeRetentionStats } from './api';
+import type { SpikeResponseWithCaptures, DiagCapture, CaptureCooldownInfo, NetworkDiagData, TcpSocketDiagData, SpikeRetentionStats, TcpQuality } from './api';
 
 // ---------------------------------------------------------------------------
 // Default Retention Stats
@@ -253,6 +253,7 @@ export function createTimelineEvent(overrides: Partial<{
   dataStatus: 'ok' | 'malformed';
   malformedReasons: string[];
   isPinnedAnchor: boolean;
+  nativeTcpQuality: TcpQuality | null;
 }> = {}): TimelineEvent {
   const eventId = overrides.eventId ?? 'evt-1';
   const probeKind = overrides.probeKind ?? 'http';
@@ -286,6 +287,7 @@ export function createTimelineEvent(overrides: Partial<{
     dataStatus: overrides.dataStatus ?? 'ok',
     malformedReasons: overrides.malformedReasons ?? [],
     isPinnedAnchor: overrides.isPinnedAnchor ?? false,
+    nativeTcpQuality: overrides.nativeTcpQuality ?? null,
   };
 }
 
@@ -509,6 +511,147 @@ export function createDegradedSuppressedCapture(overrides: Partial<DiagCapture> 
     ...overrides,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Native TCP Quality Fixtures
+// ---------------------------------------------------------------------------
+
+/** Create native TCP quality evidence from the actual probe socket.
+ * This represents TCP_INFO collected directly from the HTTP probe connection,
+ * with matched_socket=true indicating evidence from the real connection.
+ */
+export function createNativeTcpQuality(overrides: Partial<TcpQuality> = {}): TcpQuality {
+  return {
+    kind: 'http',
+    lookup_target: 'example.com',
+    matched_socket: true,
+    source: 'native_tcp_info',
+    state: 'ESTAB',
+    local: 'redacted:443',
+    remote: 'redacted:443',
+    rtt_us: 50000,
+    rttvar_us: 5000,
+    retransmits_current: 0,
+    retransmits_total: 0,
+    unacked: 0,
+    lost: 0,
+    sacked: 0,
+    reordering: 3,
+    snd_cwnd: 10,
+    ssthresh: 2147483647,
+    delivery_rate_bps: 1000000,
+    congestion_algorithm: 'cubic',
+    collected_at: '2026-06-18T12:00:00Z',
+    ...overrides,
+  };
+}
+
+/** Create TCP quality evidence from ss command fallback.
+ * This represents TCP_INFO collected via the ss utility when native collection fails.
+ */
+export function createSsTcpQuality(overrides: Partial<TcpQuality> = {}): TcpQuality {
+  return {
+    kind: 'http',
+    lookup_target: 'example.com',
+    matched_socket: true,
+    source: 'ss-tcp-info',
+    state: 'ESTAB',
+    local: 'redacted:443',
+    remote: 'redacted:443',
+    rtt_us: 75000,
+    rttvar_us: 8000,
+    retransmits_current: 2,
+    retransmits_total: 5,
+    collected_at: '2026-06-18T12:00:00Z',
+    ...overrides,
+  };
+}
+
+/** Create synthetic TCP quality evidence from diagnostic probes.
+ * This represents TCP_INFO collected via synthetic/diagnostic probes,
+ * not from the actual HTTP probe socket. Uses source=synthetic_tcp_info.
+ */
+export function createSyntheticTcpQuality(overrides: Partial<TcpQuality> = {}): TcpQuality {
+  return {
+    kind: 'http',
+    lookup_target: 'example.com',
+    matched_socket: false,
+    source: 'synthetic_tcp_info',
+    rtt_us: 60000,
+    rttvar_us: 6000,
+    retransmits_current: 1,
+    retransmits_total: 3,
+    collected_at: '2026-06-18T12:00:00Z',
+    ...overrides,
+  };
+}
+
+/** Create unavailable TCP quality evidence (no socket found).
+ * Uses source=unavailable when socket collection failed entirely.
+ */
+export function createUnavailableTcpQuality(overrides: Partial<TcpQuality> = {}): TcpQuality {
+  return {
+    kind: 'http',
+    lookup_target: 'example.com',
+    matched_socket: false,
+    source: 'unavailable',
+    error_kind: 'no_matching_socket',
+    error: 'No matching TCP socket found for probe connection',
+    collected_at: '2026-06-18T12:00:00Z',
+    ...overrides,
+  };
+}
+
+/** Create spike event with native TCP quality evidence */
+export function createSpikeEventWithNativeTcpQuality(overrides: Partial<{
+  event_id: string;
+  latency_ms: number;
+  native_tcp_quality?: TcpQuality;
+}> = {}): SpikeResponseWithCaptures['spikes'][0] {
+  return createSpikeEvent({
+    event_id: overrides.event_id ?? 'evt-native-tcp-001',
+    latency_ms: overrides.latency_ms ?? 2500,
+    ...overrides,
+    native_tcp_quality: overrides.native_tcp_quality ?? createNativeTcpQuality(),
+  });
+}
+
+/** Create spike response with native TCP quality evidence */
+export function createNativeTcpQualitySpikeResponse(overrides: Partial<{
+  latency_ms?: number;
+  rtt_us?: number;
+}> = {}): SpikeResponseWithCaptures {
+  return createSpikeResponse(createSpikeEventWithNativeTcpQuality({
+    latency_ms: overrides.latency_ms ?? 2500,
+    native_tcp_quality: createNativeTcpQuality({
+      rtt_us: overrides.rtt_us ?? 50000,
+      retransmits_current: 0,
+    }),
+  }));
+}
+
+/** Create spike response with high latency and degraded TCP quality */
+export function createDegradedTcpQualitySpikeResponse(): SpikeResponseWithCaptures {
+  return createSpikeResponse(createSpikeEventWithNativeTcpQuality({
+    latency_ms: 5000,
+    native_tcp_quality: createNativeTcpQuality({
+      rtt_us: 200000,
+      rttvar_us: 50000,
+      retransmits_current: 15,
+      retransmits_total: 50,
+      lost: 3,
+    }),
+  }));
+}
+
+/** Create spike response with TCP quality unavailable */
+export function createUnavailableTcpQualitySpikeResponse(): SpikeResponseWithCaptures {
+  return createSpikeResponse(createSpikeEventWithNativeTcpQuality({
+    latency_ms: 3000,
+    native_tcp_quality: createUnavailableTcpQuality(),
+  }));
+}
+
 
 /** Create spike response with pinned anchors.
  * This fixture simulates the production API response shape where:

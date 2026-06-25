@@ -5,7 +5,7 @@ import type { TimelinePageState } from './diagnosticTimeline';
 import { PAGE_SIZE_OPTIONS } from './diagnosticTimeline';
 import { formatSpikeTime, formatLatencyMs } from './format';
 import { formatLocalDateTime, parseApiInstant, formatRemainingCooldown } from './time';
-import { getCooldownInfo, isSuppressionDegraded, getDegradedReason, getAnchorEventSummary, getAnchorVisibilityReason, isPinnedAnchor } from './diagnosticTimeline.model';
+import { getCooldownInfo, isSuppressionDegraded, getDegradedReason, getAnchorEventSummary, getAnchorVisibilityReason, isPinnedAnchor, getTcpQualitySourceLabel, isNativeTcpQuality, isSyntheticTcpQuality, isSsTcpQuality, isTcpQualityUnavailable } from './diagnosticTimeline.model';
 
 // ---------------------------------------------------------------------------
 // Pagination Types
@@ -448,6 +448,118 @@ function renderCaptureDetailsSection(event: TimelineEvent): string {
 }
 
 // ---------------------------------------------------------------------------
+// TCP Quality Section
+// ---------------------------------------------------------------------------
+
+/** Render TCP quality evidence section for an event.
+ * Shows actual probe socket TCP_INFO when available, or fallback/unavailable states.
+ */
+function renderTcpQualitySection(event: TimelineEvent): string {
+  const tcpQuality = event.nativeTcpQuality;
+  if (!tcpQuality) return '';
+
+  const sourceLabel = getTcpQualitySourceLabel(event);
+  const isNative = isNativeTcpQuality(event);
+  const isSynthetic = isSyntheticTcpQuality(event);
+  const isSs = isSsTcpQuality(event);
+  const isUnavailable = isTcpQualityUnavailable(event);
+
+  // Determine CSS class based on evidence reliability
+  let badgeClass = 'tcp-quality-badge';
+  if (isNative) {
+    badgeClass += ' tcp-quality-native';
+  } else if (isSynthetic || isSs) {
+    badgeClass += ' tcp-quality-synthetic';
+  } else {
+    badgeClass += ' tcp-quality-unavailable';
+  }
+
+  let html = '<div class="tcp-quality-section">';
+  html += '<div class="tcp-quality-header">';
+  html += `<div class="tcp-quality-title">TCP Path Quality</div>`;
+  html += `<span class="${badgeClass}">${escapeText(sourceLabel)}</span>`;
+  html += '</div>';
+
+  // If unavailable, show error message
+  if (isUnavailable) {
+    if (tcpQuality.error) {
+      html += `<div class="tcp-quality-error">${escapeText(tcpQuality.error)}</div>`;
+    } else if (tcpQuality.error_kind) {
+      html += `<div class="tcp-quality-error">${escapeText(tcpQuality.error_kind)}</div>`;
+    }
+    html += '</div>';
+    return html;
+  }
+
+  // Show connection details if available
+  if (tcpQuality.state) {
+    html += `<div class="detail-row"><span class="detail-label">State:</span><span class="detail-value">${escapeText(tcpQuality.state)}</span></div>`;
+  }
+
+  // Show RTT metrics
+  if (tcpQuality.rtt_us !== undefined) {
+    const rttMs = (tcpQuality.rtt_us / 1000).toFixed(1);
+    html += `<div class="detail-row"><span class="detail-label">RTT:</span><span class="detail-value">${rttMs} ms</span></div>`;
+  }
+
+  if (tcpQuality.rttvar_us !== undefined) {
+    const rttvarMs = (tcpQuality.rttvar_us / 1000).toFixed(1);
+    html += `<div class="detail-row"><span class="detail-label">RTT variance:</span><span class="detail-value">${rttvarMs} ms</span></div>`;
+  }
+
+  // Show retransmit metrics
+  if (tcpQuality.retransmits_current !== undefined) {
+    html += `<div class="detail-row"><span class="detail-label">Retransmits (current):</span><span class="detail-value">${tcpQuality.retransmits_current}</span></div>`;
+  }
+
+  if (tcpQuality.retransmits_total !== undefined) {
+    html += `<div class="detail-row"><span class="detail-label">Retransmits (total):</span><span class="detail-value">${tcpQuality.retransmits_total}</span></div>`;
+  }
+
+  // Show congestion window
+  if (tcpQuality.snd_cwnd !== undefined) {
+    html += `<div class="detail-row"><span class="detail-label">Congestion window:</span><span class="detail-value">${tcpQuality.snd_cwnd}</span></div>`;
+  }
+
+  // Show congestion algorithm
+  if (tcpQuality.congestion_algorithm) {
+    html += `<div class="detail-row"><span class="detail-label">Congestion algorithm:</span><span class="detail-value">${escapeText(tcpQuality.congestion_algorithm)}</span></div>`;
+  }
+
+  // Show delivery rate
+  if (tcpQuality.delivery_rate_bps !== undefined) {
+    const rateMbps = (tcpQuality.delivery_rate_bps / 1000000).toFixed(2);
+    html += `<div class="detail-row"><span class="detail-label">Delivery rate:</span><span class="detail-value">${rateMbps} Mbps</span></div>`;
+  }
+
+  // Show queue depths
+  if (tcpQuality.send_queue_bytes !== undefined) {
+    html += `<div class="detail-row"><span class="detail-label">Send queue:</span><span class="detail-value">${tcpQuality.send_queue_bytes} bytes</span></div>`;
+  }
+
+  if (tcpQuality.recv_queue_bytes !== undefined) {
+    html += `<div class="detail-row"><span class="detail-label">Receive queue:</span><span class="detail-value">${tcpQuality.recv_queue_bytes} bytes</span></div>`;
+  }
+
+  // Show loss indicators
+  if (tcpQuality.lost !== undefined) {
+    html += `<div class="detail-row"><span class="detail-label">Lost packets:</span><span class="detail-value">${tcpQuality.lost}</span></div>`;
+  }
+
+  if (tcpQuality.unacked !== undefined) {
+    html += `<div class="detail-row"><span class="detail-label">Unacked:</span><span class="detail-value">${tcpQuality.unacked}</span></div>`;
+  }
+
+  // Show when collected
+  if (tcpQuality.collected_at) {
+    html += `<div class="detail-row"><span class="detail-label">Collected:</span><span class="detail-value">${formatTimelineTime(tcpQuality.collected_at)}</span></div>`;
+  }
+
+  html += '</div>';
+  return html;
+}
+
+// ---------------------------------------------------------------------------
 // Network Diagnostics
 // ---------------------------------------------------------------------------
 
@@ -625,6 +737,9 @@ export function renderExpandedPanel(event: TimelineEvent, rowIndex: number): str
   
   // Network diagnostics
   html += renderNetworkDiagSection(event);
+  
+  // TCP quality evidence
+  html += renderTcpQualitySection(event);
   
   // Action buttons
   html += '<div class="timeline-actions">';

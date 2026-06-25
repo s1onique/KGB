@@ -10,6 +10,13 @@ import {
   getCooldownInfo,
   getAnchorProbeKind,
   getSuppressedProbeKind,
+  getNativeTcpQuality,
+  hasNativeTcpQuality,
+  getTcpQualitySourceLabel,
+  isNativeTcpQuality,
+  isSyntheticTcpQuality,
+  isSsTcpQuality,
+  isTcpQualityUnavailable,
 } from './diagnosticTimeline.model';
 import {
   createSpikeEvent,
@@ -18,6 +25,12 @@ import {
   createErrorCapture,
   createSkippedCooldownCaptureWithHiddenAnchor,
   createIcmpToHttpCrossProbeCooldownInfo,
+  createNativeTcpQuality,
+  createSsTcpQuality,
+  createSyntheticTcpQuality,
+  createUnavailableTcpQuality,
+  createNativeTcpQualitySpikeResponse,
+  createUnavailableTcpQualitySpikeResponse,
   defaultRetention,
 } from './diagnosticTimeline.fixtures';
 
@@ -375,6 +388,289 @@ describe('diagnosticTimeline.model', () => {
       expect(state.mergedEvents[0].timeStatus).toBe('ok');
       expect(state.mergedEvents[1].eventId).toBe('zzz-invalid-1');
       expect(state.mergedEvents[1].timeStatus).toBe('invalid');
+    });
+  });
+
+  describe('native TCP quality helpers', () => {
+    describe('getNativeTcpQuality', () => {
+      it('returns null when no TCP quality data', () => {
+        const spike = createSpikeEvent({});
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        expect(getNativeTcpQuality(state.mergedEvents[0])).toBeNull();
+      });
+
+      it('returns TCP quality when present', () => {
+        const response = createNativeTcpQualitySpikeResponse();
+        const state = buildTimelineState(response, null);
+        
+        const tcpQuality = getNativeTcpQuality(state.mergedEvents[0]);
+        expect(tcpQuality).not.toBeNull();
+        expect(tcpQuality?.source).toBe('native_tcp_info');
+      });
+    });
+
+    describe('hasNativeTcpQuality', () => {
+      it('returns false when no TCP quality data', () => {
+        const spike = createSpikeEvent({});
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        expect(hasNativeTcpQuality(state.mergedEvents[0])).toBe(false);
+      });
+
+      it('returns true when TCP quality is present', () => {
+        const response = createNativeTcpQualitySpikeResponse();
+        const state = buildTimelineState(response, null);
+        
+        expect(hasNativeTcpQuality(state.mergedEvents[0])).toBe(true);
+      });
+    });
+
+    describe('isNativeTcpQuality', () => {
+      it('returns true for native_tcp_info with matched_socket=true', () => {
+        const response = createNativeTcpQualitySpikeResponse();
+        const state = buildTimelineState(response, null);
+        
+        expect(isNativeTcpQuality(state.mergedEvents[0])).toBe(true);
+      });
+
+      it('returns false for ss-tcp-info (synthetic)', () => {
+        const spike = createSpikeEvent({
+          native_tcp_quality: createSsTcpQuality(),
+        });
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        expect(isNativeTcpQuality(state.mergedEvents[0])).toBe(false);
+      });
+
+      it('returns false for unavailable (no socket)', () => {
+        const response = createUnavailableTcpQualitySpikeResponse();
+        const state = buildTimelineState(response, null);
+        
+        expect(isNativeTcpQuality(state.mergedEvents[0])).toBe(false);
+      });
+
+      it('returns false for native_tcp_info with matched_socket=false', () => {
+        const spike = createSpikeEvent({
+          native_tcp_quality: createNativeTcpQuality({ matched_socket: false }),
+        });
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        // Even with source=native_tcp_info, if matched_socket=false, it's not "native"
+        expect(isNativeTcpQuality(state.mergedEvents[0])).toBe(false);
+      });
+    });
+
+    describe('isSyntheticTcpQuality', () => {
+      it('returns true for ss-tcp-info', () => {
+        const spike = createSpikeEvent({
+          native_tcp_quality: createSsTcpQuality(),
+        });
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        expect(isSyntheticTcpQuality(state.mergedEvents[0])).toBe(true);
+      });
+
+      it('returns true for synthetic_tcp_info', () => {
+        const spike = createSpikeEvent({
+          native_tcp_quality: createSyntheticTcpQuality(),
+        });
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        expect(isSyntheticTcpQuality(state.mergedEvents[0])).toBe(true);
+      });
+
+      it('returns false for native_tcp_info', () => {
+        const response = createNativeTcpQualitySpikeResponse();
+        const state = buildTimelineState(response, null);
+        
+        expect(isSyntheticTcpQuality(state.mergedEvents[0])).toBe(false);
+      });
+    });
+
+    describe('isSsTcpQuality', () => {
+      it('returns true for ss-tcp-info source', () => {
+        const spike = createSpikeEvent({
+          native_tcp_quality: createSsTcpQuality(),
+        });
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        expect(isSsTcpQuality(state.mergedEvents[0])).toBe(true);
+      });
+
+      it('returns false for native_tcp_info', () => {
+        const response = createNativeTcpQualitySpikeResponse();
+        const state = buildTimelineState(response, null);
+        
+        expect(isSsTcpQuality(state.mergedEvents[0])).toBe(false);
+      });
+
+      it('returns false for synthetic_tcp_info', () => {
+        const spike = createSpikeEvent({
+          native_tcp_quality: createSyntheticTcpQuality(),
+        });
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        expect(isSsTcpQuality(state.mergedEvents[0])).toBe(false);
+      });
+    });
+
+    describe('getTcpQualitySourceLabel', () => {
+      it('returns "Actual HTTP probe socket TCP_INFO" for native_tcp_info', () => {
+        const response = createNativeTcpQualitySpikeResponse();
+        const state = buildTimelineState(response, null);
+        
+        expect(getTcpQualitySourceLabel(state.mergedEvents[0])).toBe('Actual HTTP probe socket TCP_INFO');
+      });
+
+      it('returns "ss fallback TCP info" for ss-tcp-info', () => {
+        const spike = createSpikeEvent({
+          native_tcp_quality: createSsTcpQuality(),
+        });
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        expect(getTcpQualitySourceLabel(state.mergedEvents[0])).toBe('ss fallback TCP info');
+      });
+
+      it('returns "Synthetic diagnostic TCP_INFO" for synthetic_tcp_info', () => {
+        const spike = createSpikeEvent({
+          native_tcp_quality: createSyntheticTcpQuality(),
+        });
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        expect(getTcpQualitySourceLabel(state.mergedEvents[0])).toBe('Synthetic diagnostic TCP_INFO');
+      });
+
+      it('returns "TCP quality unavailable" for unavailable', () => {
+        const response = createUnavailableTcpQualitySpikeResponse();
+        const state = buildTimelineState(response, null);
+        
+        expect(getTcpQualitySourceLabel(state.mergedEvents[0])).toBe('TCP quality unavailable');
+      });
+
+      it('returns "TCP quality unavailable" when no TCP quality data', () => {
+        const spike = createSpikeEvent({});
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        expect(getTcpQualitySourceLabel(state.mergedEvents[0])).toBe('TCP quality unavailable');
+      });
+    });
+
+    describe('isTcpQualityUnavailable', () => {
+      it('returns true when no TCP quality data', () => {
+        const spike = createSpikeEvent({});
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        expect(isTcpQualityUnavailable(state.mergedEvents[0])).toBe(true);
+      });
+
+      it('returns true when source=unavailable', () => {
+        const response = createUnavailableTcpQualitySpikeResponse();
+        const state = buildTimelineState(response, null);
+        
+        expect(isTcpQualityUnavailable(state.mergedEvents[0])).toBe(true);
+      });
+
+      it('returns true when has error_kind (socket not found)', () => {
+        const spike = createSpikeEvent({
+          native_tcp_quality: createUnavailableTcpQuality({ error_kind: 'no_matching_socket' }),
+        });
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        expect(isTcpQualityUnavailable(state.mergedEvents[0])).toBe(true);
+      });
+
+      it('returns false for native_tcp_info with matched_socket=true', () => {
+        const response = createNativeTcpQualitySpikeResponse();
+        const state = buildTimelineState(response, null);
+        
+        expect(isTcpQualityUnavailable(state.mergedEvents[0])).toBe(false);
+      });
+
+      it('returns false for ss-tcp-info', () => {
+        const spike = createSpikeEvent({
+          native_tcp_quality: createSsTcpQuality(),
+        });
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        expect(isTcpQualityUnavailable(state.mergedEvents[0])).toBe(false);
+      });
+
+      it('returns false for synthetic_tcp_info (even with matched_socket=false)', () => {
+        // Key semantic: synthetic_tcp_info is NOT unavailable - it's valid evidence
+        // just from a different source than the native probe socket
+        const spike = createSpikeEvent({
+          native_tcp_quality: createSyntheticTcpQuality(),
+        });
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        expect(isTcpQualityUnavailable(state.mergedEvents[0])).toBe(false);
+      });
+    });
+
+    describe('TCP quality data propagation', () => {
+      it('propagates RTT from native TCP quality', () => {
+        const response = createNativeTcpQualitySpikeResponse({ rtt_us: 100000 });
+        const state = buildTimelineState(response, null);
+        
+        const tcpQuality = getNativeTcpQuality(state.mergedEvents[0]);
+        expect(tcpQuality?.rtt_us).toBe(100000);
+      });
+
+      it('propagates retransmits from native TCP quality', () => {
+        const tcpQuality = createNativeTcpQuality({
+          retransmits_current: 5,
+          retransmits_total: 20,
+        });
+        const spike = createSpikeEvent({ native_tcp_quality: tcpQuality });
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        const result = getNativeTcpQuality(state.mergedEvents[0]);
+        expect(result?.retransmits_current).toBe(5);
+        expect(result?.retransmits_total).toBe(20);
+      });
+
+      it('propagates congestion window from native TCP quality', () => {
+        const tcpQuality = createNativeTcpQuality({
+          snd_cwnd: 20,
+          congestion_algorithm: 'bbr',
+        });
+        const spike = createSpikeEvent({ native_tcp_quality: tcpQuality });
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        const result = getNativeTcpQuality(state.mergedEvents[0]);
+        expect(result?.snd_cwnd).toBe(20);
+        expect(result?.congestion_algorithm).toBe('bbr');
+      });
+
+      it('propagates socket state from native TCP quality', () => {
+        const tcpQuality = createNativeTcpQuality({
+          state: 'TIME_WAIT',
+        });
+        const spike = createSpikeEvent({ native_tcp_quality: tcpQuality });
+        const response = createSpikeResponse(spike);
+        const state = buildTimelineState(response, null);
+        
+        const result = getNativeTcpQuality(state.mergedEvents[0]);
+        expect(result?.state).toBe('TIME_WAIT');
+      });
     });
   });
 });

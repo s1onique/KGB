@@ -1,5 +1,5 @@
 // Diagnostic Timeline Model - Fetch and normalize API responses
-import { api, type SpikeResponseWithCaptures, type SpikeEventWithCaptures, type DiagCapture, type SpikeRetentionStats, type CaptureCooldownInfo, type AnchorEventSummary } from './api';
+import { api, type SpikeResponseWithCaptures, type SpikeEventWithCaptures, type DiagCapture, type SpikeRetentionStats, type CaptureCooldownInfo, type AnchorEventSummary, type TcpQuality } from './api';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -63,6 +63,11 @@ export interface TimelineEvent {
   // Pinned anchor flag - true for events from response.pinned_anchors
   // Backend-pinned anchors are separate response-level anchor spike rows
   isPinnedAnchor: boolean;
+
+  // Native TCP quality evidence - TCP_INFO collected from the actual probe socket
+  // This provides native_tcp_info evidence with matched_socket=true.
+  // Only populated for HTTP probes when TCP_INFO is successfully collected.
+  nativeTcpQuality: TcpQuality | null;
 }
 
 /** Summary card for a probe kind */
@@ -402,6 +407,7 @@ function normalizeSpikeEvent(spike: SpikeEventWithCaptures): NormalizeSpikeEvent
     dataStatus: malformedReasons.length === 0 ? 'ok' : 'malformed',
     malformedReasons,
     isPinnedAnchor: false, // Default false, overridden by normalizePinnedAnchors
+    nativeTcpQuality: spike.native_tcp_quality ?? null,
   };
   
   return { event, malformedReasons };
@@ -726,4 +732,90 @@ export function isPinnedAnchor(event: TimelineEvent): boolean {
   const info = getCooldownInfo(event);
   if (!info) return false;
   return info.anchor_visibility_reason === 'pinned_anchor';
+}
+
+// ---------------------------------------------------------------------------
+// Native TCP Quality Helpers
+// ---------------------------------------------------------------------------
+
+/** Get native TCP quality evidence from a timeline event.
+ * Returns null if no native TCP quality data is available.
+ *
+ * Native TCP quality provides TCP_INFO collected from the actual HTTP probe socket,
+ * with matched_socket=true indicating evidence from the real connection.
+ */
+export function getNativeTcpQuality(event: TimelineEvent): TcpQuality | null {
+  return event.nativeTcpQuality;
+}
+
+/** Check if an event has native TCP quality evidence.
+ * Native TCP quality is only available for HTTP probes when TCP_INFO is successfully
+ * collected from the real probe socket connection.
+ */
+export function hasNativeTcpQuality(event: TimelineEvent): boolean {
+  return event.nativeTcpQuality !== null;
+}
+
+/** Get operator-facing label for TCP quality source.
+ * Distinguishes between native_tcp_info, synthetic_tcp_info, ss-tcp-info, and unavailable.
+ * Uses explicit labels that convey the evidence reliability.
+ */
+export function getTcpQualitySourceLabel(event: TimelineEvent): string {
+  const tcpQuality = event.nativeTcpQuality;
+  if (!tcpQuality) return 'TCP quality unavailable';
+
+  switch (tcpQuality.source) {
+    case 'native_tcp_info':
+      return 'Actual HTTP probe socket TCP_INFO';
+    case 'synthetic_tcp_info':
+      return 'Synthetic diagnostic TCP_INFO';
+    case 'ss-tcp-info':
+      return 'ss fallback TCP info';
+    case 'unavailable':
+      return 'TCP quality unavailable';
+    default:
+      return tcpQuality.source || 'TCP quality unknown';
+  }
+}
+
+/** Check if the TCP quality evidence came from the actual probe socket (native).
+ * This is the most reliable evidence since it captures the real connection state.
+ * Requires both source=native_tcp_info AND matched_socket=true.
+ */
+export function isNativeTcpQuality(event: TimelineEvent): boolean {
+  const tcpQuality = event.nativeTcpQuality;
+  return tcpQuality?.source === 'native_tcp_info' && tcpQuality.matched_socket === true;
+}
+
+/** Check if the TCP quality evidence is synthetic diagnostic.
+ * Synthetic evidence is collected via diagnostic probes, not from the actual probe socket.
+ * This includes both synthetic_tcp_info and ss-tcp-info sources.
+ */
+export function isSyntheticTcpQuality(event: TimelineEvent): boolean {
+  const tcpQuality = event.nativeTcpQuality;
+  if (!tcpQuality) return false;
+  // Synthetic sources include synthetic_tcp_info and ss-tcp-info
+  return tcpQuality.source === 'synthetic_tcp_info' || tcpQuality.source === 'ss-tcp-info';
+}
+
+/** Check specifically for ss-tcp-info source (ss command fallback).
+ */
+export function isSsTcpQuality(event: TimelineEvent): boolean {
+  const tcpQuality = event.nativeTcpQuality;
+  return tcpQuality?.source === 'ss-tcp-info';
+}
+
+/** Check if TCP quality evidence is unavailable (collection failed).
+ * This includes no socket found, permission denied, or other collection errors.
+ * 
+ * NOT unavailable: synthetic_tcp_info (even with matched_socket=false) - it's valid evidence,
+ * just from a different source than the native probe socket.
+ */
+export function isTcpQualityUnavailable(event: TimelineEvent): boolean {
+  const tcpQuality = event.nativeTcpQuality;
+  if (!tcpQuality) return true;
+  // Unavailable: source=unavailable explicitly, or has error_kind/error
+  if (tcpQuality.source === 'unavailable') return true;
+  if (tcpQuality.error_kind || tcpQuality.error) return true;
+  return false;
 }

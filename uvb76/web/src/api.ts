@@ -89,6 +89,37 @@ export interface SpikeThresholds {
   relative_multiplier: number;
 }
 
+// TcpQuality represents TCP path quality evidence for the probe destination socket.
+// This provides evidence of network path health at the TCP layer during the spike,
+// including RTT, retransmits, congestion window, and queue depths.
+export interface TcpQuality {
+  kind: string;                    // probe type ("http")
+  lookup_target: string;            // host/IP that was matched (may be redacted)
+  matched_socket: boolean;          // whether a matching TCP socket was found
+  source: string;                   // evidence collection source: "native_tcp_info", "synthetic_tcp_info", "ss-tcp-info", or "unavailable"
+  match_count?: number;            // number of sockets that matched when multiple found
+  state?: string;                  // socket state (only when MatchedSocket is true)
+  local?: string;                  // local address (redacted for privacy)
+  remote?: string;                 // remote address (redacted for privacy)
+  send_queue_bytes?: number;        // send queue bytes (nil means not available)
+  recv_queue_bytes?: number;        // receive queue bytes (nil means not available)
+  rtt_us?: number;                  // RTT in microseconds
+  rttvar_us?: number;              // RTT variance in microseconds
+  retransmits_current?: number;     // current retransmit counter
+  retransmits_total?: number;       // total retransmit counter
+  unacked?: number;                // unacknowledged packets
+  lost?: number;                   // lost packets
+  sacked?: number;                 // SACKed packets
+  reordering?: number;             // reordering distance
+  snd_cwnd?: number;               // congestion window
+  ssthresh?: number;               // slow start threshold
+  delivery_rate_bps?: number;       // delivery rate in bits per second
+  congestion_algorithm?: string;   // congestion control algorithm
+  error_kind?: string;              // error classification (only when MatchedSocket is false)
+  error?: string;                  // error message (only when MatchedSocket is false)
+  collected_at: string;            // when TCP quality data was collected (RFC3339)
+}
+
 // SpikeEvent represents a detected latency spike event for evidence collection.
 export interface SpikeEvent {
   event_id: string;
@@ -104,6 +135,11 @@ export interface SpikeEvent {
   scheduler_delay_ms?: number;
   http_status?: number;
   probe_error?: string;
+  http_trace?: unknown;      // per-phase HTTP timing (HTTP spikes only)
+  // NativeTcpQuality holds TCP_INFO collected from the actual HTTP probe socket.
+  // This provides native_tcp_info evidence with matched_socket=true.
+  // Only populated for HTTP probes when TCP_INFO is successfully collected from the real connection.
+  native_tcp_quality?: TcpQuality;
   collected_at: string;      // when spike was recorded
 }
 
