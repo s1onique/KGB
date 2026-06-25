@@ -50,3 +50,25 @@ func (m *Manager) RecordRecoveryEvent(
 		targetID, kind, latencyMs, sampleTs, httpStatus, previousSamples, httpTrace,
 	)
 }
+
+// DetectAndRecordSpikeWithTcpQuality checks a sample for spike conditions and records if detected.
+// This variant allows passing native TCP_INFO collected from the actual HTTP probe socket,
+// which provides native_tcp_info evidence with matched_socket=true.
+func (m *Manager) DetectAndRecordSpikeWithTcpQuality(
+	targetID, kind string,
+	latencyMs float64,
+	sampleTs time.Time,
+	reachable bool,
+	schedulerDelayMs *float64,
+	httpStatus *int,
+	probeError *string,
+	previousSamples []LatencySample,
+	httpTrace *HTTPTrace,
+	nativeTcpQuality *TcpQuality,
+) *SpikeEvent {
+	return m.spikeDetector.DetectAndRecordWithTcpQuality(
+		targetID, kind, latencyMs, sampleTs, reachable,
+		schedulerDelayMs, httpStatus, probeError, previousSamples, httpTrace,
+		nativeTcpQuality,
+	)
+}

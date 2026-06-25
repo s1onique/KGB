@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptrace"
 	"sync"
@@ -14,6 +15,12 @@ import (
 	"github.com/s1onique/KGB/uvb76/config"
 	"github.com/s1onique/KGB/uvb76/diag"
 	"github.com/s1onique/KGB/uvb76/state"
+)
+
+const (
+	// tcpInfoCaptureTimeout is the timeout for collecting TCP_INFO from the actual probe socket.
+	// This should be short since we just need to read kernel socket metadata.
+	tcpInfoCaptureTimeout = 500 * time.Millisecond
 )
 
 // ProbeClassifyResult represents the classification of an HTTP probe result.
@@ -175,6 +182,24 @@ func (c *Client) probeAll() {
 	}
 }
 
+// collectNativeTcpQuality attempts to collect TCP_INFO from the actual probe connection.
+// Returns nil if collection fails (e.g., no connection captured, non-TCP, or TCP_INFO unavailable).
+// The conn parameter should be obtained from traceCollector.GetActualConn().
+func (c *Client) collectNativeTcpQuality(conn net.Conn, targetID string) *state.TcpQuality {
+	if conn == nil {
+		return nil
+	}
+
+	// Create a short-lived context for TCP_INFO collection
+	ctx, cancel := context.WithTimeout(context.Background(), tcpInfoCaptureTimeout)
+	defer cancel()
+
+	// Collect TCP_INFO from the actual probe socket
+	// This will set source=native_tcp_info and matched_socket=true
+	tcpQuality := diag.CollectTcpQualityFromConn(ctx, "http", targetID, conn)
+	return tcpQuality
+}
+
 // probeTarget performs a single latency probe against a target.
 // It does NOT update snapshots - only records latency measurements.
 // Triggers diagnostic capture asynchronously if spike is detected.
@@ -242,9 +267,16 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 		// Build HTTP trace for failed request (no body read possible)
 		httpTrace := traceCollector.BuildHTTPTrace(latencyMs, 0, err, false)
 		
+		// Try to collect native TCP_INFO even for failed requests if connection was established
+		var nativeTcpQuality *state.TcpQuality
+		if actualConn := traceCollector.GetActualConn(); actualConn != nil {
+			nativeTcpQuality = c.collectNativeTcpQuality(actualConn, t.ID)
+		}
+		
 		// Spike detection for failed request - this now creates diagnostic events for failures
+		// Include native TCP_INFO if available
 		errStr := fmt.Sprintf("request failed: %v", err)
-		if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, false, nil, nil, &errStr, previousSamples, httpTrace); spike != nil {
+		if spike := c.state.DetectAndRecordSpikeWithTcpQuality(t.ID, "http", latencyMs, sampleTs, false, nil, nil, &errStr, previousSamples, httpTrace, nativeTcpQuality); spike != nil {
 			c.triggerDiagCapture(spike.EventID, t.ID, "http")
 		}
 		return
@@ -294,25 +326,34 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 	// Build HTTP trace for this request
 	httpTrace := traceCollector.BuildHTTPTrace(totalMs, httpStatus, traceErr, bodyTruncated)
 
+	// Collect native TCP_INFO from the actual probe connection for spike events.
+	// This provides native_tcp_info evidence with matched_socket=true.
+	// The connection is owned by the transport - we only observe, never close.
+	var nativeTcpQuality *state.TcpQuality
+	if actualConn := traceCollector.GetActualConn(); actualConn != nil {
+		nativeTcpQuality = c.collectNativeTcpQuality(actualConn, t.ID)
+	}
+
 	if !classification.Reachable {
 		// HTTP 5xx or other unhealthy status - treat as probe failure
 		// Include canonical reason in error string for spike detector to recognize
 		errStr := fmt.Sprintf("%s: HTTP %d", classification.Reason, httpStatus)
 		
-		// Spike detection for unhealthy HTTP response
-		if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, false, nil, &httpStatus, &errStr, previousSamples, httpTrace); spike != nil {
+		// Spike detection for unhealthy HTTP response - include native TCP_INFO
+		if spike := c.state.DetectAndRecordSpikeWithTcpQuality(t.ID, "http", latencyMs, sampleTs, false, nil, &httpStatus, &errStr, previousSamples, httpTrace, nativeTcpQuality); spike != nil {
 			c.triggerDiagCapture(spike.EventID, t.ID, "http")
 		}
 		return
 	}
 
-	// Spike detection for successful request (latency spikes)
-	if spike := c.state.DetectAndRecordSpike(t.ID, "http", latencyMs, sampleTs, true, nil, &httpStatus, nil, previousSamples, httpTrace); spike != nil {
+	// Spike detection for successful request (latency spikes) - include native TCP_INFO
+	if spike := c.state.DetectAndRecordSpikeWithTcpQuality(t.ID, "http", latencyMs, sampleTs, true, nil, &httpStatus, nil, previousSamples, httpTrace, nativeTcpQuality); spike != nil {
 		c.triggerDiagCapture(spike.EventID, t.ID, "http")
 	}
 	
 	// Recovery detection: if we were unreachable and now succeeded, trigger a recovery capture
-	// Use dedicated RecordRecoveryEvent() instead of fake error injection
+	// Use dedicated RecordRecoveryEvent() instead of fake error injection.
+	// Note: Recovery events do NOT carry native TCP_INFO as they are not spike events.
 	if wasUnreachable {
 		if recoverySpike := c.state.RecordRecoveryEvent(t.ID, "http", latencyMs, sampleTs, &httpStatus, previousSamples, httpTrace); recoverySpike != nil {
 			c.triggerDiagCapture(recoverySpike.EventID, t.ID, "http")

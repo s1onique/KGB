@@ -14,6 +14,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/s1onique/KGB/uvb76/state"
 )
 
 // Linux TCP_INFO constants
@@ -257,4 +259,36 @@ func tcpStateToString(state uint8) string {
 	default:
 		return fmt.Sprintf("UNKNOWN(%d)", state)
 	}
+}
+
+// CollectTcpQualityFromConn collects TCP_INFO from an actual HTTP probe connection.
+// This provides native_tcp_info evidence from the real probe socket.
+//
+// This function is intended for use with the connection obtained via httptrace.GotConn.
+// The caller must NOT read, write, or close the connection - it is owned by the transport.
+//
+// Parameters:
+//   - ctx: context for timeout/cancellation
+//   - probeKind: the probe kind (e.g., "http")
+//   - lookupTarget: the target host/IP being probed
+//   - conn: the actual net.Conn from the HTTP probe
+//
+// Returns:
+//   - *state.TcpQuality with source=native_tcp_info and matched_socket=true on success
+//   - nil if conn is nil, non-TCP, closed, or TCP_INFO is unavailable
+func CollectTcpQualityFromConn(ctx context.Context, probeKind string, lookupTarget string, conn net.Conn) *state.TcpQuality {
+	if conn == nil {
+		return nil
+	}
+
+	// GetTcpInfo sets IsSynthetic=false by default for actual connections
+	result := GetTcpInfo(ctx, conn)
+	if result == nil || !result.Available {
+		return nil
+	}
+
+	// Ensure IsSynthetic is false for actual probe socket
+	result.IsSynthetic = false
+
+	return TcpInfoToTcpQuality(result, probeKind, lookupTarget)
 }

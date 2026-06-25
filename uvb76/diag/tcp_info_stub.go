@@ -9,6 +9,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+
+	"github.com/s1onique/KGB/uvb76/state"
 )
 
 // tcpInfoKernel is the stable prefix of Linux struct tcp_info.
@@ -89,4 +91,15 @@ func GetTcpInfoFromSyntheticDial(ctx context.Context, address string) (*TcpInfoR
 	}
 
 	return result, nil, fmt.Errorf("TCP_INFO is only available on Linux")
+}
+
+// CollectTcpQualityFromConn is a stub that always returns nil on non-Linux.
+// TCP_INFO is only available on Linux.
+func CollectTcpQualityFromConn(ctx context.Context, probeKind string, lookupTarget string, conn net.Conn) *state.TcpQuality {
+	// TCP_INFO is only available on Linux
+	_ = ctx
+	_ = probeKind
+	_ = lookupTarget
+	_ = conn
+	return nil
 }

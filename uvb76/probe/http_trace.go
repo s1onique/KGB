@@ -45,6 +45,10 @@ type httpTraceCollector struct {
 	wasIdle          bool
 	remoteAddr       string
 
+	// Actual connection for TCP_INFO collection
+	// Set by GotConn hook; do NOT read, write, or close
+	actualConn net.Conn
+
 	// Error tracking
 	dnsError        error
 	connectError    error
@@ -138,6 +142,12 @@ func (c *httpTraceCollector) getTraceHooks() *httptrace.ClientTrace {
 			c.gotConnTime = time.Now()
 			c.connectionReused = info.Reused
 			c.wasIdle = info.Reused && info.WasIdle
+			// Capture the actual connection for TCP_INFO collection.
+			// Per httptrace docs: do not read, write, or close this connection.
+			// The transport owns the connection lifecycle.
+			if c.actualConn == nil && info.Conn != nil {
+				c.actualConn = info.Conn
+			}
 		},
 
 		// Request events
@@ -180,6 +190,36 @@ func (c *httpTraceCollector) BytesRead() int64 {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.bytesRead
+}
+
+// =============================================================================
+// Actual Connection Access for TCP_INFO Collection
+// =============================================================================
+
+// GetActualConn returns the actual net.Conn used by the HTTP request.
+// This is used for native TCP_INFO collection from the real probe socket.
+// Returns nil if no connection was captured (e.g., request failed before connect).
+//
+// IMPORTANT: The returned connection is owned by the http.Transport.
+// Do NOT read, write, or close this connection. It is for observation only.
+func (c *httpTraceCollector) GetActualConn() net.Conn {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.actualConn
+}
+
+// IsConnectionReused returns whether the connection was reused from the pool.
+func (c *httpTraceCollector) IsConnectionReused() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.connectionReused
+}
+
+// WasIdle returns whether the connection was idle in the pool.
+func (c *httpTraceCollector) WasIdle() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.wasIdle
 }
 
 // =============================================================================

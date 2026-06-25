@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"math"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 )
@@ -27,7 +26,11 @@ type SpikeEvent struct {
 	HTTPStatus       *int              `json:"http_status,omitempty"`        // HTTP status code if HTTP probe
 	ProbeError       *string           `json:"probe_error,omitempty"`        // error string if probe failed
 	HTTPTrace        *HTTPTrace        `json:"http_trace,omitempty"`         // per-phase HTTP timing (HTTP spikes only)
-	CollectedAt      time.Time         `json:"collected_at"`      // when spike was recorded
+	// NativeTcpQuality holds TCP_INFO collected from the actual HTTP probe socket.
+	// This provides native_tcp_info evidence with matched_socket=true.
+	// Only populated for HTTP probes when TCP_INFO is successfully collected from the real connection.
+	NativeTcpQuality *TcpQuality       `json:"native_tcp_quality,omitempty"` // native TCP_INFO from actual probe socket
+	CollectedAt      time.Time         `json:"collected_at"`       // when spike was recorded
 }
 
 // SpikeSample represents a single latency sample captured around a spike event.
@@ -144,6 +147,8 @@ func (sd *SpikeDetector) getTracker(targetID, kind string) *spikeTracker {
 //
 // The httpTrace parameter provides per-phase HTTP timing for HTTP spikes, enabling
 // attribution of total latency to DNS, TCP connect, TLS handshake, etc.
+//
+// Note: DetectAndRecordWithTcpQuality is in spike_tcp_quality.go for file size management.
 func (sd *SpikeDetector) DetectAndRecord(
 	targetID, kind string,
 	latencyMs float64,
@@ -155,157 +160,11 @@ func (sd *SpikeDetector) DetectAndRecord(
 	previousSamples []LatencySample,
 	httpTrace *HTTPTrace,
 ) *SpikeEvent {
-	// Determine thresholds based on probe kind
-	var warningMs, criticalMs float64
-	switch kind {
-	case "icmp":
-		warningMs = sd.config.ICMPWarningMs
-		criticalMs = sd.config.ICMPCriticalMs
-	case "http":
-		warningMs = sd.config.HTTPWarningMs
-		criticalMs = sd.config.HTTPCriticalMs
-	default:
-		return nil
-	}
-
-	// Calculate rolling median from previous samples
-	medianMs := sd.calculateMedian(previousSamples)
-
-	// Check spike conditions - use highest severity threshold only
-	var severity string
-	var reasons []string
-
-	// Check for probe failure FIRST - HTTP failures are first-class diagnostic events
-	// ICMP failures continue to use latency-based spike detection (different semantics)
-	if !reached && kind == "http" {
-		// HTTP probe failure is always significant, regardless of latency
-		severity = "critical"
-		
-		// Determine failure type based on error message
-		if probeError != nil {
-			errStr := *probeError
-			if len(errStr) > 0 {
-				// First, check for explicit http_probe_* reasons embedded in the error string
-				// This handles HTTP 5xx/4xx classification from probe.go
-				errLower := strings.ToLower(errStr)
-				
-				// Check 5xx specific codes (most specific first)
-				if strings.Contains(errLower, "http_probe_503") {
-					reasons = append(reasons, "http_probe_503")
-				} else if strings.Contains(errLower, "http_probe_502") {
-					reasons = append(reasons, "http_probe_502")
-				} else if strings.Contains(errLower, "http_probe_504") {
-					reasons = append(reasons, "http_probe_504")
-				} else if strings.Contains(errLower, "http_probe_5xx") {
-					reasons = append(reasons, "http_probe_5xx")
-				} else if strings.Contains(errLower, "http_probe_timeout") {
-					reasons = append(reasons, "http_probe_timeout")
-				} else if strings.Contains(errLower, "timeout") || strings.Contains(errLower, "deadline") {
-					// Generic timeout patterns (context deadline exceeded, etc.)
-					reasons = append(reasons, "http_probe_timeout")
-				} else if strings.Contains(errLower, "connection refused") {
-					reasons = append(reasons, "http_probe_connection_refused")
-				} else if strings.Contains(errLower, "no such host") || strings.Contains(errLower, "lookup") || strings.Contains(errLower, "dial") {
-					reasons = append(reasons, "http_probe_dns_failure")
-				} else if strings.Contains(errLower, "connection reset") {
-					reasons = append(reasons, "http_probe_connection_reset")
-				} else if strings.Contains(errLower, "http_probe_404") {
-					reasons = append(reasons, "http_probe_404")
-				} else if strings.Contains(errLower, "http_probe_4xx") {
-					reasons = append(reasons, "http_probe_4xx")
-				} else {
-					reasons = append(reasons, "http_probe_failure")
-				}
-			} else {
-				reasons = append(reasons, "http_probe_failure")
-			}
-		} else {
-			reasons = append(reasons, "http_probe_failure")
-		}
-		
-		// Still check if relative threshold also exceeded (for evidence)
-		if sd.shouldIncludeRelativeReason(previousSamples, medianMs, latencyMs) {
-			reasons = append(reasons, "relative_10x_median_threshold")
-		}
-	} else {
-		// Normal latency spike detection for successful probes
-		// Check absolute thresholds first (highest priority)
-		if latencyMs >= criticalMs {
-			severity = "critical"
-			reasons = append(reasons, kind+"_critical_absolute_threshold")
-			// Check if relative threshold also exceeded (for evidence)
-			if sd.shouldIncludeRelativeReason(previousSamples, medianMs, latencyMs) {
-				reasons = append(reasons, "relative_10x_median_threshold")
-			}
-		} else if latencyMs >= warningMs {
-			severity = "warning"
-			reasons = append(reasons, kind+"_warning_absolute_threshold")
-			// Check if relative threshold also exceeded significantly (for evidence)
-			if sd.shouldIncludeRelativeReason(previousSamples, medianMs, latencyMs) {
-				reasons = append(reasons, "relative_10x_median_threshold")
-			}
-		} else if sd.shouldIncludeRelativeReason(previousSamples, medianMs, latencyMs) {
-			// Only relative threshold triggered
-			severity = "warning"
-			reasons = append(reasons, "relative_10x_median_threshold")
-		}
-	}
-
-	// No spike detected
-	if len(reasons) == 0 {
-		return nil
-	}
-
-	// Build spike event
-	tracker := sd.getTracker(targetID, kind)
-
-	// Convert previous samples to spike samples (bounded window)
-	prevSamples := sd.boundPreviousSamples(previousSamples)
-	spikePrevSamples := make([]SpikeSample, len(prevSamples))
-	for i, s := range prevSamples {
-		spikePrevSamples[i] = SpikeSample{
-			Ts:        s.Timestamp,
-			LatencyMs: s.LatencyMs,
-			OK:        s.Reachable,
-		}
-	}
-
-	event := SpikeEvent{
-		EventID:          generateEventID(),
-		TargetID:         targetID,
-		Kind:             kind,
-		Severity:         severity,
-		SampleTs:         sampleTs,
-		LatencyMs:        latencyMs,
-		RollingMedianMs:  medianMs,
-		Reasons:          reasons,
-		Thresholds: SpikeThresholds{
-			WarningMs:          warningMs,
-			CriticalMs:         criticalMs,
-			RelativeMultiplier: sd.config.RelativeMultiplier,
-		},
-		PreviousSamples:   spikePrevSamples,
-		SchedulerDelayMs:  schedulerDelayMs,
-		HTTPStatus:        httpStatus,
-		ProbeError:        probeError,
-		HTTPTrace:         httpTrace,
-		CollectedAt:       time.Now().UTC(),
-	}
-
-	// Use capture-aware eviction if configured
-	sd.mu.RLock()
-	captureFunc := sd.captureInfoFunc
-	sd.mu.RUnlock()
-	
-	if captureFunc != nil {
-		tracker.recordSpike(event, captureFunc)
-	} else {
-		// Fallback: use simple eviction function that always allows eviction
-		tracker.recordSpike(event, func(eventID string) (isProtected bool, hasCapture bool) {
-			return false, false
-		})
-	}
-	return &event
+	// Delegate to DetectAndRecordWithTcpQuality with nil TcpQuality
+	return sd.DetectAndRecordWithTcpQuality(
+		targetID, kind, latencyMs, sampleTs, reached,
+		schedulerDelayMs, httpStatus, probeError,
+		previousSamples, httpTrace, nil)
 }
 
 // calculateMedian computes the median of successful samples from the previous samples.
