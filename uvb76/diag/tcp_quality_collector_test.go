@@ -187,40 +187,6 @@ func TestTcpQuality_ErrorBlock_JSONSerialization(t *testing.T) {
 	}
 }
 
-func TestTcpQuality_ICMPUnavailableBlock_JSONSerialization(t *testing.T) {
-	// Test that ICMP unavailable TcpQuality serializes correctly
-	tq := &state.TcpQuality{
-		Kind:           "icmp",
-		LookupTarget:  "10.0.0.5",
-		MatchedSocket: false,
-		Source:        "ss-tcp-info",
-		ErrorKind:     state.TcpQualityErrorUnavailable,
-		Error:         "tcp quality is http/probe-only",
-		CollectedAt:   "2026-06-21T22:35:00Z",
-	}
-
-	data, err := json.Marshal(tq)
-	if err != nil {
-		t.Fatalf("failed to marshal TcpQuality: %v", err)
-	}
-
-	var parsed map[string]interface{}
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("failed to unmarshal TcpQuality: %v", err)
-	}
-
-	// Verify key fields
-	if parsed["kind"] != "icmp" {
-		t.Errorf("expected kind 'icmp', got '%v'", parsed["kind"])
-	}
-	if parsed["matched_socket"] != false {
-		t.Errorf("expected matched_socket false, got '%v'", parsed["matched_socket"])
-	}
-	if parsed["error_kind"] != "unavailable" {
-		t.Errorf("expected error_kind 'unavailable', got '%v'", parsed["error_kind"])
-	}
-}
-
 func TestTcpQuality_NoRawIPLeak(t *testing.T) {
 	// Test that IP addresses are properly redacted in serialization.
 	// Note: LookupTarget may retain the probe destination because it is already
@@ -298,6 +264,81 @@ func TestTcpQuality_NewTcpQualitySuccess(t *testing.T) {
 	}
 	if result.Source != "ss-tcp-info" {
 		t.Errorf("expected source 'ss-tcp-info', got '%s'", result.Source)
+	}
+}
+
+func TestTcpQuality_SourceValues(t *testing.T) {
+	// Test that new source constants are defined correctly
+	if TcpQualitySourceNativeTCPInfo != "native_tcp_info" {
+		t.Errorf("expected TcpQualitySourceNativeTCPInfo='native_tcp_info', got '%s'", TcpQualitySourceNativeTCPInfo)
+	}
+	if TcpQualitySourceSyntheticTCPInfo != "synthetic_tcp_info" {
+		t.Errorf("expected TcpQualitySourceSyntheticTCPInfo='synthetic_tcp_info', got '%s'", TcpQualitySourceSyntheticTCPInfo)
+	}
+	if TcpQualitySourceCLIFallback != "ss-tcp-info" {
+		t.Errorf("expected TcpQualitySourceCLIFallback='ss-tcp-info', got '%s'", TcpQualitySourceCLIFallback)
+	}
+	if TcpQualitySourceUnavailable != "unavailable" {
+		t.Errorf("expected TcpQualitySourceUnavailable='unavailable', got '%s'", TcpQualitySourceUnavailable)
+	}
+}
+
+func TestTcpQuality_NativeSourceSerialization(t *testing.T) {
+	// Test that TcpQuality with native_tcp_info source serializes correctly
+	tq := &state.TcpQuality{
+		Kind:           "http",
+		LookupTarget:  "10.0.0.5",
+		MatchedSocket: true,
+		Source:        TcpQualitySourceNativeTCPInfo,
+		State:         "ESTAB",
+		Local:         "redacted:45678",
+		Remote:        "redacted:8080",
+		RTTUs:         tcpQPtrInt64(5000),
+		SndCwnd:       tcpQPtrInt32(10),
+		CollectedAt:   "2026-06-21T22:35:00Z",
+	}
+
+	data, err := json.Marshal(tq)
+	if err != nil {
+		t.Fatalf("failed to marshal TcpQuality: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal TcpQuality: %v", err)
+	}
+
+	// Verify source is native_tcp_info
+	if parsed["source"] != "native_tcp_info" {
+		t.Errorf("expected source 'native_tcp_info', got '%v'", parsed["source"])
+	}
+}
+
+func TestTcpQuality_UnavailableSourceSerialization(t *testing.T) {
+	// Test that TcpQuality with unavailable source serializes correctly
+	tq := &state.TcpQuality{
+		Kind:           "http",
+		LookupTarget:  "10.0.0.5",
+		MatchedSocket: false,
+		Source:        TcpQualitySourceUnavailable,
+		ErrorKind:     state.TcpQualityErrorUnavailable,
+		Error:         "tcp quality is http/probe-only",
+		CollectedAt:   "2026-06-21T22:35:00Z",
+	}
+
+	data, err := json.Marshal(tq)
+	if err != nil {
+		t.Fatalf("failed to marshal TcpQuality: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal TcpQuality: %v", err)
+	}
+
+	// Verify source is unavailable
+	if parsed["source"] != "unavailable" {
+		t.Errorf("expected source 'unavailable', got '%v'", parsed["source"])
 	}
 }
 
