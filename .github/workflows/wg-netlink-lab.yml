@@ -36,8 +36,8 @@ jobs:
 
       - name: Install lab dependencies
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
             iproute2 \
             wireguard-tools \
             kmod
@@ -46,17 +46,18 @@ jobs:
         run: |
           echo "=== WireGuard Kernel Module Status ==="
           if [ -d /sys/module/wireguard ]; then
-            echo "WireGuard module is loaded"
+            echo "WireGuard module: LOADED"
           else
             echo "Attempting to load WireGuard module..."
-            modprobe wireguard 2>/dev/null || echo "Could not load wireguard module"
+            sudo modprobe wireguard
           fi
           
-          # Final check
+          # Fail-closed: WireGuard module is required for the proof
           if [ -d /sys/module/wireguard ]; then
             echo "WireGuard module: LOADED"
           else
-            echo "WireGuard module: NOT LOADED"
+            echo "FAIL: WireGuard module NOT LOADED - required for generic-netlink proof"
+            exit 1
           fi
 
       - name: Build wg-netlink-proof binary
@@ -96,7 +97,8 @@ jobs:
       - name: Run WireGuard generic-netlink full lab
         run: |
           echo "=== Running WireGuard Generic-Netlink Lab ==="
-          ./tools/wg-netlink-lab/wg-netlink-lab full
+          echo "Lab requires CAP_NET_ADMIN for ip link operations (create/delete wg-kgb0)"
+          sudo ./tools/wg-netlink-lab/wg-netlink-lab full
 
       - name: Check preflight artifact exists (fail-closed)
         run: |
@@ -159,11 +161,19 @@ jobs:
           fi
           echo "PASS: Artifact verifier passed"
 
-      - name: Make artifacts readable
+      - name: Fix artifact permissions (root-created files)
         if: always()
         run: |
-          chmod -R a+rX "${{ env.ARTIFACTS_DIR }}" 2>/dev/null || true
-          ls -la "${{ env.ARTIFACTS_DIR }}/"
+          echo "=== Fixing artifact permissions ==="
+          # Files created by sudo need proper permissions for readback
+          if [ -d "${{ env.ARTIFACTS_DIR }}" ]; then
+            sudo chmod -R a+rX "${{ env.ARTIFACTS_DIR }}"
+            sudo chown -R "$USER:$USER" "${{ env.ARTIFACTS_DIR }}"
+            echo "Permissions fixed:"
+            ls -la "${{ env.ARTIFACTS_DIR }}/"
+          else
+            echo "Artifacts directory not found (may have failed earlier)"
+          fi
 
       - name: Upload lab artifacts
         if: always()
