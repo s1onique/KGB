@@ -63,6 +63,8 @@ pub const StatusError = error{
     unsupported_platform,
     /// Memory allocation failed.
     out_of_memory,
+    /// Generic netlink operation failed.
+    netlink_failed,
 };
 
 /// Converts StatusError to human-readable detail string for status checks.
@@ -77,6 +79,7 @@ pub fn statusErrorDetail(err: StatusError) []const u8 {
         error.timeout => "wg command timeout",
         error.unsupported_platform => "wg not supported on this platform",
         error.out_of_memory => "wg check out of memory",
+        error.netlink_failed => "netlink operation failed",
     };
 }
 
