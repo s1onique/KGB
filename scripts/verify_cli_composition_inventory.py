@@ -82,6 +82,8 @@ PATTERNS = {
         # Match actual exec calls (not comments)
         (r'exec\.Command\s*\(', "exec.Command()"),
         (r'exec\.CommandContext\s*\(', "exec.CommandContext()"),
+        # Match syscall package usage (NETLINK_ROUTE, raw sockets)
+        (r'\bsyscall\b', "syscall import"),
     ],
     "python": [
         (r'\bsubprocess\b', "subprocess module"),

@@ -1,5 +1,6 @@
 // Package diag implements diagnostic capture for UVB-76.
-// This file provides route lookup parsing for diagnostic evidence.
+// This file provides route lookup with native NETLINK_ROUTE backend.
+// CLI fallback is available behind the UseCLIFallback seam.
 package diag
 
 import (
@@ -11,6 +12,20 @@ import (
 	"time"
 
 	"github.com/s1onique/KGB/uvb76/state"
+)
+
+// UseCLIFallback is a build-tag controlled seam for CLI fallback.
+// When true, the RouteCollector uses CLI composition as the primary path.
+// When false (default), native NETLINK_ROUTE is the primary path with CLI fallback.
+// This can be set in tests or when native netlink is unavailable.
+var UseCLIFallback = false
+
+// RouteSource indicates which backend was used for a route lookup.
+type RouteSource string
+
+const (
+	RouteSourceNative   RouteSource = "native_netlink"
+	RouteSourceCLIFallback RouteSource = "cli_fallback"
 )
 
 // RouteLookupParser parses `ip route get` output into structured ProbeRoute.
@@ -182,6 +197,8 @@ func NewRouteCollector() *RouteCollector {
 }
 
 // CollectRouteLookup performs a route lookup for the given probe kind and target.
+// It uses native NETLINK_ROUTE by default, with CLI fallback behind the UseCLIFallback seam.
+// This preserves the existing evidence shape while providing native performance.
 func (c *RouteCollector) CollectRouteLookup(ctx context.Context, probeKind state.ProbeRouteKind, target string, resolvedIP string) *state.ProbeRoute {
 	now := time.Now().UTC()
 	route := &state.ProbeRoute{
@@ -201,6 +218,82 @@ func (c *RouteCollector) CollectRouteLookup(ctx context.Context, probeKind state
 		route.Error = "invalid route lookup target"
 		return route
 	}
+
+	// Try native NETLINK_ROUTE first (unless UseCLIFallback is set)
+	if UseCLIFallback {
+		return c.collectViaCLI(ctx, route, lookupTarget)
+	}
+	return c.collectViaNative(ctx, route, lookupTarget)
+}
+
+// collectViaNative performs route lookup using native NETLINK_ROUTE.
+func (c *RouteCollector) collectViaNative(ctx context.Context, route *state.ProbeRoute, lookupTarget string) *state.ProbeRoute {
+	// Derive a child timeout from the parent context
+	childCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	nlResult := RouteLookupNative(childCtx, lookupTarget)
+	if nlResult == nil {
+		route.ErrorKind = state.RouteLookupErrorUnavailable
+		route.Error = "native route lookup returned nil"
+		return route
+	}
+
+	if nlResult.Error != nil {
+		// Native failed - try CLI fallback if this is a recoverable error
+		if c.shouldFallbackToCLI(nlResult.Error) {
+			return c.collectViaCLI(ctx, route, lookupTarget)
+		}
+		route.ErrorKind = c.mapNetlinkErrorToKind(nlResult.Error)
+		route.Error = nlResult.Error.Message
+		return route
+	}
+
+	// Success - convert to ProbeRoute fields
+	fields := RouteLookupNetlinkResultToProbeRoute(nlResult, true)
+	route.Ok = true
+	route.RouteType = fields.RouteType
+	route.Interface = fields.Interface
+	route.SourceIP = fields.SourceIP
+	route.Gateway = fields.Gateway
+	route.Table = fields.Table
+	return route
+}
+
+// shouldFallbackToCLI determines if we should fall back to CLI after native failure.
+func (c *RouteCollector) shouldFallbackToCLI(nlErr *NetlinkError) bool {
+	// Only fallback for errors that might be platform-specific
+	switch nlErr.Kind {
+	case "open_failed", "permission", "no_route":
+		return true
+	default:
+		return false
+	}
+}
+
+// mapNetlinkErrorToKind maps netlink errors to RouteLookupErrorKind.
+func (c *RouteCollector) mapNetlinkErrorToKind(nlErr *NetlinkError) state.RouteLookupErrorKind {
+	switch nlErr.Kind {
+	case "open_failed", "bind_failed", "send_failed", "receive_failed":
+		return state.RouteLookupErrorUnavailable
+	case "timeout":
+		return state.RouteLookupErrorTimeout
+	case "permission":
+		return state.RouteLookupErrorUnavailable
+	case "no_route":
+		return state.RouteLookupErrorUnavailable
+	case "malformed":
+		return state.RouteLookupErrorParseFailed
+	case "invalid_target":
+		return state.RouteLookupErrorUnavailable
+	default:
+		return state.RouteLookupErrorUnavailable
+	}
+}
+
+// collectViaCLI performs route lookup using CLI composition (ip route get).
+// This is the legacy fallback path.
+func (c *RouteCollector) collectViaCLI(ctx context.Context, route *state.ProbeRoute, lookupTarget string) *state.ProbeRoute {
 	// Always derive a child timeout from the parent context to ensure bounded execution.
 	cmdCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()

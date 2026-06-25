@@ -4,11 +4,22 @@ package diag
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/s1onique/KGB/uvb76/state"
 )
+
+// Force CLI fallback on non-Linux platforms where NETLINK_ROUTE is unavailable
+func init() {
+	// Enable CLI fallback only when native netlink is not available
+	// This ensures acceptance tests work on macOS/Windows
+	// Note: On Linux, native NETLINK_ROUTE is used by default
+	if runtime.GOOS != "linux" {
+		UseCLIFallback = true
+	}
+}
 
 func TestRouteCollector_CollectRouteLookup_Success(t *testing.T) {
 	collector := NewRouteCollector()
