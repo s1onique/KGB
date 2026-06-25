@@ -18,7 +18,7 @@ const status = @import("status.zig");
 const bfd_status = @import("bfd/status.zig");
 const bgp_status = @import("bgp/status.zig");
 const status_checks = @import("status_checks.zig");
-const wg_show_collector = @import("net/wg_show_collector.zig");
+const wg_boundary = @import("net/wg_status_boundary.zig");
 
 // ============================================================================
 // Test helpers
@@ -402,15 +402,15 @@ test "static checks have detail pointing to static strings" {
 
 test "getWgPeersCheckFromError returns static detail strings" {
     // All error details are static string literals - no allocation
-    const err_details = [_]struct { wg_show_collector.CollectError, []const u8 }{
-        .{ error.CommandNotFound, "wg command not available" },
-        .{ error.CommandFailed, "wg command failed" },
-        .{ error.PipeFailed, "wg pipe creation failed" },
-        .{ error.ForkFailed, "wg fork failed" },
-        .{ error.ExecFailed, "wg exec failed" },
-        .{ error.OutputTruncated, "wg output truncated" },
-        .{ error.MalformedOutput, "wg output malformed" },
-        .{ error.OutOfMemory, "wg check out of memory" },
+    const err_details = [_]struct { wg_boundary.StatusError, []const u8 }{
+        .{ error.backend_missing, "wg command not available" },
+        .{ error.command_failed, "wg command failed" },
+        .{ error.malformed_output, "wg output malformed" },
+        .{ error.out_of_memory, "wg check out of memory" },
+        .{ error.timeout, "wg command timeout" },
+        .{ error.interface_missing, "wg interface not found" },
+        .{ error.permission_denied, "wg permission denied" },
+        .{ error.unsupported_platform, "wg not supported on this platform" },
     };
 
     for (err_details) |pair| {
@@ -428,5 +428,5 @@ test "getWgPeersCheckFromParsed returns static detail strings" {
     try std.testing.expectEqualStrings("no handshake yet", check_no_handshake.detail);
 
     const check_ok = status_checks.getWgPeersCheckFromParsed(1, true);
-    try std.testing.expectEqualStrings("wg0", check_ok.detail);
+    try std.testing.expectEqualStrings("wireguard peers healthy", check_ok.detail);
 }

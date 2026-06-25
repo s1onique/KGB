@@ -109,7 +109,7 @@ pub const DiagnosticText = struct {
 /// Privacy-aligned fields (exposed):
 ///   - interface name
 ///   - peer count
-///   - latest handshake age
+///   - latest handshake epoch (Unix timestamp)
 ///   - transfer rx/tx bytes
 ///
 /// Explicitly excluded (not exposed):
@@ -122,9 +122,10 @@ pub const WireGuardStatus = struct {
     interface: []const u8,
     /// Number of configured peers.
     peer_count: u32,
-    /// Seconds since most recent handshake across all peers.
+    /// Unix epoch timestamp of most recent handshake across all peers.
     /// Null if no handshakes have occurred (never-handshaked peer).
-    latest_handshake_age_sec: ?u64,
+    /// Per wg(8) dump format: this is a Unix timestamp, not seconds ago.
+    latest_handshake_epoch_sec: ?u64,
     /// Total bytes received via this interface.
     rx_bytes: u64,
     /// Total bytes transmitted via this interface.
@@ -140,7 +141,7 @@ pub const WireGuardStatus = struct {
         return WireGuardStatus{
             .interface = "",
             .peer_count = 0,
-            .latest_handshake_age_sec = null,
+            .latest_handshake_epoch_sec = null,
             .rx_bytes = 0,
             .tx_bytes = 0,
             .listen_port = null,
@@ -159,8 +160,9 @@ pub const WireGuardStatus = struct {
     }
 
     /// Returns true if at least one handshake has occurred.
+    /// Note: epoch_sec is null when no handshake ever occurred.
     pub fn hasHandshake(self: WireGuardStatus) bool {
-        return self.latest_handshake_age_sec != null;
+        return self.latest_handshake_epoch_sec != null;
     }
 
     /// Derives a simple health status from this WireGuard status.
@@ -266,7 +268,8 @@ pub fn toCheck(wg_status: WireGuardStatus, detail_override: ?[]const u8) status.
 }
 
 /// Re-exports from status.zig for this module's use.
-const status = struct {
+/// Public for status.zig integration via status_checks.zig.
+pub const status = struct {
     pub const CheckStatus = enum { ok, warn, @"error", unknown };
     pub const Check = struct {
         name: []const u8,
@@ -299,18 +302,22 @@ const DUMP_PEER_FIELDS: usize = 8;
 ///   1: preshared key (redacted)
 ///   2: endpoint (redacted)
 ///   3: allowed IPs (redacted)
-///   4: latest handshake (seconds ago, 0 = never)
+///   4: latest handshake (Unix epoch timestamp, 0 = never)
 ///   5: transfer rx bytes
 ///   6: transfer tx bytes
 ///   7: persistent keepalive (seconds, or "off")
+///
+/// Note: Per wg(8) dump format, field 4 is a Unix timestamp, not seconds ago.
 pub fn parseWgDumpOutput(input: []const u8) !WireGuardStatus {
     var it = std.mem.splitScalar(u8, input, '\n');
 
+    var interface_name: []const u8 = "";
     var listen_port: ?u16 = null;
     var peer_count: u32 = 0;
-    var latest_handshake: ?u64 = null;
+    var latest_handshake_epoch: ?u64 = null;
     var rx_bytes: u64 = 0;
     var tx_bytes: u64 = 0;
+    var found_interface_line = false;
 
     // First line: interface info (4 fields)
     if (it.next()) |first_line| {
@@ -318,6 +325,9 @@ pub fn parseWgDumpOutput(input: []const u8) !WireGuardStatus {
             // Empty output = no interface
             return WireGuardStatus.noInterface();
         }
+
+        // Per wg(8) dump format: first line is interface info, even with no peers
+        found_interface_line = true;
 
         // Parse interface line fields
         var field_it = std.mem.splitScalar(u8, first_line, '\t');
@@ -328,6 +338,12 @@ pub fn parseWgDumpOutput(input: []const u8) !WireGuardStatus {
             listen_port = std.fmt.parseInt(u16, port_str, 10) catch null;
         }
         _ = field_it.next(); // fwmark
+
+        // Interface name is implied from the dump context
+        // When using `wg show dump`, the output represents a single interface
+        // We use "wg0" as the implied default since we can't determine
+        // the actual interface name from the dump output format
+        interface_name = "wg0";
     } else {
         return WireGuardStatus.noInterface();
     }
@@ -354,7 +370,7 @@ pub fn parseWgDumpOutput(input: []const u8) !WireGuardStatus {
         _ = field_it.next(); // 2: endpoint (redacted)
         _ = field_it.next(); // 3: allowed IPs (redacted)
 
-        // 4: latest handshake (seconds ago, 0 = never)
+        // 4: latest handshake (Unix epoch timestamp, 0 = never)
         const handshake_str = field_it.next() orelse "0";
         const handshake = std.fmt.parseInt(u64, handshake_str, 10) catch 0;
 
@@ -372,22 +388,23 @@ pub fn parseWgDumpOutput(input: []const u8) !WireGuardStatus {
         rx_bytes += rx;
         tx_bytes += tx;
 
-        // Track minimum handshake (most recent)
+        // Track maximum handshake epoch (most recent)
+        // Per wg(8): field 4 is a Unix epoch timestamp, 0 means never
         if (handshake > 0) {
-            if (latest_handshake == null or handshake < latest_handshake.?) {
-                latest_handshake = handshake;
+            if (latest_handshake_epoch == null or handshake > latest_handshake_epoch.?) {
+                latest_handshake_epoch = handshake;
             }
         }
     }
 
-    // If we parsed any data, consider the interface as present
-    // (wg show dump returns interface line even if no peers)
-    const has_interface = peer_count >= 0;
+    // Interface exists if we parsed the interface info line
+    // (even with zero peers, the interface line is present in dump output)
+    const has_interface = found_interface_line;
 
     return WireGuardStatus{
-        .interface = if (has_interface) "wg0" else "",
+        .interface = if (has_interface) interface_name else "",
         .peer_count = peer_count,
-        .latest_handshake_age_sec = latest_handshake,
+        .latest_handshake_epoch_sec = latest_handshake_epoch,
         .rx_bytes = rx_bytes,
         .tx_bytes = tx_bytes,
         .listen_port = listen_port,

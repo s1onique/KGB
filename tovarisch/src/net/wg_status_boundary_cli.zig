@@ -6,6 +6,17 @@
 const std = @import("std");
 const wg = @import("wg_status_boundary.zig");
 
+// POSIX fcntl and open flags (not exposed in Zig 0.16 std.c)
+const F_GETFL: c_int = 3;
+const F_SETFL: c_int = 4;
+const O_NONBLOCK: c_int = 4;
+
+// POSIX poll event flags (not exposed in Zig 0.16 std.c)
+const POLLIN: c_short = 0x0001;
+const POLLHUP: c_short = 0x0010;
+const POLLERR: c_short = 0x0008;
+
+
 // ============================================================================
 // CLI Backend Implementation
 // ============================================================================
@@ -35,26 +46,21 @@ pub const CliBackend = struct {
         "/sbin/wg",
     };
 
-    /// Timeout in seconds.
-    timeout_secs: u64 = DEFAULT_TIMEOUT_SECS,
-
     /// Initialize CLI backend with defaults.
     pub fn init() CliBackend {
-        return CliBackend{ .timeout_secs = DEFAULT_TIMEOUT_SECS };
-    }
-
-    /// Initialize CLI backend with custom timeout.
-    pub fn initWithTimeout(timeout_secs: u64) CliBackend {
-        return CliBackend{ .timeout_secs = timeout_secs };
+        return CliBackend{};
     }
 
     /// Convert to generic backend trait.
+    /// Phase 1: Uses fixed DEFAULT_TIMEOUT_SECS (5 seconds) for all CLI operations.
+    /// Note: Zig inner functions cannot capture outer scope variables, so custom
+    /// timeout is not supported through the backend trait. This is a Phase 1 limitation.
     pub fn asBackend(self: *const CliBackend) wg.WireGuardStatusBackend {
-        const timeout = self.timeout_secs;
+        _ = self;
         return wg.WireGuardStatusBackend{
             .wireguardStatusFn = struct {
                 fn f(allocator: std.mem.Allocator) wg.StatusError!wg.WireGuardStatusResult {
-                    return wireguardStatusImpl(allocator, timeout);
+                    return cliWireguardStatus(allocator);
                 }
             }.f,
             .backendKindFn = struct {
@@ -64,55 +70,46 @@ pub const CliBackend = struct {
             }.f,
         };
     }
-
-    /// Implementation of wireguardStatus for CLI backend.
-    fn wireguardStatusImpl(allocator: std.mem.Allocator, timeout_secs: u64) wg.StatusError!wg.WireGuardStatusResult {
-        const wg_path = findWgCommand() orelse return error.backend_missing;
-
-        const cmd_result = runWgShowDump(allocator, wg_path, timeout_secs) catch |err| {
-            return mapCollectorError(err);
-        };
-        errdefer allocator.free(cmd_result.stdout);
-        errdefer allocator.free(cmd_result.stderr);
-
-        if (cmd_result.exit_code == 127) return error.backend_missing;
-        if (cmd_result.exit_code == 126) return error.permission_denied;
-
-        if (cmd_result.timed_out) return error.timeout;
-
-        if (cmd_result.exit_code != 0) {
-            return error.command_failed;
-        }
-
-        if (cmd_result.stdout_truncated) {
-            return error.command_failed;
-        }
-
-        const status = wg.parseWgDumpOutput(cmd_result.stdout) catch |parse_err| {
-            _ = parse_err;
-            return error.malformed_output;
-        };
-
-        return wg.WireGuardStatusResult.withDiagnostic(status, .cli, cmd_result.stderr);
-    }
 };
+
+/// Standalone wireguardStatus implementation for CLI backend.
+/// Uses DEFAULT_TIMEOUT_SECS.
+fn cliWireguardStatus(allocator: std.mem.Allocator) wg.StatusError!wg.WireGuardStatusResult {
+    const wg_path = findWgCommand() orelse return error.backend_missing;
+
+    const cmd_result = runWgShowDump(allocator, wg_path, CliBackend.DEFAULT_TIMEOUT_SECS) catch |err| {
+        return mapCollectorError(err);
+    };
+    errdefer allocator.free(cmd_result.stdout);
+    errdefer allocator.free(cmd_result.stderr);
+
+    if (cmd_result.exit_code == 127) return error.backend_missing;
+    if (cmd_result.exit_code == 126) return error.permission_denied;
+
+    if (cmd_result.timed_out) return error.timeout;
+
+    if (cmd_result.exit_code != 0) {
+        return error.command_failed;
+    }
+
+    if (cmd_result.stdout_truncated) {
+        return error.command_failed;
+    }
+
+    const status = wg.parseWgDumpOutput(cmd_result.stdout) catch |parse_err| {
+        _ = parse_err;
+        return error.malformed_output;
+    };
+
+    return wg.WireGuardStatusResult.withDiagnostic(status, .cli, cmd_result.stderr);
+}
 
 /// Maps legacy collector errors to structured StatusError.
 fn mapCollectorError(err: anytype) wg.StatusError {
-    const E = @typeInfo(@TypeOf(err)).Error;
-    _ = E;
     return switch (err) {
-        error.CommandNotFound => .backend_missing,
-        error.CommandFailed => .command_failed,
-        error.PermissionDenied => .permission_denied,
-        error.PipeFailed => .command_failed,
-        error.ForkFailed => .command_failed,
-        error.ExecFailed => .command_failed,
-        error.OutputTruncated => .command_failed,
-        error.MalformedOutput => .malformed_output,
-        error.OutOfMemory => .out_of_memory,
-        error.Timeout => .timeout,
-        else => .command_failed,
+        error.PipeFailed => error.command_failed,
+        error.ForkFailed => error.command_failed,
+        error.OutOfMemory => error.out_of_memory,
     };
 }
 
@@ -151,12 +148,12 @@ fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_s
     }
 
     // Set stdout pipe to nonblocking before fork
-    const stdout_flags = std.c.fcntl(stdout_pipe[0], std.c.F_GETFL, 0);
-    _ = std.c.fcntl(stdout_pipe[0], std.c.F_SETFL, stdout_flags | std.c.O_NONBLOCK);
+    const stdout_flags: c_int = std.c.fcntl(stdout_pipe[0], F_GETFL, @as(c_int, 0));
+    _ = std.c.fcntl(stdout_pipe[0], F_SETFL, stdout_flags | O_NONBLOCK);
 
     // Set stderr pipe to nonblocking before fork
-    const stderr_flags = std.c.fcntl(stderr_pipe[0], std.c.F_GETFL, 0);
-    _ = std.c.fcntl(stderr_pipe[0], std.c.F_SETFL, stderr_flags | std.c.O_NONBLOCK);
+    const stderr_flags: c_int = std.c.fcntl(stderr_pipe[0], F_GETFL, @as(c_int, 0));
+    _ = std.c.fcntl(stderr_pipe[0], F_SETFL, stderr_flags | O_NONBLOCK);
 
     const pid = std.c.fork();
     if (pid < 0) {
@@ -202,43 +199,46 @@ fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_s
     var timed_out = false;
 
     // Use poll() to avoid deadlock on concurrent stdout/stderr
-    var poll_fds: [2]std.c.struct_pollfd = .{
-        .{ .fd = stdout_pipe[0], .events = std.c.POLLIN, .revents = 0 },
-        .{ .fd = stderr_pipe[0], .events = std.c.POLLIN, .revents = 0 },
+    // Track remaining time ourselves since poll() doesn't have a "remaining time" feature
+    var poll_fds: [2]std.c.pollfd = .{
+        .{ .fd = stdout_pipe[0], .events = POLLIN, .revents = 0 },
+        .{ .fd = stderr_pipe[0], .events = POLLIN, .revents = 0 },
     };
 
-    // Calculate deadline using monotonic clock
-    const start_ns = std.time.monoTimestamp();
-    const deadline_ns = start_ns + (timeout_secs * std.time.ns_per_s);
+    var remaining_ms: i32 = @intCast(timeout_secs * 1000);
+    const poll_interval_ms: i32 = 100; // Check every 100ms for responsive timeout
 
     // Read until both pipes are closed or timeout expires
     while (true) {
         // Check if we have all the data we need
         if (stdout_truncated and stderr_truncated) break;
 
-        // Calculate remaining timeout from monotonic clock
-        const now_ns = std.time.monoTimestamp();
-        const remaining_ns = deadline_ns - now_ns;
-        if (remaining_ns <= 0) {
+        // Calculate actual poll timeout (don't exceed remaining time or our interval)
+        const poll_ms: i32 = @min(remaining_ms, poll_interval_ms);
+
+        const poll_result = std.c.poll(&poll_fds, 2, poll_ms);
+
+        // Subtract elapsed time from remaining
+        remaining_ms -= poll_ms;
+
+        if (poll_result < 0) {
+            // Poll interrupted (e.g., EINTR), check again
+            continue;
+        }
+
+        // Check for timeout after subtracting elapsed time
+        if (remaining_ms <= 0) {
             timed_out = true;
             break;
         }
 
-        // Poll with remaining timeout (cap at 100ms for responsive timeout)
-        const poll_ms = @as(i32, @min(@as(i64, remaining_ns / std.time.ns_per_ms), 100));
-        const poll_result = std.c.poll(&poll_fds, 2, poll_ms);
-        if (poll_result < 0) {
-            // Poll interrupted, check again
-            continue;
-        }
-
         // Read stdout if ready
-        if (poll_fds[0].revents & std.c.POLLIN != 0) {
+        if (poll_fds[0].revents & POLLIN != 0) {
             if (!stdout_truncated and stdout_len < CliBackend.MAX_STDOUT_SIZE) {
                 const n = std.c.read(stdout_pipe[0], stdout_buf.ptr + stdout_len, CliBackend.MAX_STDOUT_SIZE - stdout_len);
                 if (n > 0) {
                     stdout_len += @intCast(n);
-                } else if (n == 0 or (n < 0 and std.c.errno(n) != @intFromEnum(std.c.E.AGAIN))) {
+                } else if (n == 0 or (n < 0 and std.c.errno(n) != .AGAIN)) {
                     poll_fds[0].fd = -1; // EOF or error, don't poll again
                 }
             }
@@ -246,12 +246,12 @@ fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_s
         }
 
         // Read stderr if ready
-        if (poll_fds[1].revents & std.c.POLLIN != 0) {
+        if (poll_fds[1].revents & POLLIN != 0) {
             if (!stderr_truncated and stderr_len < CliBackend.MAX_STDERR_SIZE) {
                 const n = std.c.read(stderr_pipe[0], stderr_buf.ptr + stderr_len, CliBackend.MAX_STDERR_SIZE - stderr_len);
                 if (n > 0) {
                     stderr_len += @intCast(n);
-                } else if (n == 0 or (n < 0 and std.c.errno(n) != @intFromEnum(std.c.E.AGAIN))) {
+                } else if (n == 0 or (n < 0 and std.c.errno(n) != .AGAIN)) {
                     poll_fds[1].fd = -1; // EOF or error, don't poll again
                 }
             }
@@ -259,8 +259,8 @@ fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_s
         }
 
         // Check for hangup on both pipes
-        if ((poll_fds[0].revents & (std.c.POLLHUP | std.c.POLLERR) != 0) and
-            (poll_fds[1].revents & (std.c.POLLHUP | std.c.POLLERR) != 0)) {
+        if ((poll_fds[0].revents & (POLLHUP | POLLERR) != 0) and
+            (poll_fds[1].revents & (POLLHUP | POLLERR) != 0)) {
             break;
         }
 
@@ -283,7 +283,7 @@ fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_s
 
     // If timed out, kill the child process
     if (timed_out) {
-        _ = std.c.kill(pid, std.c.SIGKILL);
+        _ = std.c.kill(pid, .KILL);
     }
 
     // Wait for child to finish

@@ -4,9 +4,14 @@
 // - getWgPeersCheck() - WireGuard peer diagnostics
 // - getWgPeersCheckFromParsed() - test helper
 // - getWgPeersCheckFromError() - test helper
+//
+// Production WireGuard status is now wired through the wg_status_boundary
+// typed boundary (Phase 1 complete). The old wg_show_collector is retained
+// for legacy test coverage only; production path uses the typed boundary.
 
 const std = @import("std");
-const wg_show_collector = @import("net/wg_show_collector.zig");
+const wg_boundary = @import("net/wg_status_boundary.zig");
+const wg_boundary_cli = @import("net/wg_status_boundary_cli.zig");
 const status = @import("status.zig");
 
 // ============================================================================
@@ -15,106 +20,82 @@ const status = @import("status.zig");
 
 /// Collects WireGuard diagnostics and returns the appropriate status check.
 ///
-/// Status semantics:
-/// - `ok`: `wg show` succeeds and at least one peer is detected.
-/// - `warn`: `wg` unavailable, command fails, malformed output, no peers, or no
-///   handshake yet.
-/// - `warn`: output truncated.
-/// - No hard error for unavailable WireGuard tooling.
+/// Production path: Uses wg_status_boundary CLI backend (Phase 1 complete).
+/// The boundary provides typed WireGuardStatus with structured error handling.
 ///
-/// Note: On success, we use a static detail string rather than returning
-/// `diag.diagnostics.interface` because `defer diag.deinit()` would free the
-/// backing buffer before the return. Static detail is safe for v0.
+/// Status semantics:
+/// - `ok`: WireGuard interface exists with at least one peer and a handshake.
+/// - `warn`: `wg` unavailable, permission denied, malformed output, no peers,
+///   or no handshake yet.
+/// - All errors map to warn (no hard errors for unavailable tooling).
 pub fn getWgPeersCheck(allocator: std.mem.Allocator) status.Check {
-    const result = wg_show_collector.collectWgDiagnosticsOwned(allocator);
+    // Phase 1: Use the typed WireGuard status boundary (CLI backend)
+    var cli_backend = wg_boundary_cli.CliBackend.init();
+    const backend = cli_backend.asBackend();
 
-    // Handle all error paths as warn (no hard errors for unavailable tooling)
-    var diag = result catch |err| {
-        const detail: []const u8 = switch (err) {
-            error.CommandNotFound => "wg command not available",
-            error.CommandFailed => "wg command failed",
-            error.PipeFailed => "wg pipe creation failed",
-            error.ForkFailed => "wg fork failed",
-            error.ExecFailed => "wg exec failed",
-            error.OutputTruncated => "wg output truncated",
-            error.MalformedOutput => "wg output malformed",
-            error.OutOfMemory => "wg check out of memory",
-        };
+    // Collect status through the typed boundary
+    const wg_result = backend.wireguardStatus(allocator) catch |err| {
+        // Handle all error paths as warn (no hard errors for unavailable tooling)
+        const detail = wg_boundary.statusErrorDetail(err);
+        const boundary_check = wg_boundary.toCheck(wg_boundary.WireGuardStatus.noInterface(), detail);
         return status.Check{
-            .name = "wg_peers",
-            .status = .warn,
-            .detail = detail,
+            .name = boundary_check.name,
+            .status = mapBoundaryStatus(boundary_check.status),
+            .detail = boundary_check.detail,
         };
     };
-    defer diag.deinit(allocator);
 
-    // Check for at least one peer
-    if (diag.diagnostics.peer_count == 0) {
-        return status.Check{
-            .name = "wg_peers",
-            .status = .warn,
-            .detail = "no peers detected",
-        };
-    }
-
-    // Check for handshake presence (warn if never-handshaked)
-    if (diag.diagnostics.latest_handshake_age_sec == null) {
-        return status.Check{
-            .name = "wg_peers",
-            .status = .warn,
-            .detail = "no handshake yet",
-        };
-    }
-
-    // Success: at least one peer with a handshake
-    // Use static detail to avoid dangling pointer from freed stdout_buf
+    // Success: convert WireGuardStatus to Check via boundary helper
+    const boundary_check = wg_boundary.toCheck(wg_result.status, null);
     return status.Check{
-        .name = "wg_peers",
-        .status = .ok,
-        .detail = "wireguard peers healthy",
+        .name = boundary_check.name,
+        .status = mapBoundaryStatus(boundary_check.status),
+        .detail = boundary_check.detail,
     };
 }
 
 /// Test helper: creates a wg_peers check from pre-parsed WireGuard data.
 /// This bypasses the collector to allow deterministic unit testing.
 pub fn getWgPeersCheckFromParsed(comptime peer_count: u32, comptime has_handshake: bool) status.Check {
-    if (peer_count == 0) {
-        return status.Check{
-            .name = "wg_peers",
-            .status = .warn,
-            .detail = "no peers detected",
-        };
-    }
-    if (!has_handshake) {
-        return status.Check{
-            .name = "wg_peers",
-            .status = .warn,
-            .detail = "no handshake yet",
-        };
-    }
+    // Build WireGuardStatus from parameters
+    // Note: latest_handshake_epoch_sec is a Unix timestamp; we use a fake epoch for testing
+    const wg_status = wg_boundary.WireGuardStatus{
+        .interface = "wg0",
+        .peer_count = peer_count,
+        .latest_handshake_epoch_sec = if (has_handshake) @as(u64, 1700000000) else null,
+        .rx_bytes = 0,
+        .tx_bytes = 0,
+        .listen_port = null,
+        .public_key_redacted = "",
+    };
+
+    // Use boundary helper to convert to Check, then map to status.Check
+    const boundary_check = wg_boundary.toCheck(wg_status, null);
     return status.Check{
-        .name = "wg_peers",
-        .status = .ok,
-        .detail = "wg0",
+        .name = boundary_check.name,
+        .status = mapBoundaryStatus(boundary_check.status),
+        .detail = boundary_check.detail,
     };
 }
 
-/// Test helper: creates a wg_peers check from a collector error.
-pub fn getWgPeersCheckFromError(err: wg_show_collector.CollectError) status.Check {
-    const detail = switch (err) {
-        error.CommandNotFound => "wg command not available",
-        error.CommandFailed => "wg command failed",
-        error.PipeFailed => "wg pipe creation failed",
-        error.ForkFailed => "wg fork failed",
-        error.ExecFailed => "wg exec failed",
-        error.OutputTruncated => "wg output truncated",
-        error.MalformedOutput => "wg output malformed",
-        error.OutOfMemory => "wg check out of memory",
+/// Maps boundary CheckStatus to status.CheckStatus.
+fn mapBoundaryStatus(boundary_status: wg_boundary.status.CheckStatus) status.CheckStatus {
+    return switch (boundary_status) {
+        .ok => .ok,
+        .warn => .warn,
+        .@"error" => .@"error",
+        .unknown => .unknown,
     };
+}
+
+/// Test helper: creates a wg_peers check from a boundary StatusError.
+pub fn getWgPeersCheckFromError(err: wg_boundary.StatusError) status.Check {
+    const detail = wg_boundary.statusErrorDetail(err);
+    const boundary_check = wg_boundary.toCheck(wg_boundary.WireGuardStatus.noInterface(), detail);
     return status.Check{
-        .name = "wg_peers",
-        .status = .warn,
-        .detail = detail,
+        .name = boundary_check.name,
+        .status = mapBoundaryStatus(boundary_check.status),
+        .detail = boundary_check.detail,
     };
 }
 
@@ -126,7 +107,7 @@ test "getWgPeersCheckFromParsed returns ok for peer with handshake" {
     const check = getWgPeersCheckFromParsed(1, true);
     try std.testing.expectEqualStrings("wg_peers", check.name);
     try std.testing.expectEqual(status.CheckStatus.ok, check.status);
-    try std.testing.expectEqualStrings("wg0", check.detail);
+    try std.testing.expectEqualStrings("wireguard peers healthy", check.detail);
 }
 
 test "getWgPeersCheckFromParsed returns warn for no peers" {
@@ -143,50 +124,43 @@ test "getWgPeersCheckFromParsed returns warn for no handshake" {
     try std.testing.expectEqualStrings("no handshake yet", check.detail);
 }
 
-test "getWgPeersCheckFromError returns warn for command not found" {
-    const check = getWgPeersCheckFromError(error.CommandNotFound);
+test "getWgPeersCheckFromError returns warn for backend_missing" {
+    const check = getWgPeersCheckFromError(error.backend_missing);
     try std.testing.expectEqualStrings("wg_peers", check.name);
     try std.testing.expectEqual(status.CheckStatus.warn, check.status);
     try std.testing.expectEqualStrings("wg command not available", check.detail);
 }
 
-test "getWgPeersCheckFromError returns warn for command failed" {
-    const check = getWgPeersCheckFromError(error.CommandFailed);
+test "getWgPeersCheckFromError returns warn for permission_denied" {
+    const check = getWgPeersCheckFromError(error.permission_denied);
     try std.testing.expectEqualStrings("wg_peers", check.name);
     try std.testing.expectEqual(status.CheckStatus.warn, check.status);
-    try std.testing.expectEqualStrings("wg command failed", check.detail);
+    try std.testing.expectEqualStrings("wg permission denied", check.detail);
 }
 
-test "getWgPeersCheckFromError returns warn for malformed output" {
-    const check = getWgPeersCheckFromError(error.MalformedOutput);
+test "getWgPeersCheckFromError returns warn for malformed_output" {
+    const check = getWgPeersCheckFromError(error.malformed_output);
     try std.testing.expectEqualStrings("wg_peers", check.name);
     try std.testing.expectEqual(status.CheckStatus.warn, check.status);
     try std.testing.expectEqualStrings("wg output malformed", check.detail);
 }
 
-test "getWgPeersCheckFromError returns warn for output truncated" {
-    const check = getWgPeersCheckFromError(error.OutputTruncated);
+test "getWgPeersCheckFromError returns warn for timeout" {
+    const check = getWgPeersCheckFromError(error.timeout);
     try std.testing.expectEqualStrings("wg_peers", check.name);
     try std.testing.expectEqual(status.CheckStatus.warn, check.status);
-    try std.testing.expectEqualStrings("wg output truncated", check.detail);
+    try std.testing.expectEqualStrings("wg command timeout", check.detail);
 }
 
-test "getWgPeersCheckFromError returns warn for pipe failed" {
-    const check = getWgPeersCheckFromError(error.PipeFailed);
+test "getWgPeersCheckFromError returns warn for interface_missing" {
+    const check = getWgPeersCheckFromError(error.interface_missing);
     try std.testing.expectEqualStrings("wg_peers", check.name);
     try std.testing.expectEqual(status.CheckStatus.warn, check.status);
-    try std.testing.expectEqualStrings("wg pipe creation failed", check.detail);
+    try std.testing.expectEqualStrings("wg interface not found", check.detail);
 }
 
-test "getWgPeersCheckFromError returns warn for fork failed" {
-    const check = getWgPeersCheckFromError(error.ForkFailed);
-    try std.testing.expectEqualStrings("wg_peers", check.name);
-    try std.testing.expectEqual(status.CheckStatus.warn, check.status);
-    try std.testing.expectEqualStrings("wg fork failed", check.detail);
-}
-
-test "getWgPeersCheckFromError returns warn for out of memory" {
-    const check = getWgPeersCheckFromError(error.OutOfMemory);
+test "getWgPeersCheckFromError returns warn for out_of_memory" {
+    const check = getWgPeersCheckFromError(error.out_of_memory);
     try std.testing.expectEqualStrings("wg_peers", check.name);
     try std.testing.expectEqual(status.CheckStatus.warn, check.status);
     try std.testing.expectEqualStrings("wg check out of memory", check.detail);
