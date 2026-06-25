@@ -238,205 +238,23 @@ timestamp	elapsed_millis	event	subsystem	detail	pid
 
 ## Verdict Interpretation
 
-### With Native Events: `confirmed_leak`
+| Verdict | Condition | Interpretation |
+|---------|-----------|----------------|
+| `confirmed_leak` | Native events correlate with memory steps | Owner attributed to subsystem |
+| `inconclusive` | Events don't correlate OR all disabled | Owner unknown or allocator warmup |
+| `bounded_warmup_or_allocator_highwater` | Bounded growth (<200 KiB) | Normal allocator settling |
 
-```
-verdict: confirmed_leak
-owner: heartbeat
-reason: Native events from heartbeat subsystem correlate with 3 memory steps.
-steps_detected: 3
-total_growth_kib: 600
-native_events_enabled: true
-native_event_count: 6
-```
-
-**Interpretation**: Native events from heartbeat correlate with memory steps. Owner is attributed.
-
-### With Native Events: `inconclusive`
-
-```
-verdict: inconclusive
-owner: 
-reason: Native events present but none correlate with memory steps.
-native_events_enabled: true
-```
-
-**Interpretation**: Native events exist but don't correlate with growth. Owner remains unknown.
-
-### Without Native Events: `inconclusive`
-
-```
-verdict: inconclusive
-owner: 
-reason: Shell-side synthetic events cannot produce confirmed_leak. 
-        Need tovarisch-native event emission to identify the periodic background owner.
-native_events_enabled: false
-```
-
-**Interpretation**: Shell-only artifacts cannot produce `confirmed_leak`. Native events required.
-
-### All Periodic Paths Disabled: `inconclusive`
-
-```
-verdict: inconclusive
-owner: 
-reason: Growth persists with all periodic paths disabled. May be allocator warmup.
-native_events_enabled: true
-native_disable_heartbeat: true
-native_disable_wg_checks: true
-native_disable_bgp: true
-native_disable_bfd: true
-```
-
-**Interpretation**: Growth continues even when all known periodic paths are disabled. Suggests allocator warmup or unknown source.
+**Note**: Shell-side synthetic events cannot produce `confirmed_leak`. Native events required.
 
 ## Attribution Strategy
 
-1. **Run with all periodic paths enabled** (baseline):
-   ```bash
-   ./scripts/lab_tovarisch_idle_memory.sh --native-events
-   ```
-   Expected: Staircase growth with native events from active subsystems.
-
-2. **Run with one subsystem at a time**:
-   ```bash
-   # Heartbeat only
-   ./scripts/lab_tovarisch_idle_memory.sh --native-heartbeat-only
-   
-   # No periodic paths
-   ./scripts/lab_tovarisch_idle_memory.sh --native-no-periodic
-   ```
-   Expected: If growth disappears when heartbeat disabled and appears when enabled, heartbeat is the owner.
-
-3. **Analyze verdict**:
-   - `confirmed_leak` with native events: Owner attributed
-   - `inconclusive` with all disabled: Allocator warmup or unknown source
-   - `bounded_warmup_or_allocator_highwater`: Normal behavior
+1. Run with all periodic paths enabled (baseline)
+2. Run with one subsystem at a time to isolate owner
+3. If growth disappears when a specific subsystem is disabled, that subsystem is the likely owner
 
 ## Memory Attribution Matrix
 
-The **Memory Attribution Matrix** runs multiple lab variants in sequence to systematically attribute idle memory growth.
-
-### Matrix Variants
-
-| Variant | Heartbeat | WG Checks | BGP | BFD |
-|---------|-----------|-----------|-----|-----|
-| `all_enabled` | ✓ | ✓ | ✓ | ✓ |
-| `heartbeat_disabled` | ✗ | ✓ | ✓ | ✓ |
-| `wg_disabled` | ✓ | ✗ | ✓ | ✓ |
-| `bgp_disabled` | ✓ | ✓ | ✗ | ✓ |
-| `bfd_disabled` | ✓ | ✓ | ✓ | ✗ |
-| `bgp_bfd_disabled` | ✓ | ✓ | ✗ | ✗ |
-| `no_periodic` | ✗ | ✗ | ✗ | ✗ |
-
-### Matrix Verdicts
-
-| Verdict | Meaning |
-|---------|---------|
-| `no_growth` | No significant memory growth detected in any variant |
-| `bounded_warmup_or_allocator_highwater` | Growth present but bounded. Consistent with allocator settling behavior. |
-| `subsystem_correlated_growth` | Growth correlates with specific subsystem(s). Evidence points to periodic background paths. |
-| `inconclusive` | Cannot determine attribution. More data needed. |
-
-### Evidence Contract
-
-The matrix proves or disproves:
-
-1. **Bounded allocator/warmup**: If `no_periodic` variant shows bounded growth (~<500 KiB, ~<5 steps) while `all_enabled` shows none, the growth is likely allocator settling.
-
-2. **Subsystem attribution**: If disabling a specific subsystem eliminates growth while other variants show growth, that subsystem is the likely owner.
-
-3. **Global leak**: This matrix does NOT claim "no leak". It only classifies what the evidence shows.
-
-### Running the Matrix
-
-```bash
-# Full matrix with 10-minute variants (default)
-./scripts/lab_memory_attribution_matrix.sh
-
-# Longer observation (30 minutes)
-./scripts/lab_memory_attribution_matrix.sh --duration 1800
-
-# Custom run ID
-./scripts/lab_memory_attribution_matrix.sh --run-id my-test
-
-# Specific variants only
-./scripts/lab_memory_attribution_matrix.sh --variants all_enabled no_periodic
-```
-
-### Matrix Artifacts
-
-```
-artifacts/memory-labs/tovarisch/idle-matrix/<run-id>/
-├── matrix-summary.md          # Consolidated matrix results
-├── all_enabled/               # Variant artifact
-│   ├── manifest.yaml
-│   ├── memory_samples.tsv
-│   ├── native_event_timeline.tsv
-│   └── verdict.txt
-├── heartbeat_disabled/
-│   └── ...
-└── no_periodic/
-    └── ...
-```
-
-### Matrix Interpretation Guide
-
-#### Scenario 1: `no_growth` verdict
-```
-Growth: None
-All variants: <100 KiB growth, <3 steps
-```
-**Conclusion**: No idle memory growth detected. System is stable.
-
-#### Scenario 2: `bounded_warmup_or_allocator_highwater` verdict
-```
-all_enabled growth: 800 KiB, 8 steps
-no_periodic growth: 400 KiB, 3 steps
-Other variants: Similar to all_enabled
-```
-**Conclusion**: Growth is bounded even with all periodic paths disabled. Likely allocator warmup settling. Not caused by specific subsystem.
-
-#### Scenario 3: `subsystem_correlated_growth` verdict
-```
-all_enabled growth: 1200 KiB, 10 steps
-heartbeat_disabled growth: 100 KiB, 1 step
-no_periodic growth: 50 KiB, 0 steps
-```
-**Conclusion**: Heartbeat is the likely owner. When heartbeat is disabled, growth largely disappears.
-
-#### Scenario 4: `inconclusive` verdict
-```
-Mixed results across variants
-Unable to attribute growth to specific subsystem
-```
-**Conclusion**: More data needed. Run longer duration or investigate allocator behavior.
-
-### Fail Conditions
-
-The matrix **fails closed** if:
-
-1. **Native event capture configured but missing**: `native_event_timeline.tsv` not created when native events enabled
-2. **Disabled subsystem emits events**: Heartbeat/WG/BGP/BFD events present when that subsystem is disabled
-3. **Sample count too low**: Fewer than `duration/60` samples (should be at least 1 per minute)
-4. **Duration below minimum**: Duration < 300 seconds (5 minutes)
-5. **Analyzer cannot parse run**: Verdict.txt missing or invalid format
-
-### GitHub Actions Matrix Workflow
-
-The **Tovarisch Idle Memory Attribution Matrix** workflow runs the matrix on Linux:
-
-1. **Manual trigger only** (`workflow_dispatch`)
-2. **Configurable duration** per variant (default: 600s)
-3. **Artifact upload** with `if: always()` for post-mortem analysis
-4. **Timeout**: 120 minutes (allows 7 x ~15 min variants with overhead)
-
-```bash
-# Trigger via GitHub CLI
-gh workflow run tovarisch-idle-memory-attribution-matrix.yml \
-  --field duration=600 \
-  --field interval=5
-```
+The **Memory Attribution Matrix** runs multiple lab variants to systematically attribute idle memory growth. See [idle-memory-attribution-matrix.md](./idle-memory-attribution-matrix.md) for full documentation.
 
 ## Artifact Verification
 
