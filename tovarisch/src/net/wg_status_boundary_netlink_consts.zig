@@ -103,34 +103,88 @@ pub const Nlattr = extern struct {
     }
 };
 
-/// Netlink message builder for fixed-size messages.
-pub fn buildNlmsgHeader(msg: [*]u8, msg_len: u32, msg_type: u16, flags: u32, seq: u32, pid: u32) void {
-    const hdr = @as(*Nlmsghdr, @alignCast(@ptrCast(msg)));
-    hdr.nlmsg_len = msg_len;
-    hdr.nlmsg_type = msg_type;
-    hdr.nlmsg_flags = @as(u16, @truncate(flags));
-    hdr.nlmsg_seq = seq;
-    hdr.nlmsg_pid = pid;
+/// Netlink message header length in bytes.
+pub const NLMSG_HDRLEN: usize = 16;
+
+/// Generic netlink header length in bytes.
+pub const GENL_HDRLEN: usize = 4;
+
+/// Netlink attribute header length in bytes.
+pub const NLA_HDRLEN: usize = 4;
+
+// Compile-time assertions: ensure protocol length constants match struct sizes.
+// This prevents silent breakage if structs are modified.
+comptime {
+    std.debug.assert(NLMSG_HDRLEN == @sizeOf(Nlmsghdr));
+    std.debug.assert(GENL_HDRLEN == @sizeOf(Genlmsghdr));
+    std.debug.assert(NLA_HDRLEN == @sizeOf(Nlattr));
 }
 
-/// Build generic netlink header in message.
-fn buildGenlHeader(msg: [*]u8, cmd: u8, version: u8) void {
-    const hdr = @as(*Genlmsghdr, @alignCast(@ptrCast(@as([*]u8, @ptrCast(msg)) + @sizeOf(Nlmsghdr))));
-    hdr.cmd = cmd;
-    hdr.version = version;
-    hdr.reserved = 0;
+/// Write a native-endian u32 into a byte buffer at the given offset.
+/// This avoids pointer casts that require alignment guarantees.
+inline fn writeU32Native(buf: []u8, offset: usize, value: u32) void {
+    std.mem.writeInt(u32, buf[offset..][0..4], value, .native);
+}
+
+/// Write a native-endian u16 into a byte buffer at the given offset.
+/// This avoids pointer casts that require alignment guarantees.
+inline fn writeU16Native(buf: []u8, offset: usize, value: u16) void {
+    std.mem.writeInt(u16, buf[offset..][0..2], value, .native);
+}
+
+/// Read a native-endian u32 from a byte buffer at the given offset.
+/// This avoids pointer casts that require alignment guarantees.
+inline fn readU32Native(buf: []const u8, offset: usize) u32 {
+    return std.mem.readInt(u32, buf[offset..][0..4], .native);
+}
+
+/// Read a native-endian u16 from a byte buffer at the given offset.
+/// This avoids pointer casts that require alignment guarantees.
+inline fn readU16Native(buf: []const u8, offset: usize) u16 {
+    return std.mem.readInt(u16, buf[offset..][0..2], .native);
+}
+
+/// Netlink message builder for fixed-size messages.
+/// Uses byte-wise native-endian writes to avoid alignment issues with arbitrary buffers.
+pub fn buildNlmsgHeader(msg: []u8, msg_len: u32, msg_type: u16, flags: u32, seq: u32, pid: u32) void {
+    std.debug.assert(msg.len >= NLMSG_HDRLEN);
+    writeU32Native(msg, 0, msg_len);
+    writeU16Native(msg, 4, msg_type);
+    writeU16Native(msg, 6, @as(u16, @truncate(flags)));
+    writeU32Native(msg, 8, seq);
+    writeU32Native(msg, 12, pid);
+}
+
+/// Build generic netlink header in message buffer.
+/// Uses byte-wise writes to avoid alignment issues.
+pub fn buildGenlHeader(msg: []u8, cmd: u8, version: u8) void {
+    std.debug.assert(msg.len >= GENL_HDRLEN);
+    msg[0] = cmd;
+    msg[1] = version;
+    msg[2] = 0;
+    msg[3] = 0;
 }
 
 /// Add a netlink attribute to a message buffer.
-pub fn addNlattr(buf: [*]u8, offset: usize, max_len: usize, attr_type: u16, payload: []const u8) ?usize {
-    const aligned_len = (payload.len + @sizeOf(Nlattr) + 3) & ~@as(usize, 3);
+/// Uses byte-wise writes to avoid alignment issues.
+/// Returns the aligned attribute length (including header and padding), or null if insufficient space.
+pub fn addNlattr(buf: []u8, offset: usize, max_len: usize, attr_type: u16, payload: []const u8) ?usize {
+    const attr_total_len = NLA_HDRLEN + payload.len;
+    const aligned_len = (attr_total_len + 3) & ~@as(usize, 3);
     if (offset + aligned_len > max_len) return null;
+    if (offset + attr_total_len > buf.len) return null;
 
-    const attr = @as(*Nlattr, @alignCast(@ptrCast(buf + offset)));
-    attr.nla_type = attr_type;
-    attr.nla_len = @intCast(@sizeOf(Nlattr) + payload.len);
-    // MemoryCopySafety: independent buffers — buf and payload are non-overlapping by design
-    @memcpy(buf[offset + @sizeOf(Nlattr)..][0..payload.len], payload);
+    writeU16Native(buf, offset + 0, @intCast(attr_total_len));
+    writeU16Native(buf, offset + 2, attr_type);
+    // MemoryCopySafety: buf and payload are independent buffers — no overlap
+    @memcpy(buf[offset + NLA_HDRLEN..][0..payload.len], payload);
+
+    // Zero padding bytes so netlink message doesn't contain stack garbage
+    const padding_start = offset + attr_total_len;
+    const padding_end = offset + aligned_len;
+    if (padding_end > padding_start) {
+        @memset(buf[padding_start..padding_end], 0);
+    }
 
     return aligned_len;
 }

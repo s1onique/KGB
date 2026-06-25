@@ -175,15 +175,12 @@ fn discoverWgFamilyId(sock: c_int, pid: u32, seq: u32) !u16 {
     var offset: usize = 0;
 
     // Netlink header: NLM_F_REQUEST for by-name lookup (not dump all families)
-    const genl_header_size = @sizeOf(netlink_consts.Nlmsghdr) + @sizeOf(netlink_consts.Genlmsghdr);
     netlink_consts.buildNlmsgHeader(&buf, 0, 0, netlink_consts.NLM_F_REQUEST, seq, pid);
+    offset = netlink_consts.NLMSG_HDRLEN;
 
     // Generic netlink header (CTRL_CMD_GETFAMILY)
-    const genl_hdr = @as(*netlink_consts.Genlmsghdr, @alignCast(@ptrCast(@as([*]u8, @ptrCast(&buf)) + @sizeOf(netlink_consts.Nlmsghdr))));
-    genl_hdr.cmd = netlink_consts.CTRL_CMD_GETFAMILY;
-    genl_hdr.version = netlink_consts.WG_GENL_VERSION;
-    genl_hdr.reserved = 0;
-    offset = genl_header_size;
+    netlink_consts.buildGenlHeader(buf[offset..], netlink_consts.CTRL_CMD_GETFAMILY, netlink_consts.WG_GENL_VERSION);
+    offset += netlink_consts.GENL_HDRLEN;
 
     // Add family name attribute
     const name_null: [*:0]const u8 = netlink_consts.WG_GENL_NAME;
@@ -192,10 +189,9 @@ fn discoverWgFamilyId(sock: c_int, pid: u32, seq: u32) !u16 {
         offset += attr_len;
     }
 
-    // Set final message length
+    // Set final message length and type
     const msg_len = offset;
-    @as(*netlink_consts.Nlmsghdr, @alignCast(@ptrCast(&buf))).nlmsg_len = @intCast(msg_len);
-    @as(*netlink_consts.Nlmsghdr, @alignCast(@ptrCast(&buf))).nlmsg_type = netlink_consts.GENERIC_NETLINK_CTRL_FAM_ID;
+    netlink_consts.buildNlmsgHeader(&buf, @intCast(msg_len), netlink_consts.GENERIC_NETLINK_CTRL_FAM_ID, netlink_consts.NLM_F_REQUEST, seq, pid);
 
     // Send discovery request
     var peer_addr: netlink_consts.sockaddr_nl = .{
@@ -284,14 +280,11 @@ fn queryWgDevice(
     // Netlink header: GET_DEVICE uses NLM_F_REQUEST | NLM_F_DUMP to list all devices
     // then filter by interface name in response parsing
     netlink_consts.buildNlmsgHeader(&buf, 0, family_id, netlink_consts.NLM_F_REQUEST | netlink_consts.NLM_F_DUMP, seq, pid);
-    offset = @sizeOf(netlink_consts.Nlmsghdr);
+    offset = netlink_consts.NLMSG_HDRLEN;
 
     // Generic netlink header
-    const genl_hdr = @as(*netlink_consts.Genlmsghdr, @alignCast(@ptrCast(@as([*]u8, @ptrCast(&buf)) + @sizeOf(netlink_consts.Nlmsghdr))));
-    genl_hdr.cmd = netlink_consts.WG_CMD_GET_DEVICE;
-    genl_hdr.version = netlink_consts.WG_GENL_VERSION;
-    genl_hdr.reserved = 0;
-    offset += @sizeOf(netlink_consts.Genlmsghdr);
+    netlink_consts.buildGenlHeader(buf[offset..], netlink_consts.WG_CMD_GET_DEVICE, netlink_consts.WG_GENL_VERSION);
+    offset += netlink_consts.GENL_HDRLEN;
 
     // Add device name attribute
     if (netlink_consts.addNlattr(&buf, offset, buf.len, netlink_consts.WG_DEVICE_ATTR_IFNAME, interface_name)) |attr_len| {
@@ -300,7 +293,7 @@ fn queryWgDevice(
 
     // Set final message length
     const msg_len = offset;
-    @as(*netlink_consts.Nlmsghdr, @alignCast(@ptrCast(&buf))).nlmsg_len = @intCast(msg_len);
+    netlink_consts.buildNlmsgHeader(&buf, @intCast(msg_len), family_id, netlink_consts.NLM_F_REQUEST | netlink_consts.NLM_F_DUMP, seq, pid);
 
     // Send query
     var peer_addr: netlink_consts.sockaddr_nl = .{
