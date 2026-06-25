@@ -2,14 +2,22 @@
 //
 // Part of wg_status_boundary.zig (split to satisfy LLM-friendliness limits).
 // Contains only the CLI backend implementation.
+//
+// Phase 1 CLI backend uses configured interface identity via `wg show <iface> dump`.
+// Phase 2 generic netlink remains future work.
 
 const std = @import("std");
 const wg = @import("wg_status_boundary.zig");
+const config_parse_helpers = @import("../config_parse_helpers.zig");
 
 // POSIX fcntl and open flags (not exposed in Zig 0.16 std.c)
 const F_GETFL: c_int = 3;
 const F_SETFL: c_int = 4;
-const O_NONBLOCK: c_int = 4;
+
+// Platform-specific O_NONBLOCK:
+// - Linux: octal 04000 = decimal 2048
+// - macOS/BSD: 0x0004 = decimal 4
+const O_NONBLOCK: c_int = if (@import("builtin").os.tag == .linux) 2048 else 4;
 
 // POSIX poll event flags (not exposed in Zig 0.16 std.c)
 const POLLIN: c_short = 0x0001;
@@ -18,10 +26,36 @@ const POLLERR: c_short = 0x0008;
 
 
 // ============================================================================
+// Interface Name Configuration
+// ============================================================================
+
+/// Default WireGuard interface name when not explicitly configured.
+/// Documented single source of truth for this default value.
+/// This is a compile-time constant; Zig inner functions cannot capture
+/// instance fields, so interface name must be fixed at compile time.
+///
+/// Phase 1: Only DEFAULT_WG_INTERFACE is supported.
+/// Runtime configurable interface name is future work.
+pub const DEFAULT_WG_INTERFACE: [:0]const u8 = "wg-kgb0";
+
+/// Validates an interface name for safety before passing to wg command.
+///
+/// Rejects:
+///   - empty strings
+///   - whitespace characters
+///   - forward slashes (path traversal attempt)
+///   - shell metacharacters
+///   - names exceeding Linux interface name limits (IFNAMSIZ-1 = 15 bytes)
+pub fn isValidInterfaceName(name: []const u8) bool {
+    return config_parse_helpers.isValidInterfaceName(name);
+}
+
+
+// ============================================================================
 // CLI Backend Implementation
 // ============================================================================
 
-/// CLI backend using `wg show dump` command.
+/// CLI backend using `wg show <interface> dump` command.
 /// Uses machine-readable tab-separated dump format to avoid human parsing issues.
 ///
 /// Safety properties:
@@ -29,6 +63,11 @@ const POLLERR: c_short = 0x0008;
 ///   - Bounded stdout/stderr capture (8KB stdout, 1KB stderr)
 ///   - Bounded timeout with SIGKILL enforcement
 ///   - Explicit command allowlist (only /usr/bin/wg, /usr/sbin/wg, /sbin/wg)
+///   - Validated interface name before execve
+///
+/// Note: Interface name is a compile-time constant (DEFAULT_WG_INTERFACE).
+/// Zig inner functions cannot capture instance fields, so we use a fixed
+/// interface name rather than per-instance configuration.
 pub const CliBackend = struct {
     /// Default timeout for wg show command (5 seconds).
     pub const DEFAULT_TIMEOUT_SECS: u64 = 5;
@@ -46,15 +85,17 @@ pub const CliBackend = struct {
         "/sbin/wg",
     };
 
-    /// Initialize CLI backend with defaults.
+    /// Initialize CLI backend with defaults (uses DEFAULT_WG_INTERFACE).
     pub fn init() CliBackend {
         return CliBackend{};
     }
 
     /// Convert to generic backend trait.
-    /// Phase 1: Uses fixed DEFAULT_TIMEOUT_SECS (5 seconds) for all CLI operations.
-    /// Note: Zig inner functions cannot capture outer scope variables, so custom
-    /// timeout is not supported through the backend trait. This is a Phase 1 limitation.
+    /// Uses DEFAULT_WG_INTERFACE for the wg show command.
+    ///
+    /// Phase 1: Uses compile-time constant interface name.
+    /// Note: Zig inner functions cannot capture outer scope variables,
+    /// so interface_name must be a compile-time constant.
     pub fn asBackend(self: *const CliBackend) wg.WireGuardStatusBackend {
         _ = self;
         return wg.WireGuardStatusBackend{
@@ -73,8 +114,13 @@ pub const CliBackend = struct {
 };
 
 /// Standalone wireguardStatus implementation for CLI backend.
-/// Uses DEFAULT_TIMEOUT_SECS.
+/// Uses DEFAULT_WG_INTERFACE and DEFAULT_TIMEOUT_SECS.
 fn cliWireguardStatus(allocator: std.mem.Allocator) wg.StatusError!wg.WireGuardStatusResult {
+    // Validate interface name before execve (defense in depth)
+    if (!isValidInterfaceName(DEFAULT_WG_INTERFACE)) {
+        return error.interface_missing;
+    }
+
     const wg_path = findWgCommand() orelse return error.backend_missing;
 
     const cmd_result = runWgShowDump(allocator, wg_path, CliBackend.DEFAULT_TIMEOUT_SECS) catch |err| {
@@ -89,6 +135,10 @@ fn cliWireguardStatus(allocator: std.mem.Allocator) wg.StatusError!wg.WireGuardS
     if (cmd_result.timed_out) return error.timeout;
 
     if (cmd_result.exit_code != 0) {
+        // wg show <iface> returns exit 1 if interface doesn't exist
+        if (cmd_result.exit_code == 1) {
+            return error.interface_missing;
+        }
         return error.command_failed;
     }
 
@@ -96,7 +146,8 @@ fn cliWireguardStatus(allocator: std.mem.Allocator) wg.StatusError!wg.WireGuardS
         return error.command_failed;
     }
 
-    const status = wg.parseWgDumpOutput(cmd_result.stdout) catch |parse_err| {
+    // Parse output with explicit interface name (not invented from output)
+    const status = wg.parseWgDumpOutput(cmd_result.stdout, DEFAULT_WG_INTERFACE) catch |parse_err| {
         _ = parse_err;
         return error.malformed_output;
     };
@@ -133,7 +184,7 @@ const WgDumpResult = struct {
     timed_out: bool,
 };
 
-/// Internal: run `wg show dump` and capture output with timeout enforcement.
+/// Internal: run `wg show <interface> dump` and capture output with timeout enforcement.
 ///
 /// Uses nonblocking reads with poll() to avoid pipe deadlock between stdout/stderr.
 fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_secs: u64) !WgDumpResult {
@@ -173,11 +224,11 @@ fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_s
         _ = std.c.close(stdout_pipe[1]);
 
         _ = std.c.dup2(stderr_pipe[1], 2);
-        // FIX: Close stderr_pipe[1] AFTER dup2, not fd 2
         _ = std.c.close(stderr_pipe[1]);
 
-        // Use wg show dump for machine-readable output
-        const argv: [4]?[*:0]const u8 = .{ wg_path, "show", "dump", null };
+        // Use wg show <interface> dump for machine-readable per-interface output
+        // Uses DEFAULT_WG_INTERFACE as the single source of truth
+        const argv: [5]?[*:0]const u8 = .{ wg_path, "show", DEFAULT_WG_INTERFACE.ptr, "dump", null };
         const argv_null: [*:null]const ?[*:0]const u8 = @ptrCast(&argv);
         const empty_env: [*:null]const ?[*:0]const u8 = &.{};
         _ = std.c.execve(wg_path, argv_null, empty_env);
@@ -199,34 +250,26 @@ fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_s
     var timed_out = false;
 
     // Use poll() to avoid deadlock on concurrent stdout/stderr
-    // Track remaining time ourselves since poll() doesn't have a "remaining time" feature
     var poll_fds: [2]std.c.pollfd = .{
         .{ .fd = stdout_pipe[0], .events = POLLIN, .revents = 0 },
         .{ .fd = stderr_pipe[0], .events = POLLIN, .revents = 0 },
     };
 
     var remaining_ms: i32 = @intCast(timeout_secs * 1000);
-    const poll_interval_ms: i32 = 100; // Check every 100ms for responsive timeout
+    const poll_interval_ms: i32 = 100;
 
     // Read until both pipes are closed or timeout expires
     while (true) {
-        // Check if we have all the data we need
         if (stdout_truncated and stderr_truncated) break;
 
-        // Calculate actual poll timeout (don't exceed remaining time or our interval)
         const poll_ms: i32 = @min(remaining_ms, poll_interval_ms);
-
         const poll_result = std.c.poll(&poll_fds, 2, poll_ms);
-
-        // Subtract elapsed time from remaining
         remaining_ms -= poll_ms;
 
         if (poll_result < 0) {
-            // Poll interrupted (e.g., EINTR), check again
             continue;
         }
 
-        // Check for timeout after subtracting elapsed time
         if (remaining_ms <= 0) {
             timed_out = true;
             break;
@@ -239,7 +282,7 @@ fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_s
                 if (n > 0) {
                     stdout_len += @intCast(n);
                 } else if (n == 0 or (n < 0 and std.c.errno(n) != .AGAIN)) {
-                    poll_fds[0].fd = -1; // EOF or error, don't poll again
+                    poll_fds[0].fd = -1;
                 }
             }
             if (stdout_len >= CliBackend.MAX_STDOUT_SIZE) stdout_truncated = true;
@@ -252,7 +295,7 @@ fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_s
                 if (n > 0) {
                     stderr_len += @intCast(n);
                 } else if (n == 0 or (n < 0 and std.c.errno(n) != .AGAIN)) {
-                    poll_fds[1].fd = -1; // EOF or error, don't poll again
+                    poll_fds[1].fd = -1;
                 }
             }
             if (stderr_len >= CliBackend.MAX_STDERR_SIZE) stderr_truncated = true;
@@ -264,7 +307,6 @@ fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_s
             break;
         }
 
-        // Check if both pipes are done
         if (poll_fds[0].fd == -1 and poll_fds[1].fd == -1) {
             break;
         }
@@ -299,6 +341,7 @@ fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_s
         .timed_out = timed_out,
     };
 }
+
 
 // ============================================================================
 // Fake Backend for Tests
@@ -372,3 +415,4 @@ pub const FakeBackend = struct {
         return wg.WireGuardStatusResult.ok(wg.WireGuardStatus.noInterface(), self.kind);
     }
 };
+

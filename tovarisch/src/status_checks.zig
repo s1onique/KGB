@@ -8,6 +8,9 @@
 // Production WireGuard status is now wired through the wg_status_boundary
 // typed boundary (Phase 1 complete). The old wg_show_collector is retained
 // for legacy test coverage only; production path uses the typed boundary.
+//
+// WireGuard interface identity is explicit via wg_status_boundary_cli.DEFAULT_WG_INTERFACE.
+// No hard-coded "wg0" remains in production path.
 
 const std = @import("std");
 const wg_boundary = @import("net/wg_status_boundary.zig");

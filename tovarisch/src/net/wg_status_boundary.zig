@@ -283,12 +283,22 @@ pub const status = struct {
 // ============================================================================
 
 /// Dump format field indices for `wg show dump` output per wg(8).
-/// Interface line: private_key, public_key, listen_port, fwmark
-/// Peer lines: public_key, preshared_key, endpoint, allowed_ips,
-///              latest_handshake, transfer_rx, transfer_tx, persistent_keepalive
+/// Peer lines have 8 fields each:
+///   0: peer public key (redacted)
+///   1: preshared key (redacted)
+///   2: endpoint (redacted)
+///   3: allowed IPs (redacted)
+///   4: latest handshake (Unix epoch timestamp, 0 = never)
+///   5: transfer rx bytes
+///   6: transfer tx bytes
+///   7: persistent keepalive (seconds, or "off")
 const DUMP_PEER_FIELDS: usize = 8;
 
-/// Parse `wg show dump` output into WireGuardStatus.
+/// Parse `wg show <interface> dump` output into WireGuardStatus.
+///
+/// This parser expects per-interface dump output where the interface name
+/// is provided explicitly via the interface_name parameter rather than being
+/// inferred from the output.
 ///
 /// Machine-readable tab-separated format per wg(8):
 /// Interface line fields:
@@ -308,10 +318,9 @@ const DUMP_PEER_FIELDS: usize = 8;
 ///   7: persistent keepalive (seconds, or "off")
 ///
 /// Note: Per wg(8) dump format, field 4 is a Unix timestamp, not seconds ago.
-pub fn parseWgDumpOutput(input: []const u8) !WireGuardStatus {
+pub fn parseWgDumpOutput(input: []const u8, interface_name: []const u8) !WireGuardStatus {
     var it = std.mem.splitScalar(u8, input, '\n');
 
-    var interface_name: []const u8 = "";
     var listen_port: ?u16 = null;
     var peer_count: u32 = 0;
     var latest_handshake_epoch: ?u64 = null;
@@ -339,11 +348,8 @@ pub fn parseWgDumpOutput(input: []const u8) !WireGuardStatus {
         }
         _ = field_it.next(); // fwmark
 
-        // Interface name is implied from the dump context
-        // When using `wg show dump`, the output represents a single interface
-        // We use "wg0" as the implied default since we can't determine
-        // the actual interface name from the dump output format
-        interface_name = "wg0";
+        // Interface name comes from the caller (configured interface)
+        // This ensures WireGuardStatus.interface is explicit, not invented
     } else {
         return WireGuardStatus.noInterface();
     }
