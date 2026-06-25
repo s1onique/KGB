@@ -185,6 +185,9 @@ pub fn main(init: std.process.Init) !void {
         std.process.exit(1);
     };
 
+    // Unwrap latest_handshake_epoch_sec: null means never handshaked, use 0
+    const latest_handshake_epoch_sec = wg_result.status.latest_handshake_epoch_sec orelse 0;
+
     // Success - verify no sensitive data
     const no_sensitive = wg_result.status.public_key_redacted.len == 0;
 
@@ -195,7 +198,7 @@ pub fn main(init: std.process.Init) !void {
             .backend_kind = "generic_netlink",
             .interface = wg_result.status.interface,
             .peer_count = wg_result.status.peer_count,
-            .latest_handshake_epoch_sec = wg_result.status.latest_handshake_epoch_sec,
+            .latest_handshake_epoch_sec = latest_handshake_epoch_sec,
             .rx_bytes = wg_result.status.rx_bytes,
             .tx_bytes = wg_result.status.tx_bytes,
             .listen_port = wg_result.status.listen_port,
@@ -212,7 +215,7 @@ pub fn main(init: std.process.Init) !void {
         .backend_kind = "generic_netlink",
         .interface = wg_result.status.interface,
         .peer_count = wg_result.status.peer_count,
-        .latest_handshake_epoch_sec = wg_result.status.latest_handshake_epoch_sec,
+        .latest_handshake_epoch_sec = latest_handshake_epoch_sec,
         .rx_bytes = wg_result.status.rx_bytes,
         .tx_bytes = wg_result.status.tx_bytes,
         .listen_port = wg_result.status.listen_port,
