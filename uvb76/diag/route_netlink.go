@@ -52,7 +52,7 @@ func RouteLookupNative(ctx context.Context, target string) *NetlinkRouteResult {
 	defer syscall.Close(fd)
 
 	// Set receive timeout using NsecToTimeval for platform-correct field types
-	tv := syscall.NsecToTimeval(2 * time.Second)
+	tv := syscall.NsecToTimeval((2 * time.Second).Nanoseconds())
 	if deadline, ok := ctx.Deadline(); ok {
 		timeout := deadline.Sub(time.Now())
 		if timeout > 0 {

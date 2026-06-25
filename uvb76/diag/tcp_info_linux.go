@@ -131,65 +131,72 @@ func GetTcpInfo(ctx context.Context, conn net.Conn) *TcpInfoResult {
 		return result
 	}
 
-	var info tcpInfoKernel
-	infoSize := unsafe.Sizeof(info)
+	var tcpInfo *unix.TCPInfo
+	var sockErr error
 
-	err = sysConn.Read(func(fd uintptr) bool {
-		err = unix.Getsockopt(int(fd), IPPROTO_TCP, TCP_INFO, (*byte)(unsafe.Pointer(&info)), &infoSize)
-		return err == nil
+	err = sysConn.Control(func(fd uintptr) {
+		tcpInfo, sockErr = unix.GetsockoptTCPInfo(int(fd), unix.IPPROTO_TCP, unix.TCP_INFO)
 	})
-
 	if err != nil {
 		if err == syscall.EOPNOTSUPP {
 			result.Error = &TcpInfoError{Kind: "not_supported", Message: "TCP_INFO not supported"}
 		} else {
-			result.Error = &TcpInfoError{Kind: "getsockopt_failed", Message: fmt.Sprintf("getsockopt failed: %v", err)}
+			result.Error = &TcpInfoError{Kind: "syscall_conn_failed", Message: fmt.Sprintf("Control failed: %v", err)}
 		}
+		return result
+	}
+	if sockErr != nil {
+		result.Error = &TcpInfoError{Kind: "getsockopt_failed", Message: fmt.Sprintf("getsockopt failed: %v", sockErr)}
+		return result
+	}
+
+	if tcpInfo == nil {
+		result.Error = &TcpInfoError{Kind: "no_data", Message: "TCP_INFO returned nil"}
 		return result
 	}
 
 	result.Available = true
-	result.State = tcpStateToString(info.TcpiState)
+	result.State = tcpStateToString(tcpInfo.State)
 
 	// RTT is in microseconds on modern Linux kernels (2.6+)
-	if info.TcpiRtt > 0 {
-		rtt := int64(info.TcpiRtt)
+	if tcpInfo.Rtt > 0 {
+		rtt := int64(tcpInfo.Rtt)
 		result.RTTUs = &rtt
 	}
-	if info.TcpiRttvar > 0 {
-		rttvar := int64(info.TcpiRttvar)
+	if tcpInfo.Rttvar > 0 {
+		rttvar := int64(tcpInfo.Rttvar)
 		result.RTTVarUs = &rttvar
 	}
-	if info.TcpiRetrans > 0 {
-		retrans := int64(info.TcpiRetrans)
+	if tcpInfo.Retrans > 0 {
+		retrans := int64(tcpInfo.Retrans)
 		result.RetransmitsCurrent = &retrans
 	}
-	if info.TcpiTotalRetrans > 0 {
-		total := int64(info.TcpiTotalRetrans)
+	if tcpInfo.Total_retrans > 0 {
+		total := int64(tcpInfo.Total_retrans)
 		result.RetransmitsTotal = &total
 	}
-	if info.TcpiSndCwnd > 0 {
-		cwnd := int32(info.TcpiSndCwnd)
+	if tcpInfo.Snd_cwnd > 0 {
+		cwnd := int32(tcpInfo.Snd_cwnd)
 		result.SndCwnd = &cwnd
 	}
-	if info.TcpiSndSsthresh > 0 {
-		ssthresh := int32(info.TcpiSndSsthresh)
+	if tcpInfo.Snd_ssthresh > 0 {
+		ssthresh := int32(tcpInfo.Snd_ssthresh)
 		result.Ssthresh = &ssthresh
 	}
-	if info.TcpiUnacked > 0 {
-		unacked := int64(info.TcpiUnacked)
+	if tcpInfo.Unacked > 0 {
+		unacked := int64(tcpInfo.Unacked)
 		result.Unacked = &unacked
 	}
-	if info.TcpiLost > 0 {
-		lost := int64(info.TcpiLost)
+	if tcpInfo.Lost > 0 {
+		lost := int64(tcpInfo.Lost)
 		result.Lost = &lost
 	}
-	if info.TcpiSacked > 0 {
-		sacked := int64(info.TcpiSacked)
+	if tcpInfo.Sacked > 0 {
+		sacked := int64(tcpInfo.Sacked)
 		result.Sacked = &sacked
 	}
-	if info.TcpiReordering > 0 {
-		reorder := int64(info.TcpiReordering)
+	if tcpInfo.Reordering > 0 {
+		reorder := int64(tcpInfo.Reordering)
 		result.Reordering = &reorder
 	}
 
@@ -201,6 +208,32 @@ func GetTcpInfo(ctx context.Context, conn net.Conn) *TcpInfoResult {
 	}
 
 	return result
+}
+
+// DialAndGetTCPInfo dials a TCP connection and collects TCP_INFO from it.
+// This is a convenience wrapper combining dial and TCP_INFO collection.
+func DialAndGetTCPInfo(ctx context.Context, network, address string) (*TcpInfoResult, net.Conn, error) {
+	conn, err := net.DialTimeout(network, address, 5*time.Second)
+	if err != nil {
+		return &TcpInfoResult{
+			Available:   false,
+			IsSynthetic: true,
+			Error:       &TcpInfoError{Kind: "dial_failed", Message: fmt.Sprintf("dial failed: %v", err)},
+		}, nil, err
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	result := GetTcpInfo(ctx, conn)
+	if result != nil {
+		result.IsSynthetic = true
+	}
+	if result != nil && !result.Available {
+		conn.Close()
+		return result, nil, fmt.Errorf("tcp info not available: %v", result.Error)
+	}
+
+	return result, conn, nil
 }
 
 // GetTcpInfoFromSyntheticDial creates a synthetic TCP connection and collects TCP_INFO.

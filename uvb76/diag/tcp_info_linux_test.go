@@ -153,7 +153,7 @@ func TestDialAndGetTcpInfo_BasicDial(t *testing.T) {
 
 	// Dial and get TCP_INFO
 	ctx := context.Background()
-	result, conn, err := DialAndGetTcpInfo(ctx, "tcp", listener.Addr().String())
+	result, conn, err := DialAndGetTCPInfo(ctx, "tcp", listener.Addr().String())
 	if conn != nil {
 		defer conn.Close()
 	}
@@ -167,7 +167,7 @@ func TestDialAndGetTcpInfo_BasicDial(t *testing.T) {
 	}
 
 	if err != nil {
-		t.Fatalf("DialAndGetTcpInfo failed: %v", err)
+		t.Fatalf("DialAndGetTCPInfo failed: %v", err)
 	}
 
 	if result == nil {
