@@ -10,6 +10,7 @@ import (
 
 	"github.com/s1onique/KGB/uvb76/config"
 	"github.com/s1onique/KGB/uvb76/diag"
+	"github.com/s1onique/KGB/uvb76/internal/uvb76/domain"
 	"github.com/s1onique/KGB/uvb76/state"
 )
 
@@ -43,10 +44,11 @@ const ICMPSampleKindHTTP = "http"
 const MaxICMPSpikeDetectionSamples = 120
 
 // ICMPSampleRecorder is the interface for recording ICMP samples and detecting spikes.
+// Note: Raw []state.LatencySample is NOT exposed outside uvb76/state - only domain.SampleWindow.
 type ICMPSampleRecorder interface {
 	RecordICMPLatency(targetID string, latencyMs float64, reachable bool)
-	GetRecentICMPLatencySamples(targetID string, limit int) []state.LatencySample
-	DetectAndRecordSpike(targetID, kind string, latencyMs float64, sampleTs time.Time, reachable bool, schedulerDelayMs *float64, httpStatus *int, probeError *string, previousSamples []state.LatencySample, httpTrace *state.HTTPTrace) *state.SpikeEvent
+	GetICMPSampleWindow(targetID string, limit int) domain.SampleWindow
+	DetectAndRecordSpikeWithWindow(targetID, kind string, latencyMs float64, sampleTs time.Time, reachable bool, schedulerDelayMs *float64, httpStatus *int, probeError *string, previousWindow domain.SampleWindow, httpTrace *state.HTTPTrace) *state.SpikeEvent
 }
 
 // ICMPClient performs independent ICMP ping probes against tovarisch targets.
@@ -235,7 +237,7 @@ func (c *ICMPClient) probeTarget(targetID string) {
 		return
 	}
 
-	// Get previous samples BEFORE recording (for spike detection)
+	// Get previous sample window BEFORE recording (for spike detection)
 	// Use the BOUNDED SPIKE WINDOW to avoid allocation churn on every ICMP tick.
 	// MaxICMPSpikeDetectionSamples=120 is intentionally smaller than the full
 	// retention window (3600 samples) to reduce:
@@ -247,7 +249,7 @@ func (c *ICMPClient) probeTarget(targetID string) {
 	// rolling median. 120 provides comfortable headroom.
 	//
 	// Full history is still available for UI/API via GetRecentICMPLatencySamples.
-	previousSamples := c.state.GetRecentICMPLatencySamples(t.ID, MaxICMPSpikeDetectionSamples)
+	previousWindow := c.state.GetICMPSampleWindow(t.ID, MaxICMPSpikeDetectionSamples)
 
 	// Extract hostname from base URL
 	host := extractHost(t.BaseURL)
@@ -255,7 +257,7 @@ func (c *ICMPClient) probeTarget(targetID string) {
 		sampleTs := time.Now().UTC()
 		c.state.RecordICMPLatency(t.ID, float64(c.cfg.TimeoutSeconds*1000), false)
 		errStr := "failed to extract host from base_url"
-		if spike := c.state.DetectAndRecordSpike(t.ID, "icmp", float64(c.cfg.TimeoutSeconds*1000), sampleTs, false, nil, nil, &errStr, previousSamples, nil); spike != nil {
+		if spike := c.state.DetectAndRecordSpikeWithWindow(t.ID, "icmp", float64(c.cfg.TimeoutSeconds*1000), sampleTs, false, nil, nil, &errStr, previousWindow, nil); spike != nil {
 			c.triggerDiagCapture(spike.EventID, t.ID, "icmp")
 		}
 		return
@@ -274,7 +276,7 @@ func (c *ICMPClient) probeTarget(targetID string) {
 		// Record failure - timeout or unreachable
 		c.state.RecordICMPLatency(t.ID, latencyMs, false)
 		errStr := fmt.Sprintf("ping failed: %v", err)
-		if spike := c.state.DetectAndRecordSpike(t.ID, "icmp", latencyMs, sampleTs, false, nil, nil, &errStr, previousSamples, nil); spike != nil {
+		if spike := c.state.DetectAndRecordSpikeWithWindow(t.ID, "icmp", latencyMs, sampleTs, false, nil, nil, &errStr, previousWindow, nil); spike != nil {
 			c.triggerDiagCapture(spike.EventID, t.ID, "icmp")
 		}
 		return
@@ -284,7 +286,7 @@ func (c *ICMPClient) probeTarget(targetID string) {
 	c.state.RecordICMPLatency(t.ID, latencyMs, true)
 
 	// Spike detection for successful ICMP
-	if spike := c.state.DetectAndRecordSpike(t.ID, "icmp", latencyMs, sampleTs, true, nil, nil, nil, previousSamples, nil); spike != nil {
+	if spike := c.state.DetectAndRecordSpikeWithWindow(t.ID, "icmp", latencyMs, sampleTs, true, nil, nil, nil, previousWindow, nil); spike != nil {
 		c.triggerDiagCapture(spike.EventID, t.ID, "icmp")
 	}
 }

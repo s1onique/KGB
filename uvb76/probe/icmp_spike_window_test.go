@@ -7,24 +7,26 @@ import (
 	"time"
 
 	"github.com/s1onique/KGB/uvb76/config"
+	"github.com/s1onique/KGB/uvb76/internal/uvb76/domain"
 	"github.com/s1onique/KGB/uvb76/state"
 )
 
 // mockICMPSampleRecorder implements ICMPSampleRecorder for testing.
 // Records all calls and observed limits for verification.
+// Note: This mock stores raw samples internally but only exposes domain.SampleWindow externally.
 type mockICMPSampleRecorder struct {
 	mu        sync.RWMutex
 	samples   map[string][]state.LatencySample
-	// Track calls to GetRecentICMPLatencySamples
-	lastLimit int
-	allLimits []int
-	calls     int
+	// Track calls to GetICMPSampleWindow
+	lastWindowLimit int
+	allWindowLimits []int
+	windowCalls    int
 }
 
 func newMockICMPSampleRecorder() *mockICMPSampleRecorder {
 	return &mockICMPSampleRecorder{
-		samples:   make(map[string][]state.LatencySample),
-		allLimits: make([]int, 0),
+		samples:        make(map[string][]state.LatencySample),
+		allWindowLimits: make([]int, 0),
 	}
 }
 
@@ -39,57 +41,66 @@ func (m *mockICMPSampleRecorder) RecordICMPLatency(targetID string, latencyMs fl
 	m.samples[targetID] = append(m.samples[targetID], s)
 }
 
-func (m *mockICMPSampleRecorder) GetRecentICMPLatencySamples(targetID string, limit int) []state.LatencySample {
+// GetICMPSampleWindow implements ICMPSampleRecorder for testing.
+// Inlines the slice limiting logic since GetRecentICMPLatencySamples is no longer part of the interface.
+func (m *mockICMPSampleRecorder) GetICMPSampleWindow(targetID string, limit int) domain.SampleWindow {
 	m.mu.Lock()
-	m.lastLimit = limit
-	m.allLimits = append(m.allLimits, limit)
-	m.calls++
+	m.lastWindowLimit = limit
+	m.allWindowLimits = append(m.allWindowLimits, limit)
+	m.windowCalls++
 	m.mu.Unlock()
 
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	samples := m.samples[targetID]
 	if len(samples) == 0 {
-		return nil
+		return domain.SampleWindow{}
 	}
+
+	// Inline slice limiting (previously done in GetRecentICMPLatencySamples)
+	var samplesToConvert []state.LatencySample
 	if len(samples) <= limit {
-		// Return a defensive copy
-		result := make([]state.LatencySample, len(samples))
-		copy(result, samples)
-		return result
+		samplesToConvert = samples
+	} else {
+		// Return most recent samples
+		samplesToConvert = samples[len(samples)-limit:]
 	}
-	// Return most recent samples
-	result := make([]state.LatencySample, limit)
-	copy(result, samples[len(samples)-limit:])
-	return result
+
+	domainSamples := make([]domain.Sample, len(samplesToConvert))
+	for i, s := range samplesToConvert {
+		domainSamples[i] = state.LatencySampleToDomainSampleWithKind(s, domain.ProbeKindICMP)
+	}
+
+	return domain.NewSampleWindow(domainSamples)
 }
 
-func (m *mockICMPSampleRecorder) DetectAndRecordSpike(targetID, kind string, latencyMs float64, sampleTs time.Time, reachable bool, schedulerDelayMs *float64, httpStatus *int, probeError *string, previousSamples []state.LatencySample, httpTrace *state.HTTPTrace) *state.SpikeEvent {
+// DetectAndRecordSpikeWithWindow implements ICMPSampleRecorder for testing.
+func (m *mockICMPSampleRecorder) DetectAndRecordSpikeWithWindow(targetID, kind string, latencyMs float64, sampleTs time.Time, reachable bool, schedulerDelayMs *float64, httpStatus *int, probeError *string, previousWindow domain.SampleWindow, httpTrace *state.HTTPTrace) *state.SpikeEvent {
 	// Minimal implementation for testing - just return nil
 	return nil
 }
 
-// GetLastLimit returns the last limit observed by GetRecentICMPLatencySamples
-func (m *mockICMPSampleRecorder) GetLastLimit() int {
+// GetWindowCalls returns the number of calls to GetICMPSampleWindow
+func (m *mockICMPSampleRecorder) GetWindowCalls() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.lastLimit
+	return m.windowCalls
 }
 
-// GetAllLimits returns all limits observed by GetRecentICMPLatencySamples
-func (m *mockICMPSampleRecorder) GetAllLimits() []int {
+// GetLastWindowLimit returns the last limit observed by GetICMPSampleWindow
+func (m *mockICMPSampleRecorder) GetLastWindowLimit() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	result := make([]int, len(m.allLimits))
-	copy(result, m.allLimits)
+	return m.lastWindowLimit
+}
+
+// GetAllWindowLimits returns all limits observed by GetICMPSampleWindow
+func (m *mockICMPSampleRecorder) GetAllWindowLimits() []int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make([]int, len(m.allWindowLimits))
+	copy(result, m.allWindowLimits)
 	return result
-}
-
-// GetCalls returns the number of calls to GetRecentICMPLatencySamples
-func (m *mockICMPSampleRecorder) GetCalls() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.calls
 }
 
 // TestICMPClient_UsesBoundedSpikeWindow verifies that probeTarget uses the bounded
@@ -129,21 +140,21 @@ func TestICMPClient_UsesBoundedSpikeWindow(t *testing.T) {
 	
 	// Reset call count before the probe
 	recorder.mu.Lock()
-	recorder.calls = 0
-	recorder.lastLimit = 0
+	recorder.windowCalls = 0
+	recorder.lastWindowLimit = 0
 	recorder.mu.Unlock()
 	
 	// Call probeTarget - it should use MaxICMPSpikeDetectionSamples (120)
 	// not RecentSamplesMax (3600)
 	client.probeTarget(target.ID)
 	
-	// Verify GetRecentICMPLatencySamples was called
-	if recorder.GetCalls() == 0 {
-		t.Fatal("GetRecentICMPLatencySamples was not called")
+	// Verify GetICMPSampleWindow was called (the domain boundary method)
+	if recorder.GetWindowCalls() == 0 {
+		t.Fatal("GetICMPSampleWindow was not called")
 	}
 	
 	// Verify the exact limit that was requested
-	lastLimit := recorder.GetLastLimit()
+	lastLimit := recorder.GetLastWindowLimit()
 	if lastLimit != MaxICMPSpikeDetectionSamples {
 		t.Errorf("probeTarget requested %d samples, want %d (MaxICMPSpikeDetectionSamples)", 
 			lastLimit, MaxICMPSpikeDetectionSamples)
@@ -174,36 +185,6 @@ func TestICMPClient_BoundedWindowSmallerThanRetention(t *testing.T) {
 	expectedMaxWindow := 120
 	if MaxICMPSpikeDetectionSamples != expectedMaxWindow {
 		t.Errorf("MaxICMPSpikeDetectionSamples = %d, want %d", MaxICMPSpikeDetectionSamples, expectedMaxWindow)
-	}
-}
-
-// TestICMPClient_UIAPICanStillRequest3600 verifies that the full 3600-sample history
-// is still available for UI/API reads even though the hot path uses a bounded window.
-func TestICMPClient_UIAPICanStillRequest3600(t *testing.T) {
-	_ = &config.ICMPProbeConfig{
-		IntervalSeconds:     1,
-		TimeoutSeconds:       3,
-		RecentSamplesMax:    3600, // Full retention window
-		RetainedRangeSeconds: 3600,
-	}
-	recorder := newMockICMPSampleRecorder()
-	
-	// Simulate having 3600 samples
-	for i := 0; i < 3600; i++ {
-		recorder.RecordICMPLatency("test-target", float64(i%100)+10.0, true)
-	}
-	
-	// UI/API can still request the full 3600 samples
-	samples := recorder.GetRecentICMPLatencySamples("test-target", 3600)
-	if len(samples) != 3600 {
-		t.Errorf("GetRecentICMPLatencySamples(3600) returned %d samples, want 3600", len(samples))
-	}
-	
-	// The bounded spike window (120) should still work
-	spikeSamples := recorder.GetRecentICMPLatencySamples("test-target", MaxICMPSpikeDetectionSamples)
-	if len(spikeSamples) != MaxICMPSpikeDetectionSamples {
-		t.Errorf("GetRecentICMPSpikeDetectionSamples returned %d samples, want %d", 
-			len(spikeSamples), MaxICMPSpikeDetectionSamples)
 	}
 }
 

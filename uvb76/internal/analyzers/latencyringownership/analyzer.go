@@ -66,6 +66,12 @@ func run(pass *analysis.Pass) (interface{}, error) {
 			checkCallExpr(pass, n)
 		case *ast.FuncDecl:
 			checkFuncDecl(pass, n)
+		case *ast.FuncType:
+			// Only check standalone FuncType nodes (interface method signatures)
+			// FuncDecl embeds FuncType internally, so we skip FuncType inside FuncDecl
+			if !isFuncTypeInFuncDecl(pass, n) {
+				checkFuncType(pass, n)
+			}
 		}
 	})
 
@@ -132,6 +138,22 @@ func checkCallExpr(pass *analysis.Pass, call *ast.CallExpr) {
 	}
 }
 
+// checkFuncType checks interface method signatures for disallowed return types.
+func checkFuncType(pass *analysis.Pass, ft *ast.FuncType) {
+	if ft.Results == nil {
+		return
+	}
+
+	// Check each return type
+	for _, result := range ft.Results.List {
+		tv := pass.TypesInfo.TypeOf(result.Type)
+		if tv != nil && isSliceOfStateLatencySample(tv) {
+			pass.Reportf(result.Type.Pos(), "interface method return type []state.LatencySample not allowed outside uvb76/state; use domain.SampleWindow instead")
+			return
+		}
+	}
+}
+
 // checkFuncDecl checks for disallowed return types.
 func checkFuncDecl(pass *analysis.Pass, fn *ast.FuncDecl) {
 	if fn.Type.Results == nil {
@@ -165,6 +187,19 @@ func isGeneratedFile(file *ast.File) bool {
 		for _, comment := range group.List {
 			text := comment.Text
 			if strings.Contains(text, "Code generated") && strings.Contains(text, "DO NOT EDIT") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isFuncTypeInFuncDecl returns true if the FuncType is part of a FuncDecl.
+// This helps avoid duplicate reporting when FuncType is embedded in FuncDecl.
+func isFuncTypeInFuncDecl(pass *analysis.Pass, ft *ast.FuncType) bool {
+	for _, f := range pass.Files {
+		for _, decl := range f.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Type == ft {
 				return true
 			}
 		}

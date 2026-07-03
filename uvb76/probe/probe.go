@@ -207,13 +207,13 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(c.cfg.TimeoutMilliseconds)*time.Millisecond)
 	defer cancel()
 
-	// Get previous samples BEFORE recording (for spike detection)
+	// Get previous sample window BEFORE recording (for spike detection)
 	// Use RecentSamplesMax from config, with a sensible minimum for spike detection
 	maxSamples := c.cfg.RecentSamplesMax
 	if maxSamples < 30 {
 		maxSamples = 30
 	}
-	previousSamples := c.state.GetRecentLatencySamples(t.ID, maxSamples)
+	previousWindow := c.state.GetHTTPSampleWindow(t.ID, maxSamples)
 
 	// Probe endpoint - use the explicit probe URL if configured, otherwise fall back to base_url/status
 	probeURL := config.TargetProbeURL(t)
@@ -224,7 +224,7 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 		c.state.RecordLatency(t.ID, float64(c.cfg.TimeoutMilliseconds), false)
 		// Spike detection for failed request
 		var errStr string = fmt.Sprintf("request creation failed: %v", err)
-		if spike := c.state.DetectAndRecordSpike(t.ID, "http", float64(c.cfg.TimeoutMilliseconds), sampleTs, false, nil, nil, &errStr, previousSamples, nil); spike != nil {
+		if spike := c.state.DetectAndRecordSpikeWithWindow(t.ID, "http", float64(c.cfg.TimeoutMilliseconds), sampleTs, false, nil, nil, &errStr, previousWindow, nil); spike != nil {
 			c.triggerDiagCapture(spike.EventID, t.ID, "http")
 		}
 		return
@@ -243,7 +243,7 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 		sampleTs := time.Now().UTC()
 		c.state.RecordLatency(t.ID, float64(c.cfg.TimeoutMilliseconds), false)
 		var errStr string = fmt.Sprintf("request creation failed: %v", err)
-		if spike := c.state.DetectAndRecordSpike(t.ID, "http", float64(c.cfg.TimeoutMilliseconds), sampleTs, false, nil, nil, &errStr, previousSamples, nil); spike != nil {
+		if spike := c.state.DetectAndRecordSpikeWithWindow(t.ID, "http", float64(c.cfg.TimeoutMilliseconds), sampleTs, false, nil, nil, &errStr, previousWindow, nil); spike != nil {
 			c.triggerDiagCapture(spike.EventID, t.ID, "http")
 		}
 		return
@@ -276,7 +276,7 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 		// Spike detection for failed request - this now creates diagnostic events for failures
 		// Include native TCP_INFO if available
 		errStr := fmt.Sprintf("request failed: %v", err)
-		if spike := c.state.DetectAndRecordSpikeWithTcpQuality(t.ID, "http", latencyMs, sampleTs, false, nil, nil, &errStr, previousSamples, httpTrace, nativeTcpQuality); spike != nil {
+		if spike := c.state.DetectAndRecordSpikeWithWindowAndTcpQuality(t.ID, "http", latencyMs, sampleTs, false, nil, nil, &errStr, previousWindow, httpTrace, nativeTcpQuality); spike != nil {
 			c.triggerDiagCapture(spike.EventID, t.ID, "http")
 		}
 		return
@@ -340,22 +340,22 @@ func (c *Client) probeTarget(t *config.TargetConfig) {
 		errStr := fmt.Sprintf("%s: HTTP %d", classification.Reason, httpStatus)
 		
 		// Spike detection for unhealthy HTTP response - include native TCP_INFO
-		if spike := c.state.DetectAndRecordSpikeWithTcpQuality(t.ID, "http", latencyMs, sampleTs, false, nil, &httpStatus, &errStr, previousSamples, httpTrace, nativeTcpQuality); spike != nil {
+		if spike := c.state.DetectAndRecordSpikeWithWindowAndTcpQuality(t.ID, "http", latencyMs, sampleTs, false, nil, &httpStatus, &errStr, previousWindow, httpTrace, nativeTcpQuality); spike != nil {
 			c.triggerDiagCapture(spike.EventID, t.ID, "http")
 		}
 		return
 	}
 
 	// Spike detection for successful request (latency spikes) - include native TCP_INFO
-	if spike := c.state.DetectAndRecordSpikeWithTcpQuality(t.ID, "http", latencyMs, sampleTs, true, nil, &httpStatus, nil, previousSamples, httpTrace, nativeTcpQuality); spike != nil {
+	if spike := c.state.DetectAndRecordSpikeWithWindowAndTcpQuality(t.ID, "http", latencyMs, sampleTs, true, nil, &httpStatus, nil, previousWindow, httpTrace, nativeTcpQuality); spike != nil {
 		c.triggerDiagCapture(spike.EventID, t.ID, "http")
 	}
 	
 	// Recovery detection: if we were unreachable and now succeeded, trigger a recovery capture
-	// Use dedicated RecordRecoveryEvent() instead of fake error injection.
+	// Use dedicated RecordRecoveryEventWithWindow() instead of fake error injection.
 	// Note: Recovery events do NOT carry native TCP_INFO as they are not spike events.
 	if wasUnreachable {
-		if recoverySpike := c.state.RecordRecoveryEvent(t.ID, "http", latencyMs, sampleTs, &httpStatus, previousSamples, httpTrace); recoverySpike != nil {
+		if recoverySpike := c.state.RecordRecoveryEventWithWindow(t.ID, "http", latencyMs, sampleTs, &httpStatus, previousWindow, httpTrace); recoverySpike != nil {
 			c.triggerDiagCapture(recoverySpike.EventID, t.ID, "http")
 		}
 	}
