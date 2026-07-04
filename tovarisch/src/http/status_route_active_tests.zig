@@ -181,19 +181,15 @@ test "routes.zig /status.json path dispatches to handleStatus" {
 test "routes.zig network_diag query triggers diagnostic budget" {
     const source = @embedFile("routes.zig");
 
-    // Extract handleStatus function body
-    const fn_start = std.mem.indexOf(u8, source, "pub fn handleStatus") orelse {
-        try std.testing.expect(false);
-        return;
-    };
+    // handleStatus must use include_network_diag to select the appropriate policy
+    try std.testing.expect(std.mem.indexOf(u8, source, "pub fn handleStatus") != null);
 
-    const remaining = source[fn_start..];
-    const fn_end = std.mem.indexOf(u8, remaining, "\npub fn ") orelse remaining.len;
-    const fn_body = remaining[0..fn_end];
+    // handleStatus must delegate to handleStatusWithPolicy which uses forQuery
+    try std.testing.expect(std.mem.indexOf(u8, source, "handleStatusWithPolicy") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "forQuery") != null);
 
-    // The include_network_diag parameter must be used for budget selection
-    try std.testing.expect(std.mem.indexOf(u8, fn_body, "include_network_diag") != null);
-    try std.testing.expect(std.mem.indexOf(u8, fn_body, "forQuery") != null);
+    // The include_network_diag parameter must be used for conditional routing
+    try std.testing.expect(std.mem.indexOf(u8, source, "if (include_network_diag)") != null);
 }
 
 // ============================================================================

@@ -111,18 +111,25 @@ pub fn handleHealthz(fd: i32, _: *anyopaque) !void {
     try response.writeSimpleJsonFd(fd, 200, response.Errors.ok);
 }
 
-/// Status handler - returns full status JSON with BFD, config, and live BGP state.
-/// When include_network_diag is true, includes the network_diag field.
+/// Shared status handler with explicit policy parameters.
 ///
-/// This handler uses the route contract's response budget and request allocator
-/// policy to bound memory usage. The request allocator capacity derives from
-/// the response budget plus a named overhead for transient allocations.
+/// This helper takes explicit budget and allocator capacity, allowing
+/// both production code and tests to exercise the exact same catch path.
 /// On budget overflow or allocation failure, returns an internal error response.
-pub fn handleStatus(fd: i32, state: *anyopaque, include_network_diag: bool) !void {
+///
+/// Tests use this to force the render-failure path with a tiny budget,
+/// proving the canonical catch block executes correctly.
+pub fn handleStatusWithPolicy(
+    fd: i32,
+    state: *anyopaque,
+    include_network_diag: bool,
+    comptime request_allocator_bytes: usize,
+    budget: status_route_contract.ResponseBudget,
+) !void {
     // Cast opaque state to ServeContext to get BFD runtime, config check, and BGP state.
     const ctx = @as(*server.ServeContext, @ptrCast(@alignCast(state)));
 
-    // Build status inputs (shared between branches)
+    // Build status inputs
     const inputs = status.RuntimeStatusInputs{
         .bfd_runtime = ctx.bfd_runtime,
         .config_check = ctx.config_check,
@@ -132,52 +139,57 @@ pub fn handleStatus(fd: i32, state: *anyopaque, include_network_diag: bool) !voi
         .lab_event_emitter = ctx.lab_event_emitter,
     };
 
-    // Branch on diagnostic mode to select appropriate budget and allocator capacity.
-    // This is necessary because Zig requires comptime-known array sizes.
-    // The allocator capacity derives from the route contract's request allocator policy.
-    // Use ResponseBudget.forQuery() to select the budget helper.
+    // Parse query string based on diagnostic mode
+    const query = if (include_network_diag)
+        @import("../status_query.zig").StatusQuery.parse("include=network_diag")
+    else
+        @import("../status_query.zig").StatusQuery.parse("");
+
+    // Allocate fixed buffer for request scope
+    var fixed_buf: [request_allocator_bytes]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&fixed_buf);
+    const fba_allocator = fba.allocator();
+
+    const response_or_err = status_response.renderStatusOwnedWithBudget(
+        fba_allocator,
+        inputs,
+        query,
+        budget,
+    );
+
+    // THE canonical catch path: both production and tests reach this exact code.
+    const owned_response = response_or_err catch {
+        try response.writeSimpleJsonFd(fd, 500, response.Errors.internal_error);
+        return;
+    };
+    defer owned_response.deinit(fba_allocator);
+    try response.writeSimpleJsonFd(fd, 200, owned_response.body());
+}
+
+/// Status handler - returns full status JSON with BFD, config, and live BGP state.
+/// When include_network_diag is true, includes the network_diag field.
+///
+/// This handler uses the route contract's response budget and request allocator
+/// policy to bound memory usage. The request allocator capacity derives from
+/// the response budget plus a named overhead for transient allocations.
+/// On budget overflow or allocation failure, returns an internal error response.
+pub fn handleStatus(fd: i32, state: *anyopaque, include_network_diag: bool) !void {
     if (include_network_diag) {
-        // Diagnostic mode: use the route contract's budget helper
-        const budget = status_route_contract.ResponseBudget.forQuery(true);
-        var fixed_buf: [status_route_contract.requestAllocatorBytesForQuery(true)]u8 = undefined;
-        var fba = std.heap.FixedBufferAllocator.init(&fixed_buf);
-        const fba_allocator = fba.allocator();
-
-        const query = @import("../status_query.zig").StatusQuery.parse("include=network_diag");
-        const response_or_err = status_response.renderStatusOwnedWithBudget(
-            fba_allocator,
-            inputs,
-            query,
-            budget,
+        try handleStatusWithPolicy(
+            fd,
+            state,
+            true,
+            status_route_contract.requestAllocatorBytesForQuery(true),
+            status_route_contract.ResponseBudget.forQuery(true),
         );
-
-        const owned_response = response_or_err catch {
-            try response.writeSimpleJsonFd(fd, 500, response.Errors.internal_error);
-            return;
-        };
-        defer owned_response.deinit(fba_allocator);
-        try response.writeSimpleJsonFd(fd, 200, owned_response.body());
     } else {
-        // Base mode: use the route contract's budget helper
-        const budget = status_route_contract.ResponseBudget.forQuery(false);
-        var fixed_buf: [status_route_contract.requestAllocatorBytesForQuery(false)]u8 = undefined;
-        var fba = std.heap.FixedBufferAllocator.init(&fixed_buf);
-        const fba_allocator = fba.allocator();
-
-        const query = @import("../status_query.zig").StatusQuery.parse("");
-        const response_or_err = status_response.renderStatusOwnedWithBudget(
-            fba_allocator,
-            inputs,
-            query,
-            budget,
+        try handleStatusWithPolicy(
+            fd,
+            state,
+            false,
+            status_route_contract.requestAllocatorBytesForQuery(false),
+            status_route_contract.ResponseBudget.forQuery(false),
         );
-
-        const owned_response = response_or_err catch {
-            try response.writeSimpleJsonFd(fd, 500, response.Errors.internal_error);
-            return;
-        };
-        defer owned_response.deinit(fba_allocator);
-        try response.writeSimpleJsonFd(fd, 200, owned_response.body());
     }
 }
 
