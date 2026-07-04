@@ -127,6 +127,7 @@ fn mapCommandError(err: safe_command.CommandError) CollectError {
         error.ForkFailed => return error.ForkFailed,
         error.ExecFailed => return error.ExecFailed,
         error.OutOfMemory => return error.OutOfMemory,
+        error.Timeout => return error.CommandFailed,
     }
 }
 

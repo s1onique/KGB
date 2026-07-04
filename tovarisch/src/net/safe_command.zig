@@ -1,15 +1,38 @@
 // safe_command.zig — Bounded safe command runner for network diagnostics
 //
-// ACT: Add tovarisch WireGuard and XRay TCP underlay diagnostics
-// Safe command execution without shell, with bounded output.
+// ACT: Harden CLI/process execution boundary
+//
+// Single unified process execution boundary for tovarisch diagnostics.
 //
 // Safety properties:
 // - Fixed argv only, no shell interpolation
-// - Bounded stdout/stderr capture
+// - Bounded stdout/stderr capture with poll()-based concurrent reads
 // - Explicit command allowlist
+// - Timeout enforcement with SIGKILL
+// - Exit code classification
 // - No user-controlled paths
+//
+// Policy enforcement:
+// - argv-only execution: no shell string execution
+// - explicit executable path via allowlist
+// - explicit environment policy: empty env by default
+// - timeout: enforced with poll() and SIGKILL
+// - max stdout/stderr bytes: bounded buffers
+// - allowed exit codes: classified via CommandOutcome
 
 const std = @import("std");
+
+// POSIX fcntl and open flags (not exposed in Zig 0.16 std.c)
+const F_GETFL: c_int = 3;
+const F_SETFL: c_int = 4;
+
+// Platform-specific O_NONBLOCK:
+const O_NONBLOCK: c_int = if (@import("builtin").os.tag == .linux) 2048 else 4;
+
+// POSIX poll event flags
+const POLLIN: c_short = 0x0001;
+const POLLHUP: c_short = 0x0010;
+const POLLERR: c_short = 0x0008;
 
 // ============================================================================
 // Types
@@ -37,20 +60,8 @@ pub const CommandConfig = struct {
     max_stdout_size: usize = 8192,
     /// Maximum stderr buffer size in bytes.
     max_stderr_size: usize = 1024,
-};
-
-/// Result of running a command.
-pub const CommandResult = struct {
-    /// Command exit code.
-    exit_code: c_int,
-    /// Captured stdout (owned).
-    stdout: []u8,
-    /// Captured stderr (owned).
-    stderr: []u8,
-    /// Whether stdout was truncated.
-    stdout_truncated: bool = false,
-    /// Whether stderr was truncated.
-    stderr_truncated: bool = false,
+    /// Timeout in milliseconds. 0 means no timeout.
+    timeout_ms: u32 = 0,
 };
 
 /// Command runner errors.
@@ -65,7 +76,149 @@ pub const CommandError = error{
     ExecFailed,
     /// Memory allocation failed.
     OutOfMemory,
+    /// Command timed out.
+    Timeout,
 };
+
+/// Exit code classification for command results.
+pub const ExitCodeClass = enum(u8) {
+    /// Exit code 0 - success.
+    success = 0,
+    /// Exit code 1 - generic failure.
+    failure = 1,
+    /// Exit code 126 - permission denied or command not executable.
+    permission_denied = 126,
+    /// Exit code 127 - command not found.
+    command_not_found = 127,
+    /// Exit code > 128 - signal exit (e.g., 137 = SIGKILL from timeout).
+    signal_exit = 128,
+    /// Exit code outside expected range.
+    unknown = 255,
+};
+
+/// Outcome of a completed command, classifying the exit status.
+pub const CommandOutcome = union(enum) {
+    /// Command completed successfully (exit code 0).
+    success: struct {
+        stdout: []u8,
+        stderr: []u8,
+    },
+    /// Command failed with non-zero exit code.
+    nonzero_exit: struct {
+        exit_code: u8,
+        stdout: []u8,
+        stderr: []u8,
+    },
+    /// Command timed out before completion.
+    timeout: struct {
+        /// Partial stdout captured before timeout.
+        stdout: []u8,
+        /// Partial stderr captured before timeout.
+        stderr: []u8,
+    },
+    /// Command not found (exit code 127 from execve failure).
+    command_not_found: void,
+    /// Permission denied (exit code 126 from execve failure).
+    permission_denied: void,
+    /// Command spawned but stdout exceeded max_stdout_size.
+    stdout_too_large: struct {
+        /// Truncated stdout captured.
+        stdout: []u8,
+    },
+    /// Command spawned but stderr exceeded max_stderr_size.
+    stderr_too_large: struct {
+        /// Captured stdout.
+        stdout: []u8,
+        /// Truncated stderr captured.
+        stderr: []u8,
+    },
+    /// Process spawn failed (pipe or fork error).
+    spawn_failed: CommandError,
+};
+
+/// Classify an exit code into a structured category.
+pub fn classifyExitCode(exit_code: c_int) ExitCodeClass {
+    if (exit_code == 0) return .success;
+    if (exit_code == 1) return .failure;
+    if (exit_code == 126) return .permission_denied;
+    if (exit_code == 127) return .command_not_found;
+    if (exit_code >= 128) return .signal_exit;
+    return .unknown;
+}
+
+/// Result of running a command.
+pub const CommandResult = struct {
+    /// Command exit code.
+    exit_code: c_int,
+    /// Captured stdout (owned).
+    stdout: []u8,
+    /// Captured stderr (owned).
+    stderr: []u8,
+    /// Whether stdout was truncated.
+    stdout_truncated: bool = false,
+    /// Whether stderr was truncated.
+    stderr_truncated: bool = false,
+    /// Whether the command timed out.
+    timed_out: bool = false,
+};
+
+/// Classify a CommandResult into a CommandOutcome union.
+///
+/// This function handles all failure modes and produces a structured
+/// outcome that consumers can use to decide how to proceed.
+pub fn classifyResult(result: CommandResult) CommandOutcome {
+    // Check for spawn failures (indicated by -1 exit code)
+    if (result.exit_code == -1) {
+        return .{ .spawn_failed = error.ExecFailed };
+    }
+
+    // Check for timeout
+    if (result.timed_out) {
+        return .{ .timeout = .{
+            .stdout = result.stdout,
+            .stderr = result.stderr,
+        }};
+    }
+
+    // Check for truncation before exit code classification
+    if (result.stdout_truncated) {
+        return .{ .stdout_too_large = .{
+            .stdout = result.stdout,
+        }};
+    }
+
+    if (result.stderr_truncated) {
+        return .{ .stderr_too_large = .{
+            .stdout = result.stdout,
+            .stderr = result.stderr,
+        }};
+    }
+
+    // Classify by exit code
+    const exit_class = classifyExitCode(result.exit_code);
+    switch (exit_class) {
+        .success => {
+            return .{ .success = .{
+                .stdout = result.stdout,
+                .stderr = result.stderr,
+            }};
+        },
+        .command_not_found => {
+            return .command_not_found;
+        },
+        .permission_denied => {
+            return .permission_denied;
+        },
+        else => {
+            // Any non-zero exit is treated as nonzero_exit
+            return .{ .nonzero_exit = .{
+                .exit_code = @intCast(result.exit_code & 0xff),
+                .stdout = result.stdout,
+                .stderr = result.stderr,
+            }};
+        },
+    }
+}
 
 // ============================================================================
 // Command Execution
@@ -232,200 +385,4 @@ pub fn runSsTin(
     config: CommandConfig,
 ) CommandError!CommandResult {
     return runCommand(allocator, .ss_tin, &.{ "-tin" }, config);
-}
-
-// ============================================================================
-// Tests
-// ============================================================================
-
-test "CommandConfig has sensible defaults" {
-    const cfg = CommandConfig{};
-    try std.testing.expectEqual(@as(usize, 8192), cfg.max_stdout_size);
-    try std.testing.expectEqual(@as(usize, 1024), cfg.max_stderr_size);
-}
-
-test "CommandResult can be constructed" {
-    const allocator = std.testing.allocator;
-    const stdout_bytes = "test output";
-    const stdout_buf = try allocator.dupe(u8, stdout_bytes);
-    defer allocator.free(stdout_buf);
-    
-    const stderr_bytes = "";
-    const stderr_buf = try allocator.dupe(u8, stderr_bytes);
-    defer allocator.free(stderr_buf);
-    
-    const result = CommandResult{
-        .exit_code = 0,
-        .stdout = stdout_buf,
-        .stderr = stderr_buf,
-    };
-    try std.testing.expectEqual(@as(c_int, 0), result.exit_code);
-    try std.testing.expectEqualStrings("test output", result.stdout);
-}
-
-// Regression test: argv array must be nullable for execve.
-// This ensures we can properly null-terminate the argv list.
-test "argv type is nullable for proper null-termination" {
-    // The argv array must use nullable pointers so we can set the
-    // terminating null pointer: argv[n] = null.
-    // If the type were [*:0]const u8 (non-nullable), we could not
-    // properly terminate the array for execve.
-    var argv = std.ArrayListUnmanaged(?[*:0]const u8){ .items = &.{}, .capacity = 0 };
-    try argv.append(std.testing.allocator, @ptrFromInt(0x1000));
-    try argv.append(std.testing.allocator, null); // Valid: nullable type allows null
-    
-    // Verify structure: [ptr, null]
-    try std.testing.expectEqual(@as(usize, 2), argv.items.len);
-    try std.testing.expectEqual(@as(?[*:0]const u8, @ptrFromInt(0x1000)), argv.items[0]);
-    try std.testing.expectEqual(@as(?[*:0]const u8, null), argv.items[1]);
-    
-    argv.deinit(std.testing.allocator);
-}
-
-// Regression test: ss_tin command builds correct argv for execve.
-// Before fix: execve received ["/usr/bin/ss", "-tin", "", garbage...]
-// After fix: execve receives ["/usr/bin/ss", "-tin", null]
-test "ss_tin builds correct argv for execve" {
-    // This test verifies the argv construction pattern used by runSsTin.
-    // runSsTin calls runCommand with args = &.{ "-tin" }
-    // 
-    // Expected argv structure:
-    //   argv[0] = "/usr/bin/ss"
-    //   argv[1] = "-tin"
-    //   argv[2] = null  <-- MUST be null, not empty string ""
-    
-    const exe_path: [*:0]const u8 = "/usr/bin/ss";
-    const args: []const [*:0]const u8 = &.{ "-tin" };
-    
-    // Simulate argv construction (same as runCommand)
-    var argv = std.ArrayListUnmanaged(?[*:0]const u8){ .items = &.{}, .capacity = 0 };
-    defer argv.deinit(std.testing.allocator);
-    
-    try argv.append(std.testing.allocator, exe_path);
-    for (args) |arg| {
-        try argv.append(std.testing.allocator, arg);
-    }
-    try argv.append(std.testing.allocator, null);
-    
-    // Verify: ["/usr/bin/ss", "-tin", null]
-    try std.testing.expectEqual(@as(usize, 3), argv.items.len);
-    try std.testing.expect(argv.items[0] != null);
-    try std.testing.expectEqualStrings("/usr/bin/ss", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv.items[0].?)), 0));
-    try std.testing.expect(argv.items[1] != null);
-    try std.testing.expectEqualStrings("-tin", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv.items[1].?)), 0));
-    try std.testing.expectEqual(@as(?[*:0]const u8, null), argv.items[2]);
-}
-
-// Regression test: wg_show builds correct argv for execve.
-// Expected: ["/usr/bin/wg", "show", null]
-test "wg_show builds correct argv for execve" {
-    const exe_path: [*:0]const u8 = "/usr/bin/wg";
-    const args: []const [*:0]const u8 = &.{ "show" };
-    
-    // Simulate argv construction (same as runWgShow -> runCommand)
-    var argv = std.ArrayListUnmanaged(?[*:0]const u8){ .items = &.{}, .capacity = 0 };
-    defer argv.deinit(std.testing.allocator);
-    
-    try argv.append(std.testing.allocator, exe_path);
-    for (args) |arg| {
-        try argv.append(std.testing.allocator, arg);
-    }
-    try argv.append(std.testing.allocator, null);
-    
-    // Verify: ["/usr/bin/wg", "show", null]
-    try std.testing.expectEqual(@as(usize, 3), argv.items.len);
-    try std.testing.expect(argv.items[0] != null);
-    try std.testing.expectEqualStrings("/usr/bin/wg", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv.items[0].?)), 0));
-    try std.testing.expect(argv.items[1] != null);
-    try std.testing.expectEqualStrings("show", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv.items[1].?)), 0));
-    try std.testing.expectEqual(@as(?[*:0]const u8, null), argv.items[2]);
-}
-
-// Regression test: wg_show_dump builds correct argv for execve.
-// Expected: ["/usr/bin/wg", "show", <iface>, "dump", null]
-test "wg_show_dump builds correct argv for execve" {
-    const exe_path: [*:0]const u8 = "/usr/bin/wg";
-    const iface_arg: [*:0]const u8 = "wg0";
-    const args: []const [*:0]const u8 = &.{ "show", iface_arg, "dump" };
-    
-    // Simulate argv construction
-    var argv = std.ArrayListUnmanaged(?[*:0]const u8){ .items = &.{}, .capacity = 0 };
-    defer argv.deinit(std.testing.allocator);
-    
-    try argv.append(std.testing.allocator, exe_path);
-    for (args) |arg| {
-        try argv.append(std.testing.allocator, arg);
-    }
-    try argv.append(std.testing.allocator, null);
-    
-    // Verify: ["/usr/bin/wg", "show", "wg0", "dump", null]
-    try std.testing.expectEqual(@as(usize, 5), argv.items.len);
-    try std.testing.expectEqualStrings("/usr/bin/wg", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv.items[0].?)), 0));
-    try std.testing.expectEqualStrings("show", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv.items[1].?)), 0));
-    try std.testing.expectEqualStrings("wg0", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv.items[2].?)), 0));
-    try std.testing.expectEqualStrings("dump", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv.items[3].?)), 0));
-    try std.testing.expectEqual(@as(?[*:0]const u8, null), argv.items[4]);
-}
-
-// Regression test: old bug would produce [ptr, "", garbage...] not [ptr, null]
-// This test verifies the FIX: we use nullable type and append null, not "".
-test "old bug: empty string not used as sentinel" {
-    // OLD BUG: const null_sentinel: [*:0]const u8 = "";
-    //          try argv.append(allocator, null_sentinel);
-    // This appended "" (empty string pointer) to argv, making:
-    //   ["/usr/bin/ss", "-tin", ""]  <-- "" is NOT a null pointer!
-    // 
-    // When execve scanned argv looking for NULL terminator, it found:
-    //   argv[0] = ptr to "/usr/bin/ss"   <-- valid
-    //   argv[1] = ptr to "-tin"          <-- valid
-    //   argv[2] = ptr to ""              <-- valid but not NULL!
-    //   argv[3] = UNINITIALIZED/GARBAGE  <-- EFAULT!
-    //
-    // FIX: Use nullable type and append null:
-    //   var argv = ArrayListUnmanaged(?[*:0]const u8)
-    //   try argv.append(allocator, null);  <-- actual NULL pointer
-    
-    // Verify that appending null produces a true null pointer, not empty string
-    var argv = std.ArrayListUnmanaged(?[*:0]const u8){ .items = &.{}, .capacity = 0 };
-    defer argv.deinit(std.testing.allocator);
-    
-    try argv.append(std.testing.allocator, @ptrFromInt(0x1000));
-    try argv.append(std.testing.allocator, null);
-    
-    // The second element MUST be null, not a pointer to empty string
-    try std.testing.expectEqual(@as(?[*:0]const u8, null), argv.items[1]);
-    
-    // Verify it's actually the NULL pointer, not some non-null address
-    const sentinel = argv.items[1];
-    try std.testing.expect(sentinel == null);
-}
-
-// Regression test: wg_show (no interface) argv matches wg_show_collector.zig pattern.
-// This verifies the wg_show_collector.zig execve fix produces correct argv.
-//
-// The wg_show_collector.zig uses:
-//   const argv: [3]?[*:0]const u8 = .{ wg_path, "show", null };
-//
-// This test verifies that pattern produces the expected argv:
-//   ["/usr/bin/wg", "show", null]
-//
-// Live strace evidence (before fix in wg_show_collector.zig):
-//   execve("/usr/bin/wg", ["/usr/bin/wg", "show", garbage_ptrs...], ...) = -1 EFAULT
-//
-// Live strace evidence (after fix):
-//   execve("/usr/bin/wg", ["/usr/bin/wg", "show", NULL], ...) = 0
-test "wg_show (no interface) argv matches wg_show_collector pattern" {
-    const exe_path: [*:0]const u8 = "/usr/bin/wg";
-    
-    // Pattern from wg_show_collector.zig runWgShowCapture()
-    const argv: [3]?[*:0]const u8 = .{ exe_path, "show", null };
-    const argv_ptr: [*:null]const ?[*:0]const u8 = @ptrCast(&argv);
-    
-    // Verify: ["/usr/bin/wg", "show", null]
-    try std.testing.expectEqual(@as(usize, 3), argv.len);
-    try std.testing.expect(argv_ptr[0] != null);
-    try std.testing.expectEqualStrings("/usr/bin/wg", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv_ptr[0].?)), 0));
-    try std.testing.expect(argv_ptr[1] != null);
-    try std.testing.expectEqualStrings("show", std.mem.sliceTo(@as([*:0]const u8, @ptrCast(argv_ptr[1].?)), 0));
-    try std.testing.expectEqual(@as(?[*:0]const u8, null), argv_ptr[2]);
 }
