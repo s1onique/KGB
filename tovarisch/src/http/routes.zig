@@ -160,61 +160,7 @@ pub fn handleStatus(fd: i32, state: *anyopaque, include_network_diag: bool) !voi
     };
 
     defer owned_response.deinit(fba_allocator);
-    try response.writeSimpleJsonFd(fd, 200, owned_response.body);
-}
-
-/// Status handler - returns full status JSON with BFD, config, and live BGP state.
-/// When include_network_diag is true, includes the network_diag field.
-/// NOTE: This is the legacy handler that uses fixed-size buffers.
-/// Use the budget-aware handleStatus for new code.
-pub fn handleStatusLegacy(fd: i32, state: *anyopaque, include_network_diag: bool) !void {
-    // Cast opaque state to ServeContext to get BFD runtime, config check, and BGP state.
-    const ctx = @as(*server.ServeContext, @ptrCast(@alignCast(state)));
-
-    // For HTTP, we need to render status to a buffer first then send it.
-    // Use larger buffer when including network_diag to accommodate extended output.
-    var buf: [16384]u8 = undefined;
-    var len: usize = 0;
-
-    const writer = struct {
-        buf: *[16384]u8,
-        len: *usize,
-
-        pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) !void {
-            if (self.len.* >= 16384) return error.BufferOverflow;
-            const written = std.fmt.bufPrint(self.buf[self.len.*..], fmt, args) catch return error.BufferOverflow;
-            self.len.* += written.len;
-        }
-
-        pub fn writeAll(self: @This(), bytes: []const u8) !void {
-            if (self.len.* + bytes.len > 16384) return error.BufferOverflow;
-            // Use for loop instead of @memcpy to avoid aliasing panic in Zig 0.16
-            for (bytes, 0..) |byte, i| {
-                self.buf[self.len.* + i] = byte;
-            }
-            self.len.* += bytes.len;
-        }
-
-        pub fn writeByte(self: @This(), c: u8) !void {
-            if (self.len.* >= 16384) return error.BufferOverflow;
-            self.buf[self.len.*] = c;
-            self.len.* += 1;
-        }
-    }{ .buf = &buf, .len = &len };
-
-    try status.renderPayloadWithContextAndDiag(writer, .{
-        .bfd_runtime = ctx.bfd_runtime,
-        .config_check = ctx.config_check,
-        .bgp_result = ctx.bgp_result,
-        .network_diag_config = ctx.network_diag_config,
-        .lab_config = ctx.lab_config,
-        .lab_event_emitter = ctx.lab_event_emitter,
-        // MemoryOwnership: Transient allocation for network_diag within HTTP request handler scope.
-        // The renderPayloadWithContextAndDiag() function releases all memory via defer before returning.
-    }, std.heap.page_allocator, include_network_diag);
-    const json = buf[0..len];
-
-    try response.writeSimpleJsonFd(fd, 200, json);
+    try response.writeSimpleJsonFd(fd, 200, owned_response.body());
 }
 
 /// Metrics handler - uses persistent sampler state for live rates.

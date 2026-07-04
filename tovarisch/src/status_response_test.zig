@@ -219,9 +219,11 @@ test "repeated render/deinit loop is leak-free" {
     var response_diag = try status_response.OwnedResponse.init(allocator, inputs, query_diag);
     defer response_diag.deinit(allocator);
 
-    try std.testing.expect(response_base.body.len > 0);
-    try std.testing.expect(response_diag.body.len > 0);
-    try std.testing.expect(std.mem.containsAtLeast(u8, response_diag.body, 1, "\"network_diag\":"));
+    const body_base = response_base.body();
+    const body_diag = response_diag.body();
+    try std.testing.expect(body_base.len > 0);
+    try std.testing.expect(body_diag.len > 0);
+    try std.testing.expect(std.mem.containsAtLeast(u8, body_diag, 1, "\"network_diag\":"));
 }
 
 test "many repeated renders do not accumulate memory" {
@@ -232,7 +234,7 @@ test "many repeated renders do not accumulate memory" {
     inline for (0..10) |_| {
         var response = try status_response.OwnedResponse.init(allocator, inputs, query);
         defer response.deinit(allocator);
-        try std.testing.expect(response.body.len > 0);
+        try std.testing.expect(response.body().len > 0);
     }
 }
 
@@ -326,7 +328,7 @@ test "include without value (no equals) is unknown" {
 // Test: OwnedResponse ownership contract
 // ============================================================================
 
-test "OwnedResponse.body is owned by caller" {
+test "OwnedResponse.body() returns owned slice to caller" {
     const allocator = std.testing.allocator;
     const inputs = status.RuntimeStatusInputs{};
     const query = status_query.StatusQuery.parse("");
@@ -334,11 +336,12 @@ test "OwnedResponse.body is owned by caller" {
     var response = try status_response.OwnedResponse.init(allocator, inputs, query);
     defer response.deinit(allocator);
 
-    try std.testing.expect(response.body.len > 100);
+    const body = response.body();
+    try std.testing.expect(body.len > 100);
 
     const slice = response.slice();
-    try std.testing.expect(slice.len == response.body.len);
-    try std.testing.expect(slice.ptr == response.body.ptr);
+    try std.testing.expect(slice.len == body.len);
+    try std.testing.expect(slice.ptr == body.ptr);
 }
 
 test "OwnedResponse.deinit with correct allocator" {
@@ -362,9 +365,10 @@ test "OwnedResponse body ends exactly at JSON terminator (base status)" {
     var response = try status_response.OwnedResponse.init(allocator, inputs, query);
     defer response.deinit(allocator);
 
-    try std.testing.expect(response.body.len > 0);
-    try std.testing.expectEqual(@as(u8, '\n'), response.body[response.body.len - 1]);
-    try std.testing.expectEqual(@as(u8, '}'), response.body[response.body.len - 2]);
+    const body = response.body();
+    try std.testing.expect(body.len > 0);
+    try std.testing.expectEqual(@as(u8, '\n'), body[body.len - 1]);
+    try std.testing.expectEqual(@as(u8, '}'), body[body.len - 2]);
 }
 
 test "OwnedResponse body ends exactly at JSON terminator (network_diag)" {
@@ -375,12 +379,13 @@ test "OwnedResponse body ends exactly at JSON terminator (network_diag)" {
     var response = try status_response.OwnedResponse.init(allocator, inputs, query);
     defer response.deinit(allocator);
 
-    try std.testing.expect(response.body.len > 0);
-    try std.testing.expectEqual(@as(u8, '\n'), response.body[response.body.len - 1]);
-    try std.testing.expectEqual(@as(u8, '}'), response.body[response.body.len - 2]);
+    const body = response.body();
+    try std.testing.expect(body.len > 0);
+    try std.testing.expectEqual(@as(u8, '\n'), body[body.len - 1]);
+    try std.testing.expectEqual(@as(u8, '}'), body[body.len - 2]);
 }
 
-test "OwnedResponse.slice() has same length as body" {
+test "OwnedResponse.slice() has same length as body()" {
     const allocator = std.testing.allocator;
     const inputs = status.RuntimeStatusInputs{};
     const query = status_query.StatusQuery.parse("");
@@ -388,9 +393,10 @@ test "OwnedResponse.slice() has same length as body" {
     var response = try status_response.OwnedResponse.init(allocator, inputs, query);
     defer response.deinit(allocator);
 
+    const body = response.body();
     const slice = response.slice();
-    try std.testing.expectEqual(response.body.len, slice.len);
-    try std.testing.expectEqual(@as(usize, @intFromPtr(response.body.ptr)), @as(usize, @intFromPtr(slice.ptr)));
+    try std.testing.expectEqual(body.len, slice.len);
+    try std.testing.expectEqual(@as(usize, @intFromPtr(body.ptr)), @as(usize, @intFromPtr(slice.ptr)));
 }
 
 test "OwnedResponse body does not expose trailing allocation capacity" {
@@ -401,10 +407,12 @@ test "OwnedResponse body does not expose trailing allocation capacity" {
     var response = try status_response.OwnedResponse.init(allocator, inputs, query);
     defer response.deinit(allocator);
 
-    for (response.body) |byte| {
+    const body = response.body();
+    for (body) |byte| {
         try std.testing.expect(byte < 128);
     }
 
-    try std.testing.expectEqual(@as(u8, '{'), response.body[0]);
-    try std.testing.expectEqual(@as(u8, '\n'), response.body[response.body.len - 1]);
+    try std.testing.expectEqual(@as(u8, '{'), body[0]);
+    try std.testing.expectEqual(@as(u8, '\n'), body[body.len - 1]);
 }
+

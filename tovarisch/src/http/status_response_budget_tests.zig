@@ -31,17 +31,18 @@ test "base status renders under base budget" {
     defer response.deinit(allocator);
 
     // Body must have content
-    try std.testing.expect(response.body.len > 0);
+    const body = response.body();
+    try std.testing.expect(body.len > 0);
 
     // Body must fit within budget
-    try std.testing.expect(response.body.len <= budget.max_body_bytes);
+    try std.testing.expect(body.len <= budget.max_body_bytes);
 
     // Body must be valid JSON
-    try std.testing.expectEqual(@as(u8, '{'), response.body[0]);
-    try std.testing.expectEqual(@as(u8, '\n'), response.body[response.body.len - 1]);
+    try std.testing.expectEqual(@as(u8, '{'), body[0]);
+    try std.testing.expectEqual(@as(u8, '\n'), body[body.len - 1]);
 
     // Should contain required fields
-    try std.testing.expect(std.mem.containsAtLeast(u8, response.body, 1, "\"service\":\"tovarisch\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, body, 1, "\"service\":\"tovarisch\""));
 }
 
 test "network_diag renders under diagnostic budget" {
@@ -59,17 +60,18 @@ test "network_diag renders under diagnostic budget" {
     defer response.deinit(allocator);
 
     // Body must have content
-    try std.testing.expect(response.body.len > 0);
+    const body = response.body();
+    try std.testing.expect(body.len > 0);
 
     // Body must fit within budget
-    try std.testing.expect(response.body.len <= budget.max_body_bytes);
+    try std.testing.expect(body.len <= budget.max_body_bytes);
 
     // Body must be valid JSON
-    try std.testing.expectEqual(@as(u8, '{'), response.body[0]);
-    try std.testing.expectEqual(@as(u8, '\n'), response.body[response.body.len - 1]);
+    try std.testing.expectEqual(@as(u8, '{'), body[0]);
+    try std.testing.expectEqual(@as(u8, '\n'), body[body.len - 1]);
 
     // Should contain network_diag field
-    try std.testing.expect(std.mem.containsAtLeast(u8, response.body, 1, "\"network_diag\":"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, body, 1, "\"network_diag\":"));
 }
 
 test "base status fails with tiny budget" {
@@ -130,34 +132,11 @@ test "tiny-budget failure does not leak" {
     }
 }
 
-test "allocation failure before scratch buffer creation does not leak" {
+test "allocation failure before buffer allocation does not leak" {
     // Use a failing allocator to simulate allocation failure
     // Zig 0.16 uses Config struct for FailingAllocator.init
     var failing_allocator = std.testing.FailingAllocator.init(std.testing.allocator, .{
-        .fail_index = 0, // Fail on first allocation (scratch)
-    });
-    const allocator = failing_allocator.allocator();
-
-    const inputs = status.RuntimeStatusInputs{};
-    const query = status_query.StatusQuery.parse("");
-    const budget = status_route_contract.ResponseBudget.base_budget;
-
-    const result = status_response.renderStatusOwnedWithBudget(
-        allocator,
-        inputs,
-        query,
-        budget,
-    );
-
-    // Must fail with out of memory
-    try std.testing.expectError(error.OutOfMemory, result);
-}
-
-test "allocation failure during dupe (second alloc) does not leak scratch" {
-    // Use a failing allocator that fails on the second allocation (dupe).
-    // This tests the fix for the scratch leak when dupe() fails.
-    var failing_allocator = std.testing.FailingAllocator.init(std.testing.allocator, .{
-        .fail_index = 1, // Fail on second allocation (dupe)
+        .fail_index = 0, // Fail on first allocation
     });
     const allocator = failing_allocator.allocator();
 
@@ -191,11 +170,12 @@ test "returned body is exact-length after budgeted render" {
     defer response.deinit(allocator);
 
     // Body length must match what was actually written
-    try std.testing.expect(response.body.len > 0);
+    const body = response.body();
+    try std.testing.expect(body.len > 0);
 
     // Body should end with JSON terminator
-    try std.testing.expectEqual(@as(u8, '\n'), response.body[response.body.len - 1]);
-    try std.testing.expectEqual(@as(u8, '}'), response.body[response.body.len - 2]);
+    try std.testing.expectEqual(@as(u8, '\n'), body[body.len - 1]);
+    try std.testing.expectEqual(@as(u8, '}'), body[body.len - 2]);
 }
 
 test "route contract exposes base budget for /status.json" {
@@ -239,10 +219,6 @@ test "no global allocator is used for owned response memory" {
     // The render functions accept an explicit allocator parameter.
     // Caller must provide the allocator, making allocation policy explicit.
     //
-    // The only internal global allocator use is std.heap.page_allocator,
-    // which is used for transient network_diag collection. These allocations
-    // are released via deinit() before the function returns.
-    //
     // This test passes by documentation - the API design enforces explicit allocator use.
 
     const allocator = std.testing.allocator;
@@ -275,7 +251,7 @@ test "no global allocator is used for owned response memory" {
     );
     defer response2.deinit(allocator);
 
-    try std.testing.expect(response2.body.len > 0);
+    try std.testing.expect(response2.body().len > 0);
 }
 
 // ============================================================================
@@ -300,14 +276,15 @@ test "base status renders with FixedBufferAllocator" {
     );
 
     // Body must have content
-    try std.testing.expect(response.body.len > 0);
+    const body = response.body();
+    try std.testing.expect(body.len > 0);
 
     // Body must be valid JSON
-    try std.testing.expectEqual(@as(u8, '{'), response.body[0]);
-    try std.testing.expectEqual(@as(u8, '\n'), response.body[response.body.len - 1]);
+    try std.testing.expectEqual(@as(u8, '{'), body[0]);
+    try std.testing.expectEqual(@as(u8, '\n'), body[body.len - 1]);
 
     // Should contain required fields
-    try std.testing.expect(std.mem.containsAtLeast(u8, response.body, 1, "\"service\":\"tovarisch\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, body, 1, "\"service\":\"tovarisch\""));
 
     // Clean up using same allocator
     response.deinit(allocator);
@@ -331,14 +308,15 @@ test "network_diag renders with FixedBufferAllocator" {
     );
 
     // Body must have content
-    try std.testing.expect(response.body.len > 0);
+    const body = response.body();
+    try std.testing.expect(body.len > 0);
 
     // Body must be valid JSON
-    try std.testing.expectEqual(@as(u8, '{'), response.body[0]);
-    try std.testing.expectEqual(@as(u8, '\n'), response.body[response.body.len - 1]);
+    try std.testing.expectEqual(@as(u8, '{'), body[0]);
+    try std.testing.expectEqual(@as(u8, '\n'), body[body.len - 1]);
 
     // Should contain network_diag field
-    try std.testing.expect(std.mem.containsAtLeast(u8, response.body, 1, "\"network_diag\":"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, body, 1, "\"network_diag\":"));
 
     // Clean up using same allocator
     response.deinit(allocator);
@@ -415,7 +393,7 @@ test "no leaked allocations when diagnostic rendering fails with tiny budget" {
 test "status_response has no page_allocator references" {
     // Whole-file source contract: status_response.zig must not contain
     // std.heap.page_allocator anywhere in the file.
-    const source = @embedFile("status_response.zig");
+    const source = @embedFile("../status_response.zig");
     try std.testing.expect(std.mem.indexOf(
         u8,
         source,
@@ -430,8 +408,43 @@ test "status_response has no other global allocator escapes" {
         "std.heap.smp_allocator",
         "GeneralPurposeAllocator",
     };
-    const source = @embedFile("status_response.zig");
+    const source = @embedFile("../status_response.zig");
     for (forbidden) |pattern| {
         try std.testing.expect(std.mem.indexOf(u8, source, pattern) == null);
     }
+}
+
+// ============================================================================
+// Test: Single allocation pattern (HULK05)
+// ============================================================================
+
+test "renderStatusOwnedWithBudget uses single allocation" {
+    // This test verifies the HULK05 contract: no scratch+dupe pattern
+    const allocator = std.testing.allocator;
+    const inputs = status.RuntimeStatusInputs{};
+    const query = status_query.StatusQuery.parse("");
+    const budget = status_route_contract.ResponseBudget.base_budget;
+
+    var response = try status_response.renderStatusOwnedWithBudget(
+        allocator,
+        inputs,
+        query,
+        budget,
+    );
+    defer response.deinit(allocator);
+
+    const body = response.body();
+    try std.testing.expect(body.len > 0);
+    try std.testing.expect(body.len <= response.allocation.len);
+}
+
+test "no allocator.dupe in renderStatusOwnedWithBudget" {
+    // Source-text contract: no dupe in renderStatusOwnedWithBudget
+    const source = @embedFile("../status_response.zig");
+    const fn_start = std.mem.indexOf(u8, source, "pub fn renderStatusOwnedWithBudget") orelse {
+        try std.testing.expect(false);
+        return;
+    };
+    const fn_body = source[fn_start..];
+    try std.testing.expect(std.mem.indexOf(u8, fn_body, "allocator.dupe") == null);
 }

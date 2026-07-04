@@ -21,22 +21,28 @@ const status_route_contract = @import("http/status_route_contract.zig");
 /// The caller owns the returned body slice and must free it
 /// with the same allocator that was used to create it.
 ///
+/// Uses capacity-aware design: stores the full allocation and exact length
+/// separately. This allows precise memory accounting without requiring
+/// allocator.shrink() or realloc() semantics.
+///
 /// Usage:
 /// ```zig
 /// var response = try OwnedResponse.init(allocator, inputs, query);
 /// defer response.deinit(allocator);
-/// // use response.body
+/// // use response.slice() or response.body
 /// ```
 pub const OwnedResponse = struct {
-    /// The owned JSON body bytes.
-    body: []u8,
+    /// The owned allocation (may be larger than len).
+    allocation: []u8,
+    /// The exact length of the written data.
+    len: usize,
 
     /// Render a status response into an owned buffer.
     ///
     /// **Allocator ownership:**
-    /// - Caller owns returned OwnedResponse.body
+    /// - Caller owns returned OwnedResponse.allocation
     /// - Caller must call deinit() with the same allocator
-    /// - All allocations are released on both success and error paths
+    /// - Single allocation is released on both success and error paths
     ///
     /// **Arguments:**
     /// - `allocator`: The allocator used for response buffer allocation
@@ -73,14 +79,13 @@ pub const OwnedResponse = struct {
             query.wantsNetworkDiag(),
         );
 
-        // Return owned response with exactly the written bytes.
-        // MemoryOwnership: Duplicate the written slice to return a precisely-sized
-        // owned buffer. The scratch buffer is freed here; the duplicate is owned
-        // by the caller. errdefer handles the duplicate on error.
-        const body = try allocator.dupe(u8, buf[0..w.pos]);
-        errdefer allocator.free(body);
-        allocator.free(buf);
-        return OwnedResponse{ .body = body };
+        // Return capacity-aware owned response.
+        // MemoryOwnership: Single allocation (buf) is owned. The len field tracks
+        // the exact written bytes. No dupe operation needed.
+        return OwnedResponse{
+            .allocation = buf,
+            .len = w.pos,
+        };
     }
 
     /// Free the response body.
@@ -88,12 +93,17 @@ pub const OwnedResponse = struct {
     /// **Ownership contract:** Must be called with the same allocator
     /// that was passed to init().
     pub fn deinit(self: OwnedResponse, allocator: std.mem.Allocator) void {
-        allocator.free(self.body);
+        allocator.free(self.allocation);
     }
 
     /// Returns the response body as a slice.
     pub fn slice(self: *const OwnedResponse) []const u8 {
-        return self.body;
+        return self.allocation[0..self.len];
+    }
+
+    /// Returns the response body as a slice.
+    pub fn body(self: *const OwnedResponse) []const u8 {
+        return self.allocation[0..self.len];
     }
 };
 
@@ -154,9 +164,9 @@ const BudgetedWriter = struct {
 /// Render status response into an owned buffer with explicit budget enforcement.
 ///
 /// **Allocator ownership:**
-/// - Caller owns returned OwnedResponse.body
+/// - Caller owns returned OwnedResponse.allocation
 /// - Caller must call deinit() with the same allocator
-/// - All scratch allocations are freed on both success and error paths
+/// - Single allocation is released on both success and error paths
 ///
 /// **Budget policy:**
 /// - Rendered output MUST NOT exceed `budget.max_body_bytes`
@@ -179,42 +189,33 @@ pub fn renderStatusOwnedWithBudget(
     query: status_query.StatusQuery,
     budget: status_route_contract.ResponseBudget,
 ) !OwnedResponse {
-    // Allocate scratch buffer matching the budget
-    const scratch = try allocator.alloc(u8, budget.max_body_bytes);
-    // errdefer for scratch removed - we manage scratch manually
+    // Allocate buffer matching the budget
+    const buf = try allocator.alloc(u8, budget.max_body_bytes);
+    errdefer allocator.free(buf);
 
     // Create budgeted writer that enforces the budget
     var w = BudgetedWriter{
-        .buf = scratch,
+        .buf = buf,
         .pos = 0,
     };
 
     // Render into budgeted buffer using caller's allocator.
     // MemoryOwnership: All network_diag allocations use the caller's allocator.
-    // On error, we free scratch below. On success, scratch is freed after duplication.
-    status.renderPayloadWithContextAndDiag(
+    // On error, errdefer frees buf. On success, we return the capacity-aware response.
+    try status.renderPayloadWithContextAndDiag(
         &w,
         inputs,
         allocator,
         query.wantsNetworkDiag(),
-    ) catch |err| {
-        // Free scratch on render error
-        allocator.free(scratch);
-        return err;
-    };
+    );
 
-    // Return owned response with exactly the written bytes.
-    // MemoryOwnership: Duplicate the written slice to return a precisely-sized
-    // owned buffer. On dupe error, we free scratch to avoid leak.
-    // On success, scratch is freed before returning.
-    const body = allocator.dupe(u8, scratch[0..w.pos]) catch |err| {
-        // Free scratch on dupe failure to avoid leak
-        allocator.free(scratch);
-        return err;
+    // Return capacity-aware owned response.
+    // MemoryOwnership: Single allocation (buf) is owned. The len field tracks
+    // the exact written bytes. No dupe operation needed.
+    return OwnedResponse{
+        .allocation = buf,
+        .len = w.pos,
     };
-
-    allocator.free(scratch);
-    return OwnedResponse{ .body = body };
 }
 
 /// Render status response to a writer.
