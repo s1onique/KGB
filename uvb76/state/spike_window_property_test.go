@@ -212,3 +212,136 @@ func FuzzSpikeWindow(f *testing.F) {
 		)
 	})
 }
+
+// FuzzSpikeWindowParityProperty tests domain vs state parity properties for normal latency spikes.
+// Run with: go test -fuzz=FuzzSpikeWindowParityProperty -fuzztime=30s ./state/
+// This fuzz test is excluded from HTTP failure/recovery since those are state-owned special cases.
+func FuzzSpikeWindowParityProperty(f *testing.F) {
+	detector := NewSpikeDetector()
+
+	// Seed with typical cases
+	f.Add(float64(100.0), true, "http", 30)
+	f.Add(float64(2000.0), true, "http", 30)
+	f.Add(float64(600.0), true, "icmp", 30)
+	f.Add(float64(300.0), true, "http", 30) // relative spike case
+
+	f.Fuzz(func(t *testing.T, latency float64, reachable bool, kind string, windowSize int) {
+		// Only test successful probes (HTTP failure is state-owned)
+		if !reachable {
+			return
+		}
+
+		// Clamp inputs to valid ranges
+		if windowSize < 0 {
+			windowSize = 0
+		}
+		if windowSize > 100 {
+			windowSize = 100
+		}
+		if kind != "http" && kind != "icmp" {
+			kind = "http"
+		}
+		// Skip invalid latencies
+		if math.IsNaN(latency) || math.IsInf(latency, 0) || latency < 0 {
+			return
+		}
+
+		// Build window
+		now := time.Now().UTC()
+		prevSamples := make([]domain.Sample, windowSize)
+		for i := 0; i < windowSize; i++ {
+			lat, ok := domain.NewLatencyMillis(float64(i%100) + 10.0)
+			if !ok {
+				t.Skip("Could not create valid latency")
+			}
+			prevSamples[i] = domain.Sample{
+				At:      now.Add(-time.Duration(i) * time.Second),
+				Kind:    domain.ProbeKindHTTP,
+				Latency: lat,
+				OK:      true,
+			}
+		}
+		prevWindow := domain.NewSampleWindow(prevSamples)
+
+		// Get domain config
+		stateCfg := detector.config
+		domainCfg, ok := domainSpikeConfigForState(kind, stateCfg)
+		if !ok {
+			return
+		}
+
+		// Build domain sample
+		domainLat, ok := domain.NewLatencyMillis(latency)
+		if !ok {
+			return
+		}
+		var probeKind domain.ProbeKind
+		if kind == "http" {
+			probeKind = domain.ProbeKindHTTP
+		} else {
+			probeKind = domain.ProbeKindICMP
+		}
+		current := domain.Sample{
+			At:      now,
+			Kind:    probeKind,
+			Latency: domainLat,
+			OK:      true,
+		}
+
+		// Get domain decision
+		decision := domain.DecideSpike(current, prevWindow, domainCfg)
+
+		// Get state event
+		stateEvent := detector.DetectAndRecordWithWindow(
+			"fuzz-target", kind,
+			latency,
+			now,
+			reachable,
+			nil,
+			nil,
+			nil,
+			prevWindow,
+			nil,
+		)
+
+		// Property 1: domain decision none implies no state event for normal latency
+		if decision.Kind == domain.SpikeDecisionNone && stateEvent != nil {
+			t.Errorf("Parity violation: domain=none but state produced event with severity=%s", stateEvent.Severity)
+		}
+
+		// Property 2: domain warning/critical implies state event severity matches
+		if decision.Kind != domain.SpikeDecisionNone {
+			if stateEvent == nil {
+				t.Errorf("Parity violation: domain=%s but state produced no event", decision.Kind)
+			} else {
+				expectedSeverity := severityFromDomainDecision(decision.Kind)
+				if stateEvent.Severity != expectedSeverity {
+					t.Errorf("Parity violation: domain=%s but state severity=%s (expected %s)",
+						decision.Kind, stateEvent.Severity, expectedSeverity)
+				}
+			}
+		}
+
+		// Property 3: event LatencyMs is never NaN/Inf
+		if stateEvent != nil {
+			if math.IsNaN(stateEvent.LatencyMs) || math.IsInf(stateEvent.LatencyMs, 0) {
+				t.Errorf("Event LatencyMs should not be NaN or Inf: %v", stateEvent.LatencyMs)
+			}
+		}
+
+		// Property 4: event RollingMedianMs is never NaN/Inf (when baseline exists)
+		if stateEvent != nil && decision.PreviousCount > 0 {
+			if math.IsNaN(stateEvent.RollingMedianMs) || math.IsInf(stateEvent.RollingMedianMs, 0) {
+				t.Errorf("Event RollingMedianMs should not be NaN or Inf: %v", stateEvent.RollingMedianMs)
+			}
+		}
+
+		// Property 5: PreviousSamples count <= MaxPreviousSamples
+		if stateEvent != nil {
+			if len(stateEvent.PreviousSamples) > detector.config.MaxPreviousSamples {
+				t.Errorf("PreviousSamples count %d exceeds MaxPreviousSamples %d",
+					len(stateEvent.PreviousSamples), detector.config.MaxPreviousSamples)
+			}
+		}
+	})
+}

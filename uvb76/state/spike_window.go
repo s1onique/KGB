@@ -110,117 +110,152 @@ func (sd *SpikeDetector) DetectAndRecordWithWindowAndTcpQuality(
 		return nil
 	}
 
-	// Get baseline median from previous window
-	baseline, baselineOK := previousWindow.Median()
-	var medianMs float64
-	if baselineOK {
-		medianMs = baseline.Float64()
+	// HTTP failure is a first-class diagnostic event - state-owned special case.
+	// Do not route through domain.DecideSpike.
+	if !reached && kind == "http" {
+		return sd.recordHTTPFailureEvent(
+			targetID, kind, latencyMs, sampleTs,
+			warningMs, criticalMs,
+			schedulerDelayMs, httpStatus, probeError,
+			previousWindow, httpTrace, nativeTcpQuality,
+		)
 	}
 
-	// Check spike conditions
-	var severity string
+	// Normal latency spike detection: route through domain.DecideSpike
+	domainCfg, ok := domainSpikeConfigForState(kind, sd.config)
+	if !ok {
+		return nil
+	}
+
+	current, ok := currentDomainSample(kind, latencyMs, sampleTs, reached, probeError)
+	if !ok {
+		return nil
+	}
+
+	decision := domain.DecideSpike(current, previousWindow, domainCfg)
+	if decision.Kind == domain.SpikeDecisionNone {
+		return nil
+	}
+
+	// Build spike event using domain decision
+	tracker := sd.getTracker(targetID, kind)
+
+	// Get rolling median from domain decision baseline
+	medianMs := 0.0
+	if decision.PreviousCount > 0 {
+		medianMs = decision.Baseline.Float64()
+	}
+
+	// Map domain reasons to state reasons
+	reasons := stateReasonsFromDomainDecision(kind, decision)
+
+	event := SpikeEvent{
+		EventID:          generateEventID(),
+		TargetID:         targetID,
+		Kind:             kind,
+		Severity:         severityFromDomainDecision(decision.Kind),
+		SampleTs:         sampleTs,
+		LatencyMs:        latencyMs,
+		RollingMedianMs:  medianMs,
+		Reasons:          reasons,
+		Thresholds: SpikeThresholds{
+			WarningMs:           warningMs,
+			CriticalMs:          criticalMs,
+			RelativeMultiplier: sd.config.RelativeMultiplier,
+		},
+		PreviousSamples:  spikeSamplesFromWindow(previousWindow, sd.config.MaxPreviousSamples),
+		SchedulerDelayMs: schedulerDelayMs,
+		HTTPStatus:       httpStatus,
+		ProbeError:       probeError,
+		HTTPTrace:        httpTrace,
+		NativeTcpQuality: nativeTcpQuality,
+		CollectedAt:      time.Now().UTC(),
+	}
+
+	// Use capture-aware eviction if configured
+	sd.mu.RLock()
+	captureFunc := sd.captureInfoFunc
+	sd.mu.RUnlock()
+
+	if captureFunc != nil {
+		tracker.recordSpike(event, captureFunc)
+	} else {
+		tracker.recordSpike(event, func(eventID string) (isProtected bool, hasCapture bool) {
+			return false, false
+		})
+	}
+	return &event
+}
+
+// recordHTTPFailureEvent handles HTTP probe failures as first-class diagnostic events.
+// This is intentionally state-owned and does NOT use domain.DecideSpike.
+func (sd *SpikeDetector) recordHTTPFailureEvent(
+	targetID, kind string,
+	latencyMs float64,
+	sampleTs time.Time,
+	warningMs, criticalMs float64,
+	schedulerDelayMs *float64,
+	httpStatus *int,
+	probeError *string,
+	previousWindow domain.SampleWindow,
+	httpTrace *HTTPTrace,
+	nativeTcpQuality *TcpQuality,
+) *SpikeEvent {
+	severity := "critical"
 	var reasons []string
 
-	// Check for probe failure FIRST - HTTP failures are first-class diagnostic events
-	if !reached && kind == "http" {
-		severity = "critical"
+	if probeError != nil {
+		errStr := *probeError
+		if len(errStr) > 0 {
+			errLower := lower(errStr)
 
-		if probeError != nil {
-			errStr := *probeError
-			if len(errStr) > 0 {
-				errLower := lower(errStr)
-
-				if contains(errLower, "http_probe_503") {
-					reasons = append(reasons, "http_probe_503")
-				} else if contains(errLower, "http_probe_502") {
-					reasons = append(reasons, "http_probe_502")
-				} else if contains(errLower, "http_probe_504") {
-					reasons = append(reasons, "http_probe_504")
-				} else if contains(errLower, "http_probe_5xx") {
-					reasons = append(reasons, "http_probe_5xx")
-				} else if contains(errLower, "http_probe_timeout") {
-					reasons = append(reasons, "http_probe_timeout")
-				} else if contains(errLower, "timeout") || contains(errLower, "deadline") {
-					reasons = append(reasons, "http_probe_timeout")
-				} else if contains(errLower, "connection refused") {
-					reasons = append(reasons, "http_probe_connection_refused")
-				} else if contains(errLower, "no such host") || contains(errLower, "lookup") || contains(errLower, "dial") {
-					reasons = append(reasons, "http_probe_dns_failure")
-				} else if contains(errLower, "connection reset") {
-					reasons = append(reasons, "http_probe_connection_reset")
-				} else if contains(errLower, "http_probe_404") {
-					reasons = append(reasons, "http_probe_404")
-				} else if contains(errLower, "http_probe_4xx") {
-					reasons = append(reasons, "http_probe_4xx")
-				} else {
-					reasons = append(reasons, "http_probe_failure")
-				}
+			if contains(errLower, "http_probe_503") {
+				reasons = append(reasons, "http_probe_503")
+			} else if contains(errLower, "http_probe_502") {
+				reasons = append(reasons, "http_probe_502")
+			} else if contains(errLower, "http_probe_504") {
+				reasons = append(reasons, "http_probe_504")
+			} else if contains(errLower, "http_probe_5xx") {
+				reasons = append(reasons, "http_probe_5xx")
+			} else if contains(errLower, "http_probe_timeout") {
+				reasons = append(reasons, "http_probe_timeout")
+			} else if contains(errLower, "timeout") || contains(errLower, "deadline") {
+				reasons = append(reasons, "http_probe_timeout")
+			} else if contains(errLower, "connection refused") {
+				reasons = append(reasons, "http_probe_connection_refused")
+			} else if contains(errLower, "no such host") || contains(errLower, "lookup") || contains(errLower, "dial") {
+				reasons = append(reasons, "http_probe_dns_failure")
+			} else if contains(errLower, "connection reset") {
+				reasons = append(reasons, "http_probe_connection_reset")
+			} else if contains(errLower, "http_probe_404") {
+				reasons = append(reasons, "http_probe_404")
+			} else if contains(errLower, "http_probe_4xx") {
+				reasons = append(reasons, "http_probe_4xx")
 			} else {
 				reasons = append(reasons, "http_probe_failure")
 			}
 		} else {
 			reasons = append(reasons, "http_probe_failure")
 		}
+	} else {
+		reasons = append(reasons, "http_probe_failure")
+	}
 
-		// Check relative threshold
+	// Check relative threshold even for HTTP failures
+	baseline, baselineOK := previousWindow.Median()
+	var medianMs float64
+	if baselineOK {
+		medianMs = baseline.Float64()
 		if baselineOK && previousWindow.Len() >= sd.config.MinSamplesForMedian && sd.config.RelativeMultiplier > 0 {
 			relativeThreshold := medianMs * sd.config.RelativeMultiplier
 			if latencyMs >= relativeThreshold {
 				reasons = append(reasons, "relative_10x_median_threshold")
 			}
 		}
-	} else {
-		// Normal latency spike detection
-		if latencyMs >= criticalMs {
-			severity = "critical"
-			reasons = append(reasons, kind+"_critical_absolute_threshold")
-			if baselineOK && previousWindow.Len() >= sd.config.MinSamplesForMedian && sd.config.RelativeMultiplier > 0 {
-				relativeThreshold := medianMs * sd.config.RelativeMultiplier
-				if latencyMs >= relativeThreshold {
-					reasons = append(reasons, "relative_10x_median_threshold")
-				}
-			}
-		} else if latencyMs >= warningMs {
-			severity = "warning"
-			reasons = append(reasons, kind+"_warning_absolute_threshold")
-			if baselineOK && previousWindow.Len() >= sd.config.MinSamplesForMedian && sd.config.RelativeMultiplier > 0 {
-				relativeThreshold := medianMs * sd.config.RelativeMultiplier
-				if latencyMs >= relativeThreshold {
-					reasons = append(reasons, "relative_10x_median_threshold")
-				}
-			}
-		} else if baselineOK && previousWindow.Len() >= sd.config.MinSamplesForMedian && sd.config.RelativeMultiplier > 0 {
-			relativeThreshold := medianMs * sd.config.RelativeMultiplier
-			if latencyMs >= relativeThreshold {
-				severity = "warning"
-				reasons = append(reasons, "relative_10x_median_threshold")
-			}
-		}
-	}
-
-	// No spike detected
-	if len(reasons) == 0 {
-		return nil
 	}
 
 	// Build spike event
 	tracker := sd.getTracker(targetID, kind)
-
-	// Convert previous window to spike samples (bounded)
-	domainSamples := previousWindow.Samples()
-	maxPrev := sd.config.MaxPreviousSamples
-	if len(domainSamples) > maxPrev {
-		domainSamples = domainSamples[len(domainSamples)-maxPrev:]
-	}
-
-	spikePrevSamples := make([]SpikeSample, len(domainSamples))
-	for i, s := range domainSamples {
-		spikePrevSamples[i] = SpikeSample{
-			Ts:        s.At,
-			LatencyMs: s.Latency.Float64(),
-			OK:        s.OK,
-		}
-	}
 
 	event := SpikeEvent{
 		EventID:          generateEventID(),
@@ -236,7 +271,7 @@ func (sd *SpikeDetector) DetectAndRecordWithWindowAndTcpQuality(
 			CriticalMs:          criticalMs,
 			RelativeMultiplier: sd.config.RelativeMultiplier,
 		},
-		PreviousSamples:  spikePrevSamples,
+		PreviousSamples:  spikeSamplesFromWindow(previousWindow, sd.config.MaxPreviousSamples),
 		SchedulerDelayMs: schedulerDelayMs,
 		HTTPStatus:       httpStatus,
 		ProbeError:       probeError,
@@ -293,22 +328,6 @@ func (sd *SpikeDetector) RecordRecoveryEventWithWindow(
 	// Build spike event for recovery
 	tracker := sd.getTracker(targetID, kind)
 
-	// Convert previous window to spike samples (bounded)
-	domainSamples := previousWindow.Samples()
-	maxPrev := sd.config.MaxPreviousSamples
-	if len(domainSamples) > maxPrev {
-		domainSamples = domainSamples[len(domainSamples)-maxPrev:]
-	}
-
-	spikePrevSamples := make([]SpikeSample, len(domainSamples))
-	for i, s := range domainSamples {
-		spikePrevSamples[i] = SpikeSample{
-			Ts:        s.At,
-			LatencyMs: s.Latency.Float64(),
-			OK:        s.OK,
-		}
-	}
-
 	// Recovery events use "http_probe_recovery" as the reason (consistent with other HTTP spike reasons)
 	event := SpikeEvent{
 		EventID:          generateEventID(),
@@ -324,10 +343,10 @@ func (sd *SpikeDetector) RecordRecoveryEventWithWindow(
 			CriticalMs:          criticalMs,
 			RelativeMultiplier: sd.config.RelativeMultiplier,
 		},
-		PreviousSamples:  spikePrevSamples,
-		HTTPStatus:       httpStatus,
-		HTTPTrace:        httpTrace,
-		CollectedAt:      time.Now().UTC(),
+		PreviousSamples: spikeSamplesFromWindow(previousWindow, sd.config.MaxPreviousSamples),
+		HTTPStatus:     httpStatus,
+		HTTPTrace:      httpTrace,
+		CollectedAt:    time.Now().UTC(),
 	}
 
 	// Use capture-aware eviction if configured

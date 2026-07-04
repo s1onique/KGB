@@ -1,5 +1,7 @@
 package domain
 
+import "math"
+
 // SpikeDecisionKind classifies the severity of a detected spike.
 type SpikeDecisionKind string
 
@@ -27,14 +29,32 @@ type SpikeConfig struct {
 }
 
 // NewSpikeConfig creates a SpikeConfig from raw float64 values.
-// Returns false if any threshold value is invalid.
+// Returns false if any threshold value is invalid:
+//   - warning/critical must be non-negative, finite numbers
+//   - critical must be >= warning
+//   - relativeMultiplier must be non-negative and finite (zero disables relative threshold)
+//   - minSamples must be non-negative
 func NewSpikeConfig(warningMs, criticalMs, relativeMultiplier float64, minSamples int) (SpikeConfig, bool) {
+	// Validate warning threshold
 	warn, ok := NewLatencyMillis(warningMs)
 	if !ok {
 		return SpikeConfig{}, false
 	}
+	// Validate critical threshold
 	crit, ok := NewLatencyMillis(criticalMs)
 	if !ok {
+		return SpikeConfig{}, false
+	}
+	// Critical must be >= warning
+	if crit.Float64() < warn.Float64() {
+		return SpikeConfig{}, false
+	}
+	// Validate relative multiplier: must be non-negative and finite
+	if math.IsNaN(relativeMultiplier) || math.IsInf(relativeMultiplier, 0) || relativeMultiplier < 0 {
+		return SpikeConfig{}, false
+	}
+	// Validate minSamples: must be non-negative
+	if minSamples < 0 {
 		return SpikeConfig{}, false
 	}
 	return SpikeConfig{
