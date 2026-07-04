@@ -11,6 +11,8 @@ const _http_routes = @import("http/routes.zig");
 const _http_routes_tests = @import("http/routes_tests.zig");
 const _http_server = @import("http/server.zig");
 const _http_heartbeat = @import("http/heartbeat.zig");
+const _status_route_contract = @import("http/status_route_contract.zig");
+const _status_route_contract_test = @import("http/status_route_contract_test.zig");
 const _runtime_telemetry = @import("runtime/telemetry.zig");
 const _runtime_heartbeat_log = @import("runtime/heartbeat_log.zig");
 
@@ -31,4 +33,6 @@ test { std.testing.refAllDecls(@import("runtime/telemetry.zig")); }
 test { std.testing.refAllDecls(@import("runtime/heartbeat_log.zig")); }
 test { std.testing.refAllDecls(@import("status_network_diag_wiring_tests.zig")); }
 test { std.testing.refAllDecls(@import("http/heartbeat_idle_memory_regression_tests.zig")); }
-test { std.testing.refAllDecls(@import("http/idle_memory_attribution_tests.zig")); }
+// Route contract table tests (ACT-TOVARISCH-ZIG-HULK02)
+test { std.testing.refAllDecls(@import("http/status_route_contract.zig")); }
+test { std.testing.refAllDecls(@import("http/status_route_contract_test.zig")); }

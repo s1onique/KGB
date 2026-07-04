@@ -5,6 +5,7 @@ const status = @import("../status.zig");
 const metrics = @import("../metrics.zig");
 const metrics_state = @import("../metrics_state.zig");
 const server = @import("server.zig");
+const status_route_contract = @import("status_route_contract.zig");
 
 /// HTTP method types.
 pub const Method = enum {
@@ -91,6 +92,17 @@ fn queryHasIncludeNetworkDiag(query: []const u8) bool {
         if (std.mem.eql(u8, part, "include=network_diag")) return true;
     }
     return false;
+}
+
+/// Check if the given path matches a route contract.
+/// This is a narrow seam that consults the route contract table for path validation.
+///
+/// Returns true if the path matches a known route contract.
+pub fn isStatusJsonRouteContract(path: []const u8) bool {
+    return status_route_contract.lookupRoute(
+        &status_route_contract.routes,
+        path,
+    ) != null;
 }
 
 /// Health check handler - returns simple ok status.
