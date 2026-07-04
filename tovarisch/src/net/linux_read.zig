@@ -154,7 +154,14 @@ fn linuxReadLinux(allocator: std.mem.Allocator, path: []const u8, max_bytes: usi
     const fd = @as(c_int, @intCast(rc));
     defer _ = std.c.close(fd);
 
-    const stat = std.c.fstat(fd) catch return .io_error;
+    var stat: std.os.linux.Stat = undefined;
+    const stat_rc = std.os.linux.fstat(fd, &stat);
+    switch (std.os.linux.errno(stat_rc)) {
+        .SUCCESS => {},
+        .BADF => return .io_error,
+        .OVERFLOW => return .io_error,
+        else => return .io_error,
+    }
     if (stat.size > 0 and @as(u64, @intCast(stat.size)) > max_bytes) {
         return .too_large;
     }

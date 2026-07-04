@@ -24,7 +24,7 @@ const readFixtureFile = linux_read.readFixtureFile;
 const TEST_ROOT = "/tmp/kgb_fixture";
 
 fn createFixtureDir(base: []const u8) !void {
-    try std.Io.Dir.cwd().createDir(std.testing.io, base);
+    try std.Io.Dir.cwd().createDir(std.testing.io, base, std.Io.File.Permissions.default_dir);
 }
 
 fn deleteFixtureDir(base: []const u8) void {
@@ -32,9 +32,11 @@ fn deleteFixtureDir(base: []const u8) void {
 }
 
 fn writeFixtureFile(path: []const u8, content: []const u8) !void {
-    var file = try std.Io.Dir.cwd().createFile(std.testing.io, path, .{});
-    defer file.close();
-    try file.writeAll(content);
+    const io = std.testing.io;
+    var file = try std.Io.Dir.cwd().createFile(io, path, .{});
+    defer file.close(io);
+
+    try file.writeStreamingAll(io, content);
 }
 
 fn fixturePath(comptime name: []const u8) []const u8 {
