@@ -279,6 +279,10 @@ test { std.testing.refAllDecls(@import("net/diag_event_ring.zig")); }
 // Safe command runner
 test { std.testing.refAllDecls(@import("net/safe_command.zig")); }
 
+// Linux sysfs/procfs file boundary (ACT-TOVARISCH-ZIG-HULK13)
+test { std.testing.refAllDecls(@import("net/linux_read.zig")); }
+test { std.testing.refAllDecls(@import("net/linux_read_fixture_tests.zig")); }
+
 // TCP underlay (ss) parser
 test { std.testing.refAllDecls(@import("net/ss_parser.zig")); }
 test { std.testing.refAllDecls(@import("net/ss_parser_tests.zig")); }

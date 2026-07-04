@@ -65,6 +65,8 @@ const _net_network_diag_config = @import("net/network_diag_config.zig");
 const _net_wg_dump_parser = @import("net/wg_dump_parser.zig");
 const _net_diag_event_ring = @import("net/diag_event_ring.zig");
 const _net_safe_command = @import("net/safe_command.zig");
+const _net_linux_read = @import("net/linux_read.zig");
+const _net_linux_read_fixture_tests = @import("net/linux_read_fixture_tests.zig");
 const _net_ss_parser = @import("net/ss_parser.zig");
 const _net_route_diag = @import("net/route_diag.zig");
 const _net_extended_interface_stats = @import("net/extended_interface_stats.zig");
@@ -130,6 +132,8 @@ test { std.testing.refAllDecls(@import("net/network_diag_config.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_dump_parser.zig")); }
 test { std.testing.refAllDecls(@import("net/diag_event_ring.zig")); }
 test { std.testing.refAllDecls(@import("net/safe_command.zig")); }
+test { std.testing.refAllDecls(@import("net/linux_read.zig")); }
+test { std.testing.refAllDecls(@import("net/linux_read_fixture_tests.zig")); }
 test { std.testing.refAllDecls(@import("net/ss_parser.zig")); }
 test { std.testing.refAllDecls(@import("net/ss_parser_tests.zig")); }
 test { std.testing.refAllDecls(@import("status_network_diag.zig")); }
