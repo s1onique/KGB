@@ -22,6 +22,10 @@ const _bfd_status = @import("bfd/status.zig");
 const _bfd_receive_startup_tests = @import("bfd/receive_startup_tests.zig");
 const _bfd_receive_tests = @import("bfd/receive_tests.zig");
 
+// BFD snapshot budget/state hardening (ACT-TOVARISCH-ZIG-HULK14)
+const _bfd_snapshot = @import("bfd/snapshot.zig");
+const _bfd_snapshot_tests = @import("bfd/snapshot_tests.zig");
+
 // Force test discovery
 test { std.testing.refAllDecls(@import("bfd/packet.zig")); }
 test { std.testing.refAllDecls(@import("bfd/config.zig")); }
@@ -38,3 +42,7 @@ test { std.testing.refAllDecls(@import("bfd/runtime_tests.zig")); }
 test { std.testing.refAllDecls(@import("bfd/status.zig")); }
 test { std.testing.refAllDecls(@import("bfd/receive_startup_tests.zig")); }
 test { std.testing.refAllDecls(@import("bfd/receive_tests.zig")); }
+
+// BFD snapshot budget/state hardening (ACT-TOVARISCH-ZIG-HULK14)
+test { std.testing.refAllDecls(@import("bfd/snapshot.zig")); }
+test { std.testing.refAllDecls(@import("bfd/snapshot_tests.zig")); }

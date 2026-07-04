@@ -156,6 +156,9 @@ test { std.testing.refAllDecls(@import("bfd/runtime_tests.zig")); }
 test { std.testing.refAllDecls(@import("bfd/status.zig")); }
 test { std.testing.refAllDecls(@import("bfd/receive_startup_tests.zig")); }
 test { std.testing.refAllDecls(@import("bfd/receive_tests.zig")); }
+// BFD snapshot budget/state hardening (ACT-TOVARISCH-ZIG-HULK14)
+test { std.testing.refAllDecls(@import("bfd/snapshot.zig")); }
+test { std.testing.refAllDecls(@import("bfd/snapshot_tests.zig")); }
 
 // WireGuard tests
 test { std.testing.refAllDecls(@import("config.zig")); }
@@ -235,6 +238,10 @@ test { std.testing.refAllDecls(@import("bgp/serve_export_integration_tests.zig")
 
 // BGP status tests
 test { std.testing.refAllDecls(@import("bgp/status.zig")); }
+
+// BGP snapshot budget/state hardening (ACT-TOVARISCH-ZIG-HULK14)
+test { std.testing.refAllDecls(@import("bgp/snapshot.zig")); }
+test { std.testing.refAllDecls(@import("bgp/snapshot_tests.zig")); }
 
 // BGP reconnect/backoff lifecycle tests
 test { std.testing.refAllDecls(@import("bgp/reconnect_lifecycle.zig")); }
