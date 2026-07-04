@@ -36,3 +36,5 @@ test { std.testing.refAllDecls(@import("http/heartbeat_idle_memory_regression_te
 // Route contract table tests (ACT-TOVARISCH-ZIG-HULK02)
 test { std.testing.refAllDecls(@import("http/status_route_contract.zig")); }
 test { std.testing.refAllDecls(@import("http/status_route_contract_test.zig")); }
+// Active route proof tests (ACT-TOVARISCH-ZIG-HULK06)
+test { std.testing.refAllDecls(@import("http/status_route_active_tests.zig")); }
