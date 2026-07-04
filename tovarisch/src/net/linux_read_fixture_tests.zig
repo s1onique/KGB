@@ -24,20 +24,20 @@ const readFixtureFile = linux_read.readFixtureFile;
 const TEST_ROOT = "/tmp/kgb_fixture";
 
 fn createFixtureDir(base: []const u8) !void {
-    try std.fs.cwd().makeDir(base);
+    try std.Io.Dir.cwd().createDir(std.testing.io, base);
 }
 
 fn deleteFixtureDir(base: []const u8) void {
-    std.fs.cwd().deleteTree(base) catch {};
+    std.Io.Dir.cwd().deleteTree(std.testing.io, base) catch {};
 }
 
 fn writeFixtureFile(path: []const u8, content: []const u8) !void {
-    var file = try std.fs.cwd().createFile(path, .{});
+    var file = try std.Io.Dir.cwd().createFile(std.testing.io, path, .{});
     defer file.close();
     try file.writeAll(content);
 }
 
-fn fixturePath(name: []const u8) []const u8 {
+fn fixturePath(comptime name: []const u8) []const u8 {
     return TEST_ROOT ++ "/" ++ name;
 }
 
@@ -194,7 +194,7 @@ test "linuxRead handles disappearing fixture file" {
     try writeFixtureFile(fixturePath("ephemeral"), "data\n");
 
     try std.testing.expect(linuxExists(fixturePath("ephemeral"), .test_fixture));
-    try std.fs.cwd().deleteFile(fixturePath("ephemeral"));
+    try std.Io.Dir.cwd().deleteFile(std.testing.io, fixturePath("ephemeral"));
 
     const result = readFixtureFile(allocator, fixturePath("ephemeral"), 4096);
     try std.testing.expect(result == .missing);

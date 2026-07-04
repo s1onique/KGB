@@ -142,15 +142,16 @@ fn linuxReadLinux(allocator: std.mem.Allocator, path: []const u8, max_bytes: usi
     const c_path = toCString(path, &path_buf) catch return .io_error;
 
     const flags = std.os.linux.O{ .ACCMODE = std.posix.ACCMODE.RDONLY };
-    const fd = std.c.open(c_path, flags, @as(c_uint, 0));
-    if (fd < 0) {
-        const err = std.c.getErrno(fd);
+    const rc = std.c.open(c_path, flags, @as(c_uint, 0));
+    if (rc < 0) {
+        const err = std.posix.errno(rc);
         switch (err) {
             .NOENT => return .missing,
             .ACCES => return .permission_denied,
             else => return .io_error,
         }
     }
+    const fd = @as(c_int, @intCast(rc));
     defer _ = std.c.close(fd);
 
     const stat = std.c.fstat(fd) catch return .io_error;
@@ -204,15 +205,16 @@ pub fn readFixtureFile(
     const c_path = toCString(path, &path_buf) catch return .io_error;
 
     const flags = std.os.linux.O{ .ACCMODE = std.posix.ACCMODE.RDONLY };
-    const fd = std.c.open(c_path, flags, @as(c_uint, 0));
-    if (fd < 0) {
-        const err = std.c.getErrno(fd);
+    const rc = std.c.open(c_path, flags, @as(c_uint, 0));
+    if (rc < 0) {
+        const err = std.posix.errno(rc);
         switch (err) {
             .NOENT => return .missing,
             .ACCES => return .permission_denied,
             else => return .io_error,
         }
     }
+    const fd = @as(c_int, @intCast(rc));
     defer _ = std.c.close(fd);
 
     var buf = allocator.alloc(u8, max_bytes) catch return .io_error;
