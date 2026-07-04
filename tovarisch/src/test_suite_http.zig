@@ -38,3 +38,5 @@ test { std.testing.refAllDecls(@import("http/status_route_contract.zig")); }
 test { std.testing.refAllDecls(@import("http/status_route_contract_test.zig")); }
 // Active route proof tests (ACT-TOVARISCH-ZIG-HULK06)
 test { std.testing.refAllDecls(@import("http/status_route_active_tests.zig")); }
+// Handler-level fd/socket proof tests (ACT-TOVARISCH-ZIG-HULK09)
+test { std.testing.refAllDecls(@import("http/status_handler_fd_tests.zig")); }

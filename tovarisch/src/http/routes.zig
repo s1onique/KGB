@@ -135,9 +135,10 @@ pub fn handleStatus(fd: i32, state: *anyopaque, include_network_diag: bool) !voi
     // Branch on diagnostic mode to select appropriate budget and allocator capacity.
     // This is necessary because Zig requires comptime-known array sizes.
     // The allocator capacity derives from the route contract's request allocator policy.
+    // Use ResponseBudget.forQuery() to select the budget helper.
     if (include_network_diag) {
-        // Diagnostic mode: 8192 response budget + 8192 overhead = 16384
-        const budget = status_route_contract.ResponseBudget.diagnostic_budget;
+        // Diagnostic mode: use the route contract's budget helper
+        const budget = status_route_contract.ResponseBudget.forQuery(true);
         var fixed_buf: [status_route_contract.requestAllocatorBytesForQuery(true)]u8 = undefined;
         var fba = std.heap.FixedBufferAllocator.init(&fixed_buf);
         const fba_allocator = fba.allocator();
@@ -157,8 +158,8 @@ pub fn handleStatus(fd: i32, state: *anyopaque, include_network_diag: bool) !voi
         defer owned_response.deinit(fba_allocator);
         try response.writeSimpleJsonFd(fd, 200, owned_response.body());
     } else {
-        // Base mode: 4096 response budget + 8192 overhead = 12288
-        const budget = status_route_contract.ResponseBudget.base_budget;
+        // Base mode: use the route contract's budget helper
+        const budget = status_route_contract.ResponseBudget.forQuery(false);
         var fixed_buf: [status_route_contract.requestAllocatorBytesForQuery(false)]u8 = undefined;
         var fba = std.heap.FixedBufferAllocator.init(&fixed_buf);
         const fba_allocator = fba.allocator();
