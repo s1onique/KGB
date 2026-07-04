@@ -103,14 +103,18 @@ type Manager struct {
 
 // NewManager creates a new state manager with bounded capacity.
 func NewManager() *Manager {
+	defaultBuckets := []int64{5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000}
+	defaultMaxSamples := 100
 	return &Manager{
-		snapshots:     make(map[string]*TargetSnapshot),
-		httpTrackers:  make(map[string]*LatencyTracker),
-		icmpTrackers:  make(map[string]*LatencyTracker),
-		buckets:       []int64{5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000},
-		maxSamples:    100,
-		spikeDetector: NewSpikeDetector(),
-		captureStore:  NewCaptureStore(),
+		snapshots:      make(map[string]*TargetSnapshot),
+		httpTrackers:   make(map[string]*LatencyTracker),
+		icmpTrackers:   make(map[string]*LatencyTracker),
+		buckets:        defaultBuckets,
+		maxSamples:     defaultMaxSamples,
+		icmpBuckets:    defaultBuckets,
+		icmpMaxSamples: defaultMaxSamples,
+		spikeDetector:  NewSpikeDetector(),
+		captureStore:   NewCaptureStore(),
 	}
 }
 

@@ -3,11 +3,11 @@ package server
 import (
 	"encoding/json"
 	"net/http"
-	"sort"
 	"strconv"
 	"time"
 
 	"github.com/s1onique/KGB/uvb76/config"
+	"github.com/s1onique/KGB/uvb76/internal/uvb76/domain"
 	"github.com/s1onique/KGB/uvb76/state"
 )
 
@@ -39,6 +39,7 @@ const (
 )
 
 // handleTargetLatencySeries returns percentile time-series data for a target.
+// It uses domain.SampleWindow for percentile math, preserving the existing API contract.
 func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Request) {
 	targetID := r.URL.Query().Get("target_id")
 	if targetID == "" {
@@ -48,16 +49,24 @@ func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Parse probe_kind (defaults to http)
-	probeKind := r.URL.Query().Get("probe_kind")
-	if probeKind == "" {
-		probeKind = "http"
+	probeKindStr := r.URL.Query().Get("probe_kind")
+	if probeKindStr == "" {
+		probeKindStr = "http"
 	}
 
 	// Validate probe_kind
-	if probeKind != "http" && probeKind != "icmp" {
+	if probeKindStr != "http" && probeKindStr != "icmp" {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "probe_kind must be 'http' or 'icmp'"})
 		return
+	}
+
+	// Convert to domain.ProbeKind
+	var probeKind domain.ProbeKind
+	if probeKindStr == "http" {
+		probeKind = domain.ProbeKindHTTP
+	} else {
+		probeKind = domain.ProbeKindICMP
 	}
 
 	// Find target in config
@@ -124,46 +133,29 @@ func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Reques
 		windowSeconds = 300 // default fallback
 	}
 
-	// Get atomic snapshot of tracker state. The Snapshot primitive provides
-	// a single locked operation that returns samples, timestamps, and metadata
-	// in one consistent snapshot. This replaces the previous pattern of
-	// composing responses from separate tracker reads (GetRecentSamples +
-	// GetSampleTimestamps), which could observe inconsistent state under
-	// concurrent writes.
-	var snap *state.LatencySnapshot
+	// Get configuration values based on probe kind
+	var maxSamples int
 	var intervalSeconds int
 	var windowSec int
 	var retainedRange int
 	var probeURL string
 
-	if probeKind == "http" {
-		maxSamples := s.state.GetMaxSamples()
-		// GetHTTPSnapshot provides samples + timestamps + metadata in one locked operation
-		snap = s.state.GetHTTPSnapshot(targetID, maxSamples)
+	if probeKind == domain.ProbeKindHTTP {
+		maxSamples = s.state.GetMaxSamples()
 		intervalSeconds = s.cfg.Latency.HTTP.IntervalSeconds
 		windowSec = s.cfg.Latency.HTTP.WindowSeconds
 		retainedRange = s.cfg.Latency.HTTP.RetainedRangeSeconds
 		probeURL = config.TargetStatusURL(targetCfg.BaseURL)
 	} else {
-		maxSamples := s.state.GetICMPMaxSamples()
-		// GetICMPSnapshot provides samples + timestamps + metadata in one locked operation
-		snap = s.state.GetICMPSnapshot(targetID, maxSamples)
+		maxSamples = s.state.GetICMPMaxSamples()
 		intervalSeconds = s.cfg.Latency.ICMP.IntervalSeconds
 		windowSec = s.cfg.Latency.ICMP.WindowSeconds
 		retainedRange = s.cfg.Latency.ICMP.RetainedRangeSeconds
 		probeURL = targetCfg.BaseURL
 	}
 
-	// Handle nil snapshot (should not happen but be defensive)
-	if snap == nil {
-		snap = &state.LatencySnapshot{}
-	}
-
-	// Extract snapshot data - samples are already caller-owned copies
-	samples := snap.Samples
-	oldestTs := snap.OldestSampleTs
-	newestTs := snap.NewestSampleTs
-	sampleCount := snap.Count
+	// Get series snapshot using domain.SampleWindow
+	snap := s.state.GetSeriesSnapshot(targetID, probeKind, maxSamples)
 
 	// Override window if provided in query
 	if windowSeconds <= 0 {
@@ -175,12 +167,6 @@ func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Reques
 
 	// RetainedRangeSeconds = min(rangeSeconds, max samples duration)
 	maxRetained := retainedRange
-	var maxSamples int
-	if probeKind == "http" {
-		maxSamples = s.state.GetMaxSamples()
-	} else {
-		maxSamples = s.state.GetICMPMaxSamples()
-	}
 	if maxSamples > 0 && intervalSeconds > 0 {
 		maxSampleAge := intervalSeconds * maxSamples
 		if maxSampleAge < maxRetained {
@@ -194,10 +180,10 @@ func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Reques
 		effectiveRange = maxRetained
 	}
 
-	// Build time series
+	// Build time series response
 	series := state.LatencySeries{
 		TargetID:               targetID,
-		ProbeKind:              probeKind,
+		ProbeKind:              probeKindStr,
 		ProbeURL:               probeURL,
 		IntervalSeconds:        intervalSeconds,
 		QueryRangeSeconds:      rangeSeconds,
@@ -205,16 +191,24 @@ func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Reques
 		StepSeconds:            stepSeconds,
 		WindowSeconds:          windowSeconds,
 		RetainedRangeSeconds:   maxRetained,
-		SampleCount:            sampleCount,
-		RetainedSampleCount:    sampleCount,
-		RetainedSampleCapacity: maxSamples,
+		SampleCount:            snap.RetainedSampleCount,
+		RetainedSampleCount:    snap.RetainedSampleCount,
+		RetainedSampleCapacity: snap.RetainedSampleCapacity,
 		ReturnedPointCount:     0,
-		OldestSampleTs:         oldestTs,
-		NewestSampleTs:         newestTs,
 		Points:                 []state.PercentilePoint{},
 	}
 
-	// Build series points
+	// Handle timestamps - convert value to pointer if present
+	if !snap.OldestSampleTs.IsZero() {
+		ts := snap.OldestSampleTs
+		series.OldestSampleTs = &ts
+	}
+	if !snap.NewestSampleTs.IsZero() {
+		ts := snap.NewestSampleTs
+		series.NewestSampleTs = &ts
+	}
+
+	// Build series points using domain.SampleWindow for percentile math
 	numSteps := effectiveRange / stepSeconds
 	if numSteps < 1 {
 		numSteps = 1
@@ -224,50 +218,67 @@ func (s *Server) handleTargetLatencySeries(w http.ResponseWriter, r *http.Reques
 		numSteps = MaxOutputPoints
 	}
 
+	// Get domain samples for percentile math and metadata for exact error counting
+	domainSamples := snap.Window.Samples()
+	sampleMetas := snap.Samples
+
 	for i := 0; i < numSteps; i++ {
 		stepsFromNow := numSteps - 1 - i
 		windowEnd := now.Add(-time.Duration(stepsFromNow*stepSeconds) * time.Second)
 		windowStart := windowEnd.Add(-time.Duration(windowSeconds) * time.Second)
 
-		// Find samples in this window
-		// Use preallocated slice with capacity hint to avoid repeated reallocations
-		windowSamples := make([]float64, 0, 256)
+		// Collect samples in this window from domain samples and metadata
+		var windowDomainSamples []domain.Sample
 		var errorCount int
-		for _, sample := range samples {
-			if sample.Timestamp.After(windowStart) && !sample.Timestamp.After(windowEnd) {
-				if sample.Reachable {
-					// Safety cap on window sample count
-					if len(windowSamples) < MaxSamplesPerWindow {
-						windowSamples = append(windowSamples, sample.LatencyMs)
-					}
-				} else {
+
+		// Filter domain samples by timestamp for percentile calculation
+		for _, sample := range domainSamples {
+			if sample.At.After(windowStart) && !sample.At.After(windowEnd) {
+				if len(windowDomainSamples) < MaxSamplesPerWindow {
+					windowDomainSamples = append(windowDomainSamples, sample)
+				}
+			}
+		}
+
+		// Count errors exactly using sample metadata
+		// LatencySeriesSampleMeta provides timestamps and OK/failed without raw latency values,
+		// preserving the domain boundary while enabling exact per-window error counts.
+		for _, meta := range sampleMetas {
+			if meta.At.After(windowStart) && !meta.At.After(windowEnd) {
+				if !meta.OK {
 					errorCount++
 				}
 			}
 		}
 
+		totalInWindow := len(windowDomainSamples)
+
 		point := state.PercentilePoint{
 			Timestamp:   windowEnd,
-			SampleCount: len(windowSamples) + errorCount,
+			SampleCount: totalInWindow + errorCount,
 			ErrorCount:  errorCount,
 		}
 
-		if len(windowSamples) > 0 {
-			sorted := make([]float64, len(windowSamples))
-			copy(sorted, windowSamples)
-			sort.Float64s(sorted)
-			percentiles := state.CalculatePercentiles(sorted, []float64{50, 90, 95, 99})
-			if p50, ok := percentiles[50]; ok {
-				point.P50Ms = p50
+		// Use domain.SampleWindow for percentile calculation
+		if len(windowDomainSamples) > 0 {
+			bucketWindow := domain.NewSampleWindow(windowDomainSamples)
+
+			// Use domain percentile methods
+			if p50, ok := bucketWindow.P50(); ok {
+				val := p50.Float64()
+				point.P50Ms = &val
 			}
-			if p90, ok := percentiles[90]; ok {
-				point.P90Ms = p90
+			if p90, ok := bucketWindow.P90(); ok {
+				val := p90.Float64()
+				point.P90Ms = &val
 			}
-			if p95, ok := percentiles[95]; ok {
-				point.P95Ms = p95
+			if p95, ok := bucketWindow.P95(); ok {
+				val := p95.Float64()
+				point.P95Ms = &val
 			}
-			if p99, ok := percentiles[99]; ok {
-				point.P99Ms = p99
+			if p99, ok := bucketWindow.P99(); ok {
+				val := p99.Float64()
+				point.P99Ms = &val
 			}
 		}
 
