@@ -277,3 +277,174 @@ test "no global allocator is used for owned response memory" {
 
     try std.testing.expect(response2.body.len > 0);
 }
+
+// ============================================================================
+// Test: FixedBufferAllocator compatibility (HULK04)
+// ============================================================================
+
+test "base status renders with FixedBufferAllocator" {
+    // Use a generous fixed buffer - status JSON should fit
+    var buf: [8192]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const allocator = fba.allocator();
+
+    const inputs = status.RuntimeStatusInputs{};
+    const query = status_query.StatusQuery.parse("");
+    const budget = status_route_contract.ResponseBudget.base_budget;
+
+    var response = try status_response.renderStatusOwnedWithBudget(
+        allocator,
+        inputs,
+        query,
+        budget,
+    );
+
+    // Body must have content
+    try std.testing.expect(response.body.len > 0);
+
+    // Body must be valid JSON
+    try std.testing.expectEqual(@as(u8, '{'), response.body[0]);
+    try std.testing.expectEqual(@as(u8, '\n'), response.body[response.body.len - 1]);
+
+    // Should contain required fields
+    try std.testing.expect(std.mem.containsAtLeast(u8, response.body, 1, "\"service\":\"tovarisch\""));
+
+    // Clean up using same allocator
+    response.deinit(allocator);
+}
+
+test "network_diag renders with FixedBufferAllocator" {
+    // Use a generous fixed buffer - diagnostic JSON should fit
+    var buf: [16384]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const allocator = fba.allocator();
+
+    const inputs = status.RuntimeStatusInputs{};
+    const query = status_query.StatusQuery.parse("include=network_diag");
+    const budget = status_route_contract.ResponseBudget.diagnostic_budget;
+
+    var response = try status_response.renderStatusOwnedWithBudget(
+        allocator,
+        inputs,
+        query,
+        budget,
+    );
+
+    // Body must have content
+    try std.testing.expect(response.body.len > 0);
+
+    // Body must be valid JSON
+    try std.testing.expectEqual(@as(u8, '{'), response.body[0]);
+    try std.testing.expectEqual(@as(u8, '\n'), response.body[response.body.len - 1]);
+
+    // Should contain network_diag field
+    try std.testing.expect(std.mem.containsAtLeast(u8, response.body, 1, "\"network_diag\":"));
+
+    // Clean up using same allocator
+    response.deinit(allocator);
+}
+
+test "tiny diagnostic budget returns error.BufferOverflow with FixedBufferAllocator" {
+    var buf: [8192]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const allocator = fba.allocator();
+
+    const inputs = status.RuntimeStatusInputs{};
+    const query = status_query.StatusQuery.parse("include=network_diag");
+
+    // Tiny budget that cannot hold diagnostic JSON
+    const budget = status_route_contract.ResponseBudget{ .max_body_bytes = 32 };
+
+    const result = status_response.renderStatusOwnedWithBudget(
+        allocator,
+        inputs,
+        query,
+        budget,
+    );
+
+    // Must fail with buffer overflow
+    try std.testing.expectError(error.BufferOverflow, result);
+}
+
+test "allocator failure in diagnostic path surfaces as OutOfMemory" {
+    // Use a failing allocator that fails on first allocation
+    var failing_allocator = std.testing.FailingAllocator.init(std.testing.allocator, .{
+        .fail_index = 0, // Fail on first allocation
+    });
+    const allocator = failing_allocator.allocator();
+
+    const inputs = status.RuntimeStatusInputs{};
+    const query = status_query.StatusQuery.parse("include=network_diag");
+    const budget = status_route_contract.ResponseBudget.diagnostic_budget;
+
+    const result = status_response.renderStatusOwnedWithBudget(
+        allocator,
+        inputs,
+        query,
+        budget,
+    );
+
+    // Must fail with out of memory
+    try std.testing.expectError(error.OutOfMemory, result);
+}
+
+test "no leaked allocations when diagnostic rendering fails with tiny budget" {
+    const allocator = std.testing.allocator;
+    const inputs = status.RuntimeStatusInputs{};
+    const query = status_query.StatusQuery.parse("include=network_diag");
+
+    // Tiny budget
+    const budget = status_route_contract.ResponseBudget{ .max_body_bytes = 16 };
+
+    // Multiple failures should not accumulate memory
+    inline for (0..5) |_| {
+        const result = status_response.renderStatusOwnedWithBudget(
+            allocator,
+            inputs,
+            query,
+            budget,
+        );
+        try std.testing.expectError(error.BufferOverflow, result);
+    }
+}
+
+// ============================================================================
+// Test: Source-text contract check for global allocator avoidance (HULK04)
+// ============================================================================
+
+test "no page_allocator in renderStatusOwnedWithBudget source text" {
+    // This test verifies that the budgeted render path does not use page_allocator.
+    // We check the source text of status_response.zig directly.
+    //
+    // If this test fails, someone added std.heap.page_allocator back into
+    // the renderStatusOwnedWithBudget function body.
+    const source = @embedFile("status_response.zig");
+    const func_start = std.mem.indexOf(u8, source, "pub fn renderStatusOwnedWithBudget(");
+    const func_end = std.mem.indexOf(u8, source[func_start..], "\n}\n") orelse
+        std.mem.indexOf(u8, source[func_start..], "\npub fn") orelse
+        source.len - func_start;
+
+    const func_source = source[func_start..][0..func_end];
+
+    // The function should NOT contain std.heap.page_allocator
+    const has_page_allocator = std.mem.indexOf(u8, func_source, "std.heap.page_allocator") != null;
+    try std.testing.expect(!has_page_allocator);
+}
+
+test "no global allocators in OwnedResponse.init source text" {
+    // Verify OwnedResponse.init also avoids global allocators
+    const source = @embedFile("status_response.zig");
+    const func_start = std.mem.indexOf(u8, source, "pub fn init(") orelse return;
+    // Find the OwnedResponse.init specifically by going back to find the struct
+    const struct_start = std.mem.lastIndexOf(u8, source[0..func_start], "pub const OwnedResponse") orelse 0;
+    const func_body_start = func_start;
+    const func_body_end = std.mem.indexOf(u8, source[func_body_start..], "\n}\n") orelse
+        std.mem.indexOf(u8, source[func_body_start..], "\n    ///") orelse
+        256;
+
+    const func_source = source[func_body_start..][0..func_body_end];
+
+    // Should use the allocator parameter, not std.heap.page_allocator
+    const has_page_allocator = std.mem.indexOf(u8, func_source, "std.heap.page_allocator") != null;
+    try std.testing.expect(!has_page_allocator);
+}

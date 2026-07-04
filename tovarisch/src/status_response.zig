@@ -63,11 +63,13 @@ pub const OwnedResponse = struct {
             .pos = 0,
         };
 
-        // Render using page allocator (page allocator doesn't need freeing)
+        // Render using the caller's allocator for all request-scoped allocations.
+        // MemoryOwnership: renderPayloadWithContextAndDiag uses the allocator for
+        // network_diag collection, but deinit is called via defer before return.
         try status.renderPayloadWithContextAndDiag(
             &w,
             inputs,
-            std.heap.page_allocator,
+            allocator,
             query.wantsNetworkDiag(),
         );
 
@@ -187,13 +189,13 @@ pub fn renderStatusOwnedWithBudget(
         .pos = 0,
     };
 
-    // Render into budgeted buffer
-    // MemoryOwnership: page_allocator used for transient network_diag collection.
+    // Render into budgeted buffer using caller's allocator.
+    // MemoryOwnership: All network_diag allocations use the caller's allocator.
     // On error, we free scratch below. On success, scratch is freed after duplication.
     status.renderPayloadWithContextAndDiag(
         &w,
         inputs,
-        std.heap.page_allocator,
+        allocator,
         query.wantsNetworkDiag(),
     ) catch |err| {
         // Free scratch on render error
@@ -218,20 +220,23 @@ pub fn renderStatusOwnedWithBudget(
 /// Render status response to a writer.
 ///
 /// This is a simple helper that renders status JSON to any writer type.
+/// The caller must provide an allocator for network_diag collection.
 ///
 /// **Arguments:**
 /// - `writer`: Writer type with writeAll method (e.g., *BufferedWriter, *TestWriter)
 /// - `inputs`: Runtime status inputs
 /// - `query`: Parsed query parameters
+/// - `allocator`: Allocator for network_diag collection (used for request-scoped diagnostics)
 pub fn renderStatusResponseToWriter(
     writer: anytype,
     inputs: status.RuntimeStatusInputs,
     query: status_query.StatusQuery,
+    allocator: std.mem.Allocator,
 ) !void {
     try status.renderPayloadWithContextAndDiag(
         writer,
         inputs,
-        std.heap.page_allocator,
+        allocator,
         query.wantsNetworkDiag(),
     );
 }

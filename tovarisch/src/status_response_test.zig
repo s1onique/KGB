@@ -66,11 +66,12 @@ const TestWriter = struct {
 // ============================================================================
 
 test "base status response contains all required fields" {
+    const allocator = std.testing.allocator;
     const inputs = status.RuntimeStatusInputs{};
     const query = status_query.StatusQuery.parse("");
 
     var w = TestWriter.init();
-    try status_response.renderStatusResponseToWriter(&w, inputs, query);
+    try status_response.renderStatusResponseToWriter(&w, inputs, query, allocator);
 
     const output = w.slice();
 
@@ -87,22 +88,24 @@ test "base status response contains all required fields" {
 }
 
 test "base status response does not include network_diag" {
+    const allocator = std.testing.allocator;
     const inputs = status.RuntimeStatusInputs{};
     const query = status_query.StatusQuery.parse("");
 
     var w = TestWriter.init();
-    try status_response.renderStatusResponseToWriter(&w, inputs, query);
+    try status_response.renderStatusResponseToWriter(&w, inputs, query, allocator);
 
     const output = w.slice();
     try std.testing.expect(!std.mem.containsAtLeast(u8, output, 1, "\"network_diag\":"));
 }
 
 test "empty query string produces base status" {
+    const allocator = std.testing.allocator;
     const inputs = status.RuntimeStatusInputs{};
     const query = status_query.StatusQuery.parse("");
 
     var w = TestWriter.init();
-    try status_response.renderStatusResponseToWriter(&w, inputs, query);
+    try status_response.renderStatusResponseToWriter(&w, inputs, query, allocator);
 
     const output = w.slice();
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"service\":\"tovarisch\""));
@@ -114,22 +117,24 @@ test "empty query string produces base status" {
 // ============================================================================
 
 test "network_diag response includes network_diag field" {
+    const allocator = std.testing.allocator;
     const inputs = status.RuntimeStatusInputs{};
     const query = status_query.StatusQuery.parse("include=network_diag");
 
     var w = TestWriter.init();
-    try status_response.renderStatusResponseToWriter(&w, inputs, query);
+    try status_response.renderStatusResponseToWriter(&w, inputs, query, allocator);
 
     const output = w.slice();
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"network_diag\":"));
 }
 
 test "network_diag response includes all expected diagnostic subsections" {
+    const allocator = std.testing.allocator;
     const inputs = status.RuntimeStatusInputs{};
     const query = status_query.StatusQuery.parse("include=network_diag");
 
     var w = TestWriter.init();
-    try status_response.renderStatusResponseToWriter(&w, inputs, query);
+    try status_response.renderStatusResponseToWriter(&w, inputs, query, allocator);
 
     const output = w.slice();
 
@@ -143,11 +148,12 @@ test "network_diag response includes all expected diagnostic subsections" {
 }
 
 test "network_diag with other params still includes diagnostics" {
+    const allocator = std.testing.allocator;
     const inputs = status.RuntimeStatusInputs{};
     const query = status_query.StatusQuery.parse("foo=bar&include=network_diag&baz=qux");
 
     var w = TestWriter.init();
-    try status_response.renderStatusResponseToWriter(&w, inputs, query);
+    try status_response.renderStatusResponseToWriter(&w, inputs, query, allocator);
 
     const output = w.slice();
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"network_diag\":"));
@@ -167,6 +173,7 @@ test "network_diag is case-sensitive (lowercase only)" {
 // ============================================================================
 
 test "unknown include value produces base status (no network_diag)" {
+    const allocator = std.testing.allocator;
     const inputs = status.RuntimeStatusInputs{};
     const query = status_query.StatusQuery.parse("include=unknown_feature");
 
@@ -174,7 +181,7 @@ test "unknown include value produces base status (no network_diag)" {
     try std.testing.expect(query.include == .unsupported);
 
     var w = TestWriter.init();
-    try status_response.renderStatusResponseToWriter(&w, inputs, query);
+    try status_response.renderStatusResponseToWriter(&w, inputs, query, allocator);
 
     const output = w.slice();
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"service\":\"tovarisch\""));
@@ -230,14 +237,15 @@ test "many repeated renders do not accumulate memory" {
 }
 
 test "render to writer multiple times is consistent" {
+    const allocator = std.testing.allocator;
     const inputs = status.RuntimeStatusInputs{};
     const query = status_query.StatusQuery.parse("");
 
     var w1 = TestWriter.init();
     var w2 = TestWriter.init();
 
-    try status_response.renderStatusResponseToWriter(&w1, inputs, query);
-    try status_response.renderStatusResponseToWriter(&w2, inputs, query);
+    try status_response.renderStatusResponseToWriter(&w1, inputs, query, allocator);
+    try status_response.renderStatusResponseToWriter(&w2, inputs, query, allocator);
 
     try std.testing.expect(std.mem.containsAtLeast(u8, w1.slice(), 1, "\"service\":\"tovarisch\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w2.slice(), 1, "\"service\":\"tovarisch\""));
