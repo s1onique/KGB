@@ -412,39 +412,26 @@ test "no leaked allocations when diagnostic rendering fails with tiny budget" {
 // Test: Source-text contract check for global allocator avoidance (HULK04)
 // ============================================================================
 
-test "no page_allocator in renderStatusOwnedWithBudget source text" {
-    // This test verifies that the budgeted render path does not use page_allocator.
-    // We check the source text of status_response.zig directly.
-    //
-    // If this test fails, someone added std.heap.page_allocator back into
-    // the renderStatusOwnedWithBudget function body.
+test "status_response has no page_allocator references" {
+    // Whole-file source contract: status_response.zig must not contain
+    // std.heap.page_allocator anywhere in the file.
     const source = @embedFile("status_response.zig");
-    const func_start = std.mem.indexOf(u8, source, "pub fn renderStatusOwnedWithBudget(");
-    const func_end = std.mem.indexOf(u8, source[func_start..], "\n}\n") orelse
-        std.mem.indexOf(u8, source[func_start..], "\npub fn") orelse
-        source.len - func_start;
-
-    const func_source = source[func_start..][0..func_end];
-
-    // The function should NOT contain std.heap.page_allocator
-    const has_page_allocator = std.mem.indexOf(u8, func_source, "std.heap.page_allocator") != null;
-    try std.testing.expect(!has_page_allocator);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        source,
+        "std.heap.page_allocator",
+    ) == null);
 }
 
-test "no global allocators in OwnedResponse.init source text" {
-    // Verify OwnedResponse.init also avoids global allocators
+test "status_response has no other global allocator escapes" {
+    // Additional global allocators that should not appear in status_response.zig
+    const forbidden = [_][]const u8{
+        "std.heap.c_allocator",
+        "std.heap.smp_allocator",
+        "GeneralPurposeAllocator",
+    };
     const source = @embedFile("status_response.zig");
-    const func_start = std.mem.indexOf(u8, source, "pub fn init(") orelse return;
-    // Find the OwnedResponse.init specifically by going back to find the struct
-    const struct_start = std.mem.lastIndexOf(u8, source[0..func_start], "pub const OwnedResponse") orelse 0;
-    const func_body_start = func_start;
-    const func_body_end = std.mem.indexOf(u8, source[func_body_start..], "\n}\n") orelse
-        std.mem.indexOf(u8, source[func_body_start..], "\n    ///") orelse
-        256;
-
-    const func_source = source[func_body_start..][0..func_body_end];
-
-    // Should use the allocator parameter, not std.heap.page_allocator
-    const has_page_allocator = std.mem.indexOf(u8, func_source, "std.heap.page_allocator") != null;
-    try std.testing.expect(!has_page_allocator);
+    for (forbidden) |pattern| {
+        try std.testing.expect(std.mem.indexOf(u8, source, pattern) == null);
+    }
 }
