@@ -59,6 +59,28 @@ pub const ResponseBudget = struct {
     }
 };
 
+/// Request allocation overhead for status handler.
+///
+/// This overhead accommodates transient allocations during status rendering:
+/// - JSON encoder scratch space for nested object formatting
+/// - Temporary string formatting buffers
+/// - Escape sequence expansion during JSON encoding
+///
+/// The overhead equals the diagnostic budget size to handle worst-case
+/// scenarios where network_diag content triggers maximum temporary allocations.
+pub const request_temp_overhead_bytes: usize = 8192;
+
+/// Maximum request allocator bytes for status handler.
+///
+/// Returns the total allocator capacity needed for a given query mode.
+/// Formula: response_budget.max_body_bytes + request_temp_overhead_bytes
+///
+/// - Base (no network_diag): 4096 + 8192 = 12288 bytes
+/// - Diagnostic (network_diag): 8192 + 8192 = 16384 bytes
+pub fn requestAllocatorBytesForQuery(include_network_diag: bool) usize {
+    return ResponseBudget.forQuery(include_network_diag).max_body_bytes + request_temp_overhead_bytes;
+}
+
 /// Route contract definition.
 pub const RouteContract = struct {
     /// The route path (e.g., "/status.json").

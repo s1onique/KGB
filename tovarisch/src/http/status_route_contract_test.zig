@@ -404,3 +404,40 @@ test "status_json_route singleton has budgets" {
         status_route_contract.status_json_route.diagnostic_budget.?.max_body_bytes,
     );
 }
+
+// ============================================================================
+// Request allocation policy tests (HULK08)
+// ============================================================================
+
+test "request_temp_overhead_bytes is defined as 8192" {
+    try std.testing.expectEqual(
+        @as(usize, 8192),
+        status_route_contract.request_temp_overhead_bytes,
+    );
+}
+
+test "requestAllocatorBytesForQuery for base returns 12288" {
+    // Base: 4096 (response) + 8192 (overhead) = 12288
+    const bytes = status_route_contract.requestAllocatorBytesForQuery(false);
+    try std.testing.expectEqual(@as(usize, 12288), bytes);
+}
+
+test "requestAllocatorBytesForQuery for diagnostic returns 16384" {
+    // Diagnostic: 8192 (response) + 8192 (overhead) = 16384
+    const bytes = status_route_contract.requestAllocatorBytesForQuery(true);
+    try std.testing.expectEqual(@as(usize, 16384), bytes);
+}
+
+test "max request allocator bytes equals diagnostic budget plus overhead" {
+    const max_alloc_bytes = status_route_contract.requestAllocatorBytesForQuery(true);
+    const diag_budget = status_route_contract.ResponseBudget.diagnostic_budget.max_body_bytes;
+    const expected = diag_budget + status_route_contract.request_temp_overhead_bytes;
+    try std.testing.expectEqual(expected, max_alloc_bytes);
+}
+
+test "base request allocator bytes exceeds base response budget" {
+    const alloc_bytes = status_route_contract.requestAllocatorBytesForQuery(false);
+    const base_budget = status_route_contract.ResponseBudget.base_budget.max_body_bytes;
+    // Base allocator must accommodate response + overhead
+    try std.testing.expect(alloc_bytes > base_budget);
+}

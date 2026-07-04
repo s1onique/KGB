@@ -114,21 +114,15 @@ pub fn handleHealthz(fd: i32, _: *anyopaque) !void {
 /// Status handler - returns full status JSON with BFD, config, and live BGP state.
 /// When include_network_diag is true, includes the network_diag field.
 ///
-/// This handler uses the route contract's response budget to bound memory usage.
+/// This handler uses the route contract's response budget and request allocator
+/// policy to bound memory usage. The request allocator capacity derives from
+/// the response budget plus a named overhead for transient allocations.
 /// On budget overflow or allocation failure, returns an internal error response.
 pub fn handleStatus(fd: i32, state: *anyopaque, include_network_diag: bool) !void {
     // Cast opaque state to ServeContext to get BFD runtime, config check, and BGP state.
     const ctx = @as(*server.ServeContext, @ptrCast(@alignCast(state)));
 
-    // Select the appropriate budget from the route contract
-    const budget = status_route_contract.ResponseBudget.forQuery(include_network_diag);
-
-    // Use a fixed buffer allocator bounded by the route budget
-    var fixed_buf: [16384]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&fixed_buf);
-    const fba_allocator = fba.allocator();
-
-    // Build status inputs
+    // Build status inputs (shared between branches)
     const inputs = status.RuntimeStatusInputs{
         .bfd_runtime = ctx.bfd_runtime,
         .config_check = ctx.config_check,
@@ -138,29 +132,52 @@ pub fn handleStatus(fd: i32, state: *anyopaque, include_network_diag: bool) !voi
         .lab_event_emitter = ctx.lab_event_emitter,
     };
 
-    // Parse query for wantsNetworkDiag
-    const query = @import("../status_query.zig").StatusQuery.parse(
-        if (include_network_diag) "include=network_diag" else "",
-    );
+    // Branch on diagnostic mode to select appropriate budget and allocator capacity.
+    // This is necessary because Zig requires comptime-known array sizes.
+    // The allocator capacity derives from the route contract's request allocator policy.
+    if (include_network_diag) {
+        // Diagnostic mode: 8192 response budget + 8192 overhead = 16384
+        const budget = status_route_contract.ResponseBudget.diagnostic_budget;
+        var fixed_buf: [status_route_contract.requestAllocatorBytesForQuery(true)]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&fixed_buf);
+        const fba_allocator = fba.allocator();
 
-    // Render with budget enforcement
-    const response_or_err = status_response.renderStatusOwnedWithBudget(
-        fba_allocator,
-        inputs,
-        query,
-        budget,
-    );
+        const query = @import("../status_query.zig").StatusQuery.parse("include=network_diag");
+        const response_or_err = status_response.renderStatusOwnedWithBudget(
+            fba_allocator,
+            inputs,
+            query,
+            budget,
+        );
 
-    // Handle result - no partial JSON is exposed as success on error
-    const owned_response = response_or_err catch {
-        // On budget overflow or allocation failure, return internal error.
-        // No partial JSON is exposed as success.
-        try response.writeSimpleJsonFd(fd, 500, response.Errors.internal_error);
-        return;
-    };
+        const owned_response = response_or_err catch {
+            try response.writeSimpleJsonFd(fd, 500, response.Errors.internal_error);
+            return;
+        };
+        defer owned_response.deinit(fba_allocator);
+        try response.writeSimpleJsonFd(fd, 200, owned_response.body());
+    } else {
+        // Base mode: 4096 response budget + 8192 overhead = 12288
+        const budget = status_route_contract.ResponseBudget.base_budget;
+        var fixed_buf: [status_route_contract.requestAllocatorBytesForQuery(false)]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&fixed_buf);
+        const fba_allocator = fba.allocator();
 
-    defer owned_response.deinit(fba_allocator);
-    try response.writeSimpleJsonFd(fd, 200, owned_response.body());
+        const query = @import("../status_query.zig").StatusQuery.parse("");
+        const response_or_err = status_response.renderStatusOwnedWithBudget(
+            fba_allocator,
+            inputs,
+            query,
+            budget,
+        );
+
+        const owned_response = response_or_err catch {
+            try response.writeSimpleJsonFd(fd, 500, response.Errors.internal_error);
+            return;
+        };
+        defer owned_response.deinit(fba_allocator);
+        try response.writeSimpleJsonFd(fd, 200, owned_response.body());
+    }
 }
 
 /// Metrics handler - uses persistent sampler state for live rates.

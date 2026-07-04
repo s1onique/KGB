@@ -1,6 +1,7 @@
 // status_route_active_tests.zig — Active route proof tests for /status.json
 //
 // ACT-TOVARISCH-ZIG-HULK06: Prove active HTTP route cannot bypass budget-aware status renderer
+// ACT-TOVARISCH-ZIG-HULK08: Prove request allocator capacity derives from route budget policy
 //
 // These tests prove that the production /status.json HTTP route:
 // 1. Uses handleStatus (not handleStatusLegacy)
@@ -11,6 +12,8 @@
 // 6. Does not reference handleStatusLegacy
 // 7. Does not directly call status.renderPayloadWithContextAndDiag
 // 8. Does not use std.heap.page_allocator in status path
+// 9. Uses named request allocator policy (HULK08)
+// 10. Does not contain raw 16384 literal in handleStatus body (HULK08)
 
 const std = @import("std");
 const routes = @import("routes.zig");
@@ -357,4 +360,80 @@ test "handleStatus function exists and is public" {
         source,
         "pub fn handleStatus",
     ) != null);
+}
+
+// ============================================================================
+// HULK08: Request allocator policy tests
+// ============================================================================
+
+// Test 18: Source contract — routes.zig uses named request allocator helper
+
+test "routes.zig references requestAllocatorBytesForQuery" {
+    const source = @embedFile("routes.zig");
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        source,
+        "requestAllocatorBytesForQuery",
+    ) != null);
+}
+
+// Test 19: Source contract — handleStatus body does not contain raw fixed buffer declaration
+
+test "routes.zig handleStatus has no raw [16384]u8 fixed buffer declaration" {
+    const source = @embedFile("routes.zig");
+
+    // Extract handleStatus function body
+    const fn_start = std.mem.indexOf(u8, source, "pub fn handleStatus") orelse {
+        try std.testing.expect(false);
+        return;
+    };
+
+    const remaining = source[fn_start..];
+    const fn_end = std.mem.indexOf(u8, remaining, "\npub fn ") orelse remaining.len;
+    const fn_body = remaining[0..fn_end];
+
+    // The magic fixed buffer declaration [16384]u8 must not appear in handleStatus.
+    // The function must use requestAllocatorBytesForQuery() to derive capacity.
+    // We check for the exact forbidden pattern, not numeric values in comments.
+    try std.testing.expect(std.mem.indexOf(u8, fn_body, "var fixed_buf: [16384]u8") == null);
+}
+
+// Test 20: Behavioral — request allocator capacity derives from route policy
+
+test "requestAllocatorBytesForQuery produces valid capacity for base" {
+    // Verify the named policy produces the expected value
+    const base_alloc_bytes = status_route_contract.requestAllocatorBytesForQuery(false);
+    // Base: 4096 response + 8192 overhead = 12288
+    try std.testing.expectEqual(@as(usize, 12288), base_alloc_bytes);
+}
+
+// Test 21: Behavioral — request allocator capacity derives from route policy (diagnostic)
+
+test "requestAllocatorBytesForQuery produces valid capacity for diagnostic" {
+    // Verify the named policy produces the expected value
+    const diag_alloc_bytes = status_route_contract.requestAllocatorBytesForQuery(true);
+    // Diagnostic: 8192 response + 8192 overhead = 16384
+    try std.testing.expectEqual(@as(usize, 16384), diag_alloc_bytes);
+}
+
+// Test 22: Source contract — status_route_contract.zig defines request allocator policy
+
+test "status_route_contract.zig defines request_temp_overhead_bytes" {
+    const source = @embedFile("status_route_contract.zig");
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        source,
+        "request_temp_overhead_bytes",
+    ) != null);
+}
+
+// Test 23: Behavioral — overhead is documented with rationale
+
+test "request_temp_overhead_bytes is 8192 for transient allocation headroom" {
+    // The overhead is set to 8192 to handle worst-case scenarios
+    // where network_diag content triggers maximum temporary allocations
+    try std.testing.expectEqual(
+        @as(usize, 8192),
+        status_route_contract.request_temp_overhead_bytes,
+    );
 }
