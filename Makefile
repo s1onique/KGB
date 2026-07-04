@@ -214,10 +214,16 @@ lab-uvb76-capture-url:
 # Primary execution: GitHub Actions (workflow_dispatch)
 # NOT part of make gate
 
-BASH ?= bash
+# Go orchestrator (ACT-UVB76-FP07: port from Bash to typed Go)
+uvb76-capture-netns-lab:
+	cd uvb76/cmd/uvb76-capture-netns-lab && go build -o uvb76-capture-netns-lab .
 
-lab-uvb76-capture-netns: uvb76-polling-build
-	@$(BASH) ./scripts/lab_uvb76_capture_netns.sh
+# Thin wrapper for compatibility; delegates to Go orchestrator
+lab-uvb76-capture-netns: uvb76-polling-build uvb76-capture-netns-lab
+	@./uvb76/cmd/uvb76-capture-netns-lab/uvb76-capture-netns-lab \
+		--artifact-dir ./artifacts/uvb76-capture-netns-lab/$$(date +%Y%m%d-%H%M%S) \
+		--uvb76-bin ./uvb76/uvb76 \
+		--tovarisch-bin ./tovarisch/zig-out/bin/tovarisch
 
 # === UVB-76 Latency Crash Lab ===
 # Canonical Golang daemon crash/soak lab for LatencyTracker SIGSEGV.

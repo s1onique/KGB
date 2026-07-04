@@ -3,7 +3,7 @@ path,disposition,risk_flags,owner,notes
 scripts/lab_uvb76_capture_netns_lib.sh,grandfathered_needs_owner,"jq,curl,polling",TBD,Bootstrap inventory
 scripts/lab_uvb76_capture_netns_contract.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
 scripts/lab_uvb76_capture_netns_cooldown_helpers.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
-scripts/lab_uvb76_capture_netns.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
+scripts/lab_uvb76_capture_netns.sh,legacy_wrapper_retained,none,TBD,Retained for reference; Makefile now calls Go binary directly (ACT-UVB76-FP07)
 scripts/lab_bgp_bfd_reconnect_lib.sh,grandfathered_needs_owner,"jq,curl",TBD,Bootstrap inventory
 scripts/lab_bgp_bfd_reconnect_bgp_reset.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
 scripts/lab_uvb76_capture_netns_contract_normalizers.sh,grandfathered_needs_owner,jq,TBD,Bootstrap inventory
