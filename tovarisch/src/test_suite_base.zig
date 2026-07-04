@@ -55,6 +55,11 @@ const _net_private_interface_stats_tests = @import("net/private_interface_stats_
 const _net_iptables = @import("net/iptables.zig");
 const _status_vpn_masquerade = @import("status_vpn_masquerade.zig");
 
+// Status response contract (Hulk-Zig foundation ACT)
+const _status_query = @import("status_query.zig");
+const _status_response = @import("status_response.zig");
+const _status_response_test = @import("status_response_test.zig");
+
 // Network diagnostics (ACT: Add tovarisch WireGuard and XRay TCP underlay diagnostics)
 const _net_network_diag_config = @import("net/network_diag_config.zig");
 const _net_wg_dump_parser = @import("net/wg_dump_parser.zig");
@@ -139,3 +144,6 @@ test { std.testing.refAllDecls(@import("net/wg_dump_collector.zig")); }
 test { std.testing.refAllDecls(@import("runtime/lab_events.zig")); }
 test { std.testing.refAllDecls(@import("runtime/lab_events_tests.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_status_boundary_netlink_runtime_tests.zig")); }
+test { std.testing.refAllDecls(@import("status_query.zig")); }
+test { std.testing.refAllDecls(@import("status_response.zig")); }
+test { std.testing.refAllDecls(@import("status_response_test.zig")); }

@@ -12,6 +12,9 @@ const _cli = @import("cli.zig");
 const _status = @import("status.zig");
 const _status_checks = @import("status_checks.zig");
 const _status_ownership_tests = @import("status_ownership_tests.zig");
+const _status_query = @import("status_query.zig");
+const _status_response = @import("status_response.zig");
+const _status_response_test = @import("status_response_test.zig");
 const _logging = @import("logging.zig");
 const _net_private_ip = @import("net/private_ip.zig");
 const _net_rates = @import("net/rates.zig");
@@ -110,6 +113,9 @@ test { std.testing.refAllDecls(@import("cli.zig")); }
 test { std.testing.refAllDecls(@import("status.zig")); }
 test { std.testing.refAllDecls(@import("status_checks.zig")); }
 test { std.testing.refAllDecls(@import("status_ownership_tests.zig")); }
+test { std.testing.refAllDecls(@import("status_query.zig")); }
+test { std.testing.refAllDecls(@import("status_response.zig")); }
+test { std.testing.refAllDecls(@import("status_response_test.zig")); }
 test { std.testing.refAllDecls(@import("http/response.zig")); }
 test { std.testing.refAllDecls(@import("http/routes.zig")); }
 test { std.testing.refAllDecls(@import("http/routes_tests.zig")); }
