@@ -2,156 +2,216 @@ package lab
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"log"
+	"os"
+	"path/filepath"
 	"time"
 )
 
-// PhaseName represents the lab phase name.
+// PhaseName represents the name of a lab phase.
 type PhaseName string
 
 const (
-	PhaseBaseline  PhaseName = "baseline"
-	PhaseDefect    PhaseName = "defect"
-	PhaseRecovery  PhaseName = "recovery"
+	PhaseBaseline   PhaseName = "baseline"
+	PhaseDefect     PhaseName = "defect"
+	PhaseRecovery   PhaseName = "recovery"
 )
 
-// PhaseResult captures the outcome of a phase execution.
-type PhaseResult struct {
-	Name          PhaseName  `json:"name"`
-	Started       time.Time `json:"started"`
-	Ended         time.Time `json:"ended"`
-	SpikeEventID  string    `json:"spike_event_id,omitempty"`
-	CaptureStatus string    `json:"capture_status,omitempty"`
-	ArtifactPaths []string  `json:"artifact_paths,omitempty"`
-	Err           string    `json:"error,omitempty"`
-}
-
-// Duration returns the phase duration.
-func (r PhaseResult) Duration() time.Duration {
-	return r.Ended.Sub(r.Started)
-}
-
-// PhaseConfig holds phase-specific configuration.
+// PhaseConfig holds phase configuration.
 type PhaseConfig struct {
-	Name            PhaseName
-	SpikeTimeout    time.Duration
-	CaptureTimeout  time.Duration
-	CooldownSeconds int
+	Name        PhaseName
+	Description string
+	Timeout     time.Duration
 }
 
-// DefaultPhaseConfigs returns the standard phase configurations.
+// DefaultPhaseConfigs returns the default phase configurations.
 func DefaultPhaseConfigs() []PhaseConfig {
 	return []PhaseConfig{
-		{Name: PhaseBaseline, SpikeTimeout: 30 * time.Second, CaptureTimeout: 15 * time.Second, CooldownSeconds: 5},
-		{Name: PhaseDefect, SpikeTimeout: 15 * time.Second, CaptureTimeout: 15 * time.Second, CooldownSeconds: 5},
-		{Name: PhaseRecovery, SpikeTimeout: 30 * time.Second, CaptureTimeout: 15 * time.Second, CooldownSeconds: 5},
+		{Name: PhaseBaseline, Description: "Baseline probe readiness", Timeout: 60 * time.Second},
+		{Name: PhaseDefect, Description: "Lab probe defect injection", Timeout: 30 * time.Second},
+		{Name: PhaseRecovery, Description: "Recovery after defect", Timeout: 60 * time.Second},
 	}
 }
 
-// PhaseTracker tracks phase cursor for event isolation.
-type PhaseTracker struct {
-	cursors map[PhaseName]string
-}
-
-// NewPhaseTracker creates a new phase tracker.
-func NewPhaseTracker() *PhaseTracker {
-	return &PhaseTracker{
-		cursors: make(map[PhaseName]string),
-	}
-}
-
-// SetCursor records the cursor timestamp for a phase.
-func (t *PhaseTracker) SetCursor(phase PhaseName) {
-	t.cursors[phase] = time.Now().UTC().Format(time.RFC3339)
-}
-
-// GetCursor returns the cursor timestamp for a phase.
-func (t *PhaseTracker) GetCursor(phase PhaseName) string {
-	return t.cursors[phase]
-}
-
-// PhaseContext holds runtime context for phase execution.
-type PhaseContext struct {
-	Phase       PhaseConfig
-	Tracker     *PhaseTracker
-	ArtifactDir string
-	Runner      CommandRunner
-	Netns       *NetnsHelper
-}
-
-// PollFn is a polling function that returns (done, error).
-type PollFn func(ctx context.Context) (done bool, err error)
-
-// Poll executes a polling function with deadline and interval.
-func Poll(ctx context.Context, interval time.Duration, fn PollFn) error {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			done, err := fn(ctx)
-			if err != nil {
-				return err
-			}
-			if done {
-				return nil
-			}
-		}
-	}
-}
-
-// PollWithTimeout polls until done or timeout, with explicit interval.
-func PollWithTimeout(ctx context.Context, timeout, interval time.Duration, fn PollFn) error {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	return Poll(ctx, interval, fn)
-}
-
-// PhaseOutcome represents the expected outcome for a phase.
+// PhaseOutcome represents expected outcome for a phase.
 type PhaseOutcome struct {
 	ExpectedCaptureStatus string
-	RequireCooldownInfo   bool
-	RequirePacket        bool
+	MinSpikes             int
 }
 
-// CaptureStatus constants matching production code.
+// DefaultPhaseOutcomes returns default phase outcomes.
+func DefaultPhaseOutcomes() map[PhaseName]PhaseOutcome {
+	return map[PhaseName]PhaseOutcome{
+		PhaseBaseline: {ExpectedCaptureStatus: CaptureStatusCaptured, MinSpikes: 1},
+		PhaseDefect:   {ExpectedCaptureStatus: CaptureStatusSkippedCooldown, MinSpikes: 1},
+		PhaseRecovery: {ExpectedCaptureStatus: CaptureStatusCaptured, MinSpikes: 1},
+	}
+}
+
+// PhaseResult holds the result of a phase execution.
+type PhaseResult struct {
+	Name            PhaseName
+	Started         time.Time
+	Ended          time.Time
+	Err            string
+	SpikeEventID   string
+	CaptureStatus  string
+	ArtifactPaths  []string
+}
+
+// Capture status constants.
 const (
 	CaptureStatusCaptured      = "captured"
 	CaptureStatusSkippedCooldown = "skipped_cooldown"
-	CaptureStatusNotAttempted  = "not_attempted"
-	CaptureStatusFailed        = "failed"
 )
 
-// DefaultPhaseOutcomes returns the standard phase expectations.
-func DefaultPhaseOutcomes() map[PhaseName]PhaseOutcome {
-	return map[PhaseName]PhaseOutcome{
-		PhaseBaseline:  {ExpectedCaptureStatus: CaptureStatusCaptured, RequireCooldownInfo: false, RequirePacket: true},
-		PhaseDefect:    {ExpectedCaptureStatus: CaptureStatusSkippedCooldown, RequireCooldownInfo: true, RequirePacket: false},
-		PhaseRecovery:  {ExpectedCaptureStatus: CaptureStatusCaptured, RequireCooldownInfo: false, RequirePacket: true},
+// runPhase executes a single lab phase.
+func (o *Orchestrator) runPhase(ctx context.Context, phase PhaseConfig) PhaseResult {
+	result := PhaseResult{
+		Name:    phase.Name,
+		Started: time.Now(),
 	}
-}
 
-// ValidateOutcome checks if a phase result meets expectations.
-func ValidateOutcome(result *PhaseResult, outcome PhaseOutcome) error {
-	if result.CaptureStatus != outcome.ExpectedCaptureStatus {
-		return fmt.Errorf("phase %s: expected capture_status=%s, got %s", result.Name, outcome.ExpectedCaptureStatus, result.CaptureStatus)
+	log.Printf("=== Phase: %s ===", phase.Name)
+
+	// Set cursor for this phase
+	o.Tracker.SetCursor(phase.Name)
+
+	// Execute phase-specific logic
+	switch phase.Name {
+	case PhaseBaseline:
+		o.runBaselinePhase(ctx, phase, &result)
+	case PhaseDefect:
+		o.runDefectPhase(ctx, phase, &result)
+	case PhaseRecovery:
+		o.runRecoveryPhase(ctx, phase, &result)
 	}
-	return nil
+
+	result.Ended = time.Now()
+	return result
 }
 
-// MarshalJSON implements json.Marshaler for PhaseResult.
-func (r PhaseResult) MarshalJSON() ([]byte, error) {
-	type Alias PhaseResult
-	return json.Marshal(&struct {
-		Duration string `json:"duration"`
-		Alias
-	}{
-		Duration: r.Duration().String(),
-		Alias:    Alias(r),
-	})
+func (o *Orchestrator) runBaselinePhase(ctx context.Context, phase PhaseConfig, result *PhaseResult) {
+	log.Printf("Running baseline phase...")
+
+	// Set phase cursor
+	cursor := time.Now().UTC().Format(time.RFC3339)
+	o.Tracker.SetCursor(PhaseBaseline)
+
+	// Wait for spike event with capture
+	spike, err := o.waitForSpikeAfter(ctx, PhaseBaseline, cursor, "captured", 30*time.Second)
+	if err != nil {
+		result.Err = fmt.Sprintf("baseline spike: %v", err)
+		return
+	}
+
+	result.SpikeEventID = spike.EventID
+	result.CaptureStatus = spike.CaptureStatus
+
+	// Save phase artifacts
+	spikeRowPath := filepath.Join(o.labDir, "phase1-spike-row.json")
+	if err := os.WriteFile(spikeRowPath, []byte(spike.RawJSON), 0644); err != nil {
+		log.Printf("Warning: failed to write phase1-spike-row.json: %v", err)
+	}
+
+	// Save capture packet
+	if spike.PacketPath != "" {
+		result.ArtifactPaths = []string{spikeRowPath, spike.PacketPath}
+	} else {
+		result.ArtifactPaths = []string{spikeRowPath}
+	}
+
+	log.Printf("Baseline phase complete: event=%s status=%s", spike.EventID, spike.CaptureStatus)
 }
 
+func (o *Orchestrator) runDefectPhase(ctx context.Context, phase PhaseConfig, result *PhaseResult) {
+	log.Printf("Running defect phase...")
+
+	// Set phase cursor
+	cursor := time.Now().UTC().Format(time.RFC3339)
+	o.Tracker.SetCursor(PhaseDefect)
+
+	// Inject tc netem 100% loss defect (lab contract defect for Phase 2)
+	if err := o.injectDefect(ctx); err != nil {
+		result.Err = fmt.Sprintf("inject defect: %v", err)
+		return
+	}
+
+	// Wait for skipped_cooldown spike
+	spike, err := o.waitForSpikeAfter(ctx, PhaseDefect, cursor, "skipped_cooldown", 15*time.Second)
+	if err != nil {
+		log.Printf("Warning: defect spike wait: %v", err)
+		// Clear defect before returning
+		o.clearDefect(ctx)
+		result.Err = fmt.Sprintf("defect spike: %v", err)
+		return
+	}
+
+	result.SpikeEventID = spike.EventID
+	result.CaptureStatus = spike.CaptureStatus
+
+	// Save phase artifacts - phase2-spike-row.json for contract verifier
+	spikeRowPath := filepath.Join(o.labDir, "phase2-spike-row.json")
+	if err := os.WriteFile(spikeRowPath, []byte(spike.RawJSON), 0644); err != nil {
+		log.Printf("Warning: failed to write phase2-spike-row.json: %v", err)
+	}
+
+	// Save capture packet
+	if spike.PacketPath != "" {
+		result.ArtifactPaths = []string{spikeRowPath, spike.PacketPath}
+	} else {
+		result.ArtifactPaths = []string{spikeRowPath}
+	}
+
+	log.Printf("Defect phase complete: event=%s status=%s", spike.EventID, spike.CaptureStatus)
+}
+
+func (o *Orchestrator) runRecoveryPhase(ctx context.Context, phase PhaseConfig, result *PhaseResult) {
+	log.Printf("Running recovery phase...")
+
+	// Get cooldown info from phase 2
+	phase2Path := filepath.Join(o.labDir, "phase2-spike-row.json")
+
+	// Wait for cooldown expiration based on phase 2 cooldown_info
+	if err := o.waitForCooldownExpiration(ctx, phase2Path); err != nil {
+		log.Printf("Warning: cooldown wait: %v", err)
+	}
+
+	// Clear defect
+	if err := o.clearDefect(ctx); err != nil {
+		log.Printf("Warning: clear defect: %v", err)
+	}
+
+	// Wait a bit after clearing
+	time.Sleep(2 * time.Second)
+
+	// Set phase cursor
+	cursor := time.Now().UTC().Format(time.RFC3339)
+	o.Tracker.SetCursor(PhaseRecovery)
+
+	// Wait for captured spike
+	spike, err := o.waitForSpikeAfter(ctx, PhaseRecovery, cursor, "captured", 30*time.Second)
+	if err != nil {
+		result.Err = fmt.Sprintf("recovery spike: %v", err)
+		return
+	}
+
+	result.SpikeEventID = spike.EventID
+	result.CaptureStatus = spike.CaptureStatus
+
+	// Save phase artifacts
+	spikeRowPath := filepath.Join(o.labDir, "phase3-spike-row.json")
+	if err := os.WriteFile(spikeRowPath, []byte(spike.RawJSON), 0644); err != nil {
+		log.Printf("Warning: failed to write phase3-spike-row.json: %v", err)
+	}
+
+	// Save capture packet
+	if spike.PacketPath != "" {
+		result.ArtifactPaths = []string{spikeRowPath, spike.PacketPath}
+	} else {
+		result.ArtifactPaths = []string{spikeRowPath}
+	}
+
+	log.Printf("Recovery phase complete: event=%s status=%s", spike.EventID, spike.CaptureStatus)
+}

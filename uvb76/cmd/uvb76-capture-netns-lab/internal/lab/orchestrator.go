@@ -1,10 +1,13 @@
 package lab
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -12,31 +15,41 @@ import (
 
 // Orchestrator manages the complete lab execution lifecycle.
 type Orchestrator struct {
-	Runner       CommandRunner
-	Netns        *NetnsHelper
-	Config       NetnsLabConfig
-	Artifacts    *LabArtifacts
-	Names        ArtifactNames
-	Cleanup      *CleanupStack
-	Phases       []PhaseConfig
-	Outcomes     map[PhaseName]PhaseOutcome
-	Tracker      *PhaseTracker
-	CommandLog   []CommandLog
-	startedAt    time.Time
-	uvb76PID     int
-	tovarischPID int
+	Runner        CommandRunner
+	ProcessRunner ProcessRunner
+	Netns         *NetnsHelper
+	Config        NetnsLabConfig
+	Options       OrchestratorConfig
+	Artifacts     *LabArtifacts
+	Names         ArtifactNames
+	Cleanup       *CleanupStack
+	Phases        []PhaseConfig
+	Outcomes      map[PhaseName]PhaseOutcome
+	Tracker       *PhaseTracker
+	CommandLog    []CommandLog
+	startedAt     time.Time
+	tovarischHandle *ProcessHandle
+	uvb76Handle    *ProcessHandle
+	labDir         string
+	uvb76APIBase   string
+	tovarischURL   string
+	probeReady     bool
+	uvb76AuthCookie string
 }
 
 // OrchestratorConfig holds orchestrator options.
 type OrchestratorConfig struct {
-	ArtifactDir    string
-	UVB76Bin      string
-	TovarischBin  string
-	Timeout       time.Duration
-	PhaseTimeout  time.Duration
+	ArtifactDir     string
+	UVB76Bin       string
+	TovarischBin   string
+	Timeout        time.Duration
+	PhaseTimeout   time.Duration
 	KeepNamespaces bool
-	SkipCleanup   bool
-	Verbose       bool
+	SkipCleanup    bool
+	Verbose        bool
+	// API credentials
+	APIUser string
+	APIPass string
 }
 
 // DefaultOrchestratorConfig returns the default configuration.
@@ -44,39 +57,62 @@ func DefaultOrchestratorConfig() OrchestratorConfig {
 	return OrchestratorConfig{
 		Timeout:      10 * time.Minute,
 		PhaseTimeout: 30 * time.Second,
+		APIUser:     "lab-admin",
+		APIPass:     "testpass123",
 	}
 }
 
 // NewOrchestrator creates a new lab orchestrator.
 func NewOrchestrator(runner CommandRunner, config OrchestratorConfig) (*Orchestrator, error) {
 	// Create artifact directory if needed
-	if config.ArtifactDir == "" {
+	artifactDir := config.ArtifactDir
+	if artifactDir == "" {
 		dir, err := CreateArtifactDir("kgb-uvb76-capture-netns-lab")
 		if err != nil {
 			return nil, fmt.Errorf("create artifact dir: %w", err)
 		}
-		config.ArtifactDir = dir
+		artifactDir = dir
+	}
+
+	// Ensure artifact directory exists
+	if err := os.MkdirAll(artifactDir, 0755); err != nil {
+		return nil, fmt.Errorf("create artifact root: %w", err)
 	}
 
 	netnsConfig := DefaultNetnsLabConfig()
-	netns := NewNetnsHelper(runner, netnsConfig)
 	names := DefaultArtifactNames()
-	artifacts := NewLabArtifacts(config.ArtifactDir, names)
+	artifacts := NewLabArtifacts(artifactDir, names)
 	phases := DefaultPhaseConfigs()
 	outcomes := DefaultPhaseOutcomes()
 
-	return &Orchestrator{
-		Runner:      runner,
-		Netns:       netns,
-		Config:      netnsConfig,
-		Artifacts:   artifacts,
-		Names:       names,
-		Cleanup:     NewCleanupStack(),
-		Phases:      phases,
-		Outcomes:    outcomes,
-		Tracker:     NewPhaseTracker(),
-		CommandLog:  []CommandLog{},
-	}, nil
+	// Create process runner first
+	processRunner := NewRealProcessRunner()
+
+	// Create orchestrator with CommandLog field so LoggingRunner can share it
+	o := &Orchestrator{
+		ProcessRunner: processRunner,
+		Config:        netnsConfig,
+		Options:       config,
+		Artifacts:     artifacts,
+		Names:         names,
+		Cleanup:       NewCleanupStack(),
+		Phases:        phases,
+		Outcomes:      outcomes,
+		Tracker:       NewPhaseTracker(),
+		CommandLog:    []CommandLog{},
+		labDir:        artifactDir,
+		uvb76APIBase:  fmt.Sprintf("http://localhost:%d", netnsConfig.UVB76Port),
+		tovarischURL:  fmt.Sprintf("http://%s:%d",
+			netnsConfig.TovarischNS.IPCIDR[:len(netnsConfig.TovarischNS.IPCIDR)-3],
+			netnsConfig.TovarischPort),
+	}
+
+	// Wire LoggingRunner to share o.CommandLog via pointer
+	loggingRunner := NewLoggingRunner(runner, &o.CommandLog)
+	o.Runner = loggingRunner
+	o.Netns = NewNetnsHelper(loggingRunner, netnsConfig)
+
+	return o, nil
 }
 
 // Run executes the complete lab lifecycle.
@@ -85,7 +121,16 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	log.Printf("=== UVB-76 Capture Netns Lab ===")
 	log.Printf("Artifact dir: %s", o.Artifacts.Root)
 
-	// Register cleanup steps
+	// Ensure cleanup runs on both success and failure
+	cleanupRan := false
+	defer func() {
+		if cleanupRan || o.Options.SkipCleanup {
+			return
+		}
+		o.Cleanup.Run(ctx)
+	}()
+
+	// Register cleanup steps (LIFO order)
 	o.Cleanup.Add("cleanup-log", func(ctx context.Context) error {
 		return o.writeCleanupLog()
 	})
@@ -99,23 +144,35 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		return o.clearDefect(ctx)
 	})
 	o.Cleanup.Add("delete-namespaces", func(ctx context.Context) error {
+		if o.Options.KeepNamespaces {
+			log.Printf("Keeping namespaces (--keep-namespaces)")
+			return nil
+		}
 		return o.deleteNamespaces(ctx)
 	})
 
 	// Run setup
 	if err := o.setup(ctx); err != nil {
+		cleanupRan = true
+		o.Cleanup.Run(ctx)
 		return fmt.Errorf("setup failed: %w", err)
 	}
 
 	// Run phases
 	var phaseResults []PhaseResult
+	var phasesFailed bool
 	for _, phase := range o.Phases {
 		result := o.runPhase(ctx, phase)
 		phaseResults = append(phaseResults, result)
 		if result.Err != "" {
 			log.Printf("Phase %s failed: %s", result.Name, result.Err)
+			phasesFailed = true
 		}
 	}
+
+	// Run contract verifier
+	verifierOK, verifierOutput := o.runContractVerifier(ctx)
+	log.Printf("Contract verifier: ok=%v", verifierOK)
 
 	// Write summary
 	summary := o.buildSummary(phaseResults)
@@ -124,7 +181,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	}
 
 	// Write result.json for CI compatibility
-	if err := o.writeResult(phaseResults); err != nil {
+	if err := o.writeResult(phaseResults, verifierOK, verifierOutput); err != nil {
 		log.Printf("Warning: failed to write result: %v", err)
 	}
 
@@ -133,6 +190,13 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		log.Printf("Warning: failed to chmod artifacts: %v", err)
 	}
 
+	// Return error if phases failed or verifier failed
+	// Cleanup runs via defer (cleanupRan stays false)
+	if phasesFailed || !verifierOK {
+		return fmt.Errorf("lab failed: phases=%v verifier=%v", phasesFailed, !verifierOK)
+	}
+
+	// Cleanup runs via defer on success
 	return nil
 }
 
@@ -149,6 +213,11 @@ func (o *Orchestrator) setup(ctx context.Context) error {
 		return fmt.Errorf("configure interfaces: %w", err)
 	}
 
+	// Generate configs
+	if err := o.generateConfigs(ctx); err != nil {
+		return fmt.Errorf("generate configs: %w", err)
+	}
+
 	// Write topology artifact
 	topology := fmt.Sprintf(`UVB-76 Capture Netns Lab Topology
 ================================
@@ -163,161 +232,49 @@ Namespace: %s
 
 veth pair connects the namespaces
 
-Diagnostic peer URL: http://%s:%d
+Diagnostic peer URL: %s
 `, o.Config.UVB76NS.Name, o.Config.UVB76NS.IPCIDR,
 		o.Config.TovarischNS.Name, o.Config.TovarischNS.IPCIDR,
-		o.Config.TovarischNS.IPCIDR[:len(o.Config.TovarischNS.IPCIDR)-3], o.Config.TovarischPort)
+		o.tovarischURL)
 
 	if err := os.WriteFile(o.Artifacts.TopologyPath, []byte(topology), 0644); err != nil {
 		log.Printf("Warning: failed to write topology: %v", err)
 	}
 
+	// Start tovarisch
+	log.Printf("Starting tovarisch...")
+	if err := o.startTovarisch(ctx); err != nil {
+		return fmt.Errorf("start tovarisch: %w", err)
+	}
+
+	// Wait for tovarisch HTTP endpoint
+	log.Printf("Waiting for tovarisch HTTP endpoint...")
+	if err := o.waitForTovarischHTTP(ctx); err != nil {
+		return fmt.Errorf("wait for tovarisch HTTP: %w", err)
+	}
+
+	// Start uvb76
+	log.Printf("Starting uvb76...")
+	if err := o.startUVB76(ctx); err != nil {
+		return fmt.Errorf("start uvb76: %w", err)
+	}
+
+	// Authenticate to UVB-76 API
+	log.Printf("Authenticating to UVB-76 API...")
+	if err := o.uvb76Authenticate(ctx); err != nil {
+		return fmt.Errorf("authenticate: %w", err)
+	}
+
+	// Phase 0: Baseline probe readiness
+	log.Printf("=== PHASE 0: Baseline Probe Readiness ===")
+	if err := o.phase0Readiness(ctx); err != nil {
+		log.Printf("Warning: Phase 0 readiness check failed: %v", err)
+		o.probeReady = false
+	} else {
+		o.probeReady = true
+	}
+
 	return nil
-}
-
-func (o *Orchestrator) runPhase(ctx context.Context, phase PhaseConfig) PhaseResult {
-	result := PhaseResult{
-		Name:    phase.Name,
-		Started: time.Now(),
-	}
-
-	log.Printf("=== Phase: %s ===", phase.Name)
-
-	// Set cursor for this phase
-	o.Tracker.SetCursor(phase.Name)
-
-	// Execute phase-specific logic
-	switch phase.Name {
-	case PhaseBaseline:
-		o.runBaselinePhase(ctx, phase, &result)
-	case PhaseDefect:
-		o.runDefectPhase(ctx, phase, &result)
-	case PhaseRecovery:
-		o.runRecoveryPhase(ctx, phase, &result)
-	}
-
-	result.Ended = time.Now()
-	return result
-}
-
-func (o *Orchestrator) runBaselinePhase(ctx context.Context, phase PhaseConfig, result *PhaseResult) {
-	log.Printf("Running baseline phase...")
-
-	// For baseline, we expect captured status
-	result.CaptureStatus = CaptureStatusCaptured
-	result.SpikeEventID = fmt.Sprintf("baseline-%d", time.Now().UnixNano())
-
-	// Record artifact paths
-	result.ArtifactPaths = []string{
-		o.Artifacts.Phase1SpikePath,
-		o.Artifacts.Phase1CapturePath,
-	}
-}
-
-func (o *Orchestrator) runDefectPhase(ctx context.Context, phase PhaseConfig, result *PhaseResult) {
-	log.Printf("Running defect phase...")
-
-	// Inject tc netem defect
-	if err := o.injectDefect(ctx); err != nil {
-		result.Err = fmt.Sprintf("inject defect: %v", err)
-		return
-	}
-
-	// For defect phase, we expect skipped_cooldown
-	result.CaptureStatus = CaptureStatusSkippedCooldown
-	result.SpikeEventID = fmt.Sprintf("defect-%d", time.Now().UnixNano())
-
-	// Record artifact path
-	result.ArtifactPaths = []string{
-		o.Artifacts.Phase2SpikePath,
-	}
-}
-
-func (o *Orchestrator) runRecoveryPhase(ctx context.Context, phase PhaseConfig, result *PhaseResult) {
-	log.Printf("Running recovery phase...")
-
-	// Clear defect
-	if err := o.clearDefect(ctx); err != nil {
-		result.Err = fmt.Sprintf("clear defect: %v", err)
-		return
-	}
-
-	// For recovery, we expect captured status
-	result.CaptureStatus = CaptureStatusCaptured
-	result.SpikeEventID = fmt.Sprintf("recovery-%d", time.Now().UnixNano())
-
-	// Record artifact paths
-	result.ArtifactPaths = []string{
-		o.Artifacts.Phase3SpikePath,
-		o.Artifacts.Phase3CapturePath,
-	}
-}
-
-func (o *Orchestrator) injectDefect(ctx context.Context) error {
-	// Inject tc netem 100% loss on the tovarisch namespace interface
-	// This is the lab contract defect: Phase 2 must produce skipped_cooldown
-	res := o.Netns.TC(ctx, o.Config.TovarischNS.Name,
-		"qdisc", "add", "dev", "tovarisch-veth", "root", "netem", "loss", "100%", "25",
-	)
-	if !res.OK() {
-		// Try replace if add fails (qdisc already exists)
-		res = o.Netns.TC(ctx, o.Config.TovarischNS.Name,
-			"qdisc", "replace", "dev", "tovarisch-veth", "root", "netem", "loss", "100%", "25",
-		)
-		if !res.OK() {
-			return fmt.Errorf("inject tc netem loss: %w", res.Err)
-		}
-	}
-	log.Printf("Defect injected: tc netem 100%% loss on tovarisch-veth")
-	return nil
-}
-
-func (o *Orchestrator) clearDefect(ctx context.Context) error {
-	// Remove the netem qdisc from tovarisch namespace
-	res := o.Netns.TC(ctx, o.Config.TovarischNS.Name,
-		"qdisc", "del", "dev", "tovarisch-veth", "root",
-	)
-	// Tolerate "No such file or directory" - qdisc may not exist
-	if !res.OK() && res.ExitCode != 2 && !contains(res.Stderr, "No such file or directory") {
-		log.Printf("Warning: clear defect: %v", res.Err)
-	}
-	log.Printf("Defect cleared: netem qdisc removed")
-	return nil
-}
-
-func (o *Orchestrator) stopUVB76(ctx context.Context) error {
-	if o.uvb76PID > 0 {
-		res := o.Netns.NetnsExec(ctx, o.Config.UVB76NS.Name, "kill", fmt.Sprintf("%d", o.uvb76PID))
-		if !res.OK() {
-			return fmt.Errorf("kill uvb76: %w", res.Err)
-		}
-	}
-	return nil
-}
-
-func (o *Orchestrator) stopTovarisch(ctx context.Context) error {
-	res := o.Netns.NetnsExec(ctx, o.Config.TovarischNS.Name, "pkill", "tovarisch")
-	if !res.OK() {
-		// Ignore pkill errors (process may not exist)
-		return nil
-	}
-	return nil
-}
-
-func (o *Orchestrator) deleteNamespaces(ctx context.Context) error {
-	if errs := o.Netns.DeleteNamespaces(ctx); len(errs) > 0 {
-		for _, err := range errs {
-			log.Printf("Namespace cleanup warning: %v", err)
-		}
-	}
-	return nil
-}
-
-func (o *Orchestrator) writeCleanupLog() error {
-	if len(o.CommandLog) == 0 {
-		return nil
-	}
-	return WriteJSON(o.Artifacts.Root, "cleanup-log.json", o.CommandLog)
 }
 
 func (o *Orchestrator) buildSummary(phaseResults []PhaseResult) *LabSummary {
@@ -333,6 +290,11 @@ func (o *Orchestrator) buildSummary(phaseResults []PhaseResult) *LabSummary {
 			break
 		}
 	}
+
+	// Write command log
+	commandLogPath := filepath.Join(o.labDir, "command-log.json")
+	logData, _ := json.MarshalIndent(o.CommandLog, "", "  ")
+	os.WriteFile(commandLogPath, logData, 0644)
 
 	return &LabSummary{
 		SchemaVersion: "1.0",
@@ -356,60 +318,83 @@ func (o *Orchestrator) collectArtifactPaths() []string {
 	return paths
 }
 
-func (o *Orchestrator) writeResult(phaseResults []PhaseResult) error {
+func (o *Orchestrator) runContractVerifier(ctx context.Context) (bool, string) {
+	verifierPath := "../../../scripts/verify_uvb76_diag_packet_contract.sh"
+	verifierOutputPath := filepath.Join(o.labDir, "contract-verifier-output.txt")
+
+	// Run the contract verifier on the artifact directory
+	cmd := exec.CommandContext(ctx, "bash", verifierPath, "--dir", o.labDir)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	startTime := time.Now()
+	err := cmd.Run()
+	duration := time.Since(startTime)
+
+	output := stdout.String() + stderr.String()
+
+	// Write verifier output
+	os.WriteFile(verifierOutputPath, []byte(output), 0644)
+
+	// Determine exit code
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
+		}
+	}
+
+	// Log verifier command with actual exit code
+	o.CommandLog = append(o.CommandLog, CommandLog{
+		Command:  []string{"bash", verifierPath, "--dir", o.labDir},
+		ExitCode: exitCode,
+		Duration: duration.String(),
+		Stdout:   truncate(stdout.String(), 4096),
+		Stderr:   truncate(stderr.String(), 4096),
+		Time:     startTime.Format(time.RFC3339Nano),
+	})
+
+	return err == nil, output
+}
+
+func (o *Orchestrator) writeResult(phaseResults []PhaseResult, verifierOK bool, verifierOutput string) error {
 	result := make(map[string]interface{})
-	result["ok"] = true
+	result["ok"] = verifierOK
 	result["artifact_dir"] = o.Artifacts.Root
 
-	contract := make(map[string]bool)
+	// Write phase results with derived booleans
+	derived := make(map[string]interface{})
 	for _, r := range phaseResults {
 		switch r.Name {
 		case PhaseBaseline:
-			contract["phase1_capture_contract_ok"] = r.CaptureStatus == CaptureStatusCaptured
-			contract["phase1_packet_contract_ok"] = r.CaptureStatus == CaptureStatusCaptured
+			derived["phase1_capture_contract_ok"] = r.CaptureStatus == CaptureStatusCaptured
+			derived["phase1_packet_contract_ok"] = r.CaptureStatus == CaptureStatusCaptured && len(r.ArtifactPaths) > 0
 		case PhaseDefect:
-			contract["phase2_cooldown_contract_ok"] = r.CaptureStatus == CaptureStatusSkippedCooldown
+			derived["phase2_cooldown_contract_ok"] = r.CaptureStatus == CaptureStatusSkippedCooldown
 		case PhaseRecovery:
-			contract["phase3_capture_contract_ok"] = r.CaptureStatus == CaptureStatusCaptured
-			contract["phase3_packet_contract_ok"] = r.CaptureStatus == CaptureStatusCaptured
+			derived["phase3_capture_contract_ok"] = r.CaptureStatus == CaptureStatusCaptured
+			derived["phase3_packet_contract_ok"] = r.CaptureStatus == CaptureStatusCaptured && len(r.ArtifactPaths) > 0
 		}
 	}
-	contract["probe_ready"] = true
-	contract["dir_contract_ok"] = true
-	contract["distinct_event_ids_ok"] = true
-	contract["tcp_contract_ok"] = true
+	derived["probe_ready"] = o.probeReady
+	result["derived"] = derived
 
-	result["contract"] = contract
-
-	// Check if all contracts passed
-	for _, v := range contract {
-		if !v {
-			result["ok"] = false
-			break
+	if verifierOutput != "" {
+		result["contract_verifier_output"] = "contract-verifier-output.txt"
+		result["contract_verifier_exit_code"] = 0
+		if !verifierOK {
+			result["contract_verifier_exit_code"] = 1
 		}
 	}
 
 	return WriteJSON(o.Artifacts.Root, "result.json", result)
 }
 
-// CleanupOnError runs cleanup and reports any errors.
-func (o *Orchestrator) CleanupOnError(ctx context.Context, originalErr error) error {
-	log.Printf("Lab failed: %v", originalErr)
-	log.Printf("Running cleanup...")
-
-	if errs := o.Cleanup.Run(ctx); len(errs) > 0 {
-		log.Printf("Cleanup errors:")
-		for _, err := range errs {
-			log.Printf("  - %v", err)
-		}
-	}
-
-	return originalErr
-}
-
 // CheckLinux verifies the environment is suitable for netns labs.
 func CheckLinux() error {
-	// Use runtime.GOOS which is set at compile time and reflects the actual OS
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("this lab requires Linux (network namespaces); current GOOS=%s", runtime.GOOS)
 	}
@@ -426,4 +411,18 @@ func CheckDependencies(ctx context.Context, runner CommandRunner) error {
 		}
 	}
 	return nil
+}
+
+// runCommand is a helper to run a command and log it.
+func (o *Orchestrator) runCommand(ctx context.Context, name string, args ...string) CommandResult {
+	res := o.Runner.Run(ctx, name, args...)
+	o.CommandLog = append(o.CommandLog, CommandLog{
+		Command:  append([]string{name}, args...),
+		ExitCode: res.ExitCode,
+		Duration: res.Duration().String(),
+		Stdout:   truncate(res.Stdout, 1024),
+		Stderr:   truncate(res.Stderr, 1024),
+		Time:     res.Started.Format(time.RFC3339Nano),
+	})
+	return res
 }
