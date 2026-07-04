@@ -7,12 +7,16 @@
 // 4. Repeated render/free loop does not leak
 // 5. Allocation failure does not leak partially built response data
 // 6. Response decision function is pure and has no allocator dependency
+// 7. OwnedResponse ownership contract
+//
+// Budget policy tests are in status_response_budget_tests.zig.
 
 const std = @import("std");
 const Io = std.Io;
 const status = @import("status.zig");
 const status_response = @import("status_response.zig");
 const status_query = @import("status_query.zig");
+const status_route_contract = @import("http/status_route_contract.zig");
 
 // ============================================================================
 // Test Writer Helper (no heap allocation)
@@ -36,7 +40,6 @@ const TestWriter = struct {
 
     pub fn writeAll(self: *Self, bytes: []const u8) !void {
         if (self.len + bytes.len > BufSize) return error.BufferOverflow;
-        // Use for loop to avoid aliasing panic in Zig 0.16
         for (bytes, 0..) |byte, i| {
             self.buf[self.len + i] = byte;
         }
@@ -152,7 +155,6 @@ test "network_diag with other params still includes diagnostics" {
 }
 
 test "network_diag is case-sensitive (lowercase only)" {
-    // Test that "include=Network_Diag" is NOT recognized
     const query_lower = status_query.StatusQuery.parse("include=network_diag");
     const query_upper = status_query.StatusQuery.parse("include=Network_Diag");
 
@@ -168,11 +170,9 @@ test "unknown include value produces base status (no network_diag)" {
     const inputs = status.RuntimeStatusInputs{};
     const query = status_query.StatusQuery.parse("include=unknown_feature");
 
-    // Query is classified as unsupported
     try std.testing.expect(!query.wantsNetworkDiag());
     try std.testing.expect(query.include == .unsupported);
 
-    // But rendering should still produce valid base status
     var w = TestWriter.init();
     try status_response.renderStatusResponseToWriter(&w, inputs, query);
 
@@ -184,7 +184,6 @@ test "unknown include value produces base status (no network_diag)" {
 test "duplicate include params are handled deterministically" {
     const query = status_query.StatusQuery.parse("include=network_diag&include=network_diag");
 
-    // First occurrence wins
     try std.testing.expect(query.wantsNetworkDiag());
     try std.testing.expect(query.has_duplicate);
     try std.testing.expect(!query.has_unknown);
@@ -193,9 +192,8 @@ test "duplicate include params are handled deterministically" {
 test "malformed query params are ignored" {
     const query = status_query.StatusQuery.parse("include=network_diag&malformed");
 
-    // Should still recognize the valid include
     try std.testing.expect(query.wantsNetworkDiag());
-    try std.testing.expect(query.has_unknown); // But noted as having anomalies
+    try std.testing.expect(query.has_unknown);
 }
 
 // ============================================================================
@@ -208,14 +206,12 @@ test "repeated render/deinit loop is leak-free" {
     const query_base = status_query.StatusQuery.parse("");
     const query_diag = status_query.StatusQuery.parse("include=network_diag");
 
-    // Alternate between base and network_diag
     var response_base = try status_response.OwnedResponse.init(allocator, inputs, query_base);
     defer response_base.deinit(allocator);
 
     var response_diag = try status_response.OwnedResponse.init(allocator, inputs, query_diag);
     defer response_diag.deinit(allocator);
 
-    // Both should have valid content
     try std.testing.expect(response_base.body.len > 0);
     try std.testing.expect(response_diag.body.len > 0);
     try std.testing.expect(std.mem.containsAtLeast(u8, response_diag.body, 1, "\"network_diag\":"));
@@ -226,7 +222,6 @@ test "many repeated renders do not accumulate memory" {
     const inputs = status.RuntimeStatusInputs{};
     const query = status_query.StatusQuery.parse("");
 
-    // Render many times in a tight loop
     inline for (0..10) |_| {
         var response = try status_response.OwnedResponse.init(allocator, inputs, query);
         defer response.deinit(allocator);
@@ -244,7 +239,6 @@ test "render to writer multiple times is consistent" {
     try status_response.renderStatusResponseToWriter(&w1, inputs, query);
     try status_response.renderStatusResponseToWriter(&w2, inputs, query);
 
-    // Both should contain the same structure
     try std.testing.expect(std.mem.containsAtLeast(u8, w1.slice(), 1, "\"service\":\"tovarisch\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w2.slice(), 1, "\"service\":\"tovarisch\""));
     try std.testing.expect(std.mem.containsAtLeast(u8, w1.slice(), 1, "\"checks\":["));
@@ -258,7 +252,6 @@ test "render to writer multiple times is consistent" {
 test "selectResponseMode is pure and deterministic" {
     const query = status_query.StatusQuery.parse("include=network_diag");
 
-    // Call multiple times with same input
     const mode1 = status_query.selectResponseMode(query);
     const mode2 = status_query.selectResponseMode(query);
     const mode3 = status_query.selectResponseMode(query);
@@ -271,7 +264,6 @@ test "selectResponseMode is pure and deterministic" {
 test "selectResponseMode has no allocator dependency" {
     const query = status_query.StatusQuery.parse("");
 
-    // This should work without any allocator setup
     const mode = status_query.selectResponseMode(query);
     try std.testing.expect(mode == .status_with_context);
 }
@@ -296,7 +288,7 @@ test "StatusQuery.parse is pure and deterministic" {
 test "query with only ampersand produces base status" {
     const query = status_query.StatusQuery.parse("&&");
     try std.testing.expect(!query.wantsNetworkDiag());
-    try std.testing.expect(!query.has_unknown); // Empty parts are skipped
+    try std.testing.expect(!query.has_unknown);
 }
 
 test "query with trailing ampersand produces base status" {
@@ -310,7 +302,6 @@ test "query with leading ampersand produces base status" {
 }
 
 test "empty include value is treated as base status" {
-    // Empty value after "include=" is ignored (falls through to other key=value branch)
     const query = status_query.StatusQuery.parse("include=");
     try std.testing.expect(!query.wantsNetworkDiag());
     try std.testing.expect(query.include == .none);
@@ -335,29 +326,24 @@ test "OwnedResponse.body is owned by caller" {
     var response = try status_response.OwnedResponse.init(allocator, inputs, query);
     defer response.deinit(allocator);
 
-    // Body should be valid memory
-    try std.testing.expect(response.body.len > 100); // At least 100 bytes for status JSON
+    try std.testing.expect(response.body.len > 100);
 
-    // Slice should match body
     const slice = response.slice();
     try std.testing.expect(slice.len == response.body.len);
     try std.testing.expect(slice.ptr == response.body.ptr);
 }
 
 test "OwnedResponse.deinit with correct allocator" {
-    // This test documents the contract: caller must use the same allocator
     const allocator = std.testing.allocator;
     const inputs = status.RuntimeStatusInputs{};
     const query = status_query.StatusQuery.parse("");
 
     var response = try status_response.OwnedResponse.init(allocator, inputs, query);
-
-    // Using the same allocator is correct
     response.deinit(allocator);
 }
 
 // ============================================================================
-// Test: OwnedResponse body is exactly the rendered JSON bytes (no trailing capacity)
+// Test: OwnedResponse body is exactly the rendered JSON bytes
 // ============================================================================
 
 test "OwnedResponse body ends exactly at JSON terminator (base status)" {
@@ -368,13 +354,8 @@ test "OwnedResponse body ends exactly at JSON terminator (base status)" {
     var response = try status_response.OwnedResponse.init(allocator, inputs, query);
     defer response.deinit(allocator);
 
-    // Body must have content
     try std.testing.expect(response.body.len > 0);
-
-    // Body must end with JSON terminator (newline after closing brace)
     try std.testing.expectEqual(@as(u8, '\n'), response.body[response.body.len - 1]);
-
-    // Second-to-last character should be the closing brace
     try std.testing.expectEqual(@as(u8, '}'), response.body[response.body.len - 2]);
 }
 
@@ -386,13 +367,8 @@ test "OwnedResponse body ends exactly at JSON terminator (network_diag)" {
     var response = try status_response.OwnedResponse.init(allocator, inputs, query);
     defer response.deinit(allocator);
 
-    // Body must have content
     try std.testing.expect(response.body.len > 0);
-
-    // Body must end with JSON terminator
     try std.testing.expectEqual(@as(u8, '\n'), response.body[response.body.len - 1]);
-
-    // Second-to-last character should be the closing brace
     try std.testing.expectEqual(@as(u8, '}'), response.body[response.body.len - 2]);
 }
 
@@ -417,14 +393,10 @@ test "OwnedResponse body does not expose trailing allocation capacity" {
     var response = try status_response.OwnedResponse.init(allocator, inputs, query);
     defer response.deinit(allocator);
 
-    // If we scan the body, it should be valid printable ASCII or JSON chars
-    // No undefined/trailing garbage should be present
     for (response.body) |byte| {
-        // Allow printable ASCII, JSON whitespace, and standard JSON characters
         try std.testing.expect(byte < 128);
     }
 
-    // The body should be parseable as valid JSON structure (starts with { and ends with }\n)
     try std.testing.expectEqual(@as(u8, '{'), response.body[0]);
     try std.testing.expectEqual(@as(u8, '\n'), response.body[response.body.len - 1]);
 }

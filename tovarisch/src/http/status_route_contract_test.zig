@@ -160,6 +160,7 @@ test "validateRouteTable accepts valid table" {
             .methods = &.{.get},
             .query_params = &.{},
             .response_kind = .status_json,
+            .base_budget = status_route_contract.ResponseBudget.base_budget,
         },
     };
 
@@ -174,6 +175,7 @@ test "validateRouteTable rejects empty path" {
             .methods = &.{.get},
             .query_params = &.{},
             .response_kind = .status_json,
+            .base_budget = status_route_contract.ResponseBudget.base_budget,
         },
     };
 
@@ -188,12 +190,14 @@ test "validateRouteTable rejects duplicate paths" {
             .methods = &.{.get},
             .query_params = &.{},
             .response_kind = .status_json,
+            .base_budget = status_route_contract.ResponseBudget.base_budget,
         },
         .{
             .path = "/test",
             .methods = &.{.get},
             .query_params = &.{},
             .response_kind = .status_json,
+            .base_budget = status_route_contract.ResponseBudget.base_budget,
         },
     };
 
@@ -208,6 +212,7 @@ test "validateRouteTable rejects empty methods" {
             .methods = &.{},
             .query_params = &.{},
             .response_kind = .status_json,
+            .base_budget = status_route_contract.ResponseBudget.base_budget,
         },
     };
 
@@ -227,6 +232,7 @@ test "validateRouteTable rejects empty query param name" {
                 },
             },
             .response_kind = .status_json,
+            .base_budget = status_route_contract.ResponseBudget.base_budget,
         },
     };
 
@@ -250,6 +256,7 @@ test "validateRouteTable rejects duplicate query params" {
                 },
             },
             .response_kind = .status_json,
+            .base_budget = status_route_contract.ResponseBudget.base_budget,
         },
     };
 
@@ -269,6 +276,7 @@ test "validateRouteTable rejects empty query value" {
                 },
             },
             .response_kind = .status_json,
+            .base_budget = status_route_contract.ResponseBudget.base_budget,
         },
     };
 
@@ -291,6 +299,7 @@ test "validateRouteTable rejects duplicate query values" {
                 },
             },
             .response_kind = .status_json,
+            .base_budget = status_route_contract.ResponseBudget.base_budget,
         },
     };
 
@@ -328,4 +337,70 @@ test "/status.json route has status_json response kind" {
         "/status.json",
     ).?;
     try std.testing.expect(route.response_kind == .status_json);
+}
+
+// ============================================================================
+// Response budget tests (HULK03)
+// ============================================================================
+
+test "ResponseBudget constants are defined" {
+    try std.testing.expectEqual(
+        @as(usize, 4096),
+        status_route_contract.ResponseBudget.base_budget.max_body_bytes,
+    );
+    try std.testing.expectEqual(
+        @as(usize, 8192),
+        status_route_contract.ResponseBudget.diagnostic_budget.max_body_bytes,
+    );
+}
+
+test "ResponseBudget.forQuery selects base budget for non-diagnostic" {
+    const budget = status_route_contract.ResponseBudget.forQuery(false);
+    try std.testing.expectEqual(
+        @as(usize, 4096),
+        budget.max_body_bytes,
+    );
+}
+
+test "ResponseBudget.forQuery selects diagnostic budget for diagnostic" {
+    const budget = status_route_contract.ResponseBudget.forQuery(true);
+    try std.testing.expectEqual(
+        @as(usize, 8192),
+        budget.max_body_bytes,
+    );
+}
+
+test "/status.json route has base budget of 4096" {
+    const route = status_route_contract.lookupRoute(
+        &status_route_contract.routes,
+        "/status.json",
+    ).?;
+    try std.testing.expectEqual(
+        @as(usize, 4096),
+        route.base_budget.max_body_bytes,
+    );
+}
+
+test "/status.json route has diagnostic budget of 8192" {
+    const route = status_route_contract.lookupRoute(
+        &status_route_contract.routes,
+        "/status.json",
+    ).?;
+    try std.testing.expect(route.diagnostic_budget != null);
+    try std.testing.expectEqual(
+        @as(usize, 8192),
+        route.diagnostic_budget.?.max_body_bytes,
+    );
+}
+
+test "status_json_route singleton has budgets" {
+    try std.testing.expectEqual(
+        @as(usize, 4096),
+        status_route_contract.status_json_route.base_budget.max_body_bytes,
+    );
+    try std.testing.expect(status_route_contract.status_json_route.diagnostic_budget != null);
+    try std.testing.expectEqual(
+        @as(usize, 8192),
+        status_route_contract.status_json_route.diagnostic_budget.?.max_body_bytes,
+    );
 }

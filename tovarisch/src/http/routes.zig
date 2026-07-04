@@ -2,6 +2,7 @@ const std = @import("std");
 const zig_c = std.c;
 const response = @import("response.zig");
 const status = @import("../status.zig");
+const status_response = @import("../status_response.zig");
 const metrics = @import("../metrics.zig");
 const metrics_state = @import("../metrics_state.zig");
 const server = @import("server.zig");
@@ -112,7 +113,61 @@ pub fn handleHealthz(fd: i32, _: *anyopaque) !void {
 
 /// Status handler - returns full status JSON with BFD, config, and live BGP state.
 /// When include_network_diag is true, includes the network_diag field.
+///
+/// This handler uses the route contract's response budget to bound memory usage.
+/// On budget overflow or allocation failure, returns an internal error response.
 pub fn handleStatus(fd: i32, state: *anyopaque, include_network_diag: bool) !void {
+    // Cast opaque state to ServeContext to get BFD runtime, config check, and BGP state.
+    const ctx = @as(*server.ServeContext, @ptrCast(@alignCast(state)));
+
+    // Select the appropriate budget from the route contract
+    const budget = status_route_contract.ResponseBudget.forQuery(include_network_diag);
+
+    // Use a fixed buffer allocator bounded by the route budget
+    var fixed_buf: [16384]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&fixed_buf);
+    const fba_allocator = fba.allocator();
+
+    // Build status inputs
+    const inputs = status.RuntimeStatusInputs{
+        .bfd_runtime = ctx.bfd_runtime,
+        .config_check = ctx.config_check,
+        .bgp_result = ctx.bgp_result,
+        .network_diag_config = ctx.network_diag_config,
+        .lab_config = ctx.lab_config,
+        .lab_event_emitter = ctx.lab_event_emitter,
+    };
+
+    // Parse query for wantsNetworkDiag
+    const query = @import("../status_query.zig").StatusQuery.parse(
+        if (include_network_diag) "include=network_diag" else "",
+    );
+
+    // Render with budget enforcement
+    const response_or_err = status_response.renderStatusOwnedWithBudget(
+        fba_allocator,
+        inputs,
+        query,
+        budget,
+    );
+
+    // Handle result - no partial JSON is exposed as success on error
+    const owned_response = response_or_err catch {
+        // On budget overflow or allocation failure, return internal error.
+        // No partial JSON is exposed as success.
+        try response.writeSimpleJsonFd(fd, 500, response.Errors.internal_error);
+        return;
+    };
+
+    defer owned_response.deinit(fba_allocator);
+    try response.writeSimpleJsonFd(fd, 200, owned_response.body);
+}
+
+/// Status handler - returns full status JSON with BFD, config, and live BGP state.
+/// When include_network_diag is true, includes the network_diag field.
+/// NOTE: This is the legacy handler that uses fixed-size buffers.
+/// Use the budget-aware handleStatus for new code.
+pub fn handleStatusLegacy(fd: i32, state: *anyopaque, include_network_diag: bool) !void {
     // Cast opaque state to ServeContext to get BFD runtime, config check, and BGP state.
     const ctx = @as(*server.ServeContext, @ptrCast(@alignCast(state)));
 

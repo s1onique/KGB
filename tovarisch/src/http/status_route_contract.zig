@@ -35,6 +35,30 @@ pub const ResponseKind = enum(u8) {
     status_json,
 };
 
+/// Response budget metadata for a route.
+///
+/// Defines the maximum response body size for a given request context.
+/// Used by the HTTP adapter to allocate appropriately-sized buffers and
+/// to detect budget overflow before returning partial JSON.
+pub const ResponseBudget = struct {
+    /// Maximum response body size in bytes.
+    max_body_bytes: usize,
+
+    /// Base budget for base status response (no network_diag).
+    /// Approximately 4KB covers typical status JSON without diagnostics.
+    pub const base_budget = ResponseBudget{ .max_body_bytes = 4096 };
+
+    /// Diagnostic budget for network_diag response.
+    /// Larger to accommodate extended interface stats, routes, and TCP socket data.
+    /// Approximately 8KB covers typical network_diag JSON.
+    pub const diagnostic_budget = ResponseBudget{ .max_body_bytes = 8192 };
+
+    /// Helper to select budget based on whether network diagnostics are requested.
+    pub fn forQuery(include_network_diag: bool) ResponseBudget {
+        return if (include_network_diag) diagnostic_budget else base_budget;
+    }
+};
+
 /// Route contract definition.
 pub const RouteContract = struct {
     /// The route path (e.g., "/status.json").
@@ -48,6 +72,15 @@ pub const RouteContract = struct {
 
     /// The response kind for this route.
     response_kind: ResponseKind,
+
+    /// Base response budget for this route.
+    /// Used when no diagnostic query params are specified.
+    base_budget: ResponseBudget,
+
+    /// Diagnostic response budget for this route.
+    /// Used when diagnostic query params (e.g., include=network_diag) are specified.
+    /// Null if this route does not support diagnostics.
+    diagnostic_budget: ?ResponseBudget = null,
 };
 
 /// Compile-time validation error types.
@@ -222,6 +255,8 @@ pub const routes = blk: {
                 },
             },
             .response_kind = .status_json,
+            .base_budget = ResponseBudget.base_budget,
+            .diagnostic_budget = ResponseBudget.diagnostic_budget,
         },
     };
 
