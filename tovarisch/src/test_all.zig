@@ -242,6 +242,8 @@ test { std.testing.refAllDecls(@import("bgp/status.zig")); }
 // BGP snapshot budget/state hardening (ACT-TOVARISCH-ZIG-HULK14)
 test { std.testing.refAllDecls(@import("bgp/snapshot.zig")); }
 test { std.testing.refAllDecls(@import("bgp/snapshot_tests.zig")); }
+// BGP/BFD budget contract tests (ACT-TOVARISCH-ZIG-HULK17R2)
+test { std.testing.refAllDecls(@import("bgp/budget_contract_tests.zig")); }
 
 // BGP reconnect/backoff lifecycle tests
 test { std.testing.refAllDecls(@import("bgp/reconnect_lifecycle.zig")); }

@@ -6,10 +6,16 @@
 //
 // KEY CONSTRAINT: This module does NOT perform network I/O.
 // Status rendering is purely derived from the bundle's immutable config state.
+//
+// Budget Contract:
+// - BgpSnapshotBudget constrains the size of BGP diagnostic data
+// - BgpPeerState is a closed enum ensuring exhaustive FSM state handling
 
 const std = @import("std");
 const serve_integration = @import("serve_integration.zig");
 const passive_listener = @import("passive_listener.zig");
+const session_status = @import("session_status.zig");
+const snapshot = @import("snapshot.zig");
 
 /// BGP check status enum (mirrors status.CheckStatus).
 pub const CheckStatus = enum {
@@ -52,10 +58,16 @@ pub const BgpStatusState = union(enum) {
         updates_sent: u64,
         /// Total prefixes encoded into UPDATE NLRI across this session/export run
         nlri_sent_count: usize,
-        fsm_state: []const u8,
+        /// FSM state as closed enum (not stringly typed).
+        /// This ensures exhaustive handling of all BGP peer states.
+        fsm_state: snapshot.BgpPeerState,
         peer_address: [4]u8,
-        peer_as: u16,
-        local_as: u16,
+        /// Peer's AS number (supports 4-byte ASNs per RFC 6793).
+        /// Widened from u16 to u32 per HULK17R.
+        peer_as: u32,
+        /// Our local AS number (supports 4-byte ASNs per RFC 6793).
+        /// Widened from u16 to u32 per HULK17R.
+        local_as: u32,
         last_error: ?[]const u8,
         messages_sent: u64,
         messages_received: u64,
@@ -125,7 +137,7 @@ pub fn buildBgpCheckInto(
                 return .{ .name = "bgp", .status = .warn, .detail = detail };
             }
 
-            if (std.mem.eql(u8, cfg.fsm_state, "established")) {
+            if (cfg.fsm_state == .established) {
                 // Established FSM always outranks zero-prefix warning.
                 // Live BGP connectivity is more important than prefix advertisement.
                 if (cfg.configured_prefix_count > 0) {
@@ -178,6 +190,22 @@ pub fn statusStateFromLoadResult(result: serve_integration.BgpLoadResult) BgpSta
     }
 }
 
+/// Map from internal SessionState to closed BgpPeerState for status reporting.
+/// This ensures all external-facing BGP state uses the bounded snapshot contract.
+pub fn mapSessionStateToBgpPeerState(sess_state: session_status.SessionState) snapshot.BgpPeerState {
+    return switch (sess_state) {
+        .idle => .idle,
+        .connect => .connect,
+        // SessionState has no 'active' state - BGP FSM differs from snapshot enum.
+        .open_sent => .open_sent,
+        .open_confirm => .open_confirm,
+        .established => .established,
+        // Internal states that shouldn't reach status (failed/stopped)
+        // are mapped to unknown for safety.
+        .failed, .stopped => .unknown,
+    };
+}
+
 pub fn deriveStatusStateFromBundle(bundle: ?*serve_integration.BgpServeBundle) BgpStatusState {
     if (bundle == null) return .no_config;
 
@@ -203,7 +231,8 @@ pub fn deriveStatusStateFromBundle(bundle: ?*serve_integration.BgpServeBundle) B
                 return .{ .runtime_failed = .{ .message = err_msg } };
             }
 
-            const fsm_state = @tagName(sess_status.state);
+            // Map to closed enum - ensures exhaustive handling of all FSM states.
+            const fsm_state = mapSessionStateToBgpPeerState(sess_status.state);
             var listener_state = passive_listener.ListenerState.disabled;
             var listener_error: ?[]const u8 = null;
 

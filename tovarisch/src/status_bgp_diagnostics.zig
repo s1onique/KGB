@@ -17,6 +17,21 @@
 const std = @import("std");
 const bgp_status = @import("bgp/status.zig");
 const bgp_serve = @import("cli/bgp_serve.zig");
+const bgp_snapshot = @import("bgp/snapshot.zig");
+
+/// Convert BgpPeerState enum to string for JSON output.
+/// This bridges the closed enum contract to external string representation.
+fn bgpPeerStateToString(state: bgp_snapshot.BgpPeerState) []const u8 {
+    return switch (state) {
+        .idle => "idle",
+        .connect => "connect",
+        .active => "active",
+        .open_sent => "open_sent",
+        .open_confirm => "open_confirm",
+        .established => "established",
+        .unknown => "unknown",
+    };
+}
 
 /// BGP runtime diagnostics for machine-readable access.
 /// This enables lab verification of reconnect_count via HTTP /status.json.
@@ -59,7 +74,7 @@ pub fn deriveBgpDiagnostics(state: bgp_status.BgpStatusState) BgpDiagnostics {
         },
         .configured => |cfg| {
             return .{
-                .state = cfg.fsm_state,
+                .state = bgpPeerStateToString(cfg.fsm_state),
                 // Use persisted reconnect_count from bundle - this survives recovery.
                 .reconnect_count = cfg.reconnect_count,
                 .last_socket_error = cfg.last_socket_error,

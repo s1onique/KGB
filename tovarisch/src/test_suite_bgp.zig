@@ -48,6 +48,7 @@ const _bgp_status = @import("bgp/status.zig");
 // BGP snapshot budget/state hardening (ACT-TOVARISCH-ZIG-HULK14)
 const _bgp_snapshot = @import("bgp/snapshot.zig");
 const _bgp_snapshot_tests = @import("bgp/snapshot_tests.zig");
+const _bgp_budget_contract_tests = @import("bgp/budget_contract_tests.zig");
 
 // BGP hold timer expiry recovery tests (this ACT)
 const _bgp_reconnect_hold_timer_tests = @import("bgp/reconnect_hold_timer_tests.zig");
@@ -97,6 +98,7 @@ test { std.testing.refAllDecls(@import("bgp/status.zig")); }
 // BGP snapshot budget/state hardening (ACT-TOVARISCH-ZIG-HULK14)
 test { std.testing.refAllDecls(@import("bgp/snapshot.zig")); }
 test { std.testing.refAllDecls(@import("bgp/snapshot_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/budget_contract_tests.zig")); }
 
 // BGP hold timer expiry recovery tests (this ACT)
 test { std.testing.refAllDecls(@import("bgp/reconnect_hold_timer_tests.zig")); }
