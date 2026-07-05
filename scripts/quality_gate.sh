@@ -134,6 +134,7 @@ required=(
   scripts/verify_workflow_release_safety.sh
   scripts/verify_workflow_release_safety.py
   docs/architecture/tovarisch-effect-boundary-register.md
+  docs/architecture/tovarisch-total-parser-register.md
 )
 
 for path in "${required[@]}"; do
@@ -258,6 +259,14 @@ python3 scripts/verify_effect_boundaries.py
 echo "[gate] checking functional core / effect boundary self-test"
 
 python3 scripts/verify_effect_boundaries.py --self-test
+
+echo "[gate] checking total parser / no-panic external input discipline (HULK21)"
+
+python3 scripts/verify_total_parsers.py
+
+echo "[gate] checking total parser verifier self-test (HULK21)"
+
+python3 scripts/verify_total_parsers.py --self-test
 
 echo "[gate] checking shell inventory consistency"
 

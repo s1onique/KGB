@@ -322,9 +322,16 @@ fn toCString(path: []const u8, buf: *[4096]u8) error{PathTooLong}![*:0]const u8 
     return @as([*:0]const u8, @ptrCast(buf));
 }
 
-pub fn trimAndClone(allocator: std.mem.Allocator, content: []const u8) []u8 {
+/// Parse error for trimAndClone
+pub const TrimCloneError = error{OutOfMemory};
+
+/// Trim whitespace and clone a string into an owned allocation.
+///
+/// MemoryOwnership: caller provides allocator; returns owned slice.
+/// Caller must free the returned slice.
+pub fn trimAndClone(allocator: std.mem.Allocator, content: []const u8) TrimCloneError![]u8 {
     const trimmed = std.mem.trim(u8, content, " \t\r\n");
-    return allocator.dupe(u8, trimmed) catch @panic("OOM");
+    return allocator.dupe(u8, trimmed);
 }
 
 // ============================================================================
@@ -378,14 +385,14 @@ test "ReadConfig default max_bytes" {
 
 test "trimAndClone removes whitespace" {
     const allocator = std.testing.allocator;
-    const result = trimAndClone(allocator, "  hello \n");
+    const result = try trimAndClone(allocator, "  hello \n");
     defer allocator.free(result);
     try std.testing.expectEqualStrings("hello", result);
 }
 
 test "trimAndClone handles empty after trim" {
     const allocator = std.testing.allocator;
-    const result = trimAndClone(allocator, "   \n\t  ");
+    const result = try trimAndClone(allocator, "   \n\t  ");
     defer allocator.free(result);
     try std.testing.expectEqualStrings("", result);
 }

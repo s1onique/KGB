@@ -48,6 +48,9 @@ const RECONNECT_MAX_MS: u64 = serve_integration.DEFAULT_RECONNECT_MAX_MS;
 
 /// Format peer address as string for logging.
 fn formatPeerAddr(addr: [4]u8, buf: *[32]u8) []const u8 {
+    // Buffer is 32 bytes; IPv4 address needs at most 15 + null = 16 bytes.
+    // This invariant is guaranteed by the fixed-size buffer.
+    std.debug.assert(buf.len >= 16);
     const result = std.fmt.bufPrint(buf, "{}.{}.{}.{}", .{
         addr[0],
         addr[1],
