@@ -59,14 +59,8 @@ STATEFUL_ADAPTER_MODULES = {
 
 
 # DEFERRED modules: Known partial behavior, reports but doesn't fail
-# bgp/runtime.zig: unreachable in formatPeerAddr (line 56) is defensive
-#   - Formats fixed-size [4]u8 peer address to fixed 32-byte buffer
-#   - IPv4 needs at most 16 bytes; buffer is 32 bytes
-#   - catch unreachable handles theoretically impossible fmt error
-#   - This is logging infrastructure, not external input parsing
-DEFERRED_MODULES = {
-    "bgp/runtime.zig",
-}
+# No DEFERRED modules - all external-input parsers are total
+DEFERRED_MODULES = set()
 
 
 # Combined registry: all modules that should be checked

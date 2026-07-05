@@ -47,17 +47,22 @@ const BGP_LOOP_INTERVAL_MS: u64 = 100;
 const RECONNECT_MAX_MS: u64 = serve_integration.DEFAULT_RECONNECT_MAX_MS;
 
 /// Format peer address as string for logging.
-fn formatPeerAddr(addr: [4]u8, buf: *[32]u8) []const u8 {
+/// Returns the formatted string on success, or an error if the buffer is too small.
+/// This function is fallible to satisfy the total parser requirement.
+pub const PeerAddrFormatError = error{BufferTooSmall};
+
+/// Format peer address as string for logging.
+pub fn formatPeerAddr(addr: [4]u8, buf: *[32]u8) PeerAddrFormatError![]const u8 {
     // Buffer is 32 bytes; IPv4 address needs at most 15 + null = 16 bytes.
-    // This invariant is guaranteed by the fixed-size buffer.
-    std.debug.assert(buf.len >= 16);
-    const result = std.fmt.bufPrint(buf, "{}.{}.{}.{}", .{
+    // The error return handles the theoretical case of undersized buffers.
+    return std.fmt.bufPrint(buf, "{}.{}.{}.{}", .{
         addr[0],
         addr[1],
         addr[2],
         addr[3],
-    }) catch unreachable;
-    return result;
+    }) catch |err| switch (err) {
+        error.NoSpaceLeft => return error.BufferTooSmall,
+    };
 }
 
 /// Write a BGP log record directly to stdout using c.write.
@@ -79,8 +84,9 @@ pub fn bgpRuntimeThread(bundle: *serve_integration.BgpServeBundle) void {
     {
         var log_buf = logging.BufferedWriter.init();
         var peer_addr_buf: [32]u8 = undefined;
+        const peer_addr_str = formatPeerAddr(bundle.sess.config.peer_address, &peer_addr_buf) catch "<peer-addr-error>";
         logging.emit(.bgp_connected, &log_buf, &.{
-            .{ .name = "peer", .value = logging.FieldValue{ .string = formatPeerAddr(bundle.sess.config.peer_address, &peer_addr_buf) } },
+            .{ .name = "peer", .value = logging.FieldValue{ .string = peer_addr_str } },
         }) catch return;
         bgpLogToStdout(log_buf.slice());
     }
@@ -155,9 +161,10 @@ pub fn bgpRuntimeThread(bundle: *serve_integration.BgpServeBundle) void {
                 {
                     var log_buf = logging.BufferedWriter.init();
                     var peer_addr_buf: [32]u8 = undefined;
+                    const peer_addr_str = formatPeerAddr(accept_result.peer_address, &peer_addr_buf) catch "<peer-addr-error>";
                     logging.emit(.bgp_connected, &log_buf, &.{
                         .{ .name = "detail", .value = logging.FieldValue{ .string = "passive connection accepted" } },
-                        .{ .name = "peer", .value = logging.FieldValue{ .string = formatPeerAddr(accept_result.peer_address, &peer_addr_buf) } },
+                        .{ .name = "peer", .value = logging.FieldValue{ .string = peer_addr_str } },
                     }) catch break;
                     bgpLogToStdout(log_buf.slice());
                 }

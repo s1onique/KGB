@@ -161,12 +161,9 @@ These modules have total external APIs but may use medium-risk patterns internal
 
 ## DEFERRED Modules
 
-### bgp/runtime.zig
-- **Issue**: Defensive `unreachable` in `formatPeerAddr()` (line 59)
-- **Severity**: LOW - defensive formatting, not external input parsing
-- **Rationale**: Formats fixed-size `[4]u8` peer address to fixed 32-byte buffer; IPv4 needs max 16 bytes
-- **Note**: `catch unreachable` handles theoretically impossible fmt error
-- **Tracking**: HULK21R2-DEFER-001
+**Current DEFERRED count: 0**
+
+All external-input parser modules in tovarisch are now total.
 
 ---
 
@@ -178,7 +175,6 @@ These modules have total external APIs but may use medium-risk patterns internal
 | `.?` after null check | bfd/status.zig, ss_parser.zig | Internal status computation only |
 | `else => error` | bgp/frame_decode.zig | Explicit unknown handling |
 | `@intCast` with bounds | net/*.zig, bfd/*.zig | Prior range validation |
-| Defensive unreachable | bgp/runtime.zig:59 | Fixed buffer, theoretically impossible |
 
 ---
 

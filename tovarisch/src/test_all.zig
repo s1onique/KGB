@@ -249,6 +249,7 @@ test { std.testing.refAllDecls(@import("bgp/budget_contract_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/reconnect_lifecycle.zig")); }
 test { std.testing.refAllDecls(@import("bgp/backoff_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/lifecycle_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/runtime_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/bgp_reconnect_regression_tests.zig")); }
 
 // BGP hold timer expiry recovery tests (this ACT)
