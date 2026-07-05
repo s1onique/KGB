@@ -88,6 +88,7 @@ PATTERNS = {
     "python": [
         (r'\bsubprocess\b', "subprocess module"),
         (r'subprocess\.(run|Popen|call|check_output|CalledProcessError)\s*\(', "subprocess call"),
+        (r'\bre\b', "re module"),
         (r'\bos\.system\s*\(', "os.system()"),
         (r'\bos\.popen\s*\(', "os.popen()"),
     ],
