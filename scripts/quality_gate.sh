@@ -22,6 +22,12 @@ echo "[gate] checking memory ownership hygiene in status/request paths"
 echo "[gate] checking memory ownership hygiene sentinel self-test"
 ./scripts/check_memory_ownership.sh --self-test
 
+echo "[gate] checking allocation pattern gate (HULK18: enforcing)"
+bash scripts/check_allocation_patterns.sh
+
+echo "[gate] checking allocation pattern gate self-test (HULK18)"
+bash scripts/check_allocation_patterns.sh --self-test
+
 echo "[gate] checking Zig memory copy safety hygiene"
 ./scripts/check_zig_memory_copy_safety.py
 

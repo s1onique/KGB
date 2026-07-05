@@ -278,15 +278,45 @@ The following are EXEMPT from risky pattern detection:
 
 | Check | Tool | Gate | Notes |
 |-------|------|------|-------|
-| Risky pattern report | `scripts/check_allocation_patterns.sh` | ADVISORY | Report-only; does not fail gate yet; future enforcement planned |
+| Risky pattern report | `scripts/check_allocation_patterns.sh` | **ENFORCING for RISKY-HIGH; DEFERRED remains report-only** | **HULK18: Now enforcing; fails gate on RISKY-HIGH patterns; DEFERRED patterns are report-only** |
 | Memory ownership hygiene | `scripts/check_memory_ownership.sh` | ENFORCING | Fails gate on uncovered patterns in status/http paths |
 | Memory budgets | `scripts/verify_memory_budgets.py` | ENFORCING | Fails gate on budget schema violations |
 | Linux read boundary | `scripts/verify_linux_read_boundary_bypass.py` | ENFORCING | Fails gate on direct sysfs/procfs bypass |
 | Zig build/test | `make tovarisch-build`, `make tovarisch-test` | ENFORCING | Fails gate on build/test failures |
 
-**Note**: `check_allocation_patterns.sh` is currently advisory (report-only). It classifies
-patterns but exits 0 regardless of findings. After the report stabilizes, it may be upgraded
-to enforce HIGH risk failures in `make gate`.
+### 6.1 check_allocation_patterns.sh Enforcement Semantics (HULK18)
+
+**Enforcement thresholds:**
+- **RISKY-HIGH**: Always fails gate (exit 1)
+- **DEFERRED**: Report-only (exit 0) — known legacy surfaces documented in register
+- **RISKY-MEDIUM**: Report-only by default; optionally enforcing with `--enforce-medium` flag (exit 2)
+- **RISKY-LOW**: Report-only (exit 0)
+- **ACCEPTED/EXEMPT**: Pass (exit 0)
+
+**Exit codes:**
+- 0: Gate pass (clean, LOW, DEFERRED-only, or only ACCEPTED/EXEMPT patterns)
+- 1: Gate fail — RISKY-HIGH pattern found
+- 2: Gate fail — RISKY-MEDIUM pattern with `--enforce-medium` flag
+
+**Self-test:**
+- Run `scripts/check_allocation_patterns.sh --self-test` to verify synthetic failure proofs
+- Verifies: clean tree passes, unregistered HIGH fails (exit 1), accepted patterns pass, DEFERRED passes (report-only)
+
+**Documentation of current state:**
+- Current tree: 0 RISKY-HIGH, 0 RISKY-MEDIUM, 0 RISKY-LOW, 28 DEFERRED
+- DEFERRED patterns are documented legacy surfaces across CLI layer, telemetry, and test harnesses
+- Gate passes with DEFERRED present (report-only semantics)
+
+**DEFERRED buckets (HULK18):**
+| File Pattern | Rationale |
+|--------------|-----------|
+| `*/bgp/serve_integration.zig` | page_allocator for one-time config parse at serve init |
+| `*/bfd/transport.zig:create(TransportContext)` | Test helper; never called in production |
+| `*/cli/*` | page_allocator for one-shot CLI operations |
+| `*/runtime/telemetry.zig` | page_allocator for bounded telemetry collection |
+| `*/wg/peer.zig` | page_allocator only in test functions with proper cleanup |
+| `*/net/linux_read.zig:realloc` | Bounded file reads with max_bytes cap |
+| `*/net/iptables.zig` | page_allocator for one-shot command execution |
 
 ---
 

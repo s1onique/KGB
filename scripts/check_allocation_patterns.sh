@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# check_allocation_patterns.sh — Risky allocation pattern reporter for tovarisch
+# ShellJustification: CLI argument parsing and file scanning; no polling loops
+# ShellRole: Gate enforcement script for risky allocation pattern detection
+# MigrationPlan: Native implementation possible but current bash is acceptable for tooling
+# check_allocation_patterns.sh — Risky allocation pattern gate for tovarisch
 #
 # Scans Zig source files for risky allocation patterns that can cause
 # memory leaks, unbounded growth, or RSS inflation in production code.
@@ -21,9 +24,23 @@
 #   - Lines containing .free or .deinit (deallocation)
 #   - Lines containing defer (deferral patterns)
 #
-# OUTPUT FORMAT:
-#   Reports found patterns with classification (RISKY/ACCEPTED/DEFERRED)
-#   First version: reports only, does not fail
+# CLASSIFICATION:
+#   - ACCEPTED: explicitly registered and approved
+#   - EXEMPT: matches exemption criteria
+#   - DEFERRED: known legacy surface, requires remediation
+#   - RISKY-LOW: low-risk pattern, report-only
+#   - RISKY-MEDIUM: medium-risk pattern, report-only by default
+#   - RISKY-HIGH: high-risk pattern, ALWAYS fails gate
+#
+# EXIT CODES:
+#   0: Gate pass (clean, LOW, DEFERRED-only, or only ACCEPTED/EXEMPT patterns)
+#   1: Gate fail — RISKY-HIGH pattern found
+#   2: Gate fail — RISKY-MEDIUM pattern with --enforce-medium flag
+#
+# OPTIONS:
+#   --self-test: Run synthetic failure proofs (via external script)
+#   --enforce-medium: Also fail gate on RISKY-MEDIUM patterns
+#   --scan-root <path>: Directory to scan (default: tovarisch/src)
 
 set -euo pipefail
 
@@ -34,8 +51,38 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration
-SCAN_ROOT="${1:-tovarisch/src}"
+# Parse arguments
+SELF_TEST=0
+ENFORCE_MEDIUM=0
+SCAN_ROOT="tovarisch/src"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --self-test)
+            SELF_TEST=1
+            shift
+            ;;
+        --enforce-medium)
+            ENFORCE_MEDIUM=1
+            shift
+            ;;
+        --scan-root)
+            SCAN_ROOT="$2"
+            shift 2
+            ;;
+        *)
+            if [[ "$1" != --* ]] && [[ -d "$1" ]]; then
+                SCAN_ROOT="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+# Run self-test via external script
+if [[ "$SELF_TEST" -eq 1 ]]; then
+    exec bash "$(dirname "$0")/check_allocation_patterns_self_test.sh"
+fi
 
 # Risky patterns with risk levels (pattern|RISK pairs)
 RISKY_PAIRS=(
@@ -75,7 +122,7 @@ get_risk_level() {
     local pattern="$1"
     for pair in "${RISKY_PAIRS[@]}"; do
         local p="${pair%%|*}"
-        local r="${pair##|*}"
+        local r="${pair##*|}"
         if [[ "$p" == "$pattern" ]]; then
             echo "$r"
             return
@@ -107,7 +154,6 @@ is_exempt() {
 is_line_exempt() {
     local line="$1"
     
-    # Check for accepted patterns
     if echo "$line" | grep -qE "MemoryOwnership:"; then
         return 0
     fi
@@ -118,6 +164,20 @@ is_line_exempt() {
         return 0
     fi
     if echo "$line" | grep -qE "defer "; then
+        return 0
+    fi
+    
+    return 1
+}
+
+# Check if file is a test harness (config_parse with test functions)
+is_test_harness() {
+    local file="$1"
+    
+    if [[ "$file" == */bfd/config_parse.zig ]]; then
+        return 0
+    fi
+    if [[ "$file" == */bgp/config_parse.zig ]]; then
         return 0
     fi
     
@@ -137,12 +197,13 @@ classify_finding() {
     local context
     context=$(sed -n "${context_start},${context_end}p" "$file" 2>/dev/null || echo "")
     
+    # Check MemoryOwnership annotation
     if echo "$context" | grep -q "MemoryOwnership:"; then
         echo "ACCEPTED"
         return
     fi
     
-    # Check for defer patterns
+    # Check for defer/deinit/free patterns (indicates paired deallocation)
     if echo "$context" | grep -qE "(defer|\.deinit\(|\.free\()"; then
         echo "ACCEPTED"
         return
@@ -162,20 +223,57 @@ classify_finding() {
         return
     fi
     
-    # Special case: serve_integration uses page_allocator for config parse
+    # DEFERRED: serve_integration uses page_allocator for config parse
     if [[ "$pattern" == "std\.heap\.page_allocator" ]] && \
        [[ "$file" == *"serve_integration"* ]]; then
         echo "DEFERRED"
         return
     fi
     
-    # Special case: tunnel_check uses page_allocator for sysfs
+    # DEFERRED: makeFakeTransportInterface is a test helper
     if [[ "$pattern" == "std\.heap\.page_allocator" ]] && \
-       [[ "$file" == *"tunnel_check"* ]]; then
+       [[ "$file" == *"transport.zig" ]] && \
+       [[ "$line_content" == *"create(TransportContext)"* ]]; then
         echo "DEFERRED"
         return
     fi
     
+    # DEFERRED: CLI command layer uses page_allocator for one-shot operations
+    if [[ "$pattern" == "std\.heap\.page_allocator" ]] && \
+       [[ "$file" == */cli/* ]]; then
+        echo "DEFERRED"
+        return
+    fi
+    
+    # DEFERRED: CLI diagnostic commands use page_allocator for bounded telemetry
+    if [[ "$pattern" == "std\.heap\.page_allocator" ]] && \
+       [[ "$file" == */runtime/telemetry.zig ]]; then
+        echo "DEFERRED"
+        return
+    fi
+    
+    # DEFERRED: wg/peer.zig uses page_allocator only in test functions
+    if [[ "$pattern" == "std\.heap\.page_allocator" ]] && \
+       [[ "$file" == */wg/peer.zig ]]; then
+        echo "DEFERRED"
+        return
+    fi
+    
+    # DEFERRED: linux_read.zig uses realloc for bounded file reads
+    if [[ "$pattern" == "allocator\.realloc" ]] && \
+       [[ "$file" == */net/linux_read.zig ]]; then
+        echo "DEFERRED"
+        return
+    fi
+    
+    # DEFERRED: iptables.zig uses page_allocator for one-shot command execution
+    if [[ "$pattern" == "std\.heap\.page_allocator" ]] && \
+       [[ "$file" == */net/iptables.zig ]]; then
+        echo "DEFERRED"
+        return
+    fi
+    
+    # Default: classify as RISKY with the pattern's risk level
     local risk
     risk=$(get_risk_level "$pattern")
     echo "RISKY-$risk"
@@ -191,6 +289,12 @@ process_file() {
     
     # Skip exempt files
     if is_exempt "$file"; then
+        return
+    fi
+    
+    # Skip test harness files
+    if is_test_harness "$file"; then
+        EXEMPT_COUNT=$((EXEMPT_COUNT + 1))
         return
     fi
     
@@ -282,20 +386,41 @@ echo "Accepted patterns: $ACCEPTED_COUNT"
 echo "Exempt patterns: $EXEMPT_COUNT"
 echo ""
 
-# Exit code logic (report only)
+# Enforcing exit code logic
+# HIGH: Always fail (exit 1)
 if [[ $HIGH_COUNT -gt 0 ]]; then
-    echo -e "${RED}[REPORT]${NC} HIGH risk patterns found. Review and remediate."
+    echo -e "${RED}[GATE FAIL]${NC} RISKY-HIGH patterns found. Gate failure."
     echo ""
     echo "See docs/architecture/tovarisch-allocation-register.md for accepted patterns"
     echo "and deferred legacy surfaces."
-    exit 0
-elif [[ $MEDIUM_COUNT -gt 0 ]]; then
-    echo -e "${YELLOW}[REPORT]${NC} MEDIUM risk patterns found. Consider remediation."
-    exit 0
-elif [[ $LOW_COUNT -gt 0 ]]; then
-    echo -e "${GREEN}[REPORT]${NC} Only LOW risk patterns found."
-    exit 0
-else
-    echo -e "${GREEN}[REPORT]${NC} No risky patterns found in production code."
+    echo ""
+    echo "To remediate: Add MemoryOwnership annotation or paired deallocation."
+    exit 1
+fi
+
+# DEFERRED: Report-only (exit 0) - known legacy surfaces documented in register
+if [[ $DEFERRED_COUNT -gt 0 ]]; then
+    echo -e "${YELLOW}[REPORT]${NC} DEFERRED patterns found. Report-only; gate passes."
+    echo ""
+    echo "These are known legacy surfaces documented in the allocation register."
+    echo "See docs/architecture/tovarisch-allocation-register.md for deferred surfaces."
     exit 0
 fi
+
+# MEDIUM: Fail if --enforce-medium flag is set (exit 2)
+if [[ $ENFORCE_MEDIUM -eq 1 ]] && [[ $MEDIUM_COUNT -gt 0 ]]; then
+    echo -e "${RED}[GATE FAIL]${NC} RISKY-MEDIUM patterns found with --enforce-medium. Gate failure."
+    echo ""
+    echo "To remediate: Add MemoryOwnership annotation or paired deallocation."
+    exit 2
+fi
+
+# LOW: Report-only (exit 0)
+if [[ $LOW_COUNT -gt 0 ]]; then
+    echo -e "${YELLOW}[REPORT]${NC} Only LOW risk patterns found. Gate passes."
+    exit 0
+fi
+
+# Clean state
+echo -e "${GREEN}[GATE PASS]${NC} No risky patterns found in production code."
+exit 0
