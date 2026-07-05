@@ -54,7 +54,7 @@ pub fn readSomething() ![]const u8 {
         with open(linux_read_path, 'w') as f:
             f.write(clean_code)
         
-        # Test extract_module_name
+        # Test extract_module_name and classification
         extracted = extract_module_name(linux_read_path, src_root)
         if extracted == "net/linux_read.zig":
             passed += 1
@@ -63,6 +63,41 @@ pub fn readSomething() ![]const u8 {
         else:
             failed += 1
             msg = f"Expected 'net/linux_read.zig', got '{extracted}'"
+            errors.append(msg)
+            if verbose:
+                print(f"  FAIL: {msg}")
+        
+        # Also verify the file scans without errors and has correct classification
+        result = scan_file(linux_read_path, src_root)
+        if not result.errors:
+            passed += 1
+            if verbose:
+                print("  PASS: net/linux_read.zig scanned without errors")
+        else:
+            failed += 1
+            msg = f"Unexpected scan errors: {result.errors}"
+            errors.append(msg)
+            if verbose:
+                print(f"  FAIL: {msg}")
+        
+        if result.module == "net/linux_read.zig":
+            passed += 1
+            if verbose:
+                print("  PASS: scan result module is 'net/linux_read.zig'")
+        else:
+            failed += 1
+            msg = f"Expected module 'net/linux_read.zig', got '{result.module}'"
+            errors.append(msg)
+            if verbose:
+                print(f"  FAIL: {msg}")
+        
+        if result.classification == Classification.BOUNDARY_TOTAL:
+            passed += 1
+            if verbose:
+                print("  PASS: classification is BOUNDARY_TOTAL")
+        else:
+            failed += 1
+            msg = f"Expected BOUNDARY_TOTAL, got {result.classification}"
             errors.append(msg)
             if verbose:
                 print(f"  FAIL: {msg}")
@@ -114,13 +149,13 @@ pub fn parseValue(input: []const u8) !u32 {
         
         result = scan_file(comment_path, src_root)
         
-        if not result.has_failures:
+        if not result.errors and not result.has_failures:
             passed += 1
             if verbose:
-                print("  PASS: Comments ignored, no FAIL")
+                print("  PASS: Comments ignored, no errors, no FAIL")
         else:
             failed += 1
-            msg = "Comments should not trigger FAIL"
+            msg = "Comments should not trigger FAIL or errors"
             errors.append(msg)
             if verbose:
                 print(f"  FAIL: {msg}")
@@ -151,10 +186,10 @@ test "basic test" {
         result = scan_file(stateful_path, src_root)
         
         # @panic in test block should not cause failure for STATEFUL_ADAPTER
-        if not result.has_failures:
+        if not result.errors and not result.has_failures:
             passed += 1
             if verbose:
-                print("  PASS: @panic in test block ignored for STATEFUL_ADAPTER")
+                print("  PASS: @panic in test block ignored for STATEFUL_ADAPTER (no errors)")
         else:
             failed += 1
             msg = "@panic in test block should not cause FAIL for STATEFUL_ADAPTER"
@@ -166,7 +201,8 @@ test "basic test" {
         if verbose:
             print("\nScanner test 4b: Test blocks ignored for TOTAL modules")
         
-        total_path = os.path.join(status_dir, "net_private_ip.zig")
+        # Use real registered path net/private_ip.zig, not synthetic net_private_ip.zig
+        private_ip_path = os.path.join(net_dir, "private_ip.zig")
         total_code = '''
 // TOTAL module with @panic only in test block
 pub fn classifyIP(addr: []const u8) IpClass {
@@ -178,19 +214,43 @@ test "basic classification" {
     try std.testing.expect(classifyIP("127.0.0.1") == .private);
 }
 '''
-        with open(total_path, 'w') as f:
+        with open(private_ip_path, 'w') as f:
             f.write(total_code)
         
-        result = scan_file(total_path, src_root)
+        result = scan_file(private_ip_path, src_root)
         
         # @panic in test block should not cause failure for TOTAL
-        if not result.has_failures:
+        # Assert no scanner errors
+        if not result.errors and not result.has_failures:
             passed += 1
             if verbose:
-                print("  PASS: @panic in test block ignored for TOTAL")
+                print("  PASS: @panic in test block ignored for TOTAL (no errors)")
         else:
             failed += 1
             msg = "@panic in test block should not cause FAIL for TOTAL"
+            errors.append(msg)
+            if verbose:
+                print(f"  FAIL: {msg}")
+        
+        # Assert correct module and classification
+        if result.module == "net/private_ip.zig":
+            passed += 1
+            if verbose:
+                print("  PASS: module extracted as 'net/private_ip.zig'")
+        else:
+            failed += 1
+            msg = f"Expected module 'net/private_ip.zig', got '{result.module}'"
+            errors.append(msg)
+            if verbose:
+                print(f"  FAIL: {msg}")
+        
+        if result.classification == Classification.TOTAL:
+            passed += 1
+            if verbose:
+                print("  PASS: classification is TOTAL")
+        else:
+            failed += 1
+            msg = f"Expected classification TOTAL, got {result.classification}"
             errors.append(msg)
             if verbose:
                 print(f"  FAIL: {msg}")
