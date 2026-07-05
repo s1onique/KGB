@@ -57,8 +57,8 @@ DIRECT_ACCESS_PATTERNS = [
     (r'(sysfs_root|sysfs).*["\']/sys/class/net', 'sysfs path construction'),
 ]
 
-# Explicit allowlist for non-boundary file access
-ALLOWLIST_PATTERNS = [
+# Path-level allowlist patterns (files that are fully exempt)
+ALLOWLIST_PATH_PATTERNS = [
     # linux_read.zig itself (the boundary helper defines the paths)
     r'linux_read\.zig',
     # WireGuard keys - explicit allowlist
@@ -80,13 +80,21 @@ ALLOWLIST_PATTERNS = [
     # Linux stats tests
     r'linux_stats_tests\.zig',
     r'linux_interface_stats_tests\.zig',
-    # tunnel_check.zig defines DEFAULT_SYSFS_NET_PATH constant only;
-    # actual enumeration delegates to linux_interfaces.listInterfaces() (opendir/readdir)
-    r'tunnel_check\.zig',
     # metrics.zig defines constants, not doing direct reads
     r'metrics\.zig',
     # linux_interfaces.zig uses opendir/readdir for enumeration (allowed)
     r'linux_interfaces\.zig',
+]
+
+# File+line allowlist patterns (specific exceptions for known harmless content)
+# Tuples of (path_pattern, line_pattern)
+ALLOWLIST_FILE_LINE_PATTERNS = [
+    # tunnel_check.zig: DEFAULT_SYSFS_NET_PATH constant is harmless
+    # This allows the constant while still catching any direct /sys or /proc reads
+    (
+        r'^tovarisch/src/tunnel_check\.zig$',
+        r'DEFAULT_SYSFS_NET_PATH\s*=\s*"/sys/class/net"',
+    ),
 ]
 
 # Files that are known to do direct sysfs/procfs access (legacy, should be empty after HULK16)
@@ -99,11 +107,30 @@ LEGACY_FILES: dict = {
 }
 
 
-def is_allowlisted(file_path: str, line: str) -> bool:
-    """Check if a line matches an allowlist pattern."""
-    for pattern in ALLOWLIST_PATTERNS:
-        if re.search(pattern, file_path) or re.search(pattern, line):
+def is_path_allowlisted(file_path: str) -> bool:
+    """Check if a file path matches a path-level allowlist pattern."""
+    for pattern in ALLOWLIST_PATH_PATTERNS:
+        if re.search(pattern, file_path):
             return True
+    return False
+
+
+def is_file_line_allowlisted(file_path: str, line: str) -> bool:
+    """Check if a file+line matches a file+line allowlist pattern."""
+    for path_re, line_re in ALLOWLIST_FILE_LINE_PATTERNS:
+        if re.search(path_re, file_path) and re.search(line_re, line):
+            return True
+    return False
+
+
+def is_allowlisted(file_path: str, line: str) -> bool:
+    """Check if a line matches any allowlist pattern."""
+    # Check path-level allowlist
+    if is_path_allowlisted(file_path):
+        return True
+    # Check file+line allowlist
+    if is_file_line_allowlisted(file_path, line):
+        return True
     return False
 
 
