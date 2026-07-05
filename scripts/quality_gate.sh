@@ -133,6 +133,7 @@ required=(
   scripts/verify_github_no_force_push_ruleset.sh
   scripts/verify_workflow_release_safety.sh
   scripts/verify_workflow_release_safety.py
+  docs/architecture/tovarisch-effect-boundary-register.md
 )
 
 for path in "${required[@]}"; do
@@ -249,6 +250,14 @@ python3 scripts/verify_shell_containment.py
 echo "[gate] checking shell containment self-test"
 
 python3 scripts/verify_shell_containment.py --self-test
+
+echo "[gate] checking functional core / effect boundaries"
+
+python3 scripts/verify_effect_boundaries.py
+
+echo "[gate] checking functional core / effect boundary self-test"
+
+python3 scripts/verify_effect_boundaries.py --self-test
 
 echo "[gate] checking shell inventory consistency"
 
