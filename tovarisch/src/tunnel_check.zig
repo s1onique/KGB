@@ -1,6 +1,6 @@
 // tunnel_check.zig — Tunnel presence health check for status
 //
-// ACT: Add tunnel presence check to /status
+// ACT-TOVARISCH-ZIG-HULK16: Migrate to caller-provided allocator
 //
 // This module provides tunnel presence detection for the status check.
 // It does NOT validate:
@@ -25,7 +25,7 @@ pub const CheckStatus = status.CheckStatus;
 pub const DEFAULT_SYSFS_NET_PATH = "/sys/class/net";
 
 /// Static buffer for tunnel detail string.
-/// 
+///
 /// NOTE: This buffer is safe for the current single-threaded status-rendering model.
 /// The tunnel check is computed during getLocalChecks() which is called once per
 /// status rendering. If status rendering becomes concurrent, this must be revisited
@@ -53,7 +53,10 @@ var tunnel_detail_buf: [4096]u8 = undefined;
 /// Returns a Check with:
 /// - "ok" + tunnel names when detected (e.g., "detected tunnel interfaces: wg0, tun0")
 /// - "warn" + "no tunnel interfaces detected" when none found or sysfs unavailable
-pub fn getTunnelCheck(sysfs_net_path: []const u8) Check {
+///
+/// MemoryOwnership: Uses caller-provided allocator for interface list
+/// Deinit: linux_interfaces.freeInterfaceList(allocator, ifaces)
+pub fn getTunnelCheck(allocator: std.mem.Allocator, sysfs_net_path: []const u8) Check {
     var path_buf: [4096]u8 = undefined;
     const c_path = status.toCString(sysfs_net_path, &path_buf) orelse {
         // Path too long - treat as no tunnel detected (warn)
@@ -74,8 +77,8 @@ pub fn getTunnelCheck(sysfs_net_path: []const u8) Check {
         };
     }
 
-    // Enumerate all network interfaces
-    const ifaces = linux_interfaces.listInterfaces(std.heap.page_allocator, sysfs_net_path) catch {
+    // Enumerate all network interfaces using caller-provided allocator
+    const ifaces = linux_interfaces.listInterfaces(allocator, sysfs_net_path) catch {
         // Collection failed - treat as no tunnel detected (warn)
         return Check{
             .name = "tunnel",
@@ -83,7 +86,7 @@ pub fn getTunnelCheck(sysfs_net_path: []const u8) Check {
             .detail = "no tunnel interfaces detected",
         };
     };
-    defer linux_interfaces.freeInterfaceList(std.heap.page_allocator, ifaces);
+    defer linux_interfaces.freeInterfaceList(allocator, ifaces);
 
     // Find all tunnel interfaces using fixed-size array (no heap allocation needed)
     // Maximum of 32 tunnel interfaces detected - sufficient for any realistic scenario
@@ -115,9 +118,9 @@ pub fn getTunnelCheck(sysfs_net_path: []const u8) Check {
     };
 }
 
-/// Default tunnel check using DEFAULT_SYSFS_NET_PATH.
-pub fn getTunnelCheckDefault() Check {
-    return getTunnelCheck(DEFAULT_SYSFS_NET_PATH);
+/// Default tunnel check using caller-provided allocator.
+pub fn getTunnelCheckWithAllocator(allocator: std.mem.Allocator) Check {
+    return getTunnelCheck(allocator, DEFAULT_SYSFS_NET_PATH);
 }
 
 /// Builds a detail string listing detected tunnel interfaces.
@@ -161,46 +164,56 @@ fn buildTunnelDetail(buf: *[4096]u8, tunnel_names: []const []const u8) []const u
 test "buildTunnelDetail with single tunnel" {
     var buf: [4096]u8 = undefined;
     const tunnel_names = [_][]const u8{"wg0"};
-    const result = buildTunnelDetail(&buf, &tunnel_names);
+    const result = buildTunnelDetail(&buf, tunnel_names[0..]);
     try std.testing.expectEqualStrings("detected tunnel interfaces: wg0", result);
 }
 
 test "buildTunnelDetail with multiple tunnels" {
     var buf: [4096]u8 = undefined;
     const tunnel_names = [_][]const u8{ "wg0", "tun1", "tap0" };
-    const detail = buildTunnelDetail(&buf, &tunnel_names);
+    const detail = buildTunnelDetail(&buf, tunnel_names[0..]);
     try std.testing.expectEqualStrings("detected tunnel interfaces: wg0, tun1, tap0", detail);
 }
 
 test "buildTunnelDetail with empty list" {
     var buf: [4096]u8 = undefined;
     const tunnel_names: [0][]const u8 = .{};
-    const detail = buildTunnelDetail(&buf, &tunnel_names);
+    const detail = buildTunnelDetail(&buf, tunnel_names[0..]);
     try std.testing.expectEqualStrings("detected tunnel interfaces: ", detail);
 }
 
 test "getTunnelCheck returns warn for nonexistent path" {
-    // Use a path that definitely doesn't exist
-    const check = getTunnelCheck("/nonexistent/path/that/does/not/exist");
+    // Use std.heap.FixedBufferAllocator for Zig 0.16
+    var buf: [256]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const allocator = fba.allocator();
+
+    const check = getTunnelCheck(allocator, "/nonexistent/path/that/does/not/exist");
     try std.testing.expectEqualStrings("tunnel", check.name);
     try std.testing.expectEqual(CheckStatus.warn, check.status);
     try std.testing.expectEqualStrings("no tunnel interfaces detected", check.detail);
 }
 
 test "getTunnelCheck returns warn for path too long" {
+    var buf: [256]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const allocator = fba.allocator();
+
     // Create a path longer than 4096 characters
     var long_path: [4097]u8 = undefined;
     @memset(&long_path, 'a');
     long_path[4096] = 0;
 
-    const check = getTunnelCheck(long_path[0..4096]);
+    const check = getTunnelCheck(allocator, long_path[0..4096]);
     try std.testing.expectEqualStrings("tunnel", check.name);
     try std.testing.expectEqual(CheckStatus.warn, check.status);
     try std.testing.expectEqualStrings("no tunnel interfaces detected", check.detail);
 }
 
-test "getTunnelCheckDefault returns correct name" {
-    const check = getTunnelCheckDefault();
+test "getTunnelCheckWithAllocator returns correct name" {
+    var buf: [256]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const check = getTunnelCheckWithAllocator(fba.allocator());
     try std.testing.expectEqualStrings("tunnel", check.name);
 }
 
@@ -213,7 +226,7 @@ test "tunnel check detail format when tunnels present" {
     // When tunnel interfaces are detected, detail should include "detected tunnel interfaces:"
     var buf: [4096]u8 = undefined;
     const tunnel_names = [_][]const u8{"wg0", "wg1"};
-    const detail = buildTunnelDetail(&buf, &tunnel_names);
+    const detail = buildTunnelDetail(&buf, tunnel_names[0..]);
 
     // Verify it starts with the expected prefix
     try std.testing.expect(std.mem.startsWith(u8, detail, "detected tunnel interfaces:"));
@@ -225,6 +238,10 @@ test "tunnel check detail format when tunnels present" {
 }
 
 test "getTunnelCheck with fake sysfs containing wg0 returns ok" {
+    var buf: [256]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const allocator = fba.allocator();
+
     // Create a temporary directory with a fake "wg0" interface entry
     const test_dir = "/tmp/tovarisch_test_tunnel_12345";
     var path_buf: [4096]u8 = undefined;
@@ -241,7 +258,7 @@ test "getTunnelCheck with fake sysfs containing wg0 returns ok" {
     defer _ = std.c.rmdir(wg0_c_path);
 
     // Run getTunnelCheck with our fake sysfs directory
-    const check = getTunnelCheck(test_dir);
+    const check = getTunnelCheck(allocator, test_dir);
 
     // Assert the check has correct values
     try std.testing.expectEqualStrings("tunnel", check.name);
@@ -252,6 +269,10 @@ test "getTunnelCheck with fake sysfs containing wg0 returns ok" {
 }
 
 test "getTunnelCheck with multiple fake tunnels returns ok with all names" {
+    var alloc_buf: [4096]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&alloc_buf);
+    const allocator = fba.allocator();
+
     // Create a temporary directory with multiple fake tunnel interfaces
     const test_dir = "/tmp/tovarisch_test_multi_tunnel_12345";
     var path_buf: [4096]u8 = undefined;
@@ -271,7 +292,7 @@ test "getTunnelCheck with multiple fake tunnels returns ok with all names" {
     }
 
     // Run getTunnelCheck with our fake sysfs directory
-    const check = getTunnelCheck(test_dir);
+    const check = getTunnelCheck(allocator, test_dir);
 
     // Assert the check has correct values
     try std.testing.expectEqualStrings("tunnel", check.name);

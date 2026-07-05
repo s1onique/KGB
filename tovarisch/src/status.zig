@@ -100,6 +100,8 @@ const LOCAL_CHECKS_COUNT: usize = 9;
 
 // Scratch buffer for status rendering
 pub const StatusScratch = struct {
+    /// Allocator for status checks that need dynamic memory
+    allocator: std.mem.Allocator,
     bgp_detail: [BGP_DETAIL_BUF_SIZE]u8 = undefined,
     bfd_detail: [BFD_DETAIL_BUF_SIZE]u8 = undefined,
     checks: [LOCAL_CHECKS_COUNT]Check = undefined,
@@ -192,7 +194,7 @@ pub fn getLocalChecksWithBgpAndLab(
     scratch.checks[2] = config_check_injected;
     scratch.checks[3] = getStateDirCheck();
     scratch.checks[4] = http_check;
-    scratch.checks[5] = tunnel_check.getTunnelCheckDefault();
+    scratch.checks[5] = tunnel_check.getTunnelCheckWithAllocator(scratch.allocator);
 
     // WireGuard check: return "disabled" if lab toggle is set
     if (lab_config.disable_wg_checks) {
@@ -294,14 +296,16 @@ pub fn renderPayload(writer: anytype) !void {
     try renderPayloadWithBfd(writer, null);
 }
 
+// MemoryOwnership: page_allocator is bounded per call and released immediately after render.
 pub fn renderPayloadWithBfd(writer: anytype, bfd_runtime: ?*const bfd_status.BfdRuntime) !void {
-    var scratch = StatusScratch{};
+    var scratch = StatusScratch{ .allocator = std.heap.page_allocator };
     const s = buildStatusWithBfd(bfd_runtime, &scratch);
     try renderStatus(writer, s);
 }
 
+// MemoryOwnership: page_allocator is bounded per call and released immediately after render.
 pub fn renderPayloadWithContext(writer: anytype, inputs: RuntimeStatusInputs) !void {
-    var scratch = StatusScratch{};
+    var scratch = StatusScratch{ .allocator = std.heap.page_allocator };
     const s = buildStatusWithInputs(inputs, &scratch);
     try renderStatus(writer, s);
 }
@@ -373,7 +377,7 @@ pub fn renderPayloadWithContextAndDiag(
     allocator: std.mem.Allocator,
     include_network_diag: bool,
 ) !void {
-    var scratch = StatusScratch{};
+    var scratch = StatusScratch{ .allocator = allocator };
     const s = buildStatusWithInputs(inputs, &scratch);
 
     // Collect network diagnostics if requested

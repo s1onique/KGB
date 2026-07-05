@@ -223,7 +223,7 @@ test "two BGP scratch buffers are independent (no aliasing)" {
 // ============================================================================
 
 test "StatusScratch contains dedicated BFD and BGP detail buffers" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     
     // Verify the struct has the expected fields
     const snapshot = bfd_status.StatusSnapshot{
@@ -239,7 +239,7 @@ test "StatusScratch contains dedicated BFD and BGP detail buffers" {
 }
 
 test "getBfdCheck uses caller-provided buffer" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     
     const check = status.getBfdCheck(null, &scratch.bfd_detail);
     
@@ -249,7 +249,7 @@ test "getBfdCheck uses caller-provided buffer" {
 }
 
 test "getBgpCheck uses caller-provided buffer" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     
     const check = status.getBgpCheck(.no_config, &scratch.bgp_detail);
     
@@ -263,8 +263,8 @@ test "getBgpCheck uses caller-provided buffer" {
 // ============================================================================
 
 test "two independent StatusScratch contexts don't alias" {
-    var scratch1 = status.StatusScratch{};
-    var scratch2 = status.StatusScratch{};
+    var scratch1 = status.StatusScratch{ .allocator = std.heap.page_allocator };
+    var scratch2 = status.StatusScratch{ .allocator = std.heap.page_allocator };
 
     // Build checks with different BGP states
     const checks1 = status.getLocalChecksWithBgp(
@@ -344,7 +344,7 @@ test "repeated rendering with separate scratch is consistent" {
 // ============================================================================
 
 test "getLocalChecks returns slice to caller-owned scratch.checks" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const checks = status.getLocalChecksWithBgp(
         null,
         status.getDefaultConfigCheck(),
@@ -358,7 +358,7 @@ test "getLocalChecks returns slice to caller-owned scratch.checks" {
 }
 
 test "buildStatusWithInputs uses caller-provided scratch" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const s = status.buildStatusWithInputs(.{
         .bfd_runtime = null,
         .config_check = .no_config,
@@ -376,7 +376,7 @@ test "buildStatusWithInputs uses caller-provided scratch" {
 
 test "static checks have detail pointing to static strings" {
     // Process check should have immutable static detail
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const checks = status.getLocalChecksWithBgp(
         null,
         status.getDefaultConfigCheck(),

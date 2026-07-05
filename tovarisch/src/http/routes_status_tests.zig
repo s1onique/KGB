@@ -12,7 +12,7 @@ const bfd_status = @import("../bfd/status.zig");
 // --- Status handler response tests ---
 
 test "status handler response contains status payload" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const s = status.buildStatus(&scratch);
     try std.testing.expectEqualStrings("tovarisch", s.service);
     try std.testing.expect(s.checks.len > 0);

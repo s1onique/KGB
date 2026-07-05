@@ -105,7 +105,7 @@ pub fn freeTunnelSummarySnapshots(allocator: std.mem.Allocator, result: TunnelSu
 /// Failure to call freeTunnelSummarySnapshots() will cause memory growth
 /// on each heartbeat cycle (approximately 1-2KB per cycle per interface).
 pub fn collectTunnelSummaryWithStats(allocator: std.mem.Allocator, sysfs_root: []const u8) TunnelSummaryWithStats {
-    const stats = linux_interface_stats.collectInterfaceStats(allocator, sysfs_root) catch {
+    const stats = linux_interface_stats.collectInterfaceStats(allocator, sysfs_root, .sysfs_net) catch {
         // On collection failure, return zero summary (metrics will show warning)
         return .{ .summary = .{ .count = 0, .rx_bytes = 0, .tx_bytes = 0 }, .stats = &.{} };
     };
@@ -141,7 +141,7 @@ pub fn collectTunnelSummary(allocator: std.mem.Allocator, sysfs_root: []const u8
 /// Used by heartbeatThreadWithEvents to report emit status to lab events.
 pub fn emitHeartbeatToFdResult(uptime_seconds: u64) bool {
     // Get current status from the same derivation as /status
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const current_status = status.buildStatus(&scratch);
 
     // Collect tunnel summary using the same interface enumeration as /metrics.json

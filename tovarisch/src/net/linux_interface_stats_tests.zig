@@ -66,15 +66,16 @@ fn createIfaceWithStats(base: []const u8, iface: []const u8, rx_bytes: u64, tx_b
 
 test "collectInterfaceStats: returns two snapshots for eth0 and wg0 with valid stats" {
     const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_collector_test_both_valid";
+    const base = "/tmp/kgb_fixture/kgb_collector_test_both_valid";
 
+    makeDir("/tmp/kgb_fixture") catch {};
     try makeDir(base);
     defer deleteTree(base) catch {};
 
     try createIfaceWithStats(base, "eth0", 100, 200, 10, 20);
     try createIfaceWithStats(base, "wg0", 300, 400, 30, 40);
 
-    const snapshots = try collectInterfaceStats(allocator, base);
+    const snapshots = try collectInterfaceStats(allocator, base, .test_fixture);
     defer freeInterfaceStatsSnapshots(allocator, snapshots);
 
     try std.testing.expectEqual(@as(usize, 2), snapshots.len);
@@ -107,14 +108,15 @@ test "collectInterfaceStats: returns two snapshots for eth0 and wg0 with valid s
 
 test "collectInterfaceStats: snapshot names are allocator-owned copies" {
     const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_collector_test_owned";
+    const base = "/tmp/kgb_fixture/kgb_collector_test_owned";
 
+    makeDir("/tmp/kgb_fixture") catch {};
     try makeDir(base);
     defer deleteTree(base) catch {};
 
     try createIfaceWithStats(base, "eth0", 100, 200, 10, 20);
 
-    const snapshots = try collectInterfaceStats(allocator, base);
+    const snapshots = try collectInterfaceStats(allocator, base, .test_fixture);
     defer freeInterfaceStatsSnapshots(allocator, snapshots);
 
     try std.testing.expectEqual(@as(usize, 1), snapshots.len);
@@ -130,8 +132,9 @@ test "collectInterfaceStats: snapshot names are allocator-owned copies" {
 
 test "collectInterfaceStats: skips interface without statistics/ directory" {
     const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_collector_test_no_stats_dir";
+    const base = "/tmp/kgb_fixture/kgb_collector_test_no_stats_dir";
 
+    makeDir("/tmp/kgb_fixture") catch {};
     try makeDir(base);
     defer deleteTree(base) catch {};
 
@@ -145,7 +148,7 @@ test "collectInterfaceStats: skips interface without statistics/ directory" {
         try makeDir(wg0_path);
     }
 
-    const snapshots = try collectInterfaceStats(allocator, base);
+    const snapshots = try collectInterfaceStats(allocator, base, .test_fixture);
     defer freeInterfaceStatsSnapshots(allocator, snapshots);
 
     // Only eth0 should be included
@@ -159,8 +162,9 @@ test "collectInterfaceStats: skips interface without statistics/ directory" {
 
 test "collectInterfaceStats: skips interface with invalid counter file" {
     const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_collector_test_invalid_counter";
+    const base = "/tmp/kgb_fixture/kgb_collector_test_invalid_counter";
 
+    makeDir("/tmp/kgb_fixture") catch {};
     try makeDir(base);
     defer deleteTree(base) catch {};
 
@@ -183,7 +187,7 @@ test "collectInterfaceStats: skips interface with invalid counter file" {
         try writeFile(rx_bytes_path, "not_a_number\n");
     }
 
-    const snapshots = try collectInterfaceStats(allocator, base);
+    const snapshots = try collectInterfaceStats(allocator, base, .test_fixture);
     defer freeInterfaceStatsSnapshots(allocator, snapshots);
 
     // Only eth0 should be included
@@ -197,12 +201,13 @@ test "collectInterfaceStats: skips interface with invalid counter file" {
 
 test "collectInterfaceStats: returns empty list for empty directory" {
     const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_collector_test_empty";
+    const base = "/tmp/kgb_fixture/kgb_collector_test_empty";
 
+    makeDir("/tmp/kgb_fixture") catch {};
     try makeDir(base);
     defer deleteTree(base) catch {};
 
-    const snapshots = try collectInterfaceStats(allocator, base);
+    const snapshots = try collectInterfaceStats(allocator, base, .test_fixture);
     defer freeInterfaceStatsSnapshots(allocator, snapshots);
 
     try std.testing.expectEqual(@as(usize, 0), snapshots.len);
@@ -214,12 +219,12 @@ test "collectInterfaceStats: returns empty list for empty directory" {
 
 test "collectInterfaceStats: returns error when root missing" {
     const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_collector_test_nonexistent_1234567890";
+    const base = "/tmp/kgb_fixture/kgb_collector_test_nonexistent_1234567890";
 
     // Ensure it does not exist
     deleteTree(base) catch {};
 
-    try std.testing.expectError(error.RootDirMissing, collectInterfaceStats(allocator, base));
+    try std.testing.expectError(error.RootDirMissing, collectInterfaceStats(allocator, base, .test_fixture));
 }
 
 // ============================================================================
@@ -228,8 +233,9 @@ test "collectInterfaceStats: returns error when root missing" {
 
 test "collectInterfaceStats: does not filter by private/public classification" {
     const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_collector_test_no_classification";
+    const base = "/tmp/kgb_fixture/kgb_collector_test_no_classification";
 
+    makeDir("/tmp/kgb_fixture") catch {};
     try makeDir(base);
     defer deleteTree(base) catch {};
 
@@ -238,7 +244,7 @@ test "collectInterfaceStats: does not filter by private/public classification" {
     try createIfaceWithStats(base, "wg0", 300, 400, 30, 40);
     try createIfaceWithStats(base, "lo", 50, 50, 5, 5);
 
-    const snapshots = try collectInterfaceStats(allocator, base);
+    const snapshots = try collectInterfaceStats(allocator, base, .test_fixture);
     defer freeInterfaceStatsSnapshots(allocator, snapshots);
 
     // All interfaces should be included - no filtering by private/public
@@ -251,8 +257,9 @@ test "collectInterfaceStats: does not filter by private/public classification" {
 
 test "collectInterfaceStats: skips interface with missing stat file" {
     const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_collector_test_missing_file";
+    const base = "/tmp/kgb_fixture/kgb_collector_test_missing_file";
 
+    makeDir("/tmp/kgb_fixture") catch {};
     try makeDir(base);
     defer deleteTree(base) catch {};
 
@@ -283,7 +290,7 @@ test "collectInterfaceStats: skips interface with missing stat file" {
         try writeFile(rx_packets_path, "30\n");
     }
 
-    const snapshots = try collectInterfaceStats(allocator, base);
+    const snapshots = try collectInterfaceStats(allocator, base, .test_fixture);
     defer freeInterfaceStatsSnapshots(allocator, snapshots);
 
     // Only eth0 should be included
@@ -311,8 +318,8 @@ test "collectInterfaceStats: live sysfs smoke test on Linux" {
         return error.SkipZigTest;
     }
 
-    // Call collectInterfaceStats on real sysfs
-    const snapshots = collectInterfaceStats(allocator, sysfs_root) catch return error.SkipZigTest;
+    // Call collectInterfaceStats on real sysfs (HULK16R2: use .sysfs_net for live smoke)
+    const snapshots = collectInterfaceStats(allocator, sysfs_root, .sysfs_net) catch return error.SkipZigTest;
     // Successful collection is the smoke assertion.
     // The list may be empty in constrained/containerized environments.
     // defer below frees the snapshots.

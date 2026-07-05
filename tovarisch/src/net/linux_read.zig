@@ -89,16 +89,23 @@ pub fn linuxRead(
     root: AllowedRoot,
     config: ReadConfig,
 ) LinuxReadResult {
-    if (builtin.os.tag != .linux) {
-        return .unsupported_platform;
-    }
     if (!validatePath(root, path)) {
         return .malformed;
     }
     if (config.max_bytes == 0 or config.max_bytes > MAX_FILE_SIZE) {
         return .malformed;
     }
-    return linuxReadLinux(allocator, path, config.max_bytes);
+
+    if (builtin.os.tag == .linux) {
+        return linuxReadLinux(allocator, path, config.max_bytes);
+    }
+
+    // macOS/other: Support test fixtures only
+    if (root == .test_fixture) {
+        return linuxReadMacos(allocator, path, config.max_bytes);
+    }
+
+    return .unsupported_platform;
 }
 
 pub fn linuxReadSmall(
@@ -118,19 +125,22 @@ pub fn linuxReadCounter(
 }
 
 pub fn linuxExists(path: []const u8, root: AllowedRoot) bool {
-    if (builtin.os.tag != .linux) return false;
     if (!validatePath(root, path)) return false;
 
     var path_buf: [4096]u8 = undefined;
     const c_path = toCString(path, &path_buf) catch return false;
 
-    const flags = std.os.linux.O{ .ACCMODE = std.posix.ACCMODE.RDONLY };
-    const fd = std.c.open(c_path, flags, @as(c_uint, 0));
-    if (fd >= 0) {
-        _ = std.c.close(fd);
-        return true;
+    if (builtin.os.tag == .linux) {
+        const flags = std.os.linux.O{ .ACCMODE = std.posix.ACCMODE.RDONLY };
+        const fd = std.c.open(c_path, flags, @as(c_uint, 0));
+        if (fd >= 0) {
+            _ = std.c.close(fd);
+            return true;
+        }
+        return false;
     }
-    return false;
+    // macOS/other - use access() with F_OK for cross-platform test fixture support
+    return std.c.access(c_path, std.c.F_OK) == 0;
 }
 
 // ============================================================================
@@ -189,6 +199,56 @@ fn linuxReadLinux(allocator: std.mem.Allocator, path: []const u8, max_bytes: usi
         // realloc failed, dupe the content as fallback
         const copy = allocator.dupe(u8, buf[0..n]) catch return .io_error;
         owns_buf = false;
+        return .{ .value = copy };
+    };
+
+    owns_buf = false;
+    return .{ .value = exact_buf };
+}
+
+/// macOS/other cross-platform read for test fixtures.
+/// Uses POSIX fopen/fread instead of Linux syscalls.
+/// Note: Empty files are treated as io_error since counter files always have content.
+fn linuxReadMacos(allocator: std.mem.Allocator, path: []const u8, max_bytes: usize) LinuxReadResult {
+    var path_buf: [4096]u8 = undefined;
+    const c_path = toCString(path, &path_buf) catch return .io_error;
+
+    const maybe_file = std.c.fopen(c_path, "r");
+    const file = maybe_file orelse {
+        const errno_val = std.c._errno().*;
+        switch (errno_val) {
+            2 => return .missing, // ENOENT
+            13 => return .permission_denied, // EACCES
+            else => return .io_error,
+        }
+    };
+    // Use plain defer since LinuxReadResult variants are normal returns, not error returns
+    defer _ = std.c.fclose(file);
+
+    var buf = allocator.alloc(u8, max_bytes) catch return .io_error;
+    var owns_buf = true;
+    defer if (owns_buf) allocator.free(buf);
+
+    const bytes_read = std.c.fread(buf.ptr, 1, max_bytes, file);
+    if (bytes_read == 0) {
+        // Empty file or error - counter files always have content
+        return .io_error;
+    }
+
+    const n = @as(usize, @intCast(bytes_read));
+
+    if (n >= max_bytes) {
+        // Check if there's more content
+        var extra: [1]u8 = undefined;
+        if (std.c.fread(&extra, 1, 1, file) > 0) {
+            return .too_large;
+        }
+    }
+
+    const exact_buf = allocator.realloc(buf, n) catch {
+        // realloc failed, dupe the content as fallback
+        // The existing defer will free the original scratch buffer
+        const copy = allocator.dupe(u8, buf[0..n]) catch return .io_error;
         return .{ .value = copy };
     };
 

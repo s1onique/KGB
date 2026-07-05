@@ -155,6 +155,7 @@ pub fn printCompactStatsWithRate(
     const snapshots = linux_interface_stats.collectInterfaceStats(
         allocator,
         sysfs_root,
+        .sysfs_net,
     ) catch |err| {
         try out_writer.print("net: collect-error:{s}\n", .{@errorName(err)});
         return null;

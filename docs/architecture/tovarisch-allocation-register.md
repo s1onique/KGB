@@ -44,22 +44,30 @@ JSON field values use `allocator.dupe()` with paired `allocator.free()` in errde
 **Notes**: `main.zig` uses pre-allocated 1024-byte stdout/stderr buffers.
 Argument parsing uses `toSlice(arena)` for owned copy of args.
 
-### 1.3 sysfs/procfs Read Allocations
+### 1.3 sysfs/procfs Read Allocations (HARDENED)
 
 **Classification**: PRODUCTION — PERIODIC
 
 | Property | Value |
 |----------|-------|
-| Owner | `net/linux_interfaces.zig`, `net/interface_sampler.zig`, `tunnel_check.zig` |
-| Allocator Source | Caller-provided; pattern uses `std.heap.page_allocator` in tunnel_check |
-| Maximum Size | Bounded by `/sys/class/net` enumeration and `/proc/net/dev` |
-| Deinit/Free Path | `linux_interfaces.freeInterfaceList()` for page_allocator; deferred for caller-owned |
-| Failure Mode | Returns empty list; status check reports `.warn` |
+| Owner | `net/linux_read.zig` boundary, consumed by `net/linux_stats.zig`, `net/extended_interface_stats.zig`, `runtime/telemetry.zig`, `tunnel_check.zig` |
+| Allocator Source | Caller-provided; via canonical `linux_read.zig` boundary |
+| Maximum Size | Bounded by `/sys/class/net` enumeration and `/proc/self/status` (max 8KB for status) |
+| Deinit/Free Path | `allocator.free()` on LinuxReadResult.value; paired in callers |
+| Failure Mode | Structured `LinuxReadResult` variants (missing, permission_denied, too_large, malformed, io_error) |
 | External-Input Influence | Kernel interface list (bounded by system NIC count) |
-| Test Coverage | `net/interface_filter_tests.zig`, `net/interface_sampler_tests.zig` |
+| Test Coverage | `net/linux_read_fixture_tests.zig` |
 
-**Notes**: `tunnel_check.zig` uses `std.heap.page_allocator` with paired free.
-This is a deferred legacy surface — see Section 3.
+**Notes (HULK16)**: All production Linux runtime-file reads now go through the canonical
+`linux_read.zig` boundary. This includes:
+- `/proc/self/status` via `telemetry.zig`
+- Sysfs counters via `linux_stats.zig` and `extended_interface_stats.zig`
+- Interface enumeration via `linux_interfaces.zig` and `tunnel_check.zig`
+
+The boundary provides:
+- Path validation (only allowed roots: `/sys/class/net`, `/proc/self`, `/tmp/kgb_fixture`)
+- Max-byte caps to prevent unbounded reads
+- Structured error handling (no panics on malformed input)
 
 ### 1.4 BGP/BFD Snapshot Allocations
 
@@ -102,8 +110,6 @@ This is a deferred legacy surface — see Section 3.
 | Failure Mode | Parse error returned; clean shutdown |
 | External-Input Influence | Config file content (size bounded by OS) |
 | Test Coverage | `bgp/passive_listener_config_tests.zig`, `wg/peer_tests.zig` |
-
-**Notes**: See Section 3 for deferred surfaces using page_allocator in serve_integration.
 
 ### 1.7 Test/Lab-Only Allocations
 
@@ -187,31 +193,56 @@ The following surfaces have been audited and are considered safe:
 | TCP diag | `status_network_diag_tcp.zig` | Paired `dupe`/`free` | HARDENED |
 | Config parse | `config.zig` | Caller-provided allocator | HARDENED |
 | Metrics state | `metrics_state.zig` | `allocator.dupe()` with free | HARDENED |
+| **Linux sysfs/procfs** | `net/linux_read.zig` | Canonical boundary with path validation | **HARDENED (HULK16)** |
+| Telemetry | `runtime/telemetry.zig` | Uses linux_read boundary | **HARDENED (HULK16)** |
+| Linux stats | `net/linux_stats.zig` | Uses linux_read boundary | **HARDENED (HULK16)** |
+| Extended stats | `net/extended_interface_stats.zig` | Uses linux_read boundary | **HARDENED (HULK16)** |
+| Tunnel check | `tunnel_check.zig` | Caller-provided allocator | **HARDENED (HULK16)** |
+
+### 3.1 linux_read.zig Boundary Contract
+
+```zig
+// MemoryOwnership: linux_read.zig returns owned content on .value variant
+// Rationale: Allocator-backed read with bounded size; caller must free on .value
+// MaxSize: Configurable via ReadConfig.max_bytes (default 4KB, max 64KB)
+// Deinit: allocator.free() on LinuxReadResult.value
+// FailureMode: Structured LinuxReadResult variants (no panic)
+// ExternalInputInfluence: Kernel files (bounded by max_bytes)
+// TestCoverage: net/linux_read_fixture_tests.zig
+```
 
 ---
 
-## 4. Deferred Legacy Surfaces
+## 4. Deferred Legacy Surfaces (Post-HULK16)
 
-The following surfaces use `std.heap.page_allocator` and require future hardening:
+After HULK16, all deferred surfaces have been addressed:
 
-| Surface | File | Risk | Remediation |
-|---------|------|------|-------------|
-| Tunnel check | `tunnel_check.zig` | RSS leak per check | Migrate to caller-provided allocator |
-| BGP serve | `bgp/serve_integration.zig` | page_allocator for config parse | Acceptable for serve init (one-time) |
-| BGP prefix watch | `bgp/prefix_watch_fake.zig` | Test-only | N/A — test fixture |
-| WireGuard generate | `wg/generate_tests.zig` | Test-only | N/A — test fixture |
+| Surface | File | Status | Notes |
+|---------|------|--------|-------|
+| ~~Tunnel check~~ | ~~`tunnel_check.zig`~~ | **MIGRATED (HULK16)** | Now uses caller-provided allocator |
+| ~~Telemetry~~ | ~~`runtime/telemetry.zig`~~ | **MIGRATED (HULK16)** | Now uses linux_read.zig boundary |
+| ~~Linux stats~~ | ~~`net/linux_stats.zig`~~ | **MIGRATED (HULK16)** | Now uses linux_read.zig boundary |
+| ~~Extended stats~~ | ~~`net/extended_interface_stats.zig`~~ | **MIGRATED (HULK16)** | Now uses linux_read.zig boundary |
+| BGP serve | `bgp/serve_integration.zig` | ACCEPTABLE | page_allocator for one-time serve init |
+| BGP prefix watch | `bgp/prefix_watch_fake.zig` | N/A | Test-only fixture |
+| WireGuard generate | `wg/generate_tests.zig` | N/A | Test-only fixture |
 
-### 4.1 tunnel_check.zig Specifics
+### 4.1 Remaining Acceptable Surfaces
+
+#### BGP serve_integration.zig
 
 ```zig
-// MemoryOwnership: tunnel_check uses page_allocator for sysfs enumeration
-// Rationale: One-shot check during status render; OS-backed memory released on free
-// MaxSize: Bounded by kernel interface count
-// Deinit: linux_interfaces.freeInterfaceList(std.heap.page_allocator, ifaces)
-// FailureMode: Returns null; status check reports warn
-// ExternalInputInfluence: Kernel interface list
-// TestCoverage: tunnel_check tested in integration tests
+// MemoryOwnership: page_allocator for config parse at serve init
+// Rationale: One-time allocation during serve startup; not on hot path
+// MaxSize: Bounded by config file size
+// Deinit: raw.deinit() after parse completes
+// FailureMode: Parse error returned; clean shutdown
+// ExternalInputInfluence: Config file
+// TestCoverage: bgp/passive_listener_config_tests.zig
 ```
+
+**Assessment**: This surface is acceptable because it occurs only at serve initialization,
+not on the hot path. It is bounded by config file size and freed immediately after use.
 
 ---
 
@@ -250,6 +281,7 @@ The following are EXEMPT from risky pattern detection:
 | Risky pattern report | `scripts/check_allocation_patterns.sh` | ADVISORY | Report-only; does not fail gate yet; future enforcement planned |
 | Memory ownership hygiene | `scripts/check_memory_ownership.sh` | ENFORCING | Fails gate on uncovered patterns in status/http paths |
 | Memory budgets | `scripts/verify_memory_budgets.py` | ENFORCING | Fails gate on budget schema violations |
+| Linux read boundary | `scripts/verify_linux_read_boundary_bypass.py` | ENFORCING | Fails gate on direct sysfs/procfs bypass |
 | Zig build/test | `make tovarisch-build`, `make tovarisch-test` | ENFORCING | Fails gate on build/test failures |
 
 **Note**: `check_allocation_patterns.sh` is currently advisory (report-only). It classifies
@@ -263,4 +295,5 @@ to enforce HIGH risk failures in `make gate`.
 - `docs/doctrine/embedded-memory-frugality.md` — Memory footprint contracts
 - `scripts/check_memory_ownership.sh` — Memory ownership hygiene gate
 - `scripts/check_allocation_patterns.sh` — Risky pattern reporter
+- `scripts/verify_linux_read_boundary_bypass.py` — Linux read boundary verifier
 - `docs/tooling/zig-0.16-field-manual.md` — Zig 0.16 patterns

@@ -12,6 +12,7 @@
 const std = @import("std");
 const linux_stats = @import("linux_stats.zig");
 const linux_interfaces = @import("linux_interfaces.zig");
+const linux_read = @import("linux_read.zig");
 
 // ============================================================================
 // Types
@@ -39,9 +40,12 @@ pub const InterfaceStatsSnapshot = struct {
 /// - `RootDirMissing` / `RootDirUnreadable` from `listInterfaces()` if
 ///   the sysfs root is inaccessible.
 /// - `OutOfMemory` if allocation fails (partial results are cleaned up).
+///
+/// The `root` parameter allows tests to use `.test_fixture` while production uses `.sysfs_net`.
 pub fn collectInterfaceStats(
     allocator: std.mem.Allocator,
     sysfs_root: []const u8,
+    root: linux_read.AllowedRoot,
 ) (linux_interfaces.ListError || error{OutOfMemory})![]InterfaceStatsSnapshot {
     // Enumerate all interface names
     const names = try linux_interfaces.listInterfaces(allocator, sysfs_root);
@@ -57,7 +61,7 @@ pub fn collectInterfaceStats(
 
     for (names) |name| {
         // Attempt to read stats for this interface
-        const stats = linux_stats.readInterfaceStats(allocator, sysfs_root, name) catch {
+        const stats = linux_stats.readInterfaceStats(allocator, sysfs_root, name, root) catch {
             // Skip interfaces with missing/unreadable/malformed stats
             continue;
         };

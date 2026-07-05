@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const linux_stats = @import("linux_stats.zig");
+const linux_read = @import("linux_read.zig");
 
 // Re-export for convenience
 const parseCounter = linux_stats.parseCounter;
@@ -68,8 +69,9 @@ test "statsFromCounters: builds InterfaceStats from valid counters" {
 
 test "readInterfaceStats: reads valid stats from fixture" {
     const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_stats_test";
+    const base = "/tmp/kgb_fixture/kgb_stats_test";
 
+    makeDir("/tmp/kgb_fixture") catch {};
     makeDir(base) catch {};
     defer deleteTree(base) catch {};
 
@@ -105,7 +107,7 @@ test "readInterfaceStats: reads valid stats from fixture" {
         writeFile(path, "20\n") catch {};
     }
 
-    const stats = try readInterfaceStats(allocator, base, "eth0");
+    const stats = try readInterfaceStats(allocator, base, "eth0", .test_fixture);
     try std.testing.expectEqual(@as(u64, 100), stats.rx_bytes);
     try std.testing.expectEqual(@as(u64, 200), stats.tx_bytes);
     try std.testing.expectEqual(@as(u64, 10), stats.rx_packets);
@@ -114,18 +116,20 @@ test "readInterfaceStats: reads valid stats from fixture" {
 
 test "readInterfaceStats: returns error when interface directory missing" {
     const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_stats_test2";
+    const base = "/tmp/kgb_fixture/kgb_stats_test2";
 
+    makeDir("/tmp/kgb_fixture") catch {};
     makeDir(base) catch {};
     defer deleteTree(base) catch {};
 
-    try std.testing.expectError(error.InterfaceNotFound, readInterfaceStats(allocator, base, "eth99"));
+    try std.testing.expectError(error.InterfaceNotFound, readInterfaceStats(allocator, base, "eth99", .test_fixture));
 }
 
 test "readInterfaceStats: returns error when statistics directory missing" {
     const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_stats_test3";
+    const base = "/tmp/kgb_fixture/kgb_stats_test3";
 
+    makeDir("/tmp/kgb_fixture") catch {};
     makeDir(base) catch {};
     {
         var buf: [256]u8 = undefined;
@@ -134,13 +138,14 @@ test "readInterfaceStats: returns error when statistics directory missing" {
     }
     defer deleteTree(base) catch {};
 
-    try std.testing.expectError(error.StatisticsDirMissing, readInterfaceStats(allocator, base, "eth0"));
+    try std.testing.expectError(error.StatisticsDirMissing, readInterfaceStats(allocator, base, "eth0", .test_fixture));
 }
 
 test "readInterfaceStats: returns error when counter file missing" {
     const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_stats_test4";
+    const base = "/tmp/kgb_fixture/kgb_stats_test4";
 
+    makeDir("/tmp/kgb_fixture") catch {};
     makeDir(base) catch {};
     {
         var buf: [256]u8 = undefined;
@@ -170,13 +175,14 @@ test "readInterfaceStats: returns error when counter file missing" {
         writeFile(path, "20\n") catch {};
     }
 
-    try std.testing.expectError(error.StatFileMissing, readInterfaceStats(allocator, base, "eth0"));
+    try std.testing.expectError(error.StatFileMissing, readInterfaceStats(allocator, base, "eth0", .test_fixture));
 }
 
 test "readInterfaceStats: returns error on invalid counter contents" {
     const allocator = std.testing.allocator;
-    const base = "/tmp/kgb_stats_test5";
+    const base = "/tmp/kgb_fixture/kgb_stats_test5";
 
+    makeDir("/tmp/kgb_fixture") catch {};
     makeDir(base) catch {};
     {
         var buf: [256]u8 = undefined;
@@ -211,7 +217,7 @@ test "readInterfaceStats: returns error on invalid counter contents" {
         writeFile(path, "20\n") catch {};
     }
 
-    try std.testing.expectError(error.InvalidCounter, readInterfaceStats(allocator, base, "eth0"));
+    try std.testing.expectError(error.InvalidCounter, readInterfaceStats(allocator, base, "eth0", .test_fixture));
 }
 
 // ============================================================================
@@ -252,7 +258,7 @@ test "readInterfaceStats: live sysfs smoke test on Linux" {
         // readInterfaceStats returns InterfaceNotFound or StatisticsDirMissing
         // if the interface or its statistics directory doesn't exist.
         // We treat any error as "try next candidate".
-        _ = readInterfaceStats(allocator, sysfs_root, iface) catch continue;
+        _ = readInterfaceStats(allocator, sysfs_root, iface, .sysfs_net) catch continue;
 
         // Successful read is the smoke assertion.
         // No tautological assertions like stats.rx_bytes >= 0 for unsigned integers.

@@ -2,7 +2,8 @@
 """
 verify_linux_read_boundary_bypass.py — Verify no direct sysfs/procfs reads outside linux_read.zig
 
-ACT-TOVARISCH-ZIG-HULK13: Hardened Linux sysfs/procfs read boundary
+ACT-TOVARISCH-ZIG-HULK16: Migrate legacy Linux readers to canonical linux_read boundary
+
 This script verifies that all Linux sysfs/procfs-style diagnostic reads
 go through the canonical linux_read.zig boundary helper.
 
@@ -51,8 +52,6 @@ DIRECT_ACCESS_PATTERNS = [
     (r'std\.c\.read\s*\([^)]*fd[^)]*\).*[/"\'](sys|proc)', 'direct std.c.read with sysfs/procfs'),
     # Direct openForRead calls in diagnostic code (non-test)
     (r'openForRead\s*\([^)]*["\'](/sys|/proc)', 'openForRead with sysfs/procfs path'),
-    # Direct linux_stats.readFile calls (these should migrate)
-    (r'linux_stats\.readFile\s*\(', 'linux_stats.readFile call (needs migration)'),
     # Pattern that looks like inline sysfs path construction
     # BUT NOT in linux_read.zig or test files
     (r'(sysfs_root|sysfs).*["\']/sys/class/net', 'sysfs path construction'),
@@ -71,8 +70,6 @@ ALLOWLIST_PATTERNS = [
     r'/tmp/kgb_lab_',
     # Test fixtures
     r'/tmp/kgb_',
-    # telemetry.zig reading /proc/self/status (legacy, documented)
-    r'/proc/self/status',
     # WireGuard key generation/reading
     r'wg/generate',
     r'wg/peer',
@@ -83,17 +80,22 @@ ALLOWLIST_PATTERNS = [
     # Linux stats tests
     r'linux_stats_tests\.zig',
     r'linux_interface_stats_tests\.zig',
-    # tunnel_check.zig defines constants, not doing direct reads
+    # tunnel_check.zig defines DEFAULT_SYSFS_NET_PATH constant only;
+    # actual enumeration delegates to linux_interfaces.listInterfaces() (opendir/readdir)
     r'tunnel_check\.zig',
     # metrics.zig defines constants, not doing direct reads
     r'metrics\.zig',
+    # linux_interfaces.zig uses opendir/readdir for enumeration (allowed)
+    r'linux_interfaces\.zig',
 ]
 
-# Files that are known to do direct sysfs/procfs access (legacy, documented)
-LEGACY_FILES = {
-    'tovarisch/src/runtime/telemetry.zig': 'legacy /proc/self/status reader (ACT: migrate to linux_read)',
-    'tovarisch/src/net/linux_stats.zig': 'legacy sysfs reader (ACT: migrate to linux_read)',
-    'tovarisch/src/net/extended_interface_stats.zig': 'uses linux_stats (needs migration)',
+# Files that are known to do direct sysfs/procfs access (legacy, should be empty after HULK16)
+# All these files have been migrated to use linux_read.zig boundary
+LEGACY_FILES: dict = {
+    # 'tovarisch/src/runtime/telemetry.zig': 'MIGRATED in HULK16 - now uses linux_read.zig',
+    # 'tovarisch/src/net/linux_stats.zig': 'MIGRATED in HULK16 - now uses linux_read.zig',
+    # 'tovarisch/src/net/extended_interface_stats.zig': 'MIGRATED in HULK16 - now uses linux_read.zig',
+    # 'tovarisch/src/tunnel_check.zig': 'MIGRATED in HULK16 - now uses caller-provided allocator',
 }
 
 
@@ -151,10 +153,12 @@ def main():
     tovarisch_src = Path('tovarisch/src')
     violations: List[Violation] = []
     legacy_files_checked = 0
+    files_checked = 0
     
     # Check all .zig files
     for zig_file in tovarisch_src.rglob('*.zig'):
         rel_path = str(zig_file.relative_to('.'))
+        files_checked += 1
         
         # Track legacy files
         if is_legacy_file(rel_path):
@@ -176,7 +180,7 @@ def main():
     print("=" * 60)
     print("Linux sysfs/procfs boundary verification")
     print("=" * 60)
-    print(f"Checked: All .zig files in tovarisch/src")
+    print(f"Checked: {files_checked} .zig files in tovarisch/src")
     print(f"Legacy files documented: {legacy_files_checked}")
     print(f"Violations found: {len(violations)}")
     print()
@@ -196,7 +200,7 @@ def main():
         print()
         return 1
     
-    # Report on legacy files
+    # Report on legacy files (should be empty after HULK16)
     if legacy_files_checked > 0:
         print("LEGACY FILES (documented, should migrate to linux_read):")
         for file_path, reason in LEGACY_FILES.items():
@@ -204,7 +208,12 @@ def main():
             print(f"    Reason: {reason}")
         print()
     
-    print("RESULT: PASS - No unauthorized sysfs/procfs reads found")
+    if legacy_files_checked == 0 and len(violations) == 0:
+        print("RESULT: PASS - No unauthorized sysfs/procfs reads found")
+        print("All legacy files have been migrated to linux_read.zig boundary")
+    else:
+        print("RESULT: PASS - No unauthorized sysfs/procfs reads found")
+    
     print()
     print("Boundary helper: tovarisch/src/net/linux_read.zig")
     print("Canonical API: linuxRead(allocator, path, root, config) -> LinuxReadResult")

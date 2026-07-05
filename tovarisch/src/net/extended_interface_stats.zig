@@ -1,9 +1,10 @@
 // extended_interface_stats.zig — Extended Linux interface statistics
 //
-// ACT: Add tovarisch WireGuard and XRay TCP underlay diagnostics
+// ACT-TOVARISCH-ZIG-HULK16: Migrate to canonical linux_read.zig boundary
+//
 // Extended interface statistics including error/drop counters and deltas.
 //
-// Reads from sysfs:
+// Reads from sysfs via linux_read.zig boundary:
 //   /sys/class/net/<iface>/operstate
 //   /sys/class/net/<iface>/carrier
 //   /sys/class/net/<iface>/mtu
@@ -19,6 +20,14 @@
 
 const std = @import("std");
 const linux_stats = @import("linux_stats.zig");
+const linux_read = @import("linux_read.zig");
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/// Maximum bytes for reading interface field files (operstate, carrier, mtu, etc.)
+const INTERFACE_FIELD_MAX_BYTES: usize = 64;
 
 // ============================================================================
 // Types
@@ -96,10 +105,11 @@ pub const ReadError = error{
     StatFileUnreadable,
     InvalidStatContents,
     OutOfMemory,
+    UnsupportedPlatform,
 } || linux_stats.ParseError;
 
 // ============================================================================
-// Reading
+// Reading via linux_read.zig
 // ============================================================================
 
 /// Read extended stats for a specific interface.
@@ -108,30 +118,39 @@ pub fn readExtendedInterfaceStats(
     sysfs_root: []const u8,
     iface: []const u8,
 ) ReadError!ExtendedInterfaceStats {
+    // Build paths
     var iface_dir_buf: [4096]u8 = undefined;
     const iface_dir = std.fmt.bufPrint(&iface_dir_buf, "{s}/{s}", .{ sysfs_root, iface }) catch return error.StatFileUnreadable;
 
-    if (!linux_stats.fileExists(iface_dir)) return error.InterfaceNotFound;
+    // Validate and check interface exists
+    if (!linux_read.validatePath(.sysfs_net, iface_dir)) {
+        return error.InterfaceNotFound;
+    }
+    if (!linux_read.linuxExists(iface_dir, .sysfs_net)) {
+        return error.InterfaceNotFound;
+    }
 
     var stats_dir_buf: [4096]u8 = undefined;
     const stats_dir = std.fmt.bufPrint(&stats_dir_buf, "{s}/statistics", .{iface_dir}) catch return error.StatFileUnreadable;
 
-    if (!linux_stats.fileExists(stats_dir)) return error.StatisticsDirMissing;
+    if (!linux_read.linuxExists(stats_dir, .sysfs_net)) {
+        return error.StatisticsDirMissing;
+    }
 
-    // Read basic stats
-    const basic = try linux_stats.readInterfaceStats(allocator, sysfs_root, iface);
+    // Read basic stats via linux_stats (now uses linux_read.zig internally)
+    const basic = linux_stats.readInterfaceStats(allocator, sysfs_root, iface, .sysfs_net) catch |e| return e;
 
-    // Read extended fields
-    const operstate = try readInterfaceField(allocator, iface_dir, "operstate");
-    const carrier = readOptionalBool(iface_dir, "carrier");
-    const mtu = readOptionalU32(iface_dir, "mtu");
-    const tx_queue_len = readOptionalU32(iface_dir, "tx_queue_len");
+    // Read extended fields via linux_read.zig
+    const operstate = readInterfaceField(allocator, iface_dir, "operstate") catch |e| return e;
+    const carrier = readOptionalBool(allocator, iface_dir, "carrier");
+    const mtu = readOptionalU32(allocator, iface_dir, "mtu");
+    const tx_queue_len = readOptionalU32(allocator, iface_dir, "tx_queue_len");
 
-    // Read error counters
-    const rx_errors = try readStatCounter(stats_dir, "rx_errors");
-    const tx_errors = try readStatCounter(stats_dir, "tx_errors");
-    const rx_dropped = try readStatCounter(stats_dir, "rx_dropped");
-    const tx_dropped = try readStatCounter(stats_dir, "tx_dropped");
+    // Read error counters via linux_read.zig (NOT using page_allocator)
+    const rx_errors = readStatCounterOrZero(allocator, stats_dir, "rx_errors");
+    const tx_errors = readStatCounterOrZero(allocator, stats_dir, "tx_errors");
+    const rx_dropped = readStatCounterOrZero(allocator, stats_dir, "rx_dropped");
+    const tx_dropped = readStatCounterOrZero(allocator, stats_dir, "tx_dropped");
 
     return ExtendedInterfaceStats{
         .name = iface,
@@ -175,66 +194,119 @@ pub fn readExtendedInterfaceStatsWithDeltas(
     return stats;
 }
 
-/// Read an interface file field.
+/// Read an interface file field via linux_read.zig boundary.
 /// Caller owns the returned slice and must free it.
 fn readInterfaceField(allocator: std.mem.Allocator, iface_dir: []const u8, field: []const u8) ReadError![]u8 {
     var path_buf: [4096]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ iface_dir, field }) catch return error.StatFileUnreadable;
 
-    const content = try linux_stats.readFile(allocator, path);
-    const trimmed = std.mem.trim(u8, content, " \t\r\n");
-    // Duplicate the trimmed slice so we can free the original content
-    const owned = try allocator.dupe(u8, trimmed);
-    allocator.free(content);
+    // Validate path
+    if (!linux_read.validatePath(.sysfs_net, path)) {
+        return error.StatFileUnreadable;
+    }
 
-    return owned;
+    // Read via linux_read.zig boundary
+    const result = linux_read.linuxReadSmall(allocator, path, .sysfs_net);
+
+    switch (result) {
+        .value => |content| {
+            // HULK16R3: Use defer to free content on all exits (including dupe failure)
+            defer allocator.free(content);
+            const trimmed = std.mem.trim(u8, content, " \t\r\n");
+            return allocator.dupe(u8, trimmed) catch return error.OutOfMemory;
+        },
+        .missing => return error.StatFileMissing,
+        .permission_denied => return error.StatFileUnreadable,
+        .unsupported_platform => return error.StatFileUnreadable,
+        .too_large, .malformed, .io_error => return error.StatFileUnreadable,
+    }
 }
 
-/// Read an optional boolean field.
-fn readOptionalBool(iface_dir: []const u8, field: []const u8) ?bool {
+/// Read an optional boolean field via linux_read.zig boundary.
+/// Returns null if field cannot be read.
+/// MemoryOwnership: caller provides allocator for reading
+fn readOptionalBool(allocator: std.mem.Allocator, iface_dir: []const u8, field: []const u8) ?bool {
     var path_buf: [4096]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ iface_dir, field }) catch return null;
 
-    var file_buf: [32]u8 = undefined;
-    const fd = linux_stats.openForRead(path) catch return null;
-    defer linux_stats.closeFile(fd);
+    // Validate path
+    if (!linux_read.validatePath(.sysfs_net, path)) {
+        return null;
+    }
 
-    const n = linux_stats.readFromFd(fd, &file_buf) catch return null;
-    if (n == 0) return null;
+    // Use linuxExists for existence check
+    if (!linux_read.linuxExists(path, .sysfs_net)) {
+        return null;
+    }
 
-    const content = file_buf[0..n];
+    // Read via linux_read.zig boundary
+    const result = linux_read.linuxReadSmall(allocator, path, .sysfs_net);
+    defer if (result == .value) allocator.free(result.value);
+
+    if (result != .value) {
+        return null;
+    }
+
+    const content = result.value;
     const trimmed = std.mem.trim(u8, content, " \t\r\n");
 
     return std.mem.eql(u8, trimmed, "1");
 }
 
-/// Read an optional u32 field.
-fn readOptionalU32(iface_dir: []const u8, field: []const u8) ?u32 {
+/// Read an optional u32 field via linux_read.zig boundary.
+/// Returns null if field cannot be read.
+/// MemoryOwnership: caller provides allocator for reading
+fn readOptionalU32(allocator: std.mem.Allocator, iface_dir: []const u8, field: []const u8) ?u32 {
     var path_buf: [4096]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ iface_dir, field }) catch return null;
 
-    var file_buf: [32]u8 = undefined;
-    const fd = linux_stats.openForRead(path) catch return null;
-    defer linux_stats.closeFile(fd);
+    // Validate path
+    if (!linux_read.validatePath(.sysfs_net, path)) {
+        return null;
+    }
 
-    const n = linux_stats.readFromFd(fd, &file_buf) catch return null;
-    if (n == 0) return null;
+    // Use linuxExists for existence check
+    if (!linux_read.linuxExists(path, .sysfs_net)) {
+        return null;
+    }
 
-    const content = file_buf[0..n];
+    // Read via linux_read.zig boundary
+    const result = linux_read.linuxReadSmall(allocator, path, .sysfs_net);
+    defer if (result == .value) allocator.free(result.value);
+
+    if (result != .value) {
+        return null;
+    }
+
+    const content = result.value;
     const trimmed = std.mem.trim(u8, content, " \t\r\n");
 
     return std.fmt.parseInt(u32, trimmed, 10) catch null;
 }
 
-/// Read a statistic counter from sysfs statistics directory.
-fn readStatCounter(stats_dir: []const u8, stat: []const u8) ReadError!u64 {
+/// Read a statistic counter from sysfs statistics directory via linux_read.zig boundary.
+/// Returns 0 on error (structured absence, not panic).
+fn readStatCounterOrZero(allocator: std.mem.Allocator, stats_dir: []const u8, stat: []const u8) u64 {
     var path_buf: [4096]u8 = undefined;
-    const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ stats_dir, stat }) catch return error.StatFileUnreadable;
+    const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ stats_dir, stat }) catch return 0;
 
-    const content = linux_stats.readFile(std.heap.page_allocator, path) catch return error.StatFileMissing;
-    defer std.heap.page_allocator.free(content);
+    // Validate path
+    if (!linux_read.validatePath(.sysfs_net, path)) {
+        return 0;
+    }
 
-    return linux_stats.parseCounter(content);
+    // Read via linux_read.zig boundary
+    const result = linux_read.linuxReadCounter(allocator, path, .sysfs_net);
+
+    switch (result) {
+        .value => |content| {
+            defer allocator.free(content);
+            return linux_stats.parseCounter(content) catch 0;
+        },
+        .missing, .permission_denied, .unsupported_platform, .too_large, .malformed, .io_error => {
+            return 0;
+        },
+    }
 }
 
 // ============================================================================
@@ -277,4 +349,9 @@ test "PreviousSample can be constructed" {
         .tx_dropped = 0,
     };
     try std.testing.expectEqual(@as(u64, 1000), sample.rx_bytes);
+}
+
+test "INTERFACE_FIELD_MAX_BYTES is reasonable" {
+    try std.testing.expect(INTERFACE_FIELD_MAX_BYTES >= 32);
+    try std.testing.expect(INTERFACE_FIELD_MAX_BYTES <= 128);
 }

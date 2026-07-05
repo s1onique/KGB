@@ -90,11 +90,12 @@ pub fn filterCollectedPrivateInterfaceStats(
 pub fn collectPrivateInterfaceStats(
     allocator: std.mem.Allocator,
     sysfs_root: []const u8,
-) CollectError![]linux_interface_stats.InterfaceStatsSnapshot {
+    ) CollectError![]linux_interface_stats.InterfaceStatsSnapshot {
     // Step 1: Collect all interface stats from sysfs
     const all_stats = linux_interface_stats.collectInterfaceStats(
         allocator,
         sysfs_root,
+        .sysfs_net,
     ) catch |err| {
         switch (err) {
             error.OutOfMemory => return error.OutOfMemory,

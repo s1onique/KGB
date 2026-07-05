@@ -3,8 +3,23 @@
 // ACT 5a: Pure parsing helpers (InterfaceStats, parseCounter, statsFromCounters).
 // ACT 5b: Live sysfs reading (readInterfaceStats) with test fixtures.
 // ACT 5c: Live sysfs smoke test in linux_stats_tests.zig.
+//
+// HULK16: Production Linux sysfs reads use linux_read.zig boundary for
+// path validation and max-byte caps. Test infrastructure unchanged.
 
 const std = @import("std");
+const linux_read = @import("linux_read.zig");
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/// Maximum bytes for a single counter value (e.g., rx_bytes)
+/// Counter files typically contain a single integer < 20 digits
+const COUNTER_MAX_BYTES: usize = 32;
+
+/// Max path length for C string conversion
+const MAX_PATH_BUF: usize = 4096;
 
 // ============================================================================
 // Pure Parser (ACT 5a)
@@ -81,24 +96,6 @@ pub fn fileExists(path: []const u8) bool {
     return std.c.access(c_path, std.c.F_OK) == 0;
 }
 
-pub fn openForRead(path: []const u8) ReadError!usize {
-    var path_buf: [4096]u8 = undefined;
-    const c_path = toCString(path, &path_buf) catch return error.StatFileUnreadable;
-
-    if (@import("builtin").os.tag == .linux) {
-        const flags = std.os.linux.O{ .ACCMODE = std.posix.ACCMODE.RDONLY };
-        const fd = std.c.open(c_path, flags, @as(c_uint, 0));
-        if (fd < 0) return error.StatFileMissing;
-        return @as(usize, @intCast(fd));
-    }
-    // macOS - fopen requires null-terminated path
-    const file = std.c.fopen(c_path, "r");
-    if (file) |f| {
-        return @intFromPtr(f);
-    }
-    return error.StatFileMissing;
-}
-
 fn openForWrite(path: []const u8) ReadError!usize {
     var path_buf: [4096]u8 = undefined;
     const c_path = toCString(path, &path_buf) catch return error.StatFileUnreadable;
@@ -131,17 +128,6 @@ pub fn closeFile(fd: usize) void {
     }
 }
 
-pub fn readFromFd(fd: usize, buf: []u8) !usize {
-    if (@import("builtin").os.tag == .linux) {
-        const n = std.c.read(@as(c_int, @intCast(fd)), buf.ptr, buf.len);
-        if (n < 0) return error.StatFileUnreadable;
-        return @as(usize, @intCast(n));
-    }
-    const file = @as(*std.c.FILE, @ptrFromInt(fd));
-    const n = std.c.fread(buf.ptr, 1, buf.len, file);
-    return n;
-}
-
 fn writeToFd(fd: usize, contents: []const u8) !void {
     if (@import("builtin").os.tag == .linux) {
         const written = std.c.write(@as(c_int, @intCast(fd)), contents.ptr, contents.len);
@@ -150,16 +136,6 @@ fn writeToFd(fd: usize, contents: []const u8) !void {
         const file = @as(*std.c.FILE, @ptrFromInt(fd));
         _ = std.c.fwrite(contents.ptr, 1, contents.len, file);
     }
-}
-
-pub fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    const fd = try openForRead(path);
-    defer closeFile(fd);
-
-    var buf: [4096]u8 = undefined;
-    const n = try readFromFd(fd, &buf);
-
-    return try allocator.dupe(u8, buf[0..n]);
 }
 
 /// Create a directory.
@@ -187,23 +163,35 @@ pub fn writeFile(path: []const u8, contents: []const u8) !void {
 }
 
 // ============================================================================
-// Read Interface Stats
+// Read Interface Stats (HULK16: via linux_read.zig boundary)
 // ============================================================================
 
+/// Read interface statistics from sysfs.
+/// 
+/// MemoryOwnership: caller provides allocator; returned InterfaceStats is pass-by-value
+/// (no heap allocation for the struct itself). Counter values are parsed from owned
+/// allocations that are freed via errdefer before return.
+/// 
+/// Deinit: None required - InterfaceStats is pass-by-value.
+/// 
+/// Root parameter allows tests to use .test_fixture while production uses .sysfs_net.
 pub fn readInterfaceStats(
     allocator: std.mem.Allocator,
     sysfs_root: []const u8,
     iface: []const u8,
+    root: linux_read.AllowedRoot,
 ) ReadError!InterfaceStats {
     var iface_dir_buf: [4096]u8 = undefined;
     const iface_dir = std.fmt.bufPrint(&iface_dir_buf, "{s}/{s}", .{ sysfs_root, iface }) catch return error.StatFileUnreadable;
 
-    if (!fileExists(iface_dir)) return error.InterfaceNotFound;
+    // Validate and check interface exists via linux_read boundary
+    if (!linux_read.validatePath(root, iface_dir)) return error.InterfaceNotFound;
+    if (!linux_read.linuxExists(iface_dir, root)) return error.InterfaceNotFound;
 
     var stats_dir_buf: [4096]u8 = undefined;
     const stats_dir = std.fmt.bufPrint(&stats_dir_buf, "{s}/statistics", .{iface_dir}) catch return error.StatFileUnreadable;
 
-    if (!fileExists(stats_dir)) return error.StatisticsDirMissing;
+    if (!linux_read.linuxExists(stats_dir, root)) return error.StatisticsDirMissing;
 
     var rx_bytes_buf: [4096]u8 = undefined;
     var tx_bytes_buf: [4096]u8 = undefined;
@@ -215,23 +203,118 @@ pub fn readInterfaceStats(
     const rx_packets_path = std.fmt.bufPrint(&rx_packets_buf, "{s}/rx_packets", .{stats_dir}) catch return error.StatFileUnreadable;
     const tx_packets_path = std.fmt.bufPrint(&tx_packets_buf, "{s}/tx_packets", .{stats_dir}) catch return error.StatFileUnreadable;
 
-    const rx_bytes_content = try readFile(allocator, rx_bytes_path);
-    defer allocator.free(rx_bytes_content);
+    // Read via linux_read.linuxReadCounter() boundary (HULK16)
+    // We must free any .value allocations on early return, but NOT on success.
+    const rx_bytes_result = linux_read.linuxReadCounter(allocator, rx_bytes_path, root);
+    const tx_bytes_result = linux_read.linuxReadCounter(allocator, tx_bytes_path, root);
+    const rx_packets_result = linux_read.linuxReadCounter(allocator, rx_packets_path, root);
+    const tx_packets_result = linux_read.linuxReadCounter(allocator, tx_packets_path, root);
 
-    const tx_bytes_content = try readFile(allocator, tx_bytes_path);
-    defer allocator.free(tx_bytes_content);
+    // Convert LinuxReadResult to parseable content, mapping errors appropriately
+    // On error return, free all successfully-read allocations.
+    const rx_bytes_content = switch (rx_bytes_result) {
+        .value => |v| v,
+        .missing => {
+            // Free tx/rx_packets/tx if they were read successfully
+            if (tx_bytes_result == .value) allocator.free(tx_bytes_result.value);
+            if (rx_packets_result == .value) allocator.free(rx_packets_result.value);
+            if (tx_packets_result == .value) allocator.free(tx_packets_result.value);
+            return error.StatFileMissing;
+        },
+        else => {
+            if (tx_bytes_result == .value) allocator.free(tx_bytes_result.value);
+            if (rx_packets_result == .value) allocator.free(rx_packets_result.value);
+            if (tx_packets_result == .value) allocator.free(tx_packets_result.value);
+            return error.StatFileUnreadable;
+        },
+    };
+    const tx_bytes_content = switch (tx_bytes_result) {
+        .value => |v| v,
+        .missing => {
+            allocator.free(rx_bytes_content);
+            if (rx_packets_result == .value) allocator.free(rx_packets_result.value);
+            if (tx_packets_result == .value) allocator.free(tx_packets_result.value);
+            return error.StatFileMissing;
+        },
+        else => {
+            allocator.free(rx_bytes_content);
+            if (rx_packets_result == .value) allocator.free(rx_packets_result.value);
+            if (tx_packets_result == .value) allocator.free(tx_packets_result.value);
+            return error.StatFileUnreadable;
+        },
+    };
+    const rx_packets_content = switch (rx_packets_result) {
+        .value => |v| v,
+        .missing => {
+            allocator.free(rx_bytes_content);
+            allocator.free(tx_bytes_content);
+            if (tx_packets_result == .value) allocator.free(tx_packets_result.value);
+            return error.StatFileMissing;
+        },
+        else => {
+            allocator.free(rx_bytes_content);
+            allocator.free(tx_bytes_content);
+            if (tx_packets_result == .value) allocator.free(tx_packets_result.value);
+            return error.StatFileUnreadable;
+        },
+    };
+    const tx_packets_content = switch (tx_packets_result) {
+        .value => |v| v,
+        .missing => {
+            allocator.free(rx_bytes_content);
+            allocator.free(tx_bytes_content);
+            allocator.free(rx_packets_content);
+            return error.StatFileMissing;
+        },
+        else => {
+            allocator.free(rx_bytes_content);
+            allocator.free(tx_bytes_content);
+            allocator.free(rx_packets_content);
+            return error.StatFileUnreadable;
+        },
+    };
 
-    const rx_packets_content = try readFile(allocator, rx_packets_path);
-    defer allocator.free(rx_packets_content);
+    // Parse counter values. On success, we need to free the allocations.
+    const rx_parsed = parseCounter(rx_bytes_content) catch |e| {
+        allocator.free(rx_bytes_content);
+        allocator.free(tx_bytes_content);
+        allocator.free(rx_packets_content);
+        allocator.free(tx_packets_content);
+        return e;
+    };
+    const tx_parsed = parseCounter(tx_bytes_content) catch |e| {
+        allocator.free(rx_bytes_content);
+        allocator.free(tx_bytes_content);
+        allocator.free(rx_packets_content);
+        allocator.free(tx_packets_content);
+        return e;
+    };
+    const rx_packets_parsed = parseCounter(rx_packets_content) catch |e| {
+        allocator.free(rx_bytes_content);
+        allocator.free(tx_bytes_content);
+        allocator.free(rx_packets_content);
+        allocator.free(tx_packets_content);
+        return e;
+    };
+    const tx_packets_parsed = parseCounter(tx_packets_content) catch |e| {
+        allocator.free(rx_bytes_content);
+        allocator.free(tx_bytes_content);
+        allocator.free(rx_packets_content);
+        allocator.free(tx_packets_content);
+        return e;
+    };
 
-    const tx_packets_content = try readFile(allocator, tx_packets_path);
-    defer allocator.free(tx_packets_content);
+    // Free all allocations now that parsing is complete
+    allocator.free(rx_bytes_content);
+    allocator.free(tx_bytes_content);
+    allocator.free(rx_packets_content);
+    allocator.free(tx_packets_content);
 
     return InterfaceStats{
-        .rx_bytes = try parseCounter(rx_bytes_content),
-        .tx_bytes = try parseCounter(tx_bytes_content),
-        .rx_packets = try parseCounter(rx_packets_content),
-        .tx_packets = try parseCounter(tx_packets_content),
+        .rx_bytes = rx_parsed,
+        .tx_bytes = tx_parsed,
+        .rx_packets = rx_packets_parsed,
+        .tx_packets = tx_packets_parsed,
     };
 }
 

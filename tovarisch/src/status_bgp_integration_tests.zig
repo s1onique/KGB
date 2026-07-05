@@ -8,7 +8,7 @@ const status = @import("status.zig");
 const bgp_status = @import("bgp/status.zig");
 
 test "bgp check has warn status when no config" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const checks = status.getLocalChecksWithBgp(
         null,
         status.getDefaultConfigCheck(),
@@ -98,7 +98,7 @@ test "getBgpCheck returns error for failed state" {
 }
 
 test "getLocalChecksWithBgp passes explicit BGP state" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const default_check = status.getDefaultConfigCheck();
     const checks = status.getLocalChecksWithBgp(null, default_check, .disabled, &scratch);
 

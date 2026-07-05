@@ -114,7 +114,7 @@ test "deriveStatus returns ok for empty checks" {
 // --- getLocalChecks and getStatus Tests ---
 
 test "getLocalChecksWithBgp returns nine checks" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const checks = status.getLocalChecksWithBgp(
         null,
         status.getDefaultConfigCheck(),
@@ -125,7 +125,7 @@ test "getLocalChecksWithBgp returns nine checks" {
 }
 
 test "getLocalChecksWithBgp first check is process" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const checks = status.getLocalChecksWithBgp(
         null,
         status.getDefaultConfigCheck(),
@@ -136,7 +136,7 @@ test "getLocalChecksWithBgp first check is process" {
 }
 
 test "buildStatus has correct structure" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const s = status.buildStatus(&scratch);
     try std.testing.expectEqualStrings("tovarisch", s.service);
     try std.testing.expect(std.mem.startsWith(u8, s.version, "0.1."));
@@ -151,7 +151,7 @@ test "getStateDirCheck returns correct name" {
 }
 
 test "status JSON contains all required top-level fields" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const s = status.buildStatus(&scratch);
     try std.testing.expectEqualStrings("tovarisch", s.service);
     try std.testing.expectEqualStrings("local-dev", s.node_id);
@@ -159,7 +159,7 @@ test "status JSON contains all required top-level fields" {
 }
 
 test "status JSON contains all nine check names including bfd and bgp" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const checks = status.getLocalChecksWithBgp(
         null,
         status.getDefaultConfigCheck(),
@@ -198,7 +198,7 @@ test "status JSON contains all nine check names including bfd and bgp" {
 }
 
 test "config check has warn status" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const checks = status.getLocalChecksWithBgp(
         null,
         status.getDefaultConfigCheck(),
@@ -215,7 +215,7 @@ test "config check has warn status" {
 // --- BFD Status Integration Tests ---
 
 test "bfd check has warn status when no runtime" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const checks = status.getLocalChecksWithBgp(
         null,
         status.getDefaultConfigCheck(),
@@ -253,7 +253,7 @@ test "getLocalChecksWithBfd passes explicit runtime" {
     try bfd_status.addTestPeer(&rt, "10.0.0.1", "10.0.0.2");
     rt.startAll();
     const default_check = status.getDefaultConfigCheck();
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const checks = status.getLocalChecksWithBfd(&rt, default_check, &scratch);
     var found_bfd = false;
     for (checks) |check| {
@@ -343,14 +343,14 @@ test "renderPayload output contains runtime block" {
 }
 
 test "buildStatus includes runtime telemetry" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const s = status.buildStatus(&scratch);
     try std.testing.expect(s.runtime.pid > 0);
     try std.testing.expect(s.runtime.rss_kib == null or s.runtime.rss_kib.? >= 0);
 }
 
 test "version contains base_version prefix" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const s = status.buildStatus(&scratch);
     try std.testing.expect(std.mem.startsWith(u8, s.version, "0.1."));
     try std.testing.expect(std.mem.containsAtLeast(u8, s.version, 1, "+"));
@@ -385,7 +385,7 @@ test "getBfdCheck with partial peers uses caller buffer" {
     try bfd_status.addTestPeer(&rt, "10.0.0.3", "10.0.0.4");
     rt.startAll();
 
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const check = status.getBfdCheck(&rt, &scratch.bfd_detail);
 
     try std.testing.expect(check.status == .warn);

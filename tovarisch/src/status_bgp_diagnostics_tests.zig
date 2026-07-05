@@ -187,7 +187,7 @@ test "renderPayloadWithContext output contains bgp field" {
 }
 
 test "Status struct has optional bgp field" {
-    var scratch = status.StatusScratch{};
+    var scratch = status.StatusScratch{ .allocator = std.heap.page_allocator };
     const s = status.buildStatus(&scratch);
     // buildStatus uses no_config for bgp, so bgp should be null
     try std.testing.expect(s.bgp == null);
