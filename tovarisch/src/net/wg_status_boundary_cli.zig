@@ -10,6 +10,35 @@ const std = @import("std");
 const wg = @import("wg_status_boundary.zig");
 const config_parse_helpers = @import("../config_parse_helpers.zig");
 
+// WgCommandRunner: injectable seam for testing CLI status collection.
+// ACT-HULK29R-ZIG016-MEMOWN02-COMMAND-RUNNER-SEAM
+pub const WgCommandRunner = struct {
+    runFn: *const fn (
+        allocator: std.mem.Allocator,
+        ctx: ?*anyopaque,
+        wg_path: [*:0]const u8,
+        timeout_secs: u64,
+    ) anyerror!OwnedWgCommandResult,
+    ctx: ?*anyopaque = null,
+
+    pub fn run(
+        self: WgCommandRunner,
+        allocator: std.mem.Allocator,
+        wg_path: [*:0]const u8,
+        timeout_secs: u64,
+    ) !OwnedWgCommandResult {
+        return self.runFn(allocator, self.ctx, wg_path, timeout_secs);
+    }
+};
+
+const real_wg_command_runner = WgCommandRunner{
+    .runFn = struct {
+        fn f(allocator: std.mem.Allocator, _: ?*anyopaque, wg_path: [*:0]const u8, timeout_secs: u64) !OwnedWgCommandResult {
+            return runWgShowDump(allocator, wg_path, timeout_secs);
+        }
+    }.f,
+};
+
 // POSIX fcntl and open flags (not exposed in Zig 0.16 std.c)
 const F_GETFL: c_int = 3;
 const F_SETFL: c_int = 4;
@@ -131,12 +160,26 @@ pub const CliBackend = struct {
     }
 };
 
-/// Standalone wireguardStatus implementation for CLI backend.
-/// Uses DEFAULT_WG_INTERFACE and DEFAULT_TIMEOUT_SECS.
-/// 
-/// The test_path_override parameter allows tests to inject a fake wg command
-/// without modifying PATH. Pass null for production use.
+// ============================================================================
+// Production CLI Status Collection
+// ============================================================================
+
+/// Production wireguardStatus implementation using real fork/execve path.
 fn cliWireguardStatus(allocator: std.mem.Allocator, test_path_override: ?[*:0]const u8) wg.StatusError!wg.WireGuardStatusResult {
+    return cliWireguardStatusWithRunner(allocator, test_path_override, real_wg_command_runner);
+}
+
+// ============================================================================
+// Testing Export (ACT-HULK29R-ZIG016-MEMOWN02-COMMAND-RUNNER-SEAM)
+// ============================================================================
+
+/// Test-only: runner-aware status collection with injectable command runner.
+/// Allows tests to inject allocated fake stdout/stderr without fork/execve.
+pub fn cliWireguardStatusWithRunner(
+    allocator: std.mem.Allocator,
+    test_path_override: ?[*:0]const u8,
+    runner: WgCommandRunner,
+) wg.StatusError!wg.WireGuardStatusResult {
     // Validate interface name before execve (defense in depth)
     if (!isValidInterfaceName(DEFAULT_WG_INTERFACE)) {
         return error.interface_missing;
@@ -144,12 +187,12 @@ fn cliWireguardStatus(allocator: std.mem.Allocator, test_path_override: ?[*:0]co
 
     const wg_path = test_path_override orelse (findWgCommand() orelse return error.backend_missing);
 
-    var cmd_result = runWgShowDump(allocator, wg_path, CliBackend.DEFAULT_TIMEOUT_SECS) catch |err| {
+    var cmd_result = runner.run(allocator, wg_path, CliBackend.DEFAULT_TIMEOUT_SECS) catch |err| {
         return mapCollectorError(err);
     };
     // MemoryOwnership: Use single deinit() for owned result cleanup on all return paths.
     // This is the key ownership contract: one returned owned object, one deinit().
-    // runWgShowDump uses errdefer for partial allocation failures; this defer handles
+    // runner.run() uses errdefer for partial allocation failures; this defer handles
     // successful return and all error paths in the consumer.
     defer cmd_result.deinit(allocator);
 
@@ -166,7 +209,7 @@ fn cliWireguardStatus(allocator: std.mem.Allocator, test_path_override: ?[*:0]co
         return error.command_failed;
     }
 
-    if (cmd_result.stdout_truncated) {
+    if (cmd_result.stdout_truncated or cmd_result.stderr_truncated) {
         return error.command_failed;
     }
 
@@ -185,11 +228,12 @@ fn cliWireguardStatus(allocator: std.mem.Allocator, test_path_override: ?[*:0]co
 }
 
 /// Maps legacy collector errors to structured StatusError.
-fn mapCollectorError(err: anytype) wg.StatusError {
+fn mapCollectorError(err: anyerror) wg.StatusError {
     return switch (err) {
         error.PipeFailed => error.command_failed,
         error.ForkFailed => error.command_failed,
         error.OutOfMemory => error.out_of_memory,
+        else => error.command_failed,
     };
 }
 
