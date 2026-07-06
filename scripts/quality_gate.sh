@@ -138,6 +138,8 @@ required=(
   docs/architecture/tovarisch-state-transition-register.md
   scripts/verify_state_transition_register.py
   tests/test_verify_state_transition_register.py
+  scripts/verify_no_doconly_regression_tests.py
+  tests/test_verify_no_doconly_regression_tests.py
 )
 
 for path in "${required[@]}"; do
@@ -292,6 +294,14 @@ python3 scripts/verify_state_transition_register.py
 echo "[gate] checking state transition register self-test (HULK26)"
 
 python3 tests/test_verify_state_transition_register.py
+
+echo "[gate] checking doc-only regression tests (HULK29R-ZIG016-MEMOWN03)"
+
+python3 scripts/verify_no_doconly_regression_tests.py
+
+echo "[gate] checking doc-only regression tests self-test (HULK29R-ZIG016-MEMOWN03)"
+
+python3 tests/test_verify_no_doconly_regression_tests.py
 
 echo "[gate] checking shell inventory consistency"
 

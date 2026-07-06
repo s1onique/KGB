@@ -316,15 +316,12 @@ test "OwnedWgCommandResult deinit frees stdout stderr" {
     result.deinit(allocator);
 }
 
-test "CliBackend CLI-path: requires integration test environment" {
-    // This test documents that CLI-path memory testing requires integration testing
-    // rather than unit testing with std.testing.allocator.
-    // The actual fix (errdefer -> defer in cliWireguardStatus) is verified via:
-    // - FakeBackend tests passing (no leaks with repeated calls)
-    // - Code review of cliWireguardStatus() defer placement
-    // - Integration testing on Linux with real wg command
-    try std.testing.expect(true);
-}
+// NOTE: CLI-path memory testing requires integration test environment (not std.testing.allocator).
+// The actual fix (errdefer -> defer in cliWireguardStatus) is verified via:
+// - FakeBackend tests passing (no leaks with repeated calls)
+// - MEMOWN02 runner seam tests with FakeWgCommandRunner
+// - Code review of cliWireguardStatus() defer placement
+// - Integration testing on Linux with real wg command
 
 // ACT-HULK29R-ZIG016-MEMOWN02-COMMAND-RUNNER-SEAM Tests
 // Verifies memory cleanup on ALL return paths via std.testing.allocator.
