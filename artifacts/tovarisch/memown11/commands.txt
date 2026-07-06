@@ -1,0 +1,102 @@
+# Commands for ACT-HULK29R-ZIG016-MEMOWN11-LIVE-RSS-CANARY-PROOF
+# Date: 2026-07-06
+# Environment: macOS (Darwin) - Linux lab host required for live canary
+
+## Preflight Commands (on Linux lab host)
+
+# Identify running tovarisch process
+pgrep -af tovarisch
+
+# Get PID
+PID="$(pgrep -n tovarisch)"
+echo "$PID"
+
+# Check memory and process info
+ps -o pid,ppid,rss,vsz,etime,command -p "$PID"
+
+# Test endpoint
+curl -s "$TOVARISCH_STATUS_URL" | jq .
+
+## Create artifacts directory
+mkdir -p artifacts/tovarisch/memown11
+
+## Capture baseline /status
+curl -s "$TOVARISCH_STATUS_URL" | jq . \
+  > artifacts/tovarisch/memown11/status-before.json
+
+## Capture memory source before
+if [ -r "/proc/$TOVARISCH_PID/smaps_rollup" ]; then
+  cat "/proc/$TOVARISCH_PID/smaps_rollup" \
+    > artifacts/tovarisch/memown11/proc-memory-before.txt
+else
+  cat "/proc/$TOVARISCH_PID/status" \
+    > artifacts/tovarisch/memown11/proc-memory-before.txt
+fi
+
+## Primary live RSS canary run
+python3 scripts/tovarisch_status_rss_canary.py \
+  --url "$TOVARISCH_STATUS_URL" \
+  --pid "$TOVARISCH_PID" \
+  --warmup-requests 25 \
+  --sample-requests 200 \
+  --interval-seconds 0.0 \
+  --timeout-seconds 2.0 \
+  --max-rss-kib-growth 4096 \
+  --max-private-kib-growth 1024 \
+  --output text \
+  | tee artifacts/tovarisch/memown11/status-rss-canary.txt
+
+## JSON output
+python3 scripts/tovarisch_status_rss_canary.py \
+  --url "$TOVARISCH_STATUS_URL" \
+  --pid "$TOVARISCH_PID" \
+  --warmup-requests 25 \
+  --sample-requests 200 \
+  --interval-seconds 0.0 \
+  --timeout-seconds 2.0 \
+  --max-rss-kib-growth 4096 \
+  --max-private-kib-growth 1024 \
+  --output json \
+  > artifacts/tovarisch/memown11/status-rss-canary.json
+
+## Extended run
+python3 scripts/tovarisch_status_rss_canary.py \
+  --url "$TOVARISCH_STATUS_URL" \
+  --pid "$TOVARISCH_PID" \
+  --warmup-requests 50 \
+  --sample-requests 1000 \
+  --interval-seconds 0.0 \
+  --timeout-seconds 2.0 \
+  --max-rss-kib-growth 8192 \
+  --max-private-kib-growth 2048 \
+  --output json \
+  > artifacts/tovarisch/memown11/status-rss-canary-extended.json
+
+## Post-run capture
+curl -s "$TOVARISCH_STATUS_URL" | jq . \
+  > artifacts/tovarisch/memown11/status-after.json
+
+if [ -r "/proc/$TOVARISCH_PID/smaps_rollup" ]; then
+  cat "/proc/$TOVARISCH_PID/smaps_rollup" \
+    > artifacts/tovarisch/memown11/proc-memory-after.txt
+else
+  cat "/proc/$TOVARISCH_PID/status" \
+    > artifacts/tovarisch/memown11/proc-memory-after.txt
+fi
+
+## Verification Commands (runnable on any platform)
+
+python3 scripts/tovarisch_status_rss_canary.py --help
+
+python3 -m pytest tests/test_tovarisch_status_rss_canary_cli.py -v
+python3 -m pytest tests/test_tovarisch_status_rss_canary_http.py -v
+python3 -m pytest tests/test_tovarisch_status_rss_canary_memory.py -v
+python3 -m pytest tests/test_tovarisch_status_rss_canary_output.py -v
+python3 -m pytest tests/test_tovarisch_status_rss_canary_run.py -v
+python3 -m pytest tests/test_tovarisch_status_rss_canary_run_contract.py -v
+
+python3 -m pytest tests/test_verify_memory_ownership_inventory.py -v
+python3 scripts/verify_memory_ownership_inventory.py
+python3 scripts/verify_cli_composition_inventory.py
+
+make gate

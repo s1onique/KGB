@@ -1,0 +1,69 @@
+# ACT-HULK29R-ZIG016-MEMOWN11-LIVE-RSS-CANARY-PROOF Environment Constraints
+# Date: 2026-07-06
+
+## Environment
+
+- Host OS: Darwin (macOS Sonoma)
+- Architecture: macOS (not Linux)
+- Live tovarisch process: NOT AVAILABLE on this workstation
+
+## Live Canary Constraints
+
+The RSS canary requires:
+1. Linux /proc filesystem (smaps_rollup or status)
+2. A running tovarisch process with accessible PID
+3. Network access to tovarisch /status HTTP endpoint
+
+This macOS workstation does not have:
+- /proc filesystem
+- Running tovarisch process
+- Access to the lab host where tovarisch would be deployed
+
+## Canary Behavior on macOS
+
+The canary correctly detects the non-Linux environment and exits with SKIP:
+
+```
+TOVARISCH STATUS RSS CANARY: SKIP
+reason=not_linux
+```
+
+This is the expected behavior per the canary's exit codes:
+- 0 = PASS
+- 1 = FAIL
+- 2 = SKIP (unsupported platform)
+- 3 = internal error
+
+## Alternative: Live canary must be run on Linux lab host
+
+The live RSS canary proof requires:
+- A Linux host (e.g., the lab network host at 10.149.149.1)
+- Access to a running tovarisch PID
+- Network access to the /status endpoint
+
+Suggested run when on Linux lab host:
+
+```bash
+export TOVARISCH_STATUS_URL="http://10.149.149.1:8317/status"
+export TOVARISCH_PID="<actual-pid>"
+
+python3 scripts/tovarisch_status_rss_canary.py \
+  --url "$TOVARISCH_STATUS_URL" \
+  --pid "$TOVARISCH_PID" \
+  --warmup-requests 25 \
+  --sample-requests 200 \
+  --interval-seconds 0.0 \
+  --timeout-seconds 2.0 \
+  --max-rss-kib-growth 4096 \
+  --max-private-kib-growth 1024 \
+  --output text
+```
+
+## What This ACT Documents
+
+This ACT documents:
+1. The RSS canary implementation is correct and testable
+2. All unit tests pass (including Linux-specific memory parsing tests)
+3. The canary correctly handles the not_linux platform case
+4. The live canary run is blocked by environment constraints, not code issues
+5. All other verification (gate, verifiers) passes
