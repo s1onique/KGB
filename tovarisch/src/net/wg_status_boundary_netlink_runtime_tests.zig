@@ -172,8 +172,11 @@ test "GenericNetlinkBackend seam: returns error union on all platforms" {
         try std.testing.expectError(wg.StatusError.unsupported_platform, result);
     } else {
         // On Linux, could be success or error depending on WireGuard availability
-        // We just verify the error union type is correct by using try
-        _ = try result;
+        // backend_missing is acceptable when kernel lacks WireGuard generic-netlink family
+        _ = result catch |err| switch (err) {
+            error.backend_missing => return,
+            else => return err,
+        };
     }
 }
 
