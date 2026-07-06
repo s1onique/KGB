@@ -89,12 +89,12 @@ pub const GenericNetlinkBackend = struct {
         _ = self;
         return wg.WireGuardStatusBackend{
             .wireguardStatusFn = struct {
-                fn f(allocator: std.mem.Allocator) wg.StatusError!wg.WireGuardStatusResult {
+                fn f(allocator: std.mem.Allocator, _: ?*anyopaque) wg.StatusError!wg.WireGuardStatusResult {
                     return genericNetlinkWireguardStatus(allocator);
                 }
             }.f,
             .backendKindFn = struct {
-                fn f() wg.BackendKind {
+                fn f(_: ?*anyopaque) wg.BackendKind {
                     return .generic_netlink;
                 }
             }.f,

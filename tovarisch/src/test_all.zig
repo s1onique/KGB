@@ -137,6 +137,7 @@ test { std.testing.refAllDecls(@import("logging.zig")); }
 // WireGuard status boundary tests
 test { std.testing.refAllDecls(@import("net/wg_status_boundary.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_status_boundary_cli.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_status_boundary_test.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_status_boundary_netlink.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_status_boundary_netlink_tests.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_status_boundary_netlink_runtime_tests.zig")); }

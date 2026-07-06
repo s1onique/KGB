@@ -225,18 +225,22 @@ pub const WireGuardStatusResult = struct {
 /// This is the single entry point for all WireGuard status observation.
 pub const WireGuardStatusBackend = struct {
     /// Function pointer for wireguardStatus implementation.
-    wireguardStatusFn: *const fn (allocator: std.mem.Allocator) StatusError!WireGuardStatusResult,
+    wireguardStatusFn: *const fn (allocator: std.mem.Allocator, ctx: ?*anyopaque) StatusError!WireGuardStatusResult,
     /// Function pointer for backendKind implementation.
-    backendKindFn: *const fn () BackendKind,
+    backendKindFn: *const fn (ctx: ?*anyopaque) BackendKind,
+    /// Context pointer for wireguardStatusFn (null for stateless backends).
+    wireguardStatusCtx: ?*anyopaque = null,
+    /// Context pointer for backendKindFn (null for stateless backends).
+    backendKindCtx: ?*anyopaque = null,
 
     /// Collect WireGuard status using this backend.
     pub fn wireguardStatus(self: WireGuardStatusBackend, allocator: std.mem.Allocator) StatusError!WireGuardStatusResult {
-        return self.wireguardStatusFn(allocator);
+        return self.wireguardStatusFn(allocator, self.wireguardStatusCtx);
     }
 
     /// Get the kind of this backend.
     pub fn backendKind(self: WireGuardStatusBackend) BackendKind {
-        return self.backendKindFn();
+        return self.backendKindFn(self.backendKindCtx);
     }
 };
 

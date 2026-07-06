@@ -85,9 +85,19 @@ pub const CliBackend = struct {
         "/sbin/wg",
     };
 
+    /// Override path for testing (null = use default WG_PATHS).
+    /// This allows tests to inject a fake wg command without modifying PATH.
+    test_only_wg_path: ?[*:0]const u8 = null,
+
     /// Initialize CLI backend with defaults (uses DEFAULT_WG_INTERFACE).
     pub fn init() CliBackend {
         return CliBackend{};
+    }
+
+    /// Initialize CLI backend with a test-only wg path override.
+    /// Only for use in tests - allows injecting a fake wg command.
+    pub fn initWithTestWgPath(wg_path: [*:0]const u8) CliBackend {
+        return CliBackend{ .test_only_wg_path = wg_path };
     }
 
     /// Convert to generic backend trait.
@@ -100,34 +110,50 @@ pub const CliBackend = struct {
         _ = self;
         return wg.WireGuardStatusBackend{
             .wireguardStatusFn = struct {
-                fn f(allocator: std.mem.Allocator) wg.StatusError!wg.WireGuardStatusResult {
-                    return cliWireguardStatus(allocator);
+                fn f(allocator: std.mem.Allocator, _: ?*anyopaque) wg.StatusError!wg.WireGuardStatusResult {
+                    // For production, use default path lookup
+                    return cliWireguardStatus(allocator, null);
                 }
             }.f,
             .backendKindFn = struct {
-                fn f() wg.BackendKind {
+                fn f(_: ?*anyopaque) wg.BackendKind {
                     return .cli;
                 }
             }.f,
         };
     }
+
+    /// Test-only: WireGuard status with explicit wg command path.
+    /// This exercises the real CLI path (fork/execve) but with a fake command.
+    /// Returns the result directly (not wrapped in backend trait) for testing.
+    pub fn wireguardStatusWithPath(self: *CliBackend, allocator: std.mem.Allocator) wg.StatusError!wg.WireGuardStatusResult {
+        return cliWireguardStatus(allocator, self.test_only_wg_path);
+    }
 };
 
 /// Standalone wireguardStatus implementation for CLI backend.
 /// Uses DEFAULT_WG_INTERFACE and DEFAULT_TIMEOUT_SECS.
-fn cliWireguardStatus(allocator: std.mem.Allocator) wg.StatusError!wg.WireGuardStatusResult {
+/// 
+/// The test_path_override parameter allows tests to inject a fake wg command
+/// without modifying PATH. Pass null for production use.
+fn cliWireguardStatus(allocator: std.mem.Allocator, test_path_override: ?[*:0]const u8) wg.StatusError!wg.WireGuardStatusResult {
     // Validate interface name before execve (defense in depth)
     if (!isValidInterfaceName(DEFAULT_WG_INTERFACE)) {
         return error.interface_missing;
     }
 
-    const wg_path = findWgCommand() orelse return error.backend_missing;
+    const wg_path = test_path_override orelse (findWgCommand() orelse return error.backend_missing);
 
     const cmd_result = runWgShowDump(allocator, wg_path, CliBackend.DEFAULT_TIMEOUT_SECS) catch |err| {
         return mapCollectorError(err);
     };
-    errdefer allocator.free(cmd_result.stdout);
-    errdefer allocator.free(cmd_result.stderr);
+    // MemoryOwnership: Free stdout/stderr buffers on ALL return paths.
+    // Critical fix for per-request RSS leak (~18KB/request) observed during /status hammering.
+    // Defer handles success path and error paths where we control the return.
+    defer {
+        allocator.free(cmd_result.stdout);
+        allocator.free(cmd_result.stderr);
+    }
 
     if (cmd_result.exit_code == 127) return error.backend_missing;
     if (cmd_result.exit_code == 126) return error.permission_denied;
@@ -152,7 +178,12 @@ fn cliWireguardStatus(allocator: std.mem.Allocator) wg.StatusError!wg.WireGuardS
         return error.malformed_output;
     };
 
-    return wg.WireGuardStatusResult.withDiagnostic(status, .cli, cmd_result.stderr);
+    // MemoryOwnership: On success, we return without stderr diagnostic to avoid
+    // dangling pointer issues (defer would free stderr while result borrows it).
+    // Stderr diagnostics are primarily useful for error conditions, not success.
+    // The result uses empty diagnostic on success, which is fine for the current
+    // status check use case where stderr isn't exposed.
+    return wg.WireGuardStatusResult.ok(status, .cli);
 }
 
 /// Maps legacy collector errors to structured StatusError.
@@ -240,9 +271,15 @@ fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_s
     _ = std.c.close(stdout_pipe[1]);
     _ = std.c.close(stderr_pipe[1]);
 
-    // Allocate buffers
+    // Allocate buffers with errdefer for cleanup on allocation failure.
+    // If stderr_buf allocation fails after stdout_buf succeeds, errdefer
+    // cleans up stdout_buf. Once runWgShowDump returns successfully, the
+    // caller's defer handles cleanup - no conflict.
     var stdout_buf = try allocator.alloc(u8, CliBackend.MAX_STDOUT_SIZE);
+    errdefer allocator.free(stdout_buf);
+
     var stderr_buf = try allocator.alloc(u8, CliBackend.MAX_STDERR_SIZE);
+    errdefer allocator.free(stderr_buf);
     var stdout_len: usize = 0;
     var stderr_len: usize = 0;
     var stdout_truncated = false;
@@ -341,78 +378,4 @@ fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_s
         .timed_out = timed_out,
     };
 }
-
-
-// ============================================================================
-// Fake Backend for Tests
-// ============================================================================
-
-/// Fake backend for deterministic unit testing.
-pub const FakeBackend = struct {
-    /// Pre-configured status to return (null = return err).
-    status: ?wg.WireGuardStatus = null,
-    /// Pre-configured error to return (null = return status).
-    err: ?wg.StatusError = null,
-    /// Backend kind for this fake.
-    kind: wg.BackendKind = .fake,
-
-    /// Initialize fake backend with no preset (returns no_interface by default).
-    pub fn init() FakeBackend {
-        return FakeBackend{};
-    }
-
-    /// Initialize with a specific status.
-    pub fn initWithStatus(status: wg.WireGuardStatus) FakeBackend {
-        return FakeBackend{ .status = status };
-    }
-
-    /// Initialize with a specific error.
-    pub fn initWithError(err: wg.StatusError) FakeBackend {
-        return FakeBackend{ .err = err };
-    }
-
-    /// Set the status to return.
-    pub fn setStatus(self: *FakeBackend, status: wg.WireGuardStatus) void {
-        self.status = status;
-        self.err = null;
-    }
-
-    /// Set the error to return.
-    pub fn setError(self: *FakeBackend, err: wg.StatusError) void {
-        self.err = err;
-        self.status = null;
-    }
-
-    /// Set the backend kind.
-    pub fn setKind(self: *FakeBackend, kind: wg.BackendKind) void {
-        self.kind = kind;
-    }
-
-    /// Convert to generic backend trait.
-    pub fn asBackend(self: *const FakeBackend) wg.WireGuardStatusBackend {
-        return wg.WireGuardStatusBackend{
-            .wireguardStatusFn = struct {
-                fn f(allocator: std.mem.Allocator) wg.StatusError!wg.WireGuardStatusResult {
-                    _ = allocator;
-                    return fakeWireguardStatusImpl(self);
-                }
-            }.f,
-            .backendKindFn = struct {
-                fn f() wg.BackendKind {
-                    return self.kind;
-                }
-            }.f,
-        };
-    }
-
-    fn fakeWireguardStatusImpl(self: *const FakeBackend) wg.StatusError!wg.WireGuardStatusResult {
-        if (self.err) |e| {
-            return e;
-        }
-        if (self.status) |s| {
-            return wg.WireGuardStatusResult.ok(s, self.kind);
-        }
-        return wg.WireGuardStatusResult.ok(wg.WireGuardStatus.noInterface(), self.kind);
-    }
-};
 
