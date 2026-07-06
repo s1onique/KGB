@@ -2,7 +2,7 @@
 
 **Epic ID**: ACT-TOVARISCH-ZIG-HULK25
 **Status**: CLOSED
-**Closed**: 2026-07-07
+**Closed**: 2026-07-06
 **Commit**: `fff8c30c9a3241ab4ba42067a0f5b1508d390a1b`
 
 ---
@@ -26,23 +26,23 @@ This maps to Zig's explicitness model (no hidden control flow, no hidden memory 
 
 | HULK | Focus | Register | Gate | Status |
 |------|-------|----------|------|--------|
-| HULK01 | CLI/process boundary | — | — | CLOSED |
-| HULK02 | /status.json budget | — | — | CLOSED |
-| HULK03 | BGP snapshot contracts | — | — | CLOSED |
-| HULK04 | BFD snapshot contracts | — | — | CLOSED |
-| HULK05 | Linux sysfs/procfs boundary | — | — | CLOSED |
-| HULK06 | HTTP response budget | — | — | CLOSED |
-| HULK07 | WireGuard allocation hygiene | — | — | CLOSED |
-| HULK08 | BGP FSM enum | — | — | CLOSED |
-| HULK09 | BFD FSM enum | — | — | CLOSED |
-| HULK10 | Network diagnostics budget | — | — | CLOSED |
-| HULK11 | Safe command pattern | — | — | CLOSED |
-| HULK12 | CLI argument parsing | — | — | CLOSED |
-| HULK13 | Heartbeat emission | — | — | CLOSED |
-| HULK14 | Memory ownership hygiene | — | — | CLOSED |
-| HULK15 | Allocation audit pass | — | — | CLOSED |
-| HULK16 | Linux sysfs/procfs migration | — | — | CLOSED |
-| HULK17 | BFD FSM completeness | — | — | CLOSED |
+| HULK01 | /status.json response foundation | — | — | CLOSED |
+| HULK02 | Route/query contract table | — | — | CLOSED |
+| HULK03 | Budget tests | — | — | CLOSED |
+| HULK04 | Request allocator policy | — | — | CLOSED |
+| HULK05 | Status route budget policy | — | — | CLOSED |
+| HULK06 | Active route budget proofs | — | — | CLOSED |
+| HULK07 | Route allocation hygiene | — | — | CLOSED |
+| HULK08 | WireGuard allocation hygiene | — | — | CLOSED |
+| HULK09 | FD-level handler proofs | — | — | CLOSED |
+| HULK10 | Canonical HTTP 500 render-failure path | — | — | CLOSED |
+| HULK11 | fd success/failure paths | — | — | CLOSED |
+| HULK12 | CLI/process boundary | — | — | CLOSED |
+| HULK13 | Linux sysfs/procfs read boundary | — | — | CLOSED |
+| HULK14 | BGP/BFD snapshot contracts | — | — | CLOSED |
+| HULK15 | Allocation register | — | — | CLOSED |
+| HULK16 | Linux read migration | — | — | CLOSED |
+| HULK17 | Production BGP/BFD budget/state integration | — | — | CLOSED |
 | HULK18 | RISKY-HIGH gate | `tovarisch-allocation-register.md` | `check_allocation_patterns.sh` | CLOSED |
 | HULK19 | Memory epic close | — | — | CLOSED |
 | HULK20 | Effect boundary register | `tovarisch-effect-boundary-register.md` | — | CLOSED |
@@ -98,16 +98,9 @@ This maps to Zig's explicitness model (no hidden control flow, no hidden memory 
 
 All 75 UNKNOWN modules are report-only in the current gate. These represent CLI commands, runtime telemetry, and protocol-specific modules that are expected to use IO. The PURE modules have been verified.
 
-### RISKY-MEDIUM (29 total — accepted patterns)
+### RISKY-MEDIUM/LOW (33 total — accepted patterns)
 
-These are accepted patterns with documented ownership and bounded allocations. Examples include:
-- `allocator.dupe()` for string ownership transfer with paired `allocator.free()` in errdefer
-- `allocator.alloc()` for bounded buffer operations
-- `ArrayListUnmanaged` for zero-initialization patterns
-
-### RISKY-LOW (4 total — accepted patterns)
-
-Zero-initialization `ArrayListUnmanaged` fields in fake/test implementations.
+Accepted patterns with documented ownership: `allocator.dupe()` + errdefer, bounded `allocator.alloc()`, `ArrayListUnmanaged` for zero-initialization in test/fake implementations.
 
 ---
 
