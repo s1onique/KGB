@@ -148,11 +148,20 @@ make gate
 ## Files Changed
 
 - scripts/tovarisch_status_rss_canary.py (new)
-- tests/test_tovarisch_status_rss_canary.py (new)
+- scripts/tovarisch_status_rss_canary_lib.py (new, implementation library)
+- tests/tovarisch_status_rss_canary_test_support.py (new, test helper)
+- tests/test_tovarisch_status_rss_canary_memory.py (new)
+- tests/test_tovarisch_status_rss_canary_http.py (new)
+- tests/test_tovarisch_status_rss_canary_output.py (new)
+- tests/test_tovarisch_status_rss_canary_cli.py (new)
+- tests/test_tovarisch_status_rss_canary_run.py (new)
 - docs/acts/ACT-HULK29R-ZIG016-MEMOWN05-STATUS-RSS-CANARY.md (new)
 - Makefile (modified)
 - scripts/quality_gate.sh (modified)
 - docs/tooling/memory-ownership-inventory.csv (modified)
+
+Note: MEMOWN07 later split the monolithic files for LLM-friendliness.
+See ACT-HULK29R-ZIG016-MEMOWN07-RSS-CANARY-FILE-SPLIT.md for details.
 
 ## Zig 0.16 Observations
 

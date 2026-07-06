@@ -144,7 +144,13 @@ required=(
   scripts/verify_memory_ownership_inventory.py
   tests/test_verify_memory_ownership_inventory.py
   scripts/tovarisch_status_rss_canary.py
-  tests/test_tovarisch_status_rss_canary.py
+  scripts/tovarisch_status_rss_canary_lib.py
+  tests/tovarisch_status_rss_canary_test_support.py
+  tests/test_tovarisch_status_rss_canary_memory.py
+  tests/test_tovarisch_status_rss_canary_http.py
+  tests/test_tovarisch_status_rss_canary_output.py
+  tests/test_tovarisch_status_rss_canary_cli.py
+  tests/test_tovarisch_status_rss_canary_run.py
 )
 
 for path in "${required[@]}"; do
@@ -316,9 +322,13 @@ echo "[gate] checking memory ownership inventory self-test (HULK29R-ZIG016-MEMOW
 
 python3 tests/test_verify_memory_ownership_inventory.py
 
-echo "[gate] checking tovarisch status RSS canary self-test (HULK29R-ZIG016-MEMOWN05)"
+echo "[gate] checking tovarisch status RSS canary self-test (HULK29R-ZIG016-MEMOWN05/MEMOWN07)"
 
-python3 tests/test_tovarisch_status_rss_canary.py
+python3 tests/test_tovarisch_status_rss_canary_memory.py
+python3 tests/test_tovarisch_status_rss_canary_http.py
+python3 tests/test_tovarisch_status_rss_canary_output.py
+python3 tests/test_tovarisch_status_rss_canary_cli.py
+python3 tests/test_tovarisch_status_rss_canary_run.py
 
 echo "[gate] checking shell inventory consistency"
 
