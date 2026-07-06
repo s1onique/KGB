@@ -151,6 +151,7 @@ required=(
   tests/test_tovarisch_status_rss_canary_output.py
   tests/test_tovarisch_status_rss_canary_cli.py
   tests/test_tovarisch_status_rss_canary_run.py
+  tests/test_tovarisch_status_rss_canary_run_contract.py
 )
 
 for path in "${required[@]}"; do
@@ -329,6 +330,7 @@ python3 tests/test_tovarisch_status_rss_canary_http.py
 python3 tests/test_tovarisch_status_rss_canary_output.py
 python3 tests/test_tovarisch_status_rss_canary_cli.py
 python3 tests/test_tovarisch_status_rss_canary_run.py
+python3 tests/test_tovarisch_status_rss_canary_run_contract.py
 
 echo "[gate] checking shell inventory consistency"
 
