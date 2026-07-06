@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate memory-lab memory-lab-test lab-tovarisch-memory lab-uvb76-memory lab-uvb76-memory-attribution verify-uvb76-memory-attribution
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate memory-lab memory-lab-test lab-tovarisch-memory lab-uvb76-memory lab-uvb76-memory-attribution verify-uvb76-memory-attribution hulk-uvb76-gate
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 87
@@ -192,7 +192,23 @@ uvb76-build-linux-arm64: uvb76-web-build
 uvb76-test: uvb76-web-build
 	cd uvb76 && go test -v ./...
 
+# === UVB-76 Hulk Gate ===
+# ACT-UVB76-HULK01-CONCURRENCY-RUNTIME-CONTRACT-GATE
+# Runtime contract tests for latency, spike, and runtime read paths.
+# Tests concurrent sample writes, latency series reads, spike detector median/window reads,
+# ring-buffer boundary correctness, NaN/Inf latency inputs, overlapping probe execution,
+# and impossible percentile output.
+
+hulk-uvb76-gate:
+	@echo "=== UVB-76 Hulk Gate: Runtime Contract Tests ==="
+	@cd uvb76 && go test -race -v ./state/... ./server/... ./probe/...
+	@echo "=== UVB-76 Hulk Gate: Verifying Runtime Contract Inventory ==="
+	@python3 scripts/verify_uvb76_runtime_contracts.py
+	@echo "=== UVB-76 Hulk Gate: Verifier Self-Test ==="
+	@python3 scripts/verify_uvb76_runtime_contracts.py --self-test
+
 # === UVB-76 Capture Netns Polling ===
+
 # Build and test the polling binary (Go port of shell/JQ polling logic)
 uvb76-polling-build:
 	cd uvb76/cmd/uvb76-capture-netns-polling && go build -o uvb76-capture-netns-polling .
