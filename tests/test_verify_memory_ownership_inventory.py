@@ -150,6 +150,14 @@ class TestFindDeinitOrDefer(unittest.TestCase):
 }
 '''
         self.assertTrue(find_deinit_or_defer(content, 'consumer'))
+    
+    def test_finds_allocator_free(self):
+        """Should find allocator.free() pattern for raw slice cleanup."""
+        content = '''pub fn freeTunnelSummarySnapshots(allocator: std.mem.Allocator, result: TunnelSummaryWithStats) void {
+    linux_interface_stats.freeInterfaceStatsSnapshots(allocator, result.stats);
+}
+'''
+        self.assertTrue(find_deinit_or_defer(content, 'freeTunnelSummarySnapshots'))
 
 
 class TestHasTestingAllocator(unittest.TestCase):
@@ -500,6 +508,249 @@ class TestVerifierSelfTest(unittest.TestCase):
         
         self.assertEqual(result.returncode, 0, 
             f"Self-test failed:\nstdout: {result.stdout}\nstderr: {result.stderr}")
+
+
+class TestAllocationFreeRows(unittest.TestCase):
+    """Test allocation-free request_path rows (MEMOWN06)."""
+    
+    def test_allocation_free_row_passes_with_review_note(self):
+        """Allocation-free request_path row passes when notes contain 'Inventory reviewed'."""
+        csv_content = """id,path,language,symbol,kind,allocator_boundary,owned_type,owner,cleanup,coverage,request_path,verified,notes
+MEMOWN-0001,test.zig,zig,buildBgpCheckInto,producer,none,n/a,self,n/a,status tests,yes,yes,Inventory reviewed: BGP collector returns value-only status
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            csv_path = tmpdir / "docs/tooling/memory-ownership-inventory.csv"
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            csv_path.write_text(csv_content)
+            
+            zig_path = tmpdir / "test.zig"
+            zig_path.write_text("// Test file\n")
+            
+            import verify_memory_ownership_inventory
+            old_root = verify_memory_ownership_inventory.REPO_ROOT
+            verify_memory_ownership_inventory.REPO_ROOT = tmpdir
+            
+            errors = check_source_backed_ownership(csv_path)
+            
+            verify_memory_ownership_inventory.REPO_ROOT = old_root
+            
+            # Should pass - has review note
+            self.assertEqual(len(errors), 0)
+    
+    def test_allocation_free_row_passes_with_value_only_note(self):
+        """Allocation-free request_path row passes when notes contain 'value-only'."""
+        csv_content = """id,path,language,symbol,kind,allocator_boundary,owned_type,owner,cleanup,coverage,request_path,verified,notes
+MEMOWN-0001,test.zig,zig,snapshotFromRuntime,producer,none,n/a,self,n/a,status tests,yes,yes,Returns value-only status snapshot
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            csv_path = tmpdir / "docs/tooling/memory-ownership-inventory.csv"
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            csv_path.write_text(csv_content)
+            
+            zig_path = tmpdir / "test.zig"
+            zig_path.write_text("// Test file\n")
+            
+            import verify_memory_ownership_inventory
+            old_root = verify_memory_ownership_inventory.REPO_ROOT
+            verify_memory_ownership_inventory.REPO_ROOT = tmpdir
+            
+            errors = check_source_backed_ownership(csv_path)
+            
+            verify_memory_ownership_inventory.REPO_ROOT = old_root
+            
+            # Should pass - has value-only note
+            self.assertEqual(len(errors), 0)
+    
+    def test_allocation_free_row_fails_without_explanation(self):
+        """Allocation-free request_path row fails when notes are empty."""
+        csv_content = """id,path,language,symbol,kind,allocator_boundary,owned_type,owner,cleanup,coverage,request_path,verified,notes
+MEMOWN-0001,test.zig,zig,someFunction,producer,none,n/a,self,n/a,n/a,yes,yes,
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            csv_path = tmpdir / "docs/tooling/memory-ownership-inventory.csv"
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            csv_path.write_text(csv_content)
+            
+            zig_path = tmpdir / "test.zig"
+            zig_path.write_text("// Test file\n")
+            
+            import verify_memory_ownership_inventory
+            old_root = verify_memory_ownership_inventory.REPO_ROOT
+            verify_memory_ownership_inventory.REPO_ROOT = tmpdir
+            
+            errors = check_source_backed_ownership(csv_path)
+            
+            verify_memory_ownership_inventory.REPO_ROOT = old_root
+            
+            # Should fail - no review note
+            self.assertTrue(len(errors) > 0)
+            self.assertTrue(any("Inventory reviewed" in e for e in errors))
+
+
+class TestAllocatorFreeCleanup(unittest.TestCase):
+    """Test allocator.free cleanup detection (MEMOWN06)."""
+    
+    def test_consumer_with_allocator_free_passes(self):
+        """Consumer row passes when nearby cleanup uses allocator.free."""
+        csv_content = """id,path,language,symbol,kind,allocator_boundary,owned_type,owner,cleanup,coverage,request_path,verified,notes
+MEMOWN-0001,test.zig,zig,freeInterfaceStatsSnapshots,consumer,consumes_owned,InterfaceStatsSnapshot,self,allocator.free,tests,yes,yes,Frees interface stats
+"""
+        zig_content = """pub fn freeInterfaceStatsSnapshots(
+    allocator: std.mem.Allocator,
+    snapshots: []InterfaceStatsSnapshot,
+) void {
+    for (snapshots) |snap| allocator.free(snap.name);
+    allocator.free(snapshots);
+}
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            csv_path = tmpdir / "docs/tooling/memory-ownership-inventory.csv"
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            csv_path.write_text(csv_content)
+            
+            zig_path = tmpdir / "test.zig"
+            zig_path.write_text(zig_content)
+            
+            import verify_memory_ownership_inventory
+            old_root = verify_memory_ownership_inventory.REPO_ROOT
+            verify_memory_ownership_inventory.REPO_ROOT = tmpdir
+            
+            errors = check_source_backed_ownership(csv_path)
+            
+            verify_memory_ownership_inventory.REPO_ROOT = old_root
+            
+            # Should pass - has allocator.free
+            self.assertEqual(len(errors), 0)
+
+
+class TestCoverageReferences(unittest.TestCase):
+    """Test coverage reference validation (MEMOWN06)."""
+    
+    def test_coverage_in_source_file_passes(self):
+        """Coverage string found in source file passes."""
+        csv_content = """id,path,language,symbol,kind,allocator_boundary,owned_type,owner,cleanup,coverage,request_path,verified,notes
+MEMOWN-0001,test.zig,zig,SomeFunc,producer,allocates,n/a,n/a,none,SomeFunc test,no,yes,Test
+"""
+        zig_content = """fn SomeFunc() void {}
+
+// Test for SomeFunc
+test "SomeFunc test" {
+    SomeFunc();
+}
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            csv_path = tmpdir / "docs/tooling/memory-ownership-inventory.csv"
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            csv_path.write_text(csv_content)
+            
+            zig_path = tmpdir / "test.zig"
+            zig_path.write_text(zig_content)
+            
+            import verify_memory_ownership_inventory
+            old_root = verify_memory_ownership_inventory.REPO_ROOT
+            verify_memory_ownership_inventory.REPO_ROOT = tmpdir
+            
+            errors = check_source_backed_ownership(csv_path)
+            
+            verify_memory_ownership_inventory.REPO_ROOT = old_root
+            
+            # Should pass - coverage found in source
+            self.assertEqual(len(errors), 0)
+    
+    def test_coverage_in_zig_tests_passes(self):
+        """Coverage string found in Zig test file passes."""
+        csv_content = """id,path,language,symbol,kind,allocator_boundary,owned_type,owner,cleanup,coverage,request_path,verified,notes
+MEMOWN-0001,test.zig,zig,SomeFunc,producer,allocates,n/a,n/a,none,SomeFunc coverage,no,yes,Test
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            csv_path = tmpdir / "docs/tooling/memory-ownership-inventory.csv"
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            csv_path.write_text(csv_content)
+            
+            # Source file
+            zig_path = tmpdir / "test.zig"
+            zig_path.write_text("fn SomeFunc() void {}\n")
+            
+            # Test file
+            tests_dir = tmpdir / "tovarisch/src"
+            tests_dir.mkdir(parents=True)
+            test_path = tests_dir / "test_coverage_tests.zig"
+            test_path.write_text('test "SomeFunc coverage" { SomeFunc(); }\n')
+            
+            import verify_memory_ownership_inventory
+            old_root = verify_memory_ownership_inventory.REPO_ROOT
+            verify_memory_ownership_inventory.REPO_ROOT = tmpdir
+            
+            errors = check_source_backed_ownership(csv_path)
+            
+            verify_memory_ownership_inventory.REPO_ROOT = old_root
+            
+            # Should pass - coverage found in Zig test file
+            self.assertEqual(len(errors), 0)
+    
+    def test_coverage_in_python_tests_passes(self):
+        """Coverage string found in Python test file passes."""
+        csv_content = """id,path,language,symbol,kind,allocator_boundary,owned_type,owner,cleanup,coverage,request_path,verified,notes
+MEMOWN-0001,test.zig,zig,SomeFunc,producer,allocates,n/a,n/a,none,SomeFunc py coverage,no,yes,Test
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            csv_path = tmpdir / "docs/tooling/memory-ownership-inventory.csv"
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            csv_path.write_text(csv_content)
+            
+            # Source file
+            zig_path = tmpdir / "test.zig"
+            zig_path.write_text("fn SomeFunc() void {}\n")
+            
+            # Python test file
+            tests_dir = tmpdir / "tests"
+            tests_dir.mkdir(parents=True)
+            test_path = tests_dir / "test_coverage.py"
+            test_path.write_text("# SomeFunc py coverage\ndef test_something():\n    pass\n")
+            
+            import verify_memory_ownership_inventory
+            old_root = verify_memory_ownership_inventory.REPO_ROOT
+            verify_memory_ownership_inventory.REPO_ROOT = tmpdir
+            
+            errors = check_source_backed_ownership(csv_path)
+            
+            verify_memory_ownership_inventory.REPO_ROOT = old_root
+            
+            # Should pass - coverage found in Python test file
+            self.assertEqual(len(errors), 0)
+    
+    def test_nonexistent_coverage_fails(self):
+        """Coverage string not found anywhere fails."""
+        csv_content = """id,path,language,symbol,kind,allocator_boundary,owned_type,owner,cleanup,coverage,request_path,verified,notes
+MEMOWN-0001,test.zig,zig,SomeFunc,producer,allocates,n/a,n/a,none,CompletelyFakeCoverage,no,yes,Test
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            csv_path = tmpdir / "docs/tooling/memory-ownership-inventory.csv"
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            csv_path.write_text(csv_content)
+            
+            zig_path = tmpdir / "test.zig"
+            zig_path.write_text("fn SomeFunc() void {}\n")
+            
+            import verify_memory_ownership_inventory
+            old_root = verify_memory_ownership_inventory.REPO_ROOT
+            verify_memory_ownership_inventory.REPO_ROOT = tmpdir
+            
+            errors = check_source_backed_ownership(csv_path)
+            
+            verify_memory_ownership_inventory.REPO_ROOT = old_root
+            
+            # Should fail - coverage not found
+            self.assertTrue(len(errors) > 0)
+            self.assertTrue(any("CompletelyFakeCoverage" in e for e in errors))
 
 
 if __name__ == "__main__":

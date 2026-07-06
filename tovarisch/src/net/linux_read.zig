@@ -227,8 +227,8 @@ fn linuxReadLinux(allocator: std.mem.Allocator, path: []const u8, max_bytes: usi
 
     const exact_buf = allocator.realloc(buf, n) catch {
         // realloc failed, dupe the content as fallback
+        // Keep owns_buf=true so defer frees original scratch buf
         const copy = allocator.dupe(u8, buf[0..n]) catch return .io_error;
-        owns_buf = false;
         return .{ .value = copy };
     };
 
@@ -277,7 +277,7 @@ fn linuxReadMacos(allocator: std.mem.Allocator, path: []const u8, max_bytes: usi
 
     const exact_buf = allocator.realloc(buf, n) catch {
         // realloc failed, dupe the content as fallback
-        // The existing defer will free the original scratch buffer
+        // Keep owns_buf=true so defer frees original scratch buf
         const copy = allocator.dupe(u8, buf[0..n]) catch return .io_error;
         return .{ .value = copy };
     };

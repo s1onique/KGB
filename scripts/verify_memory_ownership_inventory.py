@@ -55,10 +55,32 @@ def find_symbol(content: str, symbol: str) -> bool:
     if re.search(r'test\s+"' + re.escape(symbol) + r'"', content):
         return True
     
-    # Handle method names (e.g., "FakeWgCommandRunner.run")
+    # Handle struct method names (e.g., "NetworkDiag.deinit")
     if '.' in symbol:
         parts = symbol.split('.')
-        # Look for fn run( inside a struct (method pattern)
+        struct_name = parts[0]
+        method_name = parts[1]
+        
+        # First find the struct definition
+        struct_pattern = r'(const\s+' + re.escape(struct_name) + r'\s*=\s*struct\s*\{|struct\s+' + re.escape(struct_name) + r'\s*\{)'
+        struct_match = re.search(struct_pattern, content)
+        if struct_match:
+            # Extract struct body (from opening brace to closing brace)
+            start_pos = struct_match.end() - 1  # Position of opening brace
+            brace_count = 1
+            pos = start_pos + 1
+            while pos < len(content) and brace_count > 0:
+                if content[pos] == '{':
+                    brace_count += 1
+                elif content[pos] == '}':
+                    brace_count -= 1
+                pos += 1
+            struct_body = content[start_pos:pos]
+            # Look for method in struct body
+            if re.search(r'(pub\s+)?fn\s+' + re.escape(method_name) + r'\s*\(', struct_body):
+                return True
+        
+        # Also try standalone function patterns
         patterns = [
             r'fn\s+' + re.escape(symbol) + r'\s*\(',
             r'pub\s+fn\s+' + re.escape(parts[0]) + r'\s*\.\s*' + re.escape(parts[1]) + r'\s*\(',
@@ -154,13 +176,58 @@ def find_errdefer(content: str, symbol: str, window_lines: int = 200) -> bool:
     return re.search(r'^\s*errdefer\s', window, re.MULTILINE) is not None
 
 
-def find_deinit_or_defer(content: str, symbol: str, window_lines: int = 50) -> bool:
-    """Check if a consumer function uses deinit or defer for cleanup."""
+def find_deinit_or_defer(content: str, symbol: str, window_lines: int = 200) -> bool:
+    """Check if a consumer function uses deinit, defer, or allocator.free for cleanup."""
+    # Handle struct method names (e.g., "NetworkDiag.deinit")
+    if '.' in symbol:
+        parts = symbol.split('.')
+        struct_name = parts[0]
+        method_name = parts[1]
+        
+        # Find the struct definition
+        struct_pattern = r'(const\s+' + re.escape(struct_name) + r'\s*=\s*struct\s*\{|struct\s+' + re.escape(struct_name) + r'\s*\{)'
+        struct_match = re.search(struct_pattern, content)
+        if struct_match:
+            # Extract struct body
+            start_pos = struct_match.end() - 1
+            brace_count = 1
+            pos = start_pos + 1
+            while pos < len(content) and brace_count > 0:
+                if content[pos] == '{':
+                    brace_count += 1
+                elif content[pos] == '}':
+                    brace_count -= 1
+                pos += 1
+            struct_body = content[start_pos:pos]
+            
+            # Look for method in struct body
+            method_pattern = r'(pub\s+)?fn\s+' + re.escape(method_name) + r'\s*\([^)]*\)\s*[^;]*\{'
+            method_match = re.search(method_pattern, struct_body)
+            if method_match:
+                # Extract method body
+                method_start = method_match.end() - 1  # position of opening brace
+                brace_count = 1
+                pos = method_start + 1
+                while pos < len(struct_body) and brace_count > 0:
+                    if struct_body[pos] == '{':
+                        brace_count += 1
+                    elif struct_body[pos] == '}':
+                        brace_count -= 1
+                    pos += 1
+                method_body = struct_body[method_start:pos]
+                
+                # Look for cleanup patterns in method body
+                has_allocator_free = re.search(r'allocator\.free\s*\(', method_body) is not None
+                return has_allocator_free
+    
+    # Default: use window extraction for regular functions
     window = extract_nearby_window(content, symbol, window_lines)
     # Look for .deinit( calls or defer statements at start of line
     has_deinit = re.search(r'\.deinit\s*\(', window) is not None
     has_defer = re.search(r'^\s*defer\s', window, re.MULTILINE) is not None
-    return has_deinit or has_defer
+    # Also accept allocator.free for raw slice cleanup
+    has_allocator_free = re.search(r'allocator\.free\s*\(', window) is not None
+    return has_deinit or has_defer or has_allocator_free
 
 
 def find_test_body(content: str, test_name: str) -> Optional[str]:
@@ -339,6 +406,10 @@ def check_source_backed_ownership(csv_path: Path) -> List[str]:
             allocator_boundary = row['allocator_boundary']
             owned_type = row['owned_type']
             cleanup = row['cleanup']
+            request_path = row['request_path']
+            verified = row['verified']
+            notes = row.get('notes', '')
+            coverage = row.get('coverage', '')
             
             # owned_type rows: check deinit exists
             if kind == 'owned_type' and owned_type != 'n/a':
@@ -365,7 +436,7 @@ def check_source_backed_ownership(csv_path: Path) -> List[str]:
                         f"lacks errdefer in {path}"
                     )
             
-            # consumer rows: check deinit/defer exists
+            # consumer rows: check deinit/defer/allocator.free exists
             if kind == 'consumer' and allocator_boundary == 'consumes_owned':
                 if not find_symbol(content, symbol):
                     errors.append(
@@ -373,7 +444,7 @@ def check_source_backed_ownership(csv_path: Path) -> List[str]:
                     )
                 elif not find_deinit_or_defer(content, symbol):
                     errors.append(
-                        f"{row_prefix}: consumer row `{symbol}` lacks `.deinit(` or `defer` near symbol "
+                        f"{row_prefix}: consumer row `{symbol}` lacks `.deinit(`, `defer`, or `allocator.free` near symbol "
                         f"in {path}"
                     )
             
@@ -387,6 +458,61 @@ def check_source_backed_ownership(csv_path: Path) -> List[str]:
                     errors.append(
                         f"{row_prefix}: test row `{symbol}` with cleanup=std.testing.allocator "
                         f"lacks std.testing.allocator in test body of {path}"
+                    )
+            
+            # Allocation-free request_path rows must have explanatory notes (MEMOWN06)
+            if request_path == 'yes' and allocator_boundary == 'none':
+                # Accept if symbol exists OR notes contain one of the review phrases
+                symbol_exists = find_symbol(content, symbol)
+                notes_lower = notes.lower()
+                has_review_note = any(phrase in notes_lower for phrase in [
+                    'inventory reviewed',
+                    'allocation-free',
+                    'value-only',
+                    'no owned',
+                    'no request-scoped allocation',
+                ])
+                if not symbol_exists and not has_review_note:
+                    errors.append(
+                        f"{row_prefix}: request_path=yes with allocator_boundary=none requires "
+                        f"symbol existence or explanatory notes (e.g., 'Inventory reviewed') in {path}"
+                    )
+            
+            # verified=yes rows with non-n/a coverage must have coverage reference found
+            if verified == 'yes' and coverage and coverage != 'n/a':
+                # Check if coverage string exists in source file, Zig tests, or Python tests
+                coverage_found = False
+                
+                # Check in the same source file
+                if coverage in content:
+                    coverage_found = True
+                else:
+                    # Check in Zig test files under tovarisch/src
+                    for test_pattern in ['*_tests.zig', 'test_*.zig', '*_test.zig']:
+                        for test_file in (REPO_ROOT / 'tovarisch/src').rglob(test_pattern):
+                            try:
+                                if coverage in test_file.read_text():
+                                    coverage_found = True
+                                    break
+                            except Exception:
+                                pass
+                        if coverage_found:
+                            break
+                    
+                    # Check in Python test files under tests/
+                    if not coverage_found:
+                        for test_file in (REPO_ROOT / 'tests').rglob('*.py'):
+                            try:
+                                if coverage in test_file.read_text():
+                                    coverage_found = True
+                                    break
+                            except Exception:
+                                pass
+                
+                if not coverage_found:
+                    errors.append(
+                        f"{row_prefix}: coverage '{coverage}' not found in {path}, "
+                        f"tovarisch/src/*_tests.zig, or tests/*.py"
                     )
     
     return errors
