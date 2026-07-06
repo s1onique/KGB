@@ -219,11 +219,15 @@ fn discoverWgFamilyId(sock: c_int, pid: u32, seq: u32) !u16 {
 }
 
 /// Parse netlink messages for WireGuard family ID.
+/// Uses byte-wise copy to avoid @alignCast panics on misaligned buffers.
 fn parseForWgFamilyId(buf: [*]u8, buf_len: usize) !u16 {
     var offset: usize = 0;
+    const data = buf[0..buf_len];
 
     while (offset + @sizeOf(netlink_consts.Nlmsghdr) <= buf_len) {
-        const nlh = @as(*const netlink_consts.Nlmsghdr, @alignCast(@ptrCast(buf + offset)));
+        const nlh = netlink_consts.readNetlinkStruct(netlink_consts.Nlmsghdr, data, offset) orelse {
+            return error.backend_missing;
+        };
 
         // Check for end of message
         if (nlh.nlmsg_type == netlink_consts.NLMSG_DONE) break;
@@ -243,15 +247,18 @@ fn parseForWgFamilyId(buf: [*]u8, buf_len: usize) !u16 {
 
         // Parse generic netlink payload
         const genl_offset = offset + @sizeOf(netlink_consts.Nlmsghdr);
-        const genlh = @as(*const netlink_consts.Genlmsghdr, @alignCast(@ptrCast(buf + genl_offset)));
+        const genlh = netlink_consts.readNetlinkStruct(netlink_consts.Genlmsghdr, data, genl_offset) orelse {
+            offset = (offset + nlh.nlmsg_len + 3) & ~@as(usize, 3);
+            continue;
+        };
 
         if (genlh.cmd == netlink_consts.CTRL_CMD_NEWFAMILY) {
             // Parse attributes for CTRL_ATTR_FAMILY_ID
             const attr_offset = genl_offset + @sizeOf(netlink_consts.Genlmsghdr);
             const attr_len = nlh.nlmsg_len - @sizeOf(netlink_consts.Nlmsghdr) - @sizeOf(netlink_consts.Genlmsghdr);
 
-            if (attr_len > 0) {
-                const family_id = netlink_consts.parseFamilyIdAttr(buf + attr_offset, attr_len) catch continue;
+            if (attr_len > 0 and attr_offset + attr_len <= data.len) {
+                const family_id = netlink_consts.parseFamilyIdAttr(data[attr_offset..][0..attr_len].ptr, attr_len) catch continue;
                 return family_id;
             }
         }
@@ -321,7 +328,7 @@ fn queryWgDevice(
 /// Parse WireGuard device response.
 /// Uses actual recv_len to bound parsing, not MAX_RCV_SIZE.
 /// Returns WireGuardStatus with interface_name borrowed from caller (no allocation).
-/// Note: This is a skeleton - multipart handling (NLM_F_MULTI) is TODO for production.
+/// Uses byte-wise copy to avoid @alignCast panics on misaligned buffers.
 fn parseWgDeviceResponse(buf: [*]u8, recv_len: usize, interface_name: []const u8) !wg.WireGuardStatus {
     var peer_count: u32 = 0;
     var latest_handshake: ?u64 = null;
@@ -330,9 +337,12 @@ fn parseWgDeviceResponse(buf: [*]u8, recv_len: usize, interface_name: []const u8
     var listen_port: ?u16 = null;
     var found_interface = false;
     var offset: usize = 0;
+    const data = buf[0..recv_len];
 
     while (offset + @sizeOf(netlink_consts.Nlmsghdr) <= recv_len) {
-        const nlh = @as(*const netlink_consts.Nlmsghdr, @alignCast(@ptrCast(buf + offset)));
+        const nlh = netlink_consts.readNetlinkStruct(netlink_consts.Nlmsghdr, data, offset) orelse {
+            break;
+        };
 
         if (nlh.nlmsg_type == netlink_consts.NLMSG_DONE) break;
         if (nlh.nlmsg_type == netlink_consts.NLMSG_ERROR) {
@@ -349,7 +359,10 @@ fn parseWgDeviceResponse(buf: [*]u8, recv_len: usize, interface_name: []const u8
         }
 
         const genl_offset = offset + @sizeOf(netlink_consts.Nlmsghdr);
-        const genlh = @as(*const netlink_consts.Genlmsghdr, @alignCast(@ptrCast(buf + genl_offset)));
+        const genlh = netlink_consts.readNetlinkStruct(netlink_consts.Genlmsghdr, data, genl_offset) orelse {
+            offset = (offset + nlh.nlmsg_len + 3) & ~@as(usize, 3);
+            continue;
+        };
 
         // Only process WireGuard messages
         if (genlh.cmd != netlink_consts.WG_CMD_GET_DEVICE) {
@@ -361,8 +374,8 @@ fn parseWgDeviceResponse(buf: [*]u8, recv_len: usize, interface_name: []const u8
         const attr_offset = genl_offset + @sizeOf(netlink_consts.Genlmsghdr);
         const attr_len = nlh.nlmsg_len - @sizeOf(netlink_consts.Nlmsghdr) - @sizeOf(netlink_consts.Genlmsghdr);
 
-        if (attr_len > 0) {
-            try netlink_consts.parseDeviceAttrs(buf + attr_offset, attr_len, &peer_count, &latest_handshake, &rx_bytes, &tx_bytes, &listen_port);
+        if (attr_len > 0 and attr_offset + attr_len <= data.len) {
+            try netlink_consts.parseDeviceAttrs(data[attr_offset..][0..attr_len].ptr, attr_len, &peer_count, &latest_handshake, &rx_bytes, &tx_bytes, &listen_port);
             // TODO: Implement multipart handling for multiple interfaces
             // For now, mark as found after first valid parse
             found_interface = true;

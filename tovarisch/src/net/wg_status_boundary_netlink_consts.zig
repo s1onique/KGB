@@ -134,7 +134,7 @@ inline fn writeU16Native(buf: []u8, offset: usize, value: u16) void {
 
 /// Read a native-endian u32 from a byte buffer at the given offset.
 /// This avoids pointer casts that require alignment guarantees.
-inline fn readU32Native(buf: []const u8, offset: usize) u32 {
+pub inline fn readU32Native(buf: []const u8, offset: usize) u32 {
     return std.mem.readInt(u32, buf[offset..][0..4], .native);
 }
 
@@ -142,6 +142,24 @@ inline fn readU32Native(buf: []const u8, offset: usize) u32 {
 /// This avoids pointer casts that require alignment guarantees.
 inline fn readU16Native(buf: []const u8, offset: usize) u16 {
     return std.mem.readInt(u16, buf[offset..][0..2], .native);
+}
+
+/// Read a struct value from a byte buffer at the given offset using byte-wise copy.
+/// This avoids @alignCast/@ptrCast panics when the buffer is not aligned for the struct.
+///
+/// Returns the struct value, or null if the buffer is too short.
+pub inline fn readNetlinkStruct(
+    comptime T: type,
+    buf: []const u8,
+    offset: usize,
+) ?T {
+    if (offset + @sizeOf(T) > buf.len) {
+        return null;
+    }
+    var value: T = undefined;
+    // MemoryCopySafety: buf and value are independent buffers — no overlap
+    @memcpy(std.mem.asBytes(&value), buf[offset..][0..@sizeOf(T)]);
+    return value;
 }
 
 /// Netlink message builder for fixed-size messages.
@@ -194,30 +212,35 @@ pub fn addNlattr(buf: []u8, offset: usize, max_len: usize, attr_type: u16, paylo
 // ============================================================================
 
 /// Parse family ID from attributes (u16 to support family IDs > 255).
+/// Uses byte-wise copy to avoid @alignCast panics on misaligned buffers.
 pub fn parseFamilyIdAttr(attrs_start: [*]u8, attrs_len: usize) !u16 {
     var offset: usize = 0;
+    const buf = attrs_start[0..attrs_len];
 
     while (offset + @sizeOf(Nlattr) <= attrs_len) {
-        const attr = @as(*const Nlattr, @alignCast(@ptrCast(attrs_start + offset)));
+        const attr = readNetlinkStruct(Nlattr, buf, offset) orelse break;
 
-        if (!attr.isValid(attrs_len - offset)) {
+        const nla_len: usize = attr.nla_len;
+        if (nla_len < @sizeOf(Nlattr) or nla_len > attrs_len - offset) {
             break;
         }
 
         if (attr.nla_type == CTRL_ATTR_FAMILY_ID) {
-            const payload = attr.payload();
-            if (payload.len >= 2) {
-                return std.mem.readInt(u16, @as(*const [2]u8, @ptrCast(payload.ptr)), .little);
+            const payload_offset = offset + @sizeOf(Nlattr);
+            const payload_len = nla_len - @sizeOf(Nlattr);
+            if (payload_len >= 2 and payload_offset + 2 <= buf.len) {
+                return readU16Native(buf, payload_offset);
             }
         }
 
-        offset = (offset + attr.nla_len + 3) & ~@as(usize, 3);
+        offset = (offset + nla_len + 3) & ~@as(usize, 3);
     }
 
     return error.backend_missing;
 }
 
 /// Parse device-level attributes.
+/// Uses byte-wise copy to avoid @alignCast panics on misaligned buffers.
 pub fn parseDeviceAttrs(
     attrs_start: [*]u8,
     attrs_len: usize,
@@ -228,33 +251,40 @@ pub fn parseDeviceAttrs(
     listen_port: *?u16,
 ) !void {
     var offset: usize = 0;
+    const buf = attrs_start[0..attrs_len];
 
     while (offset + @sizeOf(Nlattr) <= attrs_len) {
-        const attr = @as(*const Nlattr, @alignCast(@ptrCast(attrs_start + offset)));
+        const attr = readNetlinkStruct(Nlattr, buf, offset) orelse break;
 
-        if (!attr.isValid(attrs_len - offset)) {
+        const nla_len: usize = attr.nla_len;
+        if (nla_len < @sizeOf(Nlattr) or nla_len > attrs_len - offset) {
             break;
         }
 
         switch (attr.nla_type) {
             WG_DEVICE_ATTR_LISTEN_PORT => {
-                const payload = attr.payload();
-                if (payload.len >= 2) {
-                    listen_port.* = std.mem.readInt(u16, @as(*const [2]u8, @ptrCast(payload.ptr)), .little);
+                const payload_offset = offset + @sizeOf(Nlattr);
+                const payload_len = nla_len - @sizeOf(Nlattr);
+                if (payload_len >= 2 and payload_offset + 2 <= buf.len) {
+                    listen_port.* = readU16Native(buf, payload_offset);
                 }
             },
             WG_DEVICE_ATTR_PEERS => {
-                const payload = attr.payload();
-                try parsePeersAttrs(@constCast(payload.ptr), payload.len, peer_count, latest_handshake, rx_bytes, tx_bytes);
+                const payload_offset = offset + @sizeOf(Nlattr);
+                const payload_len = nla_len - @sizeOf(Nlattr);
+                if (payload_offset + payload_len <= buf.len) {
+                    try parsePeersAttrs(buf[payload_offset..][0..payload_len].ptr, payload_len, peer_count, latest_handshake, rx_bytes, tx_bytes);
+                }
             },
             else => {},
         }
 
-        offset = (offset + attr.nla_len + 3) & ~@as(usize, 3);
+        offset = (offset + nla_len + 3) & ~@as(usize, 3);
     }
 }
 
 /// Parse peer attributes from nested container.
+/// Uses byte-wise copy to avoid @alignCast panics on misaligned buffers.
 pub fn parsePeersAttrs(
     peers_start: [*]u8,
     peers_len: usize,
@@ -264,25 +294,31 @@ pub fn parsePeersAttrs(
     tx_bytes: *u64,
 ) !void {
     var offset: usize = 0;
+    const buf = peers_start[0..peers_len];
 
     while (offset + @sizeOf(Nlattr) <= peers_len) {
-        const peer_attr = @as(*const Nlattr, @alignCast(@ptrCast(peers_start + offset)));
+        const peer_attr = readNetlinkStruct(Nlattr, buf, offset) orelse break;
 
-        if (!peer_attr.isValid(peers_len - offset)) {
+        const nla_len: usize = peer_attr.nla_len;
+        if (nla_len < @sizeOf(Nlattr) or nla_len > peers_len - offset) {
             break;
         }
 
         if (peer_attr.nla_type == 0) {
-            const payload = peer_attr.payload();
-            try parsePeerAttrs(@constCast(payload.ptr), payload.len, latest_handshake, rx_bytes, tx_bytes);
-            peer_count.* += 1;
+            const payload_offset = offset + @sizeOf(Nlattr);
+            const payload_len = nla_len - @sizeOf(Nlattr);
+            if (payload_offset + payload_len <= buf.len) {
+                try parsePeerAttrs(buf[payload_offset..][0..payload_len].ptr, payload_len, latest_handshake, rx_bytes, tx_bytes);
+                peer_count.* += 1;
+            }
         }
 
-        offset = (offset + peer_attr.nla_len + 3) & ~@as(usize, 3);
+        offset = (offset + nla_len + 3) & ~@as(usize, 3);
     }
 }
 
 /// Parse single peer attributes.
+/// Uses byte-wise copy to avoid @alignCast panics on misaligned buffers.
 pub fn parsePeerAttrs(
     peer_start: [*]u8,
     peer_len: usize,
@@ -291,21 +327,25 @@ pub fn parsePeerAttrs(
     tx_bytes: *u64,
 ) !void {
     var offset: usize = 0;
+    const buf = peer_start[0..peer_len];
 
     while (offset + @sizeOf(Nlattr) <= peer_len) {
-        const attr = @as(*const Nlattr, @alignCast(@ptrCast(peer_start + offset)));
+        const attr = readNetlinkStruct(Nlattr, buf, offset) orelse break;
 
-        if (!attr.isValid(peer_len - offset)) {
+        const nla_len: usize = attr.nla_len;
+        if (nla_len < @sizeOf(Nlattr) or nla_len > peer_len - offset) {
             break;
         }
+
+        const payload_offset = offset + @sizeOf(Nlattr);
+        const payload_len = nla_len - @sizeOf(Nlattr);
 
         switch (attr.nla_type) {
             WG_PEER_ATTR_LAST_HANDSHAKE_TIME => {
                 // WireGuard uses kernel timespec: sec (u64) + nsec (u64) = 16 bytes
-                const payload = attr.payload();
-                if (payload.len >= 16) {
-                    const handshake_sec = std.mem.readInt(u64, @as(*const [8]u8, @ptrCast(payload.ptr)), .little);
-                    // nsec = payload[8..16] (not used, just validating 16-byte length)
+                if (payload_len >= 16 and payload_offset + 16 <= buf.len) {
+                    const handshake_sec = std.mem.readInt(u64, buf[payload_offset..][0..8], .little);
+                    // nsec = buf[payload_offset+8..][0..8] (not used, just validating 16-byte length)
                     if (handshake_sec > 0) {
                         if (latest_handshake.* == null or handshake_sec > latest_handshake.*.?) {
                             latest_handshake.* = handshake_sec;
@@ -314,21 +354,19 @@ pub fn parsePeerAttrs(
                 }
             },
             WG_PEER_ATTR_RX_BYTES => {
-                const payload = attr.payload();
-                if (payload.len >= 8) {
-                    rx_bytes.* +|= std.mem.readInt(u64, @as(*const [8]u8, @ptrCast(payload.ptr)), .little);
+                if (payload_len >= 8 and payload_offset + 8 <= buf.len) {
+                    rx_bytes.* +|= std.mem.readInt(u64, buf[payload_offset..][0..8], .little);
                 }
             },
             WG_PEER_ATTR_TX_BYTES => {
-                const payload = attr.payload();
-                if (payload.len >= 8) {
-                    tx_bytes.* +|= std.mem.readInt(u64, @as(*const [8]u8, @ptrCast(payload.ptr)), .little);
+                if (payload_len >= 8 and payload_offset + 8 <= buf.len) {
+                    tx_bytes.* +|= std.mem.readInt(u64, buf[payload_offset..][0..8], .little);
                 }
             },
             else => {},
         }
 
-        offset = (offset + attr.nla_len + 3) & ~@as(usize, 3);
+        offset = (offset + nla_len + 3) & ~@as(usize, 3);
     }
 }
 
