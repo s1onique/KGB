@@ -140,6 +140,9 @@ required=(
   tests/test_verify_state_transition_register.py
   scripts/verify_no_doconly_regression_tests.py
   tests/test_verify_no_doconly_regression_tests.py
+  docs/tooling/memory-ownership-inventory.csv
+  scripts/verify_memory_ownership_inventory.py
+  tests/test_verify_memory_ownership_inventory.py
 )
 
 for path in "${required[@]}"; do
@@ -302,6 +305,14 @@ python3 scripts/verify_no_doconly_regression_tests.py
 echo "[gate] checking doc-only regression tests self-test (HULK29R-ZIG016-MEMOWN03)"
 
 python3 tests/test_verify_no_doconly_regression_tests.py
+
+echo "[gate] checking memory ownership inventory (HULK29R-ZIG016-MEMOWN04)"
+
+python3 scripts/verify_memory_ownership_inventory.py
+
+echo "[gate] checking memory ownership inventory self-test (HULK29R-ZIG016-MEMOWN04)"
+
+python3 tests/test_verify_memory_ownership_inventory.py
 
 echo "[gate] checking shell inventory consistency"
 

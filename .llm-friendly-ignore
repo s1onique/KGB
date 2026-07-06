@@ -69,3 +69,7 @@ docs/epics/act-5-sysfs-collector.md  # ACT 5 epic; grows with each slice per epi
 
 # CLI composition inventory verifier has comprehensive self-test (~150 lines of test code)
 scripts/verify_cli_composition_inventory.py  # Self-test requires extensive test coverage
+
+# Memory ownership inventory verifier has comprehensive self-test (14 test cases)
+scripts/verify_memory_ownership_inventory.py  # Self-test requires extensive test coverage
+tests/test_verify_memory_ownership_inventory.py  # 14 comprehensive self-test cases
