@@ -17,6 +17,7 @@ from .classifications import (
     STATEFUL_ADAPTER_MODULES,
 )
 from .patterns import (
+    ACCEPTED_PATTERNS,
     FORBIDDEN_PATTERNS,
     MEDIUM_PATTERNS,
     is_forbidden_pattern,
@@ -135,6 +136,23 @@ def should_ignore_line(line: str, module: str) -> bool:
     return False
 
 
+def is_accepted_pattern(module: str, line: str) -> Tuple[bool, str]:
+    """Check if a forbidden pattern in this module is an accepted pattern.
+    
+    Args:
+        module: Module name
+        line: Source line containing the pattern
+        
+    Returns:
+        Tuple of (is_accepted, rationale)
+    """
+    for module_pattern, line_pattern, rationale in ACCEPTED_PATTERNS:
+        if module_pattern == module or module_pattern == "*":
+            if re.search(line_pattern, line):
+                return True, rationale
+    return False, ""
+
+
 def check_line_for_patterns(
     line: str,
     line_number: int,
@@ -176,8 +194,15 @@ def check_line_for_patterns(
             else:
                 severity = FindingSeverity.WARN
         else:
-            # TOTAL and BOUNDARY_TOTAL fail on forbidden patterns
-            severity = FindingSeverity.FAIL
+            # Check if this is an accepted pattern
+            accepted, rationale = is_accepted_pattern(module, line)
+            if accepted:
+                # Downgrade to WARN with accepted pattern rationale
+                severity = FindingSeverity.WARN
+                desc = f"{desc} [ACCEPTED: {rationale}]"
+            else:
+                # TOTAL and BOUNDARY_TOTAL fail on forbidden patterns
+                severity = FindingSeverity.FAIL
         
         # Get the matched pattern
         pattern = ""

@@ -19,6 +19,8 @@ from .classifications import (
     get_all_registered_modules,
 )
 from .patterns import (
+    ACCEPTED_PATTERNS,
+    ACCEPTED_PATTERN_MODULES,
     FORBIDDEN_PATTERNS,
     MEDIUM_PATTERNS,
     is_forbidden_pattern,
@@ -43,6 +45,8 @@ __all__ = [
     "DEFERRED_MODULES",
     "get_module_classification",
     "get_all_registered_modules",
+    "ACCEPTED_PATTERNS",
+    "ACCEPTED_PATTERN_MODULES",
     "FORBIDDEN_PATTERNS",
     "MEDIUM_PATTERNS",
     "is_forbidden_pattern",

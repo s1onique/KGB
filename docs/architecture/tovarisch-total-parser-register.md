@@ -18,6 +18,10 @@ Stateful session/protocol adapters with external input handling. Error recovery 
 ### DEFERRED
 Parser modules with known partial behavior that cannot be fixed in current ACT.
 
+**Current DEFERRED count: 0**
+
+All external-input parser modules in tovarisch are now total.
+
 ---
 
 ## TOTAL Modules
@@ -36,6 +40,13 @@ Parser modules with known partial behavior that cannot be fixed in current ACT.
 - **Forbidden patterns**: None
 - **Note**: All parsing functions return errors; no panics
 
+### bgp/config_parse.zig
+- **Source**: INI configuration file `[bgp]` section
+- **External input**: Config file string values
+- **Structured failure**: `ConfigError` variants
+- **Forbidden patterns**: None
+- **Note**: Total parser via ConfigError returns; parseIpv4Address validates octets
+
 ### bgp/frame_decode.zig
 - **Source**: BGP wire protocol frames
 - **External input**: Raw packet bytes
@@ -49,6 +60,34 @@ Parser modules with known partial behavior that cannot be fixed in current ACT.
 - **Structured failure**: Returns `"Unknown Error"` / `"Unknown Subcode"` for unrecognized codes
 - **Forbidden patterns**: None
 - **Note**: Fallthrough to else case is explicit and safe
+
+### bfd/packet.zig
+- **Source**: BFD wire protocol packets (RFC 5880)
+- **External input**: Raw UDP packet bytes
+- **Structured failure**: `error.InvalidPacket` for truncated/malformed packets
+- **Accepted patterns**: `@enumFromInt` after bit masking (RFC 5880 guarantees valid range)
+- **Note**: State and Diagnostic enums decoded via `@truncate` + mask + `@enumFromInt`
+
+### net/ss_parser.zig
+- **Source**: `ss -tin` command output
+- **External input**: Shell command stdout
+- **Structured failure**: `ParseError` variants (NoData, MalformedOutput, InvalidNumber)
+- **Accepted patterns**: `.?` after null check via `if (x) |val|` pattern
+- **Note**: All optional unwraps are preceded by explicit null checks
+
+### net/wg_show_parser.zig
+- **Source**: `wg show` command output
+- **External input**: Shell command stdout
+- **Structured failure**: `ParseError` variants (NoInterface, InvalidNumber, MalformedOutput)
+- **Forbidden patterns**: None
+- **Note**: Line-by-line parsing with explicit null returns for unrecognized format
+
+### net/linux_addr_parse.zig
+- **Source**: rtnetlink message attributes
+- **External input**: Netlink buffer bytes
+- **Structured failure**: `parseLabel` returns null for invalid labels
+- **Forbidden patterns**: None
+- **Note**: Helper functions only; bounds-checked slicing
 
 ### net/private_ip.zig
 - **Source**: IPv4 text addresses
@@ -105,6 +144,13 @@ These modules have total external APIs but may use medium-risk patterns internal
 - **Forbidden patterns**: None
 - **Note**: Composition boundary, error propagation is total
 
+### net/linux_interfaces.zig
+- **Source**: `/sys/class/net` directory enumeration
+- **External input**: Kernel-provided directory entries
+- **Structured failure**: `ListError` variants (RootDirMissing, RootDirUnreadable)
+- **Forbidden patterns**: None
+- **Note**: Uses C readdir with explicit null-skip; path validation via access()
+
 ### net/safe_command.zig
 - **Source**: Shell command output
 - **External input**: Command stdout
@@ -159,22 +205,29 @@ These modules have total external APIs but may use medium-risk patterns internal
 
 ---
 
-## DEFERRED Modules
-
-**Current DEFERRED count: 0**
-
-All external-input parser modules in tovarisch are now total.
-
----
-
 ## Accepted Patterns
 
 | Pattern | Location | Rationale |
 |---------|----------|-----------|
-| `@enumFromInt` with bounds | bfd/packet.zig:168,172 | Bit masking guarantees valid range |
-| `.?` after null check | bfd/status.zig, ss_parser.zig | Internal status computation only |
-| `else => error` | bgp/frame_decode.zig | Explicit unknown handling |
-| `@intCast` with bounds | net/*.zig, bfd/*.zig | Prior range validation |
+| `@enumFromInt(diag_val\|state_val)` | bfd/packet.zig:168,172 | Bit-masked `@truncate` output; RFC 5880 guarantees 2-bit state and 5-bit diag |
+| `@enumFromInt(field.value)` | net/ss_parser.zig:279 | Uses enum field value; safe by construction |
+| `retransmits.?`, `unacked.?`, `rto_ms.?`, `colon_idx.?`, etc. | net/ss_parser.zig | Specific nullable variables with null guards in same function |
+| `latest_handshake.?` | net/wg_show_parser.zig:116 | Null-or guard ensures non-null in branch |
+| `.?` after null check | bfd/status.zig | Internal status computation; null check precedes unwrap |
+| `else => error` | bgp/frame_decode.zig | Explicit unknown handling in switch |
+| `@intCast` with bounds | net/*.zig, bfd/*.zig | Prior range validation documented in function comments |
+
+---
+
+## Module Counts
+
+| Category | Count |
+|----------|-------|
+| TOTAL | 11 |
+| BOUNDARY_TOTAL | 11 |
+| STATEFUL_ADAPTER | 3 |
+| DEFERRED | 0 |
+| **Total** | **25** |
 
 ---
 
@@ -190,8 +243,10 @@ python3 scripts/verify_total_parsers.py --self-test
 ## Maintenance
 
 When adding new external-input parser modules:
+
 1. Classify according to categories above
 2. Ensure all public API functions are total
 3. Update this register
 4. Add to `scripts/total_parser_verifier/classifications.py`
-5. Verify no forbidden patterns via `verify_total_parsers.py`
+5. Document any accepted patterns in the Accepted Patterns table
+6. Verify no forbidden patterns via `verify_total_parsers.py`

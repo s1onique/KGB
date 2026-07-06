@@ -6,6 +6,9 @@ These tests create a temporary source tree and prove:
 - Missing registered modules produce fatal errors
 - @panic in PURE module fails through scanner
 - Comments and test blocks do not trigger false positives
+
+Tests 1-5 and 9-14 are in this file.
+Tests 6-8 (second-ring parsers) are in scanner_second_ring_tests.py.
 """
 
 import os
@@ -36,6 +39,10 @@ def run_scanner_self_tests(verbose: bool = False) -> Tuple[int, int, List[str]]:
         src_root = os.path.join(tmpdir, "tovarisch", "src")
         os.makedirs(src_root)
         
+        # =========================================================
+        # Tests 1-5: Base scanner functionality
+        # =========================================================
+        
         # Test 1: Nested module path is preserved
         if verbose:
             print("\nScanner test 1: Nested module path preservation")
@@ -44,7 +51,7 @@ def run_scanner_self_tests(verbose: bool = False) -> Tuple[int, int, List[str]]:
         os.makedirs(net_dir)
         
         clean_code = '''
-const std = @import("std");
+const std = @Import("std");
 
 pub fn readSomething() ![]const u8 {
     return error.NotFound;
@@ -138,7 +145,7 @@ pub fn parseQuery(input: []const u8) !void {
         comment_code = '''
 // This file has @panic in a comment but should pass
 // @panic("this is fine")
-const std = @import("std");
+const std = @Import("std");
 
 pub fn parseValue(input: []const u8) !u32 {
     return std.fmt.parseInt(u32, input, 10);
@@ -160,7 +167,7 @@ pub fn parseValue(input: []const u8) !u32 {
             if verbose:
                 print(f"  FAIL: {msg}")
         
-        # Test 4: Test blocks are ignored for ALL modules (doctrine: test code not part of production verification)
+        # Test 4: Test blocks are ignored for ALL modules
         if verbose:
             print("\nScanner test 4: Test blocks ignored for all modules")
         
@@ -201,7 +208,6 @@ test "basic test" {
         if verbose:
             print("\nScanner test 4b: Test blocks ignored for TOTAL modules")
         
-        # Use real registered path net/private_ip.zig, not synthetic net_private_ip.zig
         private_ip_path = os.path.join(net_dir, "private_ip.zig")
         total_code = '''
 // TOTAL module with @panic only in test block
@@ -220,7 +226,6 @@ test "basic classification" {
         result = scan_file(private_ip_path, src_root)
         
         # @panic in test block should not cause failure for TOTAL
-        # Assert no scanner errors
         if not result.errors and not result.has_failures:
             passed += 1
             if verbose:
@@ -259,8 +264,6 @@ test "basic classification" {
         if verbose:
             print("\nScanner test 5: Missing registered modules produce errors")
         
-        # scan_modules uses the real classifications.py which has 20 modules
-        # Our temp tree only has 4 files, so we should get errors for missing ones
         results, scan_errors = scan_modules(src_root)
         
         # Check that errors list includes the missing modules
@@ -299,5 +302,21 @@ test "basic classification" {
             errors.append(msg)
             if verbose:
                 print(f"  FAIL: {msg}")
+        
+        # =========================================================
+        # Tests 6-8: Second-ring parser modules
+        # =========================================================
+        from .scanner_second_ring_tests import run_second_ring_tests
+        passed, failed, errors = run_second_ring_tests(
+            src_root, passed, failed, errors, verbose
+        )
+        
+        # =========================================================
+        # Tests 9-14: Accepted pattern negative tests
+        # =========================================================
+        from .scanner_accepted_pattern_tests import run_accepted_pattern_tests
+        passed, failed, errors = run_accepted_pattern_tests(
+            passed, failed, errors, verbose
+        )
     
     return passed, failed, errors

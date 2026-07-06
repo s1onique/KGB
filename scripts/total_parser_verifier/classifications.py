@@ -24,12 +24,18 @@ class Classification(Enum):
 
 # TOTAL modules: All public functions are total
 # No @panic, unreachable, .? unwrap, or @enumFromInt without bounds
-# Note: Some TOTAL modules have accepted .? patterns after null checks
+# Note: Some TOTAL modules have accepted patterns documented in ACCEPTED_PATTERNS
 TOTAL_MODULES = {
     "status_query.zig",
     "config_parse_helpers.zig",
+    # Second-ring parsers: external input from wire/protocol/config
+    "bgp/config_parse.zig",
     "bgp/frame_decode.zig",
     "bgp/notification_decode.zig",
+    "bfd/packet.zig",
+    "net/ss_parser.zig",
+    "net/wg_show_parser.zig",
+    "net/linux_addr_parse.zig",
     "net/private_ip.zig",
     "net/interface_filter.zig",
 }
@@ -42,6 +48,7 @@ BOUNDARY_TOTAL_MODULES = {
     "net/linux_read.zig",
     "net/linux_stats.zig",
     "net/linux_interface_stats.zig",
+    "net/linux_interfaces.zig",
     "net/safe_command.zig",
     "net/wg_dump_collector.zig",
     "net/wg_show_collector.zig",

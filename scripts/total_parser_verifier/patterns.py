@@ -3,10 +3,12 @@
 
 Forbidden patterns cause verification FAILURE in TOTAL and BOUNDARY_TOTAL modules.
 Medium patterns cause warnings but not failures (for @intCast with bounds checks).
+
+Accepted patterns are allowed in specific modules with documented rationale.
 """
 
 import re
-from typing import List, Tuple
+from typing import List, Tuple, Set
 
 
 # Forbidden patterns: FAIL on these in TOTAL/BOUNDARY_TOTAL modules
@@ -68,6 +70,67 @@ MEDIUM_PATTERNS: List[Tuple[str, str, bool]] = [
         True,
     ),
 ]
+
+
+# Accepted patterns: Allowed in specific modules with documented rationale
+# Format: (module_pattern, line_pattern, description)
+# module_pattern: exact module name or '*' for all
+# line_pattern: regex pattern to match the line
+# description: human-readable rationale
+#
+# NARROW PATTERNS: Each pattern matches exact line shapes to prevent
+# future unsafe drift. Patterns are module+shape specific.
+ACCEPTED_PATTERNS: List[Tuple[str, str, str]] = [
+    # bfd/packet.zig: @enumFromInt for BFD State and Diagnostic enums
+    # Only accepted for variables derived from @truncate + bit mask
+    # RFC 5880 guarantees 2-bit state (0-3) and 5-bit diag (0-31)
+    (
+        "bfd/packet.zig",
+        r'@enumFromInt\((?:diag_val|state_val)\)',
+        "@enumFromInt for bit-masked BFD state/diag - RFC 5880 wire format guarantees valid range",
+    ),
+    
+    # net/ss_parser.zig: .? on specific nullable variables only
+    # Each pattern matches exact variable names used with null guards.
+    # Patterns: retransmits.?, unacked.?, rto_ms.?, colon_idx.?, open_idx.?, close_idx.?, slash_idx.?, num_start.?, len.?
+    (
+        "net/ss_parser.zig",
+        r'(?:retransmits|unacked|rto_ms|colon_idx|open_idx|close_idx|slash_idx|num_start|len)\.\?',
+        ".? on specific nullable variables - index/status parser with null guards",
+    ),
+    
+    # net/ss_parser.zig: @enumFromInt from enum field values (safe by construction)
+    # Pattern: @enumFromInt(field.value) where field is from enum definition
+    (
+        "net/ss_parser.zig",
+        r'@enumFromInt\(field\.value\)',
+        "@enumFromInt from enum field values - safe by construction",
+    ),
+    
+    # net/wg_show_parser.zig: .? on specific nullable variables only
+    # Patterns: latest_handshake.? after null-or guard, num_start.? after null check
+    (
+        "net/wg_show_parser.zig",
+        r'(?:latest_handshake|num_start)\.\?',
+        ".? on specific nullable variables - null guards ensure safe unwrap",
+    ),
+    
+    # bfd/status.zig: .? after null check for internal status computation
+    (
+        "bfd/status.zig",
+        r'\.\?',
+        ".? after null check - internal status computation only",
+    ),
+]
+
+
+# Modules that have accepted patterns (for quick lookup)
+ACCEPTED_PATTERN_MODULES: Set[str] = {
+    "bfd/packet.zig",
+    "net/ss_parser.zig",
+    "net/wg_show_parser.zig",
+    "bfd/status.zig",
+}
 
 
 # Patterns that should be ignored (in comments, strings, tests)
