@@ -94,13 +94,6 @@ pub const Nlattr = extern struct {
     pub fn isValid(self: *const Nlattr, total_len: usize) bool {
         return self.nla_len >= @sizeOf(Nlattr) and self.nla_len <= total_len;
     }
-
-    /// Returns the payload as a u8 slice.
-    pub fn payload(self: *const Nlattr) []const u8 {
-        const payload_start = @sizeOf(Nlattr);
-        const len = self.payloadLen();
-        return @as([*]const u8, @ptrCast(self))[payload_start..][0..len];
-    }
 };
 
 /// Netlink message header length in bytes.
@@ -122,13 +115,13 @@ comptime {
 
 /// Write a native-endian u32 into a byte buffer at the given offset.
 /// This avoids pointer casts that require alignment guarantees.
-inline fn writeU32Native(buf: []u8, offset: usize, value: u32) void {
+pub inline fn writeU32Native(buf: []u8, offset: usize, value: u32) void {
     std.mem.writeInt(u32, buf[offset..][0..4], value, .native);
 }
 
 /// Write a native-endian u16 into a byte buffer at the given offset.
 /// This avoids pointer casts that require alignment guarantees.
-inline fn writeU16Native(buf: []u8, offset: usize, value: u16) void {
+pub inline fn writeU16Native(buf: []u8, offset: usize, value: u16) void {
     std.mem.writeInt(u16, buf[offset..][0..2], value, .native);
 }
 
@@ -148,12 +141,15 @@ inline fn readU16Native(buf: []const u8, offset: usize) u16 {
 /// This avoids @alignCast/@ptrCast panics when the buffer is not aligned for the struct.
 ///
 /// Returns the struct value, or null if the buffer is too short.
+/// Uses overflow-safe bounds checking to prevent usize wraparound.
 pub inline fn readNetlinkStruct(
     comptime T: type,
     buf: []const u8,
     offset: usize,
 ) ?T {
-    if (offset + @sizeOf(T) > buf.len) {
+    // Overflow-safe: check that offset is within bounds and that reading
+    // @sizeOf(T) bytes won't wrap around.
+    if (offset > buf.len or buf.len - offset < @sizeOf(T)) {
         return null;
     }
     var value: T = undefined;

@@ -4,6 +4,10 @@
 // These tests run on all platforms but test the attribute parsing logic
 // which is platform-independent. Netlink socket operations are skipped
 // on non-Linux platforms.
+//
+// IMPORTANT: These tests use copy-based parsing (readNetlinkStruct) to avoid
+// @alignCast/@ptrCast panics on misaligned buffers. This is the same pattern
+// used by production parsing code.
 
 const std = @import("std");
 const wg = @import("wg_status_boundary.zig");
@@ -18,6 +22,10 @@ const parseFamilyIdAttr = netlink_consts.parseFamilyIdAttr;
 const Nlattr = netlink_consts.Nlattr;
 const Nlmsghdr = netlink_consts.Nlmsghdr;
 const Genlmsghdr = netlink_consts.Genlmsghdr;
+const readNetlinkStruct = netlink_consts.readNetlinkStruct;
+const readU16Native = netlink_consts.readU16Native;
+const writeU16Native = netlink_consts.writeU16Native;
+const writeU32Native = netlink_consts.writeU32Native;
 
 // WireGuard attribute constants for test fixtures
 const WG_DEVICE_ATTR_LISTEN_PORT: u16 = 5;
@@ -118,13 +126,13 @@ test "parseDeviceAttrs: listen port parsed correctly" {
     var tx_bytes: u64 = 0;
     var listen_port: ?u16 = null;
     
-    // Build a listen port attribute manually
+    // Build a listen port attribute using byte-wise writes (no @alignCast/@ptrCast)
     var buf: [64]u8 = std.mem.zeroes([64]u8);
-    const attr = @as(*Nlattr, @alignCast(@ptrCast(&buf)));
-    attr.nla_len = @intCast(@sizeOf(Nlattr) + 2);
-    attr.nla_type = WG_DEVICE_ATTR_LISTEN_PORT;
+    const attr_total_len = @as(u16, @intCast(@sizeOf(Nlattr) + 2));
+    writeU16Native(buf[0..], 0, attr_total_len);
+    writeU16Native(buf[0..], 2, WG_DEVICE_ATTR_LISTEN_PORT);
     // Little-endian port 51820 = 0xCA6C
-    @memcpy(buf[@sizeOf(Nlattr)..][0..2], &[_]u8{ 0x6C, 0xCA });
+    buf[@sizeOf(Nlattr)..][0..2].* = .{ 0x6C, 0xCA };
     
     try parseDeviceAttrs(&buf, @sizeOf(Nlattr) + 2, &peer_count, &latest_handshake, &rx_bytes, &tx_bytes, &listen_port);
     try std.testing.expectEqual(@as(?u16, 51820), listen_port);
@@ -137,11 +145,12 @@ test "parseDeviceAttrs: unknown attrs are ignored" {
     var tx_bytes: u64 = 0;
     var listen_port: ?u16 = null;
     
+    // Build an unknown attribute using byte-wise writes
     var buf: [64]u8 = std.mem.zeroes([64]u8);
-    const attr = @as(*Nlattr, @alignCast(@ptrCast(&buf)));
-    attr.nla_len = @intCast(@sizeOf(Nlattr) + 4);
-    attr.nla_type = 99; // Unknown type
-    @memcpy(buf[@sizeOf(Nlattr)..][0..4], &[_]u8{ 1, 2, 3, 4 });
+    const attr_total_len = @as(u16, @intCast(@sizeOf(Nlattr) + 4));
+    writeU16Native(buf[0..], 0, attr_total_len);
+    writeU16Native(buf[0..], 2, 99); // Unknown type
+    buf[@sizeOf(Nlattr)..][0..4].* = .{ 1, 2, 3, 4 };
     
     try parseDeviceAttrs(&buf, @sizeOf(Nlattr) + 4, &peer_count, &latest_handshake, &rx_bytes, &tx_bytes, &listen_port);
     try std.testing.expectEqual(@as(u32, 0), peer_count);
@@ -154,11 +163,12 @@ test "parseDeviceAttrs: truncated attribute is ignored" {
     var tx_bytes: u64 = 0;
     var listen_port: ?u16 = null;
     
+    // Build a truncated attribute using byte-wise writes
     var buf: [64]u8 = std.mem.zeroes([64]u8);
-    const attr = @as(*Nlattr, @alignCast(@ptrCast(&buf)));
-    attr.nla_len = @intCast(@sizeOf(Nlattr) + 2);
-    attr.nla_type = WG_DEVICE_ATTR_LISTEN_PORT;
-    @memcpy(buf[@sizeOf(Nlattr)..][0..2], &[_]u8{ 0x6C, 0xCA });
+    const attr_total_len = @as(u16, @intCast(@sizeOf(Nlattr) + 2));
+    writeU16Native(buf[0..], 0, attr_total_len);
+    writeU16Native(buf[0..], 2, WG_DEVICE_ATTR_LISTEN_PORT);
+    buf[@sizeOf(Nlattr)..][0..2].* = .{ 0x6C, 0xCA };
     
     // Pass only 3 bytes (less than header + 2)
     try parseDeviceAttrs(&buf, 3, &peer_count, &latest_handshake, &rx_bytes, &tx_bytes, &listen_port);
@@ -174,13 +184,12 @@ test "parsePeerAttrs: one peer with handshake" {
     var rx_bytes: u64 = 0;
     var tx_bytes: u64 = 0;
     
-    // Build peer with LAST_HANDSHAKE_TIME
+    // Build peer with LAST_HANDSHAKE_TIME using byte-wise writes
     // WireGuard uses kernel timespec: sec (u64) + nsec (u64) = 16 bytes
-    // We store the epoch seconds directly in the sec field
     var buf: [256]u8 = std.mem.zeroes([256]u8);
-    const attr = @as(*Nlattr, @alignCast(@ptrCast(&buf)));
-    attr.nla_len = @intCast(@sizeOf(Nlattr) + 16);
-    attr.nla_type = WG_PEER_ATTR_LAST_HANDSHAKE_TIME;
+    const attr_total_len = @as(u16, @intCast(@sizeOf(Nlattr) + 16));
+    writeU16Native(buf[0..], 0, attr_total_len);
+    writeU16Native(buf[0..], 2, WG_PEER_ATTR_LAST_HANDSHAKE_TIME);
     
     // Write handshake time: sec = 1000000000 (1 billion seconds since epoch)
     // nsec = 0 (not used)
@@ -196,12 +205,14 @@ test "parsePeerAttrs: one peer with rx bytes" {
     var rx_bytes: u64 = 0;
     var tx_bytes: u64 = 0;
     
+    // Build peer with RX_BYTES using byte-wise writes
     var buf: [256]u8 = std.mem.zeroes([256]u8);
-    const attr = @as(*Nlattr, @alignCast(@ptrCast(&buf)));
-    attr.nla_len = @intCast(@sizeOf(Nlattr) + 8);
-    attr.nla_type = WG_PEER_ATTR_RX_BYTES;
-    const rx_val: [8]u8 = .{ 0xE8, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }; // 1000 little-endian
-    @memcpy(buf[@sizeOf(Nlattr)..][0..8], &rx_val);
+    const attr_total_len = @as(u16, @intCast(@sizeOf(Nlattr) + 8));
+    writeU16Native(buf[0..], 0, attr_total_len);
+    writeU16Native(buf[0..], 2, WG_PEER_ATTR_RX_BYTES);
+    // Little-endian 1000 = 0x3E8
+    const rx_val: [8]u8 = .{ 0xE8, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    buf[@sizeOf(Nlattr)..][0..8].* = rx_val;
     
     try parsePeerAttrs(&buf, @sizeOf(Nlattr) + 8, &latest_handshake, &rx_bytes, &tx_bytes);
     try std.testing.expectEqual(@as(u64, 1000), rx_bytes);
@@ -212,12 +223,14 @@ test "parsePeerAttrs: one peer with tx bytes" {
     var rx_bytes: u64 = 0;
     var tx_bytes: u64 = 0;
     
+    // Build peer with TX_BYTES using byte-wise writes
     var buf: [256]u8 = std.mem.zeroes([256]u8);
-    const attr = @as(*Nlattr, @alignCast(@ptrCast(&buf)));
-    attr.nla_len = @intCast(@sizeOf(Nlattr) + 8);
-    attr.nla_type = WG_PEER_ATTR_TX_BYTES;
-    const tx_val: [8]u8 = .{ 0xD0, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }; // 2000 little-endian
-    @memcpy(buf[@sizeOf(Nlattr)..][0..8], &tx_val);
+    const attr_total_len = @as(u16, @intCast(@sizeOf(Nlattr) + 8));
+    writeU16Native(buf[0..], 0, attr_total_len);
+    writeU16Native(buf[0..], 2, WG_PEER_ATTR_TX_BYTES);
+    // Little-endian 2000 = 0x7D0
+    const tx_val: [8]u8 = .{ 0xD0, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    buf[@sizeOf(Nlattr)..][0..8].* = tx_val;
     
     try parsePeerAttrs(&buf, @sizeOf(Nlattr) + 8, &latest_handshake, &rx_bytes, &tx_bytes);
     try std.testing.expectEqual(@as(u64, 2000), tx_bytes);
@@ -230,9 +243,9 @@ test "parsePeerAttrs: zero handshake is null" {
     
     // timespec with sec = 0 means no handshake occurred
     var buf: [256]u8 = std.mem.zeroes([256]u8);
-    const attr = @as(*Nlattr, @alignCast(@ptrCast(&buf)));
-    attr.nla_len = @intCast(@sizeOf(Nlattr) + 16);
-    attr.nla_type = WG_PEER_ATTR_LAST_HANDSHAKE_TIME;
+    const attr_total_len = @as(u16, @intCast(@sizeOf(Nlattr) + 16));
+    writeU16Native(buf[0..], 0, attr_total_len);
+    writeU16Native(buf[0..], 2, WG_PEER_ATTR_LAST_HANDSHAKE_TIME);
     // All zeros means sec = 0, nsec = 0 (from memset)
     
     try parsePeerAttrs(&buf, @sizeOf(Nlattr) + 16, &latest_handshake, &rx_bytes, &tx_bytes);
@@ -244,11 +257,12 @@ test "parsePeerAttrs: sensitive attrs are ignored" {
     var rx_bytes: u64 = 0;
     var tx_bytes: u64 = 0;
     
+    // Build a PUBLIC_KEY attribute (should be ignored by parser)
     var buf: [256]u8 = std.mem.zeroes([256]u8);
-    const attr = @as(*Nlattr, @alignCast(@ptrCast(&buf)));
-    attr.nla_len = @intCast(@sizeOf(Nlattr) + 4);
-    attr.nla_type = 1; // PUBLIC_KEY
-    @memcpy(buf[@sizeOf(Nlattr)..][0..4], &[_]u8{ 0x01, 0x02, 0x03, 0x04 });
+    const attr_total_len = @as(u16, @intCast(@sizeOf(Nlattr) + 4));
+    writeU16Native(buf[0..], 0, attr_total_len);
+    writeU16Native(buf[0..], 2, 1); // PUBLIC_KEY type
+    buf[@sizeOf(Nlattr)..][0..4].* = .{ 0x01, 0x02, 0x03, 0x04 };
     
     try parsePeerAttrs(&buf, @sizeOf(Nlattr) + 4, &latest_handshake, &rx_bytes, &tx_bytes);
     try std.testing.expectEqual(@as(?u64, null), latest_handshake);
@@ -261,10 +275,11 @@ test "parsePeerAttrs: sensitive attrs are ignored" {
 // ============================================================================
 
 test "parseFamilyIdAttr: extracts family ID as u16" {
+    // Build a FAMILY_ID attribute using byte-wise writes
     var buf: [64]u8 = std.mem.zeroes([64]u8);
-    const attr = @as(*Nlattr, @alignCast(@ptrCast(&buf)));
-    attr.nla_len = @intCast(@sizeOf(Nlattr) + 2);
-    attr.nla_type = 1; // CTRL_ATTR_FAMILY_ID
+    const attr_total_len = @as(u16, @intCast(@sizeOf(Nlattr) + 2));
+    writeU16Native(buf[0..], 0, attr_total_len);
+    writeU16Native(buf[0..], 2, 1); // CTRL_ATTR_FAMILY_ID
     // Family ID = 27 (0x1B) as little-endian u16
     buf[@sizeOf(Nlattr)..][0..2].* = .{ 0x1B, 0x00 };
     
@@ -276,20 +291,20 @@ test "parseFamilyIdAttr: skips non-FAMILY_ID attrs" {
     var buf: [128]u8 = std.mem.zeroes([128]u8);
     var offset: usize = 0;
     
-    // Add FAMILY_NAME attr first
+    // Add FAMILY_NAME attr first using byte-wise writes
     {
-        const attr = @as(*Nlattr, @alignCast(@ptrCast(buf[offset..].ptr)));
-        attr.nla_len = @intCast(@sizeOf(Nlattr) + 9);
-        attr.nla_type = 2; // CTRL_ATTR_FAMILY_NAME
-        @memcpy(buf[offset + @sizeOf(Nlattr)..][0..9], "wireguard");
+        const attr_total_len = @as(u16, @intCast(@sizeOf(Nlattr) + 9));
+        writeU16Native(buf[offset..], 0, attr_total_len);
+        writeU16Native(buf[offset..], 2, 2); // CTRL_ATTR_FAMILY_NAME
+        buf[offset + @sizeOf(Nlattr)..][0..9].* = "wireguard".*;
         offset += (9 + @sizeOf(Nlattr) + 3) & ~@as(usize, 3);
     }
     
-    // Add FAMILY_ID attr
+    // Add FAMILY_ID attr using byte-wise writes
     {
-        const attr = @as(*Nlattr, @alignCast(@ptrCast(buf[offset..].ptr)));
-        attr.nla_len = @intCast(@sizeOf(Nlattr) + 2);
-        attr.nla_type = 1; // CTRL_ATTR_FAMILY_ID
+        const attr_total_len = @as(u16, @intCast(@sizeOf(Nlattr) + 2));
+        writeU16Native(buf[offset..], 0, attr_total_len);
+        writeU16Native(buf[offset..], 2, 1); // CTRL_ATTR_FAMILY_ID
         buf[offset + @sizeOf(Nlattr)..][0..2].* = .{ 0x1B, 0x00 };
     }
     
@@ -302,6 +317,52 @@ test "parseFamilyIdAttr: truncated returns error" {
     
     const result = parseFamilyIdAttr(&buf, 2);
     try std.testing.expectError(error.backend_missing, result);
+}
+
+// ============================================================================
+// readNetlinkStruct Overflow Safety Tests
+// ============================================================================
+
+test "readNetlinkStruct: returns null on offset past buffer" {
+    var buf: [16]u8 = std.mem.zeroes([16]u8);
+    const result = readNetlinkStruct(Nlattr, &buf, 20);
+    try std.testing.expect(result == null);
+}
+
+test "readNetlinkStruct: returns null on offset equals buffer len" {
+    var buf: [16]u8 = std.mem.zeroes([16]u8);
+    const result = readNetlinkStruct(Nlattr, &buf, 16);
+    try std.testing.expect(result == null);
+}
+
+test "readNetlinkStruct: returns null on buffer too short for struct" {
+    var buf: [2]u8 = std.mem.zeroes([2]u8);
+    const result = readNetlinkStruct(Nlattr, &buf, 0);
+    try std.testing.expect(result == null);
+}
+
+test "readNetlinkStruct: reads correctly from aligned buffer" {
+    var buf: [16]u8 = std.mem.zeroes([16]u8);
+    // Write Nlattr: nla_len=8, nla_type=5
+    writeU16Native(buf[0..], 0, 8);
+    writeU16Native(buf[0..], 2, 5);
+    
+    const attr = readNetlinkStruct(Nlattr, &buf, 0);
+    try std.testing.expect(attr != null);
+    try std.testing.expectEqual(@as(u16, 8), attr.?.nla_len);
+    try std.testing.expectEqual(@as(u16, 5), attr.?.nla_type);
+}
+
+test "readNetlinkStruct: reads correctly from misaligned offset" {
+    var buf: [32]u8 = std.mem.zeroes([32]u8);
+    // Write Nlattr at offset 3 (misaligned)
+    writeU16Native(buf[3..], 0, 12);
+    writeU16Native(buf[3..], 2, 7);
+    
+    const attr = readNetlinkStruct(Nlattr, &buf, 3);
+    try std.testing.expect(attr != null);
+    try std.testing.expectEqual(@as(u16, 12), attr.?.nla_len);
+    try std.testing.expectEqual(@as(u16, 7), attr.?.nla_type);
 }
 
 // ============================================================================
