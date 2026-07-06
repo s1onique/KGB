@@ -144,16 +144,14 @@ fn cliWireguardStatus(allocator: std.mem.Allocator, test_path_override: ?[*:0]co
 
     const wg_path = test_path_override orelse (findWgCommand() orelse return error.backend_missing);
 
-    const cmd_result = runWgShowDump(allocator, wg_path, CliBackend.DEFAULT_TIMEOUT_SECS) catch |err| {
+    var cmd_result = runWgShowDump(allocator, wg_path, CliBackend.DEFAULT_TIMEOUT_SECS) catch |err| {
         return mapCollectorError(err);
     };
-    // MemoryOwnership: Free stdout/stderr buffers on ALL return paths.
-    // Critical fix for per-request RSS leak (~18KB/request) observed during /status hammering.
-    // Defer handles success path and error paths where we control the return.
-    defer {
-        allocator.free(cmd_result.stdout);
-        allocator.free(cmd_result.stderr);
-    }
+    // MemoryOwnership: Use single deinit() for owned result cleanup on all return paths.
+    // This is the key ownership contract: one returned owned object, one deinit().
+    // runWgShowDump uses errdefer for partial allocation failures; this defer handles
+    // successful return and all error paths in the consumer.
+    defer cmd_result.deinit(allocator);
 
     if (cmd_result.exit_code == 127) return error.backend_missing;
     if (cmd_result.exit_code == 126) return error.permission_denied;
@@ -205,20 +203,37 @@ fn findWgCommand() ?[*:0]const u8 {
     return null;
 }
 
-/// Internal: result type for runWgShowDump.
-const WgDumpResult = struct {
+/// Owned result type for WireGuard command output.
+/// Provides explicit ownership contract with single deinit() method.
+/// This makes memory ownership mechanically reviewable.
+pub const OwnedWgCommandResult = struct {
+    /// Full allocated stdout buffer (may be larger than used slice).
+    stdout_storage: []u8,
+    /// Full allocated stderr buffer (may be larger than used slice).
+    stderr_storage: []u8,
+    /// Actual stdout content (slice of stdout_storage).
+    stdout: []const u8,
+    /// Actual stderr content (slice of stderr_storage).
+    stderr: []const u8,
     exit_code: c_int,
-    stdout: []u8,
-    stderr: []u8,
     stdout_truncated: bool,
     stderr_truncated: bool,
     timed_out: bool,
+
+    /// Frees all owned allocations.
+    /// Must be called on all return paths from the consumer.
+    pub fn deinit(self: *OwnedWgCommandResult, allocator: std.mem.Allocator) void {
+        allocator.free(self.stdout_storage);
+        allocator.free(self.stderr_storage);
+        self.* = undefined;
+    }
 };
 
 /// Internal: run `wg show <interface> dump` and capture output with timeout enforcement.
 ///
 /// Uses nonblocking reads with poll() to avoid pipe deadlock between stdout/stderr.
-fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_secs: u64) !WgDumpResult {
+/// Returns OwnedWgCommandResult with explicit ownership - caller must call deinit().
+fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_secs: u64) !OwnedWgCommandResult {
     var stdout_pipe: [2]c_int = undefined;
     var stderr_pipe: [2]c_int = undefined;
 
@@ -369,10 +384,12 @@ fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_s
     var status: c_int = undefined;
     _ = std.c.waitpid(pid, &status, 0);
 
-    return WgDumpResult{
-        .exit_code = if ((status & 0x7f) == 0) (status >> 8) & 0xff else -1,
+    return OwnedWgCommandResult{
+        .stdout_storage = stdout_buf,
+        .stderr_storage = stderr_buf,
         .stdout = stdout_buf[0..stdout_len],
         .stderr = stderr_buf[0..stderr_len],
+        .exit_code = if ((status & 0x7f) == 0) (status >> 8) & 0xff else -1,
         .stdout_truncated = stdout_truncated,
         .stderr_truncated = stderr_truncated,
         .timed_out = timed_out,

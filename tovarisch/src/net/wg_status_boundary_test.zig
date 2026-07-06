@@ -5,6 +5,7 @@
 const std = @import("std");
 const wg = @import("wg_status_boundary.zig");
 const linux_stats = @import("linux_stats.zig");
+const wg_cli = @import("wg_status_boundary_cli.zig");
 
 // ============================================================================
 // Fake Backend for Tests
@@ -207,6 +208,33 @@ test "FakeBackend repeated calls do not leak with testing allocator" {
 // - Run tovarisch with /status hammering and observe RSS stable (not growing)
 // - Use valgrind/massif to verify memory patterns
 // ============================================================================
+
+// ============================================================================
+// OwnedWgCommandResult Deinit Test
+//
+// ACT-HULK29R-ZIG016-MEMOWN01-OWNED-COMMAND-RESULT
+//
+// Verifies that OwnedWgCommandResult.deinit() properly frees all owned
+// allocations. std.testing.allocator reports leaks when allocations are
+// not freed, making this test meaningful.
+// ============================================================================
+
+test "OwnedWgCommandResult deinit frees stdout stderr" {
+    const allocator = std.testing.allocator;
+
+    var result = wg_cli.OwnedWgCommandResult{
+        .stdout_storage = try allocator.alloc(u8, 18 * 1024),
+        .stderr_storage = try allocator.alloc(u8, 1024),
+        .stdout = "",
+        .stderr = "",
+        .exit_code = 0,
+        .stdout_truncated = false,
+        .stderr_truncated = false,
+        .timed_out = false,
+    };
+    // If this completes without allocator reporting leaks, deinit() worked
+    result.deinit(allocator);
+}
 
 test "CliBackend CLI-path: requires integration test environment" {
     // This test documents that CLI-path memory testing requires integration testing
