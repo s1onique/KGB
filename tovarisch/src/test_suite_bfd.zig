@@ -26,6 +26,10 @@ const _bfd_receive_tests = @import("bfd/receive_tests.zig");
 const _bfd_snapshot = @import("bfd/snapshot.zig");
 const _bfd_snapshot_tests = @import("bfd/snapshot_tests.zig");
 
+// BFD state transition totality tests (ACT-TOVARISCH-ZIG-HULK24)
+const _bfd_transition_totality_tests = @import("bfd/transition_totality_tests.zig");
+const _bfd_transition_fsm_tests = @import("bfd/transition_fsm_tests.zig");
+
 // Force test discovery
 test { std.testing.refAllDecls(@import("bfd/packet.zig")); }
 test { std.testing.refAllDecls(@import("bfd/config.zig")); }
@@ -46,3 +50,7 @@ test { std.testing.refAllDecls(@import("bfd/receive_tests.zig")); }
 // BFD snapshot budget/state hardening (ACT-TOVARISCH-ZIG-HULK14)
 test { std.testing.refAllDecls(@import("bfd/snapshot.zig")); }
 test { std.testing.refAllDecls(@import("bfd/snapshot_tests.zig")); }
+
+// BFD state transition totality tests (ACT-TOVARISCH-ZIG-HULK24)
+test { std.testing.refAllDecls(@import("bfd/transition_totality_tests.zig")); }
+test { std.testing.refAllDecls(@import("bfd/transition_fsm_tests.zig")); }

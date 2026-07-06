@@ -80,6 +80,7 @@ const _bfd_runtime_tests = @import("bfd/runtime_tests.zig");
 const _bfd_status = @import("bfd/status.zig");
 const _bfd_receive_startup_tests = @import("bfd/receive_startup_tests.zig");
 const _bfd_receive_tests = @import("bfd/receive_tests.zig");
+const _bfd_transition_fsm_tests = @import("bfd/transition_fsm_tests.zig");
 
 // Force test discovery for all imported modules
 test { std.testing.refAllDecls(@import("net/private_ip.zig")); }
@@ -159,6 +160,9 @@ test { std.testing.refAllDecls(@import("bfd/receive_tests.zig")); }
 // BFD snapshot budget/state hardening (ACT-TOVARISCH-ZIG-HULK14)
 test { std.testing.refAllDecls(@import("bfd/snapshot.zig")); }
 test { std.testing.refAllDecls(@import("bfd/snapshot_tests.zig")); }
+// BFD state transition totality tests (ACT-TOVARISCH-ZIG-HULK24)
+test { std.testing.refAllDecls(@import("bfd/transition_totality_tests.zig")); }
+test { std.testing.refAllDecls(@import("bfd/transition_fsm_tests.zig")); }
 
 // WireGuard tests
 test { std.testing.refAllDecls(@import("config.zig")); }
@@ -244,6 +248,8 @@ test { std.testing.refAllDecls(@import("bgp/snapshot.zig")); }
 test { std.testing.refAllDecls(@import("bgp/snapshot_tests.zig")); }
 // BGP/BFD budget contract tests (ACT-TOVARISCH-ZIG-HULK17R2)
 test { std.testing.refAllDecls(@import("bgp/budget_contract_tests.zig")); }
+// BGP state transition totality tests (ACT-TOVARISCH-ZIG-HULK24)
+test { std.testing.refAllDecls(@import("bgp/transition_totality_tests.zig")); }
 
 // BGP reconnect/backoff lifecycle tests
 test { std.testing.refAllDecls(@import("bgp/reconnect_lifecycle.zig")); }

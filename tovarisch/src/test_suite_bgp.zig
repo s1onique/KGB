@@ -50,6 +50,9 @@ const _bgp_snapshot = @import("bgp/snapshot.zig");
 const _bgp_snapshot_tests = @import("bgp/snapshot_tests.zig");
 const _bgp_budget_contract_tests = @import("bgp/budget_contract_tests.zig");
 
+// BGP state transition totality tests (ACT-TOVARISCH-ZIG-HULK24)
+const _bgp_transition_totality_tests = @import("bgp/transition_totality_tests.zig");
+
 // BGP hold timer expiry recovery tests (this ACT)
 const _bgp_reconnect_hold_timer_tests = @import("bgp/reconnect_hold_timer_tests.zig");
 const _bgp_reconnect_recovery_tests = @import("bgp/reconnect_recovery_tests.zig");
@@ -99,6 +102,9 @@ test { std.testing.refAllDecls(@import("bgp/status.zig")); }
 test { std.testing.refAllDecls(@import("bgp/snapshot.zig")); }
 test { std.testing.refAllDecls(@import("bgp/snapshot_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/budget_contract_tests.zig")); }
+
+// BGP state transition totality tests (ACT-TOVARISCH-ZIG-HULK24)
+test { std.testing.refAllDecls(@import("bgp/transition_totality_tests.zig")); }
 
 // BGP hold timer expiry recovery tests (this ACT)
 test { std.testing.refAllDecls(@import("bgp/reconnect_hold_timer_tests.zig")); }
