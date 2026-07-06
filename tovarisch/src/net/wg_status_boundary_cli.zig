@@ -5,10 +5,20 @@
 //
 // Phase 1 CLI backend uses configured interface identity via `wg show <iface> dump`.
 // Phase 2 generic netlink remains future work.
+//
+// ACT-HULK29R-ZIG016-WG-PEERS-DIAGNOSTIC-INTEGRATION:
+// This module provides diagnostic-aware status collection that carries structured
+// diagnostic context (interface, backend, timeout_secs, exit code) on both success
+// and failure paths without changing the public API surface.
 
 const std = @import("std");
 const wg = @import("wg_status_boundary.zig");
 const config_parse_helpers = @import("../config_parse_helpers.zig");
+const wg_cli_run = @import("wg_status_boundary_cli_run.zig");
+
+// Re-export from wg_status_boundary_cli_run.zig for backward compatibility
+pub const OwnedWgCommandResult = wg_cli_run.OwnedWgCommandResult;
+pub const runWgShowDump = wg_cli_run.runWgShowDump;
 
 // WgCommandRunner: injectable seam for testing CLI status collection.
 // ACT-HULK29R-ZIG016-MEMOWN02-COMMAND-RUNNER-SEAM
@@ -17,6 +27,7 @@ pub const WgCommandRunner = struct {
         allocator: std.mem.Allocator,
         ctx: ?*anyopaque,
         wg_path: [*:0]const u8,
+        interface_name: []const u8,
         timeout_secs: u64,
     ) anyerror!OwnedWgCommandResult,
     ctx: ?*anyopaque = null,
@@ -25,18 +36,44 @@ pub const WgCommandRunner = struct {
         self: WgCommandRunner,
         allocator: std.mem.Allocator,
         wg_path: [*:0]const u8,
+        interface_name: []const u8,
         timeout_secs: u64,
     ) !OwnedWgCommandResult {
-        return self.runFn(allocator, self.ctx, wg_path, timeout_secs);
+        return self.runFn(allocator, self.ctx, wg_path, interface_name, timeout_secs);
     }
 };
 
 const real_wg_command_runner = WgCommandRunner{
     .runFn = struct {
-        fn f(allocator: std.mem.Allocator, _: ?*anyopaque, wg_path: [*:0]const u8, timeout_secs: u64) !OwnedWgCommandResult {
-            return runWgShowDump(allocator, wg_path, timeout_secs);
+        fn f(allocator: std.mem.Allocator, _: ?*anyopaque, wg_path: [*:0]const u8, interface_name: []const u8, timeout_secs: u64) !OwnedWgCommandResult {
+            return runWgShowDump(allocator, wg_path, interface_name, timeout_secs);
         }
     }.f,
+};
+
+// ============================================================================
+// Diagnostic Attempt Union (ACT-HULK29R-ZIG016-WG-PEERS-DIAGNOSTIC-INTEGRATION)
+// ============================================================================
+
+/// Union that carries both status and diagnostic on all paths.
+/// This allows callers to get structured diagnostic context even on error paths,
+/// unlike an error union which would lose diagnostic context on `return error.timeout`.
+///
+/// Usage:
+///   const attempt = cliWireguardStatusDiagnosticAttemptWithRunner(...);
+///   switch (attempt) {
+///       .ok => |ok| use ok.status and ok.diagnostic,
+///       .err => |bad| use bad.err and bad.diagnostic,
+///   }
+pub const WireGuardStatusDiagnosticAttempt = union(enum) {
+    ok: struct {
+        status: wg.WireGuardStatus,
+        diagnostic: wg.WireGuardPeerDiagnostic,
+    },
+    err: struct {
+        err: wg.StatusError,
+        diagnostic: wg.WireGuardPeerDiagnostic,
+    },
 };
 
 // POSIX fcntl and open flags (not exposed in Zig 0.16 std.c)
@@ -170,61 +207,163 @@ fn cliWireguardStatus(allocator: std.mem.Allocator, test_path_override: ?[*:0]co
 }
 
 // ============================================================================
-// Testing Export (ACT-HULK29R-ZIG016-MEMOWN02-COMMAND-RUNNER-SEAM)
+// Diagnostic Builder (ACT-HULK29R-ZIG016-WG-PEERS-DIAGNOSTIC-INTEGRATION)
 // ============================================================================
 
-/// Test-only: runner-aware status collection with injectable command runner.
-/// Allows tests to inject allocated fake stdout/stderr without fork/execve.
-pub fn cliWireguardStatusWithRunner(
+/// Builds a value-only WireGuardPeerDiagnostic from command result data.
+/// All fields are value types - no borrowed slices escape the command result.
+fn buildCliDiagnostic(
+    error_kind: []const u8,
+    exit_code: ?u8,
+    timed_out: bool,
+    stdout_len: usize,
+    stderr_len: usize,
+) wg.WireGuardPeerDiagnostic {
+    return .{
+        .backend = "cli",
+        .selected_interface = DEFAULT_WG_INTERFACE,
+        .command = "wg show wg-kgb0 dump",
+        .timeout_secs = if (timed_out) CliBackend.DEFAULT_TIMEOUT_SECS else null,
+        .exit_code = exit_code,
+        .error_kind = error_kind,
+        .stderr_len = stderr_len,
+        .stdout_len = stdout_len,
+    };
+}
+
+// ============================================================================
+// Diagnostic-Aware Status Collection (ACT-HULK29R-ZIG016-WG-PEERS-DIAGNOSTIC-INTEGRATION)
+// ============================================================================
+
+/// Diagnostic-aware WireGuard status collection with injectable command runner.
+///
+/// This internal function returns a union that carries both status and diagnostic
+/// on all paths, allowing callers to get structured diagnostic context even on
+/// error paths without changing the public API.
+///
+/// Declassifies the diagnostic attempt into the legacy error union for callers
+/// that only need the status (preserving API compatibility).
+pub fn cliWireguardStatusDiagnosticAttemptWithRunner(
     allocator: std.mem.Allocator,
     test_path_override: ?[*:0]const u8,
     runner: WgCommandRunner,
-) wg.StatusError!wg.WireGuardStatusResult {
+) WireGuardStatusDiagnosticAttempt {
     // Validate interface name before execve (defense in depth)
     if (!isValidInterfaceName(DEFAULT_WG_INTERFACE)) {
-        return error.interface_missing;
+        return .{ .err = .{
+            .err = error.interface_missing,
+            .diagnostic = buildCliDiagnostic("interface_missing", null, false, 0, 0),
+        } };
     }
 
-    const wg_path = test_path_override orelse (findWgCommand() orelse return error.backend_missing);
+    const wg_path = test_path_override orelse (findWgCommand() orelse return .{ .err = .{
+        .err = error.backend_missing,
+        .diagnostic = buildCliDiagnostic("backend_missing", null, false, 0, 0),
+    } });
 
-    var cmd_result = runner.run(allocator, wg_path, CliBackend.DEFAULT_TIMEOUT_SECS) catch |err| {
-        return mapCollectorError(err);
+    var cmd_result = runner.run(allocator, wg_path, DEFAULT_WG_INTERFACE, CliBackend.DEFAULT_TIMEOUT_SECS) catch |run_err| {
+        // runner.run() failure - classify based on error type
+        const classified = mapCollectorError(run_err);
+        const diag = buildCliDiagnostic(
+            switch (classified) {
+                error.timeout => "timeout",
+                error.backend_missing => "backend_missing",
+                error.permission_denied => "permission_denied",
+                error.interface_missing => "interface_missing",
+                error.malformed_output => "malformed_output",
+                error.out_of_memory => "out_of_memory",
+                error.unsupported_platform => "unsupported_platform",
+                error.netlink_failed => "netlink_failed",
+                error.command_failed => "command_failed",
+            },
+            null,
+            false,
+            0,
+            0,
+        );
+        return .{ .err = .{ .err = classified, .diagnostic = diag } };
     };
-    // MemoryOwnership: Use single deinit() for owned result cleanup on all return paths.
-    // This is the key ownership contract: one returned owned object, one deinit().
-    // runner.run() uses errdefer for partial allocation failures; this defer handles
-    // successful return and all error paths in the consumer.
+
+    // MemoryOwnership: Use defer for owned result cleanup on all return paths.
+    // cmd_result is an OwnedWgCommandResult with explicit deinit() contract.
     defer cmd_result.deinit(allocator);
 
-    if (cmd_result.exit_code == 127) return error.backend_missing;
-    if (cmd_result.exit_code == 126) return error.permission_denied;
+    const stdout_len = cmd_result.stdout.len;
+    const stderr_len = cmd_result.stderr.len;
 
-    if (cmd_result.timed_out) return error.timeout;
+    // Classify command result
+    if (cmd_result.exit_code == 127) {
+        return .{ .err = .{
+            .err = error.backend_missing,
+            .diagnostic = buildCliDiagnostic("backend_missing", 127, false, stdout_len, stderr_len),
+        } };
+    }
+
+    if (cmd_result.exit_code == 126) {
+        return .{ .err = .{
+            .err = error.permission_denied,
+            .diagnostic = buildCliDiagnostic("permission_denied", 126, false, stdout_len, stderr_len),
+        } };
+    }
+
+    if (cmd_result.timed_out) {
+        return .{ .err = .{
+            .err = error.timeout,
+            .diagnostic = buildCliDiagnostic("timeout", null, true, stdout_len, stderr_len),
+        } };
+    }
 
     if (cmd_result.exit_code != 0) {
         // wg show <iface> returns exit 1 if interface doesn't exist
-        if (cmd_result.exit_code == 1) {
-            return error.interface_missing;
-        }
-        return error.command_failed;
+        const kind: []const u8 = if (cmd_result.exit_code == 1) "interface_missing" else "command_failed";
+        return .{ .err = .{
+            .err = if (cmd_result.exit_code == 1) error.interface_missing else error.command_failed,
+            .diagnostic = buildCliDiagnostic(kind, @intCast(cmd_result.exit_code), false, stdout_len, stderr_len),
+        } };
     }
 
     if (cmd_result.stdout_truncated or cmd_result.stderr_truncated) {
-        return error.command_failed;
+        return .{ .err = .{
+            .err = error.command_failed,
+            .diagnostic = buildCliDiagnostic("command_failed", 0, false, stdout_len, stderr_len),
+        } };
     }
 
     // Parse output with explicit interface name (not invented from output)
     const status = wg.parseWgDumpOutput(cmd_result.stdout, DEFAULT_WG_INTERFACE) catch |parse_err| {
         _ = parse_err;
-        return error.malformed_output;
+        return .{ .err = .{
+            .err = error.malformed_output,
+            .diagnostic = buildCliDiagnostic("malformed_output", 0, false, stdout_len, stderr_len),
+        } };
     };
 
-    // MemoryOwnership: On success, we return without stderr diagnostic to avoid
-    // dangling pointer issues (defer would free stderr while result borrows it).
-    // Stderr diagnostics are primarily useful for error conditions, not success.
-    // The result uses empty diagnostic on success, which is fine for the current
-    // status check use case where stderr isn't exposed.
-    return wg.WireGuardStatusResult.ok(status, .cli);
+    // Success path - return status with ok diagnostic
+    return .{ .ok = .{
+        .status = status,
+        .diagnostic = buildCliDiagnostic("ok", 0, false, stdout_len, stderr_len),
+    } };
+}
+
+// ============================================================================
+// Testing Export (ACT-HULK29R-ZIG016-MEMOWN02-COMMAND-RUNNER-SEAM)
+// ============================================================================
+
+/// Test-only: runner-aware status collection with injectable command runner.
+/// Allows tests to inject allocated fake stdout/stderr without fork/execve.
+///
+/// Preserves the legacy public API for backward compatibility while delegating
+/// to the diagnostic-aware internal implementation.
+pub fn cliWireguardStatusWithRunner(
+    allocator: std.mem.Allocator,
+    test_path_override: ?[*:0]const u8,
+    runner: WgCommandRunner,
+) wg.StatusError!wg.WireGuardStatusResult {
+    const attempt = cliWireguardStatusDiagnosticAttemptWithRunner(allocator, test_path_override, runner);
+    return switch (attempt) {
+        .ok => |ok| wg.WireGuardStatusResult.ok(ok.status, .cli),
+        .err => |bad| bad.err,
+    };
 }
 
 /// Maps legacy collector errors to structured StatusError.
@@ -246,197 +385,3 @@ fn findWgCommand() ?[*:0]const u8 {
     }
     return null;
 }
-
-/// Owned result type for WireGuard command output.
-/// Provides explicit ownership contract with single deinit() method.
-/// This makes memory ownership mechanically reviewable.
-pub const OwnedWgCommandResult = struct {
-    /// Full allocated stdout buffer (may be larger than used slice).
-    stdout_storage: []u8,
-    /// Full allocated stderr buffer (may be larger than used slice).
-    stderr_storage: []u8,
-    /// Actual stdout content (slice of stdout_storage).
-    stdout: []const u8,
-    /// Actual stderr content (slice of stderr_storage).
-    stderr: []const u8,
-    exit_code: c_int,
-    stdout_truncated: bool,
-    stderr_truncated: bool,
-    timed_out: bool,
-
-    /// Frees all owned allocations.
-    /// Must be called on all return paths from the consumer.
-    pub fn deinit(self: *OwnedWgCommandResult, allocator: std.mem.Allocator) void {
-        allocator.free(self.stdout_storage);
-        allocator.free(self.stderr_storage);
-        self.* = undefined;
-    }
-};
-
-/// Internal: run `wg show <interface> dump` and capture output with timeout enforcement.
-///
-/// Uses nonblocking reads with poll() to avoid pipe deadlock between stdout/stderr.
-/// Returns OwnedWgCommandResult with explicit ownership - caller must call deinit().
-fn runWgShowDump(allocator: std.mem.Allocator, wg_path: [*:0]const u8, timeout_secs: u64) !OwnedWgCommandResult {
-    var stdout_pipe: [2]c_int = undefined;
-    var stderr_pipe: [2]c_int = undefined;
-
-    if (std.c.pipe(&stdout_pipe) != 0) return error.PipeFailed;
-    if (std.c.pipe(&stderr_pipe) != 0) {
-        _ = std.c.close(stdout_pipe[0]);
-        _ = std.c.close(stdout_pipe[1]);
-        return error.PipeFailed;
-    }
-
-    // Set stdout pipe to nonblocking before fork
-    const stdout_flags: c_int = std.c.fcntl(stdout_pipe[0], F_GETFL, @as(c_int, 0));
-    _ = std.c.fcntl(stdout_pipe[0], F_SETFL, stdout_flags | O_NONBLOCK);
-
-    // Set stderr pipe to nonblocking before fork
-    const stderr_flags: c_int = std.c.fcntl(stderr_pipe[0], F_GETFL, @as(c_int, 0));
-    _ = std.c.fcntl(stderr_pipe[0], F_SETFL, stderr_flags | O_NONBLOCK);
-
-    const pid = std.c.fork();
-    if (pid < 0) {
-        _ = std.c.close(stdout_pipe[0]);
-        _ = std.c.close(stdout_pipe[1]);
-        _ = std.c.close(stderr_pipe[0]);
-        _ = std.c.close(stderr_pipe[1]);
-        return error.ForkFailed;
-    }
-
-    if (pid == 0) {
-        // Child process
-        _ = std.c.close(stdout_pipe[0]);
-        _ = std.c.close(stderr_pipe[0]);
-
-        _ = std.c.dup2(stdout_pipe[1], 1);
-        _ = std.c.close(stdout_pipe[1]);
-
-        _ = std.c.dup2(stderr_pipe[1], 2);
-        _ = std.c.close(stderr_pipe[1]);
-
-        // Use wg show <interface> dump for machine-readable per-interface output
-        // Uses DEFAULT_WG_INTERFACE as the single source of truth
-        const argv: [5]?[*:0]const u8 = .{ wg_path, "show", DEFAULT_WG_INTERFACE.ptr, "dump", null };
-        const argv_null: [*:null]const ?[*:0]const u8 = @ptrCast(&argv);
-        const empty_env: [*:null]const ?[*:0]const u8 = &.{};
-        _ = std.c.execve(wg_path, argv_null, empty_env);
-
-        std.c._exit(127);
-    }
-
-    // Parent process
-    _ = std.c.close(stdout_pipe[1]);
-    _ = std.c.close(stderr_pipe[1]);
-
-    // Allocate buffers with errdefer for cleanup on allocation failure.
-    // If stderr_buf allocation fails after stdout_buf succeeds, errdefer
-    // cleans up stdout_buf. Once runWgShowDump returns successfully, the
-    // caller's defer handles cleanup - no conflict.
-    var stdout_buf = try allocator.alloc(u8, CliBackend.MAX_STDOUT_SIZE);
-    errdefer allocator.free(stdout_buf);
-
-    var stderr_buf = try allocator.alloc(u8, CliBackend.MAX_STDERR_SIZE);
-    errdefer allocator.free(stderr_buf);
-    var stdout_len: usize = 0;
-    var stderr_len: usize = 0;
-    var stdout_truncated = false;
-    var stderr_truncated = false;
-    var timed_out = false;
-
-    // Use poll() to avoid deadlock on concurrent stdout/stderr
-    var poll_fds: [2]std.c.pollfd = .{
-        .{ .fd = stdout_pipe[0], .events = POLLIN, .revents = 0 },
-        .{ .fd = stderr_pipe[0], .events = POLLIN, .revents = 0 },
-    };
-
-    var remaining_ms: i32 = @intCast(timeout_secs * 1000);
-    const poll_interval_ms: i32 = 100;
-
-    // Read until both pipes are closed or timeout expires
-    while (true) {
-        if (stdout_truncated and stderr_truncated) break;
-
-        const poll_ms: i32 = @min(remaining_ms, poll_interval_ms);
-        const poll_result = std.c.poll(&poll_fds, 2, poll_ms);
-        remaining_ms -= poll_ms;
-
-        if (poll_result < 0) {
-            continue;
-        }
-
-        if (remaining_ms <= 0) {
-            timed_out = true;
-            break;
-        }
-
-        // Read stdout if ready
-        if (poll_fds[0].revents & POLLIN != 0) {
-            if (!stdout_truncated and stdout_len < CliBackend.MAX_STDOUT_SIZE) {
-                const n = std.c.read(stdout_pipe[0], stdout_buf.ptr + stdout_len, CliBackend.MAX_STDOUT_SIZE - stdout_len);
-                if (n > 0) {
-                    stdout_len += @intCast(n);
-                } else if (n == 0 or (n < 0 and std.c.errno(n) != .AGAIN)) {
-                    poll_fds[0].fd = -1;
-                }
-            }
-            if (stdout_len >= CliBackend.MAX_STDOUT_SIZE) stdout_truncated = true;
-        }
-
-        // Read stderr if ready
-        if (poll_fds[1].revents & POLLIN != 0) {
-            if (!stderr_truncated and stderr_len < CliBackend.MAX_STDERR_SIZE) {
-                const n = std.c.read(stderr_pipe[0], stderr_buf.ptr + stderr_len, CliBackend.MAX_STDERR_SIZE - stderr_len);
-                if (n > 0) {
-                    stderr_len += @intCast(n);
-                } else if (n == 0 or (n < 0 and std.c.errno(n) != .AGAIN)) {
-                    poll_fds[1].fd = -1;
-                }
-            }
-            if (stderr_len >= CliBackend.MAX_STDERR_SIZE) stderr_truncated = true;
-        }
-
-        // Check for hangup on both pipes
-        if ((poll_fds[0].revents & (POLLHUP | POLLERR) != 0) and
-            (poll_fds[1].revents & (POLLHUP | POLLERR) != 0)) {
-            break;
-        }
-
-        if (poll_fds[0].fd == -1 and poll_fds[1].fd == -1) {
-            break;
-        }
-    }
-
-    // Drain any remaining stdout if truncated
-    if (stdout_truncated) {
-        var drain: [256]u8 = undefined;
-        while (true) {
-            const n = std.c.read(stdout_pipe[0], &drain, drain.len);
-            if (n <= 0) break;
-        }
-    }
-    _ = std.c.close(stdout_pipe[0]);
-    _ = std.c.close(stderr_pipe[0]);
-
-    // If timed out, kill the child process
-    if (timed_out) {
-        _ = std.c.kill(pid, .KILL);
-    }
-
-    // Wait for child to finish
-    var status: c_int = undefined;
-    _ = std.c.waitpid(pid, &status, 0);
-
-    return OwnedWgCommandResult{
-        .stdout_storage = stdout_buf,
-        .stderr_storage = stderr_buf,
-        .stdout = stdout_buf[0..stdout_len],
-        .stderr = stderr_buf[0..stderr_len],
-        .exit_code = if ((status & 0x7f) == 0) (status >> 8) & 0xff else -1,
-        .stdout_truncated = stdout_truncated,
-        .stderr_truncated = stderr_truncated,
-        .timed_out = timed_out,
-    };
-}
-

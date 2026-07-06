@@ -1,7 +1,7 @@
 // status_checks.zig — Status check implementations
 //
 // Contains check functions for:
-// - getWgPeersCheck() - WireGuard peer diagnostics
+// - getWgPeersCheck() - WireGuard peer diagnostics with diagnostic detail
 // - getWgPeersCheckFromParsed() - test helper
 // - getWgPeersCheckFromError() - test helper
 //
@@ -11,6 +11,10 @@
 //
 // WireGuard interface identity is explicit via wg_status_boundary_cli.DEFAULT_WG_INTERFACE.
 // No hard-coded "wg0" remains in production path.
+//
+// ACT-HULK29R-ZIG016-WG-PEERS-DIAGNOSTIC-INTEGRATION:
+// The wg_peers check now uses diagnostic-aware status collection to provide
+// structured detail such as "wg timeout: interface=wg-kgb0 backend=cli timeout_secs=5".
 
 const std = @import("std");
 const wg_boundary = @import("net/wg_status_boundary.zig");
@@ -31,30 +35,57 @@ const status = @import("status.zig");
 /// - `warn`: `wg` unavailable, permission denied, malformed output, no peers,
 ///   or no handshake yet.
 /// - All errors map to warn (no hard errors for unavailable tooling).
+///
+/// Diagnostic detail: On error, the check detail includes structured context
+/// such as interface=wg-kgb0 backend=cli timeout_secs=5 exit=1.
 pub fn getWgPeersCheck(allocator: std.mem.Allocator) status.Check {
-    // Phase 1: Use the typed WireGuard status boundary (CLI backend)
-    var cli_backend = wg_boundary_cli.CliBackend.init();
-    const backend = cli_backend.asBackend();
+    // Use diagnostic-aware status collection for structured error detail
+    const attempt = wg_boundary_cli.cliWireguardStatusDiagnosticAttemptWithRunner(
+        allocator,
+        null, // use real wg path lookup
+        wg_boundary_cli.WgCommandRunner{
+            .runFn = struct {
+                fn f(
+                    alloc: std.mem.Allocator,
+                    _: ?*anyopaque,
+                    wg_path: [*:0]const u8,
+                    interface_name: []const u8,
+                    timeout_secs: u64,
+                ) anyerror!wg_boundary_cli.OwnedWgCommandResult {
+                    return wg_boundary_cli.runWgShowDump(alloc, wg_path, interface_name, timeout_secs);
+                }
+            }.f,
+        },
+    );
 
-    // Collect status through the typed boundary
-    const wg_result = backend.wireguardStatus(allocator) catch |err| {
-        // Handle all error paths as warn (no hard errors for unavailable tooling)
-        const detail = wg_boundary.statusErrorDetail(err);
-        const boundary_check = wg_boundary.toCheck(wg_boundary.WireGuardStatus.noInterface(), detail);
-        return status.Check{
-            .name = boundary_check.name,
-            .status = mapBoundaryStatus(boundary_check.status),
-            .detail = boundary_check.detail,
-        };
-    };
+    switch (attempt) {
+        .ok => |ok_result| {
+            // Success: convert WireGuardStatus to Check via boundary helper
+            const boundary_check = wg_boundary.toCheck(ok_result.status, null);
+            return status.Check{
+                .name = boundary_check.name,
+                .status = mapBoundaryStatus(boundary_check.status),
+                .detail = boundary_check.detail,
+            };
+        },
+        .err => |bad| {
+            // Error path: format diagnostic detail into the check
+            // Use a fixed-size buffer for the formatted detail string
+            var detail_buf: [wg_boundary.DIAGNOSTIC_DETAIL_BUF_SIZE]u8 = undefined;
+            const detail = wg_boundary.formatPeerDiagnosticDetail(bad.diagnostic, &detail_buf);
 
-    // Success: convert WireGuardStatus to Check via boundary helper
-    const boundary_check = wg_boundary.toCheck(wg_result.status, null);
-    return status.Check{
-        .name = boundary_check.name,
-        .status = mapBoundaryStatus(boundary_check.status),
-        .detail = boundary_check.detail,
-    };
+            // Create boundary check with the formatted diagnostic detail
+            const boundary_check = wg_boundary.toCheck(
+                wg_boundary.WireGuardStatus.noInterface(),
+                detail,
+            );
+            return status.Check{
+                .name = boundary_check.name,
+                .status = mapBoundaryStatus(boundary_check.status),
+                .detail = boundary_check.detail,
+            };
+        },
+    }
 }
 
 /// Test helper: creates a wg_peers check from pre-parsed WireGuard data.

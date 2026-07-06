@@ -6,6 +6,11 @@ const std = @import("std");
 const wg = @import("wg_status_boundary.zig");
 const linux_stats = @import("linux_stats.zig");
 const wg_cli = @import("wg_status_boundary_cli.zig");
+const wg_cli_tests = @import("wg_status_boundary_cli_tests.zig");
+
+// Re-export FakeWgCommandRunner and valid_wg_dump_output for external use
+pub const FakeWgCommandRunner = wg_cli_tests.FakeWgCommandRunner;
+const valid_wg_dump_output = wg_cli_tests.valid_wg_dump_output;
 
 // ============================================================================
 // Fake Backend for Tests
@@ -70,86 +75,6 @@ const parseWgDumpOutput = wg.parseWgDumpOutput;
 // Test helpers for test fixtures
 const writeFile = linux_stats.writeFile;
 const makeDir = linux_stats.makeDir;
-
-// ============================================================================
-// FakeWgCommandRunner — Test double for WgCommandRunner
-// ============================================================================
-
-/// Configuration for FakeWgCommandRunner.
-const FakeWgCommandRunnerConfig = struct {
-    /// Fixture stdout content (will be allocated fresh per call).
-    stdout: []const u8,
-    /// Fixture stderr content (will be allocated fresh per call).
-    stderr: []const u8,
-    /// Exit code for the fake command.
-    exit_code: c_int,
-    /// Whether command timed out.
-    timed_out: bool = false,
-    /// Whether stdout was truncated.
-    stdout_truncated: bool = false,
-    /// Whether stderr was truncated.
-    stderr_truncated: bool = false,
-};
-
-/// Fake command runner that returns allocated stdout/stderr for unit testing.
-/// Each call allocates fresh buffers using the provided allocator.
-///
-/// ACT-HULK29R-ZIG016-MEMOWN02-COMMAND-RUNNER-SEAM
-pub const FakeWgCommandRunner = struct {
-    /// Configuration for this fake runner.
-    config: FakeWgCommandRunnerConfig,
-
-    /// Initialize fake runner with configuration.
-    pub fn init(config: FakeWgCommandRunnerConfig) FakeWgCommandRunner {
-        return FakeWgCommandRunner{ .config = config };
-    }
-
-    /// Create a WgCommandRunner that uses this fake.
-    pub fn asRunner(self: *FakeWgCommandRunner) wg_cli.WgCommandRunner {
-        return wg_cli.WgCommandRunner{
-            .runFn = FakeWgCommandRunner.run,
-            .ctx = self,
-        };
-    }
-
-    /// Run function: allocates stdout/stderr using the provided allocator
-    /// and returns an OwnedWgCommandResult.
-    fn run(
-        allocator: std.mem.Allocator,
-        ctx: ?*anyopaque,
-        _: [*:0]const u8,
-        _: u64,
-    ) anyerror!wg_cli.OwnedWgCommandResult {
-        const self: *FakeWgCommandRunner = @ptrCast(@alignCast(ctx));
-
-        // Allocate fresh stdout buffer per call
-        const stdout_storage = try allocator.dupe(u8, self.config.stdout);
-        errdefer allocator.free(stdout_storage);
-
-        // Allocate fresh stderr buffer per call
-        const stderr_storage = try allocator.dupe(u8, self.config.stderr);
-        errdefer allocator.free(stderr_storage);
-
-        return wg_cli.OwnedWgCommandResult{
-            .stdout_storage = stdout_storage,
-            .stderr_storage = stderr_storage,
-            .stdout = stdout_storage,
-            .stderr = stderr_storage,
-            .exit_code = self.config.exit_code,
-            .stdout_truncated = self.config.stdout_truncated,
-            .stderr_truncated = self.config.stderr_truncated,
-            .timed_out = self.config.timed_out,
-        };
-    }
-};
-
-// ============================================================================
-// Valid WireGuard dump fixture for tests
-// ============================================================================
-
-/// Valid wg show dump output with one peer (for success path tests).
-const valid_wg_dump_output = "private_key_base64\tpublic_key_base64\t51820\t0\n" ++
-    "peer_pubkey_base64\tpsk_base64\t1.2.3.4:51820\t10.0.0.2/32\t1700000000\t1000\t2000\t25\n";
 
 // ============================================================================
 // Tests for WireGuard Dump Parser

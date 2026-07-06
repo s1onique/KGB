@@ -43,66 +43,116 @@ pub const DIAGNOSTIC_DETAIL_BUF_SIZE: usize = 256;
 ///
 /// Returns a static or formatted string safe for status JSON.
 /// Format: "wg <error_kind>: interface=<iface> backend=<backend> [timeout_secs=<n>] [exit=<n>]"
+///
+/// Uses branch-specific std.fmt.bufPrint calls for bounds-safe formatting.
+/// Falls back to truncatedDiagnostic if buffer capacity is exhausted.
 pub fn formatPeerDiagnosticDetail(diag: WireGuardPeerDiagnostic, buf: *[DIAGNOSTIC_DETAIL_BUF_SIZE]u8) []const u8 {
-    const prefix = "wg ";
-    const interface_tag = "interface=";
-    const backend_tag = "backend=";
-    const timeout_tag = "timeout_secs=";
-    const exit_tag = "exit=";
-
-    var pos: usize = 0;
-
-    // "wg <error_kind>: "
-    // MemoryCopySafety: buf is fixed-size output buffer, prefix is a string literal (const).
-    @memcpy(buf[pos..][0..prefix.len], prefix);
-    pos += prefix.len;
-    // MemoryCopySafety: buf is fixed-size output buffer, diag.error_kind is an input slice.
-    @memcpy(buf[pos..][0..diag.error_kind.len], diag.error_kind);
-    pos += diag.error_kind.len;
-    buf[pos] = ':';
-    pos += 1;
-    buf[pos] = ' ';
-    pos += 1;
-
-    // "interface=<iface> "
-    // MemoryCopySafety: buf is fixed-size output buffer, interface_tag is a string literal.
-    @memcpy(buf[pos..][0..interface_tag.len], interface_tag);
-    pos += interface_tag.len;
-    // MemoryCopySafety: buf is fixed-size output buffer, diag.selected_interface is an input slice.
-    @memcpy(buf[pos..][0..diag.selected_interface.len], diag.selected_interface);
-    pos += diag.selected_interface.len;
-    buf[pos] = ' ';
-    pos += 1;
-
-    // "backend=<backend> "
-    // MemoryCopySafety: buf is fixed-size output buffer, backend_tag is a string literal.
-    @memcpy(buf[pos..][0..backend_tag.len], backend_tag);
-    pos += backend_tag.len;
-    // MemoryCopySafety: buf is fixed-size output buffer, diag.backend is an input slice.
-    @memcpy(buf[pos..][0..diag.backend.len], diag.backend);
-    pos += diag.backend.len;
-    buf[pos] = ' ';
-    pos += 1;
-
-    // "[timeout_secs=<n>] "
     if (diag.timeout_secs) |timeout| {
-        // MemoryCopySafety: buf is fixed-size output buffer, timeout_tag is a string literal.
-        @memcpy(buf[pos..][0..timeout_tag.len], timeout_tag);
-        pos += timeout_tag.len;
-        const timeout_str = std.fmt.bufPrint(buf[pos..], "{d}", .{timeout}) catch unreachable;
-        pos += timeout_str.len;
-        buf[pos] = ' ';
-        pos += 1;
+        if (diag.exit_code) |code| {
+            return std.fmt.bufPrint(
+                buf,
+                "wg {s}: interface={s} backend={s} timeout_secs={d} exit={d}",
+                .{ diag.error_kind, diag.selected_interface, diag.backend, timeout, code },
+            ) catch truncatedDiagnostic(buf);
+        }
+
+        return std.fmt.bufPrint(
+            buf,
+            "wg {s}: interface={s} backend={s} timeout_secs={d}",
+            .{ diag.error_kind, diag.selected_interface, diag.backend, timeout },
+        ) catch truncatedDiagnostic(buf);
     }
 
-    // "[exit=<n>]"
     if (diag.exit_code) |code| {
-        // MemoryCopySafety: buf is fixed-size output buffer, exit_tag is a string literal.
-        @memcpy(buf[pos..][0..exit_tag.len], exit_tag);
-        pos += exit_tag.len;
-        const exit_str = std.fmt.bufPrint(buf[pos..], "{d}", .{code}) catch unreachable;
-        pos += exit_str.len;
+        return std.fmt.bufPrint(
+            buf,
+            "wg {s}: interface={s} backend={s} exit={d}",
+            .{ diag.error_kind, diag.selected_interface, diag.backend, code },
+        ) catch truncatedDiagnostic(buf);
     }
 
-    return buf[0..pos];
+    return std.fmt.bufPrint(
+        buf,
+        "wg {s}: interface={s} backend={s}",
+        .{ diag.error_kind, diag.selected_interface, diag.backend },
+    ) catch truncatedDiagnostic(buf);
+}
+
+/// Truncated fallback when buffer capacity is exhausted.
+/// MemoryCopySafety: buf and fallback are independent buffers; fallback is a string literal.
+fn truncatedDiagnostic(buf: *[DIAGNOSTIC_DETAIL_BUF_SIZE]u8) []const u8 {
+    const fallback = "wg diagnostic_truncated";
+    const n = @min(fallback.len, buf.len);
+    @memcpy(buf[0..n], fallback[0..n]);
+    return buf[0..n];
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+const testing = std.testing;
+
+test "formatPeerDiagnosticDetail: no optional fields" {
+    const diag = WireGuardPeerDiagnostic{
+        .backend = "cli",
+        .selected_interface = "wg-kgb0",
+        .command = "wg show wg-kgb0 dump",
+        .timeout_secs = null,
+        .exit_code = null,
+        .error_kind = "backend_missing",
+        .stderr_len = 0,
+        .stdout_len = 0,
+    };
+    var buf: [DIAGNOSTIC_DETAIL_BUF_SIZE]u8 = undefined;
+    const result = formatPeerDiagnosticDetail(diag, &buf);
+    try testing.expectEqualStrings("wg backend_missing: interface=wg-kgb0 backend=cli", result);
+}
+
+test "formatPeerDiagnosticDetail: timeout only" {
+    const diag = WireGuardPeerDiagnostic{
+        .backend = "cli",
+        .selected_interface = "wg-kgb0",
+        .command = "wg show wg-kgb0 dump",
+        .timeout_secs = 5,
+        .exit_code = null,
+        .error_kind = "timeout",
+        .stderr_len = 0,
+        .stdout_len = 0,
+    };
+    var buf: [DIAGNOSTIC_DETAIL_BUF_SIZE]u8 = undefined;
+    const result = formatPeerDiagnosticDetail(diag, &buf);
+    try testing.expectEqualStrings("wg timeout: interface=wg-kgb0 backend=cli timeout_secs=5", result);
+}
+
+test "formatPeerDiagnosticDetail: exit only" {
+    const diag = WireGuardPeerDiagnostic{
+        .backend = "cli",
+        .selected_interface = "wg-kgb0",
+        .command = "wg show wg-kgb0 dump",
+        .timeout_secs = null,
+        .exit_code = 1,
+        .error_kind = "interface_missing",
+        .stderr_len = 0,
+        .stdout_len = 0,
+    };
+    var buf: [DIAGNOSTIC_DETAIL_BUF_SIZE]u8 = undefined;
+    const result = formatPeerDiagnosticDetail(diag, &buf);
+    try testing.expectEqualStrings("wg interface_missing: interface=wg-kgb0 backend=cli exit=1", result);
+}
+
+test "formatPeerDiagnosticDetail: timeout and exit" {
+    const diag = WireGuardPeerDiagnostic{
+        .backend = "cli",
+        .selected_interface = "wg-kgb0",
+        .command = "wg show wg-kgb0 dump",
+        .timeout_secs = 5,
+        .exit_code = 255,
+        .error_kind = "timeout",
+        .stderr_len = 0,
+        .stdout_len = 0,
+    };
+    var buf: [DIAGNOSTIC_DETAIL_BUF_SIZE]u8 = undefined;
+    const result = formatPeerDiagnosticDetail(diag, &buf);
+    try testing.expectEqualStrings("wg timeout: interface=wg-kgb0 backend=cli timeout_secs=5 exit=255", result);
 }
