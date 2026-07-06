@@ -12,7 +12,6 @@
 # Run with: python3 tests/test_verify_state_transition_register.py
 
 import os
-import re
 import sys
 import tempfile
 import unittest
