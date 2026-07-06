@@ -206,6 +206,20 @@ else
   exit 1
 fi
 
+echo "[gate] checking linux_read.zig statx migration (HULK13 regression)"
+
+# Reject reintroduction of stale fstat/Stat API in linux_read.zig
+# ACT-HULK13R5-ZIG016-LINUX-READ-STATX-FD-FIX migrated to statx(AT_EMPTY_PATH)
+if git grep -n 'std\.os\.linux\.Stat\b' -- tovarisch/src/net/linux_read.zig 2>/dev/null; then
+  echo "[gate] FAIL: found std.os.linux.Stat in linux_read.zig — use linux.Statx with AT_EMPTY_PATH" >&2
+  exit 1
+fi
+
+if git grep -n 'std\.os\.linux\.fstat' -- tovarisch/src/net/linux_read.zig 2>/dev/null; then
+  echo "[gate] FAIL: found std.os.linux.fstat in linux_read.zig — use linux.statx with AT_EMPTY_PATH" >&2
+  exit 1
+fi
+
 echo "[gate] checking privacy doctrine exists"
 
 grep -RIn 'browsing history\|visited domains\|destination IP' docs/doctrine/privacy.md >/dev/null
