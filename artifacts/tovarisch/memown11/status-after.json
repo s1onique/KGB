@@ -1,0 +1,62 @@
+{
+  "service": "tovarisch",
+  "version": "0.1.1-rc56+d08f14c",
+  "node_id": "local-dev",
+  "status": "warn",
+  "checks": [
+    {
+      "name": "process",
+      "status": "ok",
+      "detail": "running"
+    },
+    {
+      "name": "binary",
+      "status": "ok",
+      "detail": "tovarisch"
+    },
+    {
+      "name": "config",
+      "status": "ok",
+      "detail": "/etc/kgb/tovarisch.conf"
+    },
+    {
+      "name": "state_dir",
+      "status": "warn",
+      "detail": "state directory not found"
+    },
+    {
+      "name": "http",
+      "status": "ok",
+      "detail": "http service route available"
+    },
+    {
+      "name": "tunnel",
+      "status": "ok",
+      "detail": "detected tunnel interfaces: wg-kgb0"
+    },
+    {
+      "name": "wg_peers",
+      "status": "warn",
+      "detail": "wg command timeout"
+    },
+    {
+      "name": "bfd",
+      "status": "ok",
+      "detail": "bfd sessions up"
+    },
+    {
+      "name": "bgp",
+      "status": "ok",
+      "detail": "BGP established; 15811 configured prefixes"
+    }
+  ],
+  "bgp": {
+    "state": "established",
+    "reconnect_count": 0,
+    "last_socket_error": null
+  },
+  "runtime": {
+    "pid": 2177992,
+    "rss_kib": 6388
+  }
+}

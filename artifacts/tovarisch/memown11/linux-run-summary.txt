@@ -1,0 +1,12 @@
+# Linux live RSS canary run
+date_utc=2026-07-06T19:49:59Z
+uname=Linux london2 6.8.0-124-generic #124-Ubuntu SMP PREEMPT_DYNAMIC Tue May 26 13:00:45 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+pid=2177992
+url=http://10.149.149.1:8317/status
+memory_source=smaps_rollup
+    PID    PPID   RSS    VSZ     ELAPSED COMMAND
+2177992       1  6380 153220    08:48:46 /usr/bin/tovarisch serve --config /etc/kgb/tovarisch.conf
+
+# Post-run process status
+    PID    PPID   RSS    VSZ     ELAPSED COMMAND
+2177992       1  6380 153220    08:48:46 /usr/bin/tovarisch serve --config /etc/kgb/tovarisch.conf

@@ -1,0 +1,14 @@
+TOVARISCH STATUS RSS CANARY: PASS
+pid=2177992
+url=http://10.149.149.1:8317/status
+memory_source=smaps_rollup
+warmup_requests=25
+sample_requests=200
+rss_kib_before=6380
+rss_kib_after=6380
+rss_kib_delta=0
+private_kib_before=4608
+private_kib_after=4608
+private_kib_delta=0
+max_rss_kib_growth=4096
+max_private_kib_growth=1024
