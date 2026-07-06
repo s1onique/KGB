@@ -7,6 +7,7 @@ const std = @import("std");
 const c = std.c;
 const status = @import("../status.zig");
 const linux_interface_stats = @import("../net/linux_interface_stats.zig");
+const linux_read = @import("../net/linux_read.zig");
 const interface_filter = @import("../net/interface_filter.zig");
 
 /// Heartbeat-specific fixed buffer writer.
@@ -104,8 +105,15 @@ pub fn freeTunnelSummarySnapshots(allocator: std.mem.Allocator, result: TunnelSu
 ///
 /// Failure to call freeTunnelSummarySnapshots() will cause memory growth
 /// on each heartbeat cycle (approximately 1-2KB per cycle per interface).
-pub fn collectTunnelSummaryWithStats(allocator: std.mem.Allocator, sysfs_root: []const u8) TunnelSummaryWithStats {
-    const stats = linux_interface_stats.collectInterfaceStats(allocator, sysfs_root, .sysfs_net) catch {
+///
+/// The `root` parameter allows tests to use `.test_fixture` for deterministic
+/// fixture-based testing, while production uses the default `.sysfs_net`.
+pub fn collectTunnelSummaryWithStats(
+    allocator: std.mem.Allocator,
+    sysfs_root: []const u8,
+    root: linux_read.AllowedRoot,
+) TunnelSummaryWithStats {
+    const stats = linux_interface_stats.collectInterfaceStats(allocator, sysfs_root, root) catch {
         // On collection failure, return zero summary (metrics will show warning)
         return .{ .summary = .{ .count = 0, .rx_bytes = 0, .tx_bytes = 0 }, .stats = &.{} };
     };
@@ -121,6 +129,12 @@ pub fn collectTunnelSummaryWithStats(allocator: std.mem.Allocator, sysfs_root: [
     return .{ .summary = summary, .stats = stats };
 }
 
+/// Production convenience wrapper using sysfs_net root.
+/// Tests should call collectTunnelSummaryWithStats with explicit root parameter.
+pub fn collectTunnelSummaryWithStatsDefault(allocator: std.mem.Allocator, sysfs_root: []const u8) TunnelSummaryWithStats {
+    return collectTunnelSummaryWithStats(allocator, sysfs_root, .sysfs_net);
+}
+
 /// Legacy tunnel summary collector for single-shot use cases.
 ///
 /// This function properly frees the stats snapshots before returning,
@@ -130,7 +144,7 @@ pub fn collectTunnelSummaryWithStats(allocator: std.mem.Allocator, sysfs_root: [
 ///
 /// Returns tunnel summary with aggregated counters.
 pub fn collectTunnelSummary(allocator: std.mem.Allocator, sysfs_root: []const u8) TunnelSummary {
-    const result = collectTunnelSummaryWithStats(allocator, sysfs_root);
+    const result = collectTunnelSummaryWithStats(allocator, sysfs_root, .sysfs_net);
     const summary = result.summary;
     // Free the snapshots immediately since this is single-shot use
     linux_interface_stats.freeInterfaceStatsSnapshots(allocator, result.stats);
@@ -149,7 +163,7 @@ pub fn emitHeartbeatToFdResult(uptime_seconds: u64) bool {
     // MemoryOwnership: page_allocator used with collectTunnelSummaryWithStats.
     // The freeTunnelSummarySnapshots() deferred call releases memory immediately
     // after use, before the next heartbeat cycle. Memory is bounded/fixed per cycle.
-    const tunnel_result = collectTunnelSummaryWithStats(std.heap.page_allocator, "/sys/class/net");
+    const tunnel_result = collectTunnelSummaryWithStats(std.heap.page_allocator, "/sys/class/net", .sysfs_net);
     defer freeTunnelSummarySnapshots(std.heap.page_allocator, tunnel_result);
     const tunnel_summary = tunnel_result.summary;
 

@@ -58,7 +58,16 @@ pub fn validatePath(root: AllowedRoot, path: []const u8) bool {
     if (path.len < expected_prefix.len) return false;
     if (!std.mem.startsWith(u8, path, expected_prefix)) return false;
     if (path.len == expected_prefix.len) return false;
-    if (path[expected_prefix.len] != '/') return false;
+
+    // For test_fixture, allow paths like /tmp/kgb_heartbeat_test/wg0 (test fixture subdir)
+    // or /tmp/kgb_heartbeat_test (test fixture root)
+    // The path must start with /tmp/kgb followed by '/' or '_'.
+    if (root == .test_fixture) {
+        const next_char = path[expected_prefix.len];
+        if (next_char != '/' and next_char != '_') return false;
+    } else {
+        if (path[expected_prefix.len] != '/') return false;
+    }
 
     var i: usize = expected_prefix.len + 1;
     while (i < path.len) : (i += 1) {
@@ -75,7 +84,7 @@ fn rootPrefix(root: AllowedRoot) []const u8 {
     return switch (root) {
         .sysfs_net => "/sys/class/net",
         .proc_self => "/proc/self",
-        .test_fixture => "/tmp/kgb_fixture",
+        .test_fixture => "/tmp/kgb",
     };
 }
 
@@ -285,9 +294,14 @@ pub fn readFixtureFile(
     if (builtin.os.tag != .linux) {
         return .unsupported_platform;
     }
-    if (!std.mem.startsWith(u8, path, "/tmp/kgb_fixture")) {
+    // Accept /tmp/kgb/... or /tmp/kgb_... patterns to match validatePath
+    if (!std.mem.startsWith(u8, path, "/tmp/kgb")) {
         return .malformed;
     }
+    // Must have at least one more character after /tmp/kgb
+    if (path.len < 9) return .malformed;
+    const next_char = path[8];
+    if (next_char != '/' and next_char != '_') return .malformed;
 
     var path_buf: [4096]u8 = undefined;
     const c_path = toCString(path, &path_buf) catch return .io_error;

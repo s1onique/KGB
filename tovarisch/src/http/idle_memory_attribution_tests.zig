@@ -114,7 +114,7 @@ test "repeated heartbeat tunnel summary collection does not leak" {
     
     // Simulate many heartbeat cycles (30 seconds * 100 cycles = 50 minutes)
     for (0..100) |_| {
-        const result = heartbeat.collectTunnelSummaryWithStats(allocator, base);
+        const result = heartbeat.collectTunnelSummaryWithStats(allocator, base, .test_fixture);
         defer heartbeat.freeTunnelSummarySnapshots(allocator, result);
         
         // Verify summary is correct
@@ -133,7 +133,7 @@ test "heartbeat tunnel summary warmup cycles do not leak" {
     
     // Warmup cycles (simulate startup behavior)
     for (0..5) |_| {
-        const result = heartbeat.collectTunnelSummaryWithStats(allocator, base);
+        const result = heartbeat.collectTunnelSummaryWithStats(allocator, base, .test_fixture);
         defer heartbeat.freeTunnelSummarySnapshots(allocator, result);
         try testing.expectEqual(@as(u32, 1), result.summary.count);
     }
@@ -322,7 +322,7 @@ test "memory attribution test suite validation" {
     try std.testing.expectError(error.CommandNotFound, wg_result);
     
     // 2. Heartbeat tunnel summary collection
-    const tunnel = heartbeat.collectTunnelSummaryWithStats(allocator, base);
+    const tunnel = heartbeat.collectTunnelSummaryWithStats(allocator, base, .test_fixture);
     defer heartbeat.freeTunnelSummarySnapshots(allocator, tunnel);
     try testing.expectEqual(@as(u32, 1), tunnel.summary.count);
     

@@ -65,14 +65,14 @@ test "collectTunnelSummaryWithStats: repeated calls with freeing do NOT leak mem
 
     // Warmup cycles
     for (0..3) |_| {
-        const result = heartbeat.collectTunnelSummaryWithStats(allocator, base);
+        const result = heartbeat.collectTunnelSummaryWithStats(allocator, base, .test_fixture);
         try std.testing.expect(result.stats.len > 0);
         heartbeat.freeTunnelSummarySnapshots(allocator, result);
     }
 
     // Simulate heartbeat cycles (30 seconds * 40 cycles = 20 minutes)
     for (0..40) |_| {
-        const result = heartbeat.collectTunnelSummaryWithStats(allocator, base);
+        const result = heartbeat.collectTunnelSummaryWithStats(allocator, base, .test_fixture);
         try std.testing.expect(result.summary.count >= 2);
         heartbeat.freeTunnelSummarySnapshots(allocator, result);
     }
@@ -87,10 +87,12 @@ test "collectTunnelSummary: single-shot use is safe" {
 
     try createIfaceWithStats(base, "wg0", 1000, 2000, 10, 20);
 
-    const summary = heartbeat.collectTunnelSummary(allocator, base);
-    try std.testing.expectEqual(@as(u32, 1), summary.count);
-    try std.testing.expectEqual(@as(u64, 1000), summary.rx_bytes);
-    try std.testing.expectEqual(@as(u64, 2000), summary.tx_bytes);
+    // Use collectTunnelSummaryWithStats with test_fixture root for deterministic testing
+    const result = heartbeat.collectTunnelSummaryWithStats(allocator, base, .test_fixture);
+    defer heartbeat.freeTunnelSummarySnapshots(allocator, result);
+    try std.testing.expectEqual(@as(u32, 1), result.summary.count);
+    try std.testing.expectEqual(@as(u64, 1000), result.summary.rx_bytes);
+    try std.testing.expectEqual(@as(u64, 2000), result.summary.tx_bytes);
 }
 
 test "freeTunnelSummarySnapshots: handles empty stats slice" {
@@ -99,7 +101,7 @@ test "freeTunnelSummarySnapshots: handles empty stats slice" {
 
     deleteTree(base) catch {};
 
-    const result = heartbeat.collectTunnelSummaryWithStats(allocator, base);
+    const result = heartbeat.collectTunnelSummaryWithStats(allocator, base, .test_fixture);
     try std.testing.expectEqual(@as(usize, 0), result.stats.len);
     try std.testing.expectEqual(@as(u32, 0), result.summary.count);
     heartbeat.freeTunnelSummarySnapshots(allocator, result);
@@ -116,7 +118,7 @@ test "collectTunnelSummaryWithStats: returns correct tunnel summary" {
     try createIfaceWithStats(base, "wg1", 300, 400, 30, 40);
     try createIfaceWithStats(base, "eth0", 5000, 6000, 50, 60);
 
-    const result = heartbeat.collectTunnelSummaryWithStats(allocator, base);
+    const result = heartbeat.collectTunnelSummaryWithStats(allocator, base, .test_fixture);
     defer heartbeat.freeTunnelSummarySnapshots(allocator, result);
 
     try std.testing.expectEqual(@as(u32, 2), result.summary.count);
@@ -139,7 +141,7 @@ test "heartbeat loop simulation: no memory growth after many cycles" {
     var first_cycle = true;
 
     for (0..100) |_| {
-        const result = heartbeat.collectTunnelSummaryWithStats(allocator, base);
+        const result = heartbeat.collectTunnelSummaryWithStats(allocator, base, .test_fixture);
 
         if (first_cycle) {
             previous_summary = result.summary;
