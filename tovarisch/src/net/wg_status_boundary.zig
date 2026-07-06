@@ -103,6 +103,16 @@ pub const DiagnosticText = struct {
 };
 
 // ============================================================================
+// WireGuard Peer Diagnostic (re-exported from wg_peer_diagnostic)
+// ACT-HULK29R-ZIG016-WG-PEERS-TIMEOUT-DIAGNOSTIC-SEAM
+// ============================================================================
+
+const wg_peer_diag = @import("wg_peer_diagnostic.zig");
+pub const WireGuardPeerDiagnostic = wg_peer_diag.WireGuardPeerDiagnostic;
+pub const DIAGNOSTIC_DETAIL_BUF_SIZE = wg_peer_diag.DIAGNOSTIC_DETAIL_BUF_SIZE;
+pub const formatPeerDiagnosticDetail = wg_peer_diag.formatPeerDiagnosticDetail;
+
+// ============================================================================
 // Typed Status Model
 // ============================================================================
 
