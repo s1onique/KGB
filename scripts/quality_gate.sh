@@ -143,6 +143,8 @@ required=(
   docs/tooling/memory-ownership-inventory.csv
   scripts/verify_memory_ownership_inventory.py
   tests/test_verify_memory_ownership_inventory.py
+  scripts/tovarisch_status_rss_canary.py
+  tests/test_tovarisch_status_rss_canary.py
 )
 
 for path in "${required[@]}"; do
@@ -313,6 +315,10 @@ python3 scripts/verify_memory_ownership_inventory.py
 echo "[gate] checking memory ownership inventory self-test (HULK29R-ZIG016-MEMOWN04)"
 
 python3 tests/test_verify_memory_ownership_inventory.py
+
+echo "[gate] checking tovarisch status RSS canary self-test (HULK29R-ZIG016-MEMOWN05)"
+
+python3 tests/test_tovarisch_status_rss_canary.py
 
 echo "[gate] checking shell inventory consistency"
 

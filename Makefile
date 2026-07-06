@@ -530,3 +530,24 @@ lab-wg-netlink: $(WG_NETLINK_LAB)
 	@$(MAKE) wg-netlink-proof
 	@$(WG_NETLINK_LAB) full
 
+# === Tovarisch Status RSS Canary ===
+# Runtime smoke test for /status endpoint request-driven memory growth.
+# NOT part of make gate - requires live tovarisch and Linux /proc.
+# Usage:
+#   TOVARISCH_STATUS_URL=http://10.149.149.1:8317/status TOVARISCH_PID=2174927 make tovarisch-status-rss-canary
+#   TOVARISCH_PID=2174927 make tovarisch-status-rss-canary-local
+
+.PHONY: tovarisch-status-rss-canary
+tovarisch-status-rss-canary:
+	@echo "=== Tovarisch Status RSS Canary ==="
+	python3 scripts/tovarisch_status_rss_canary.py \
+		--url "$${TOVARISCH_STATUS_URL:?set TOVARISCH_STATUS_URL}" \
+		--pid "$${TOVARISCH_PID:?set TOVARISCH_PID}"
+
+.PHONY: tovarisch-status-rss-canary-local
+tovarisch-status-rss-canary-local:
+	@echo "=== Tovarisch Status RSS Canary (local) ==="
+	python3 scripts/tovarisch_status_rss_canary.py \
+		--url "$${TOVARISCH_STATUS_URL:-http://127.0.0.1:8317/status}" \
+		--pid "$${TOVARISCH_PID:?set TOVARISCH_PID}"
+
