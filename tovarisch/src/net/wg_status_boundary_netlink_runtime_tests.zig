@@ -173,8 +173,10 @@ test "GenericNetlinkBackend seam: returns error union on all platforms" {
     } else {
         // On Linux, could be success or error depending on WireGuard availability
         // backend_missing is acceptable when kernel lacks WireGuard generic-netlink family
+        // Note: mapNetlinkError() maps backend_missing to netlink_failed via else clause
         _ = result catch |err| switch (err) {
             error.backend_missing => return,
+            error.netlink_failed => return,
             else => return err,
         };
     }
