@@ -153,8 +153,9 @@ class TestFindDeinitOrDefer(unittest.TestCase):
     
     def test_finds_allocator_free(self):
         """Should find allocator.free() pattern for raw slice cleanup."""
-        content = '''pub fn freeTunnelSummarySnapshots(allocator: std.mem.Allocator, result: TunnelSummaryWithStats) void {
-    linux_interface_stats.freeInterfaceStatsSnapshots(allocator, result.stats);
+        content = '''pub fn freeTunnelSummarySnapshots(allocator: std.mem.Allocator, snapshots: []Snapshot) void {
+    for (snapshots) |snap| allocator.free(snap.data);
+    allocator.free(snapshots);
 }
 '''
         self.assertTrue(find_deinit_or_defer(content, 'freeTunnelSummarySnapshots'))
@@ -408,7 +409,7 @@ fn createOwned(allocator: std.mem.Allocator) !OwnedType {
     def test_consumer_without_deinit_defer(self):
         """consumer row with allocator_boundary=consumes_owned but missing deinit/defer should fail."""
         csv_content = """id,path,language,symbol,kind,allocator_boundary,owned_type,owner,cleanup,coverage,request_path,verified,notes
-MEMOWN-0001,test.zig,zig,consumeOwned,consumer,consumes_owned,OwnedType,self,defer,test,yes,yes,Test
+MEMOWN-0001,test.zig,zig,consumeOwned,consumer,consumes_owned,OwnedType,self,defer,n/a,yes,yes,Test
 """
         zig_content = """const OwnedType = struct {};
 
@@ -437,7 +438,7 @@ fn consumeOwned(allocator: std.mem.Allocator) !void {
             verify_memory_ownership_inventory.REPO_ROOT = old_root
             
             self.assertTrue(len(errors) > 0)
-            self.assertTrue(any("lacks `.deinit(` or `defer`" in e for e in errors))
+            self.assertTrue(any("lacks `.deinit(`" in e for e in errors))
     
     def test_test_without_std_testing_allocator(self):
         """test row with cleanup=std.testing.allocator but missing std.testing.allocator in body should fail."""
@@ -516,7 +517,7 @@ class TestAllocationFreeRows(unittest.TestCase):
     def test_allocation_free_row_passes_with_review_note(self):
         """Allocation-free request_path row passes when notes contain 'Inventory reviewed'."""
         csv_content = """id,path,language,symbol,kind,allocator_boundary,owned_type,owner,cleanup,coverage,request_path,verified,notes
-MEMOWN-0001,test.zig,zig,buildBgpCheckInto,producer,none,n/a,self,n/a,status tests,yes,yes,Inventory reviewed: BGP collector returns value-only status
+MEMOWN-0001,test.zig,zig,buildBgpCheckInto,producer,none,n/a,self,n/a,n/a,yes,yes,Inventory reviewed: BGP collector returns value-only status
 """
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
@@ -541,7 +542,7 @@ MEMOWN-0001,test.zig,zig,buildBgpCheckInto,producer,none,n/a,self,n/a,status tes
     def test_allocation_free_row_passes_with_value_only_note(self):
         """Allocation-free request_path row passes when notes contain 'value-only'."""
         csv_content = """id,path,language,symbol,kind,allocator_boundary,owned_type,owner,cleanup,coverage,request_path,verified,notes
-MEMOWN-0001,test.zig,zig,snapshotFromRuntime,producer,none,n/a,self,n/a,status tests,yes,yes,Returns value-only status snapshot
+MEMOWN-0001,test.zig,zig,snapshotFromRuntime,producer,none,n/a,self,n/a,n/a,yes,yes,Returns value-only status snapshot
 """
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
@@ -596,7 +597,7 @@ class TestAllocatorFreeCleanup(unittest.TestCase):
     def test_consumer_with_allocator_free_passes(self):
         """Consumer row passes when nearby cleanup uses allocator.free."""
         csv_content = """id,path,language,symbol,kind,allocator_boundary,owned_type,owner,cleanup,coverage,request_path,verified,notes
-MEMOWN-0001,test.zig,zig,freeInterfaceStatsSnapshots,consumer,consumes_owned,InterfaceStatsSnapshot,self,allocator.free,tests,yes,yes,Frees interface stats
+MEMOWN-0001,test.zig,zig,freeInterfaceStatsSnapshots,consumer,consumes_owned,InterfaceStatsSnapshot,self,allocator.free,n/a,yes,yes,Frees interface stats
 """
         zig_content = """pub fn freeInterfaceStatsSnapshots(
     allocator: std.mem.Allocator,

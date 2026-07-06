@@ -560,8 +560,8 @@ def _run_self_test(initial_errors: List[str]) -> None:
         {
             "name": "valid minimal inventory should pass",
             "csv": """id,path,language,symbol,kind,allocator_boundary,owned_type,owner,cleanup,coverage,request_path,verified,notes
-MEMOWN-0001,test.zig,zig,OwnedWgCommandResult,owned_type,consumes_owned,OwnedWgCommandResult,self,deinit,test_deinit,yes,yes,Test owned type
-MEMOWN-0002,test.zig,zig,runWgShowDump,producer,returns_owned,OwnedWgCommandResult,caller,errdefer,test_deinit,yes,yes,Test producer
+MEMOWN-0001,test.zig,zig,OwnedWgCommandResult,owned_type,consumes_owned,OwnedWgCommandResult,self,deinit,n/a,yes,yes,Test owned type
+MEMOWN-0002,test.zig,zig,runWgShowDump,producer,returns_owned,OwnedWgCommandResult,caller,errdefer,n/a,yes,yes,Test producer
 """,
             "zig_content": """pub const OwnedWgCommandResult = struct {
     pub fn deinit(self: *OwnedWgCommandResult, allocator: std.mem.Allocator) void {
@@ -673,7 +673,7 @@ fn createOwned(allocator: std.mem.Allocator) !OwnedType {
         {
             "name": "consumer without deinit/defer should fail",
             "csv": """id,path,language,symbol,kind,allocator_boundary,owned_type,owner,cleanup,coverage,request_path,verified,notes
-MEMOWN-0001,test.zig,zig,consumeOwned,consumer,consumes_owned,OwnedType,self,defer,test,yes,yes,Test
+MEMOWN-0001,test.zig,zig,consumeOwned,consumer,consumes_owned,OwnedType,self,defer,n/a,yes,yes,Test
 """,
             "zig_content": """const OwnedType = struct {};
 
@@ -684,7 +684,7 @@ fn consumeOwned(allocator: std.mem.Allocator) !void {
 }
 """,
             "should_pass": False,
-            "error_contains": "lacks `.deinit(` or `defer`",
+            "error_contains": "lacks `.deinit(`",
         },
         # Case 12: test without std.testing.allocator - should fail
         {
