@@ -427,5 +427,5 @@ pub fn renderPayloadWithContextAndDiag(
     } else {
         try writer.writeAll(",\"rss_kib\":null");
     }
-    try writer.writeAll("}\n");
+    try writer.writeAll("}}\n");
 }
