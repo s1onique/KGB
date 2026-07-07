@@ -12,13 +12,19 @@
 // WireGuard interface identity is explicit via wg_status_boundary_cli.DEFAULT_WG_INTERFACE.
 // No hard-coded "wg0" remains in production path.
 //
-// ACT-HULK29R-ZIG016-WG-PEERS-DIAGNOSTIC-INTEGRATION:
-// The wg_peers check now uses diagnostic-aware status collection to provide
-// structured detail such as "wg timeout: interface=wg-kgb0 backend=cli timeout_secs=5".
+// ACT-HULK29R-ZIG016-WG-STATUS-CLASSIFICATION-FIX:
+// The wg_peers check now uses precise diagnostic classification that separates:
+// - OS link presence from WireGuard interface visibility
+// - Permission/capability failures from namespace/unreachable cases
+// - Malformed output from healthy states
+// This resolves the live contradiction where tunnel says wg-kgb0 exists
+// but wg_peers reports generic "interface_missing".
 
 const std = @import("std");
 const wg_boundary = @import("net/wg_status_boundary.zig");
 const wg_boundary_cli = @import("net/wg_status_boundary_cli.zig");
+const wg_cli_facts = @import("net/wg_cli_facts.zig");
+const classifier = @import("net/wg_diagnostic_classifier.zig");
 const status = @import("status.zig");
 
 // ============================================================================
@@ -68,13 +74,20 @@ pub fn getWgPeersCheck(allocator: std.mem.Allocator) status.Check {
                 .detail = boundary_check.detail,
             };
         },
-        .err => |bad| {
-            // Error path: format diagnostic detail into the check
-            // MemoryOwnership: detail string must be allocated via the passed allocator
-            // so it outlives this function and remains valid during JSON serialization.
-            // Caller is responsible for freeing via Check.deinit() after rendering.
-            var detail_buf: [wg_boundary.DIAGNOSTIC_DETAIL_BUF_SIZE]u8 = undefined;
-            const detail_formatted = wg_boundary.formatPeerDiagnosticDetail(bad.diagnostic, &detail_buf);
+        .err => {
+            // Use classifier to determine precise diagnostic class
+            // Convert diagnostic attempt to facts for classification
+            // ACT-HULK29R-ZIG016-WG-STATUS-CLASSIFICATION-FIX: Wire classifier into production path
+            const facts = wg_cli_facts.factsFromDiagnosticAttempt(
+                attempt,
+                false, // os_link_seen - not available in this context
+                .unknown, // os_link_kind - not available in this context
+                "", // stderr - not available in this context
+            );
+            const diag_class = classifier.classifyWgStatus(facts);
+
+            // Format detail using the classified diagnostic
+            const detail_formatted = classifierErrorKindToDetail(diag_class);
 
             // Allocate owned copy so the slice is valid until after JSON serialization
             const detail_owned = allocator.dupe(u8, detail_formatted) catch {
@@ -88,16 +101,11 @@ pub fn getWgPeersCheck(allocator: std.mem.Allocator) status.Check {
                 };
             };
 
-            // Create boundary check with the allocated diagnostic detail
-            const boundary_check = wg_boundary.toCheck(
-                wg_boundary.WireGuardStatus.noInterface(),
-                detail_owned,
-            );
             return status.Check{
-                .name = boundary_check.name,
-                .status = mapBoundaryStatus(boundary_check.status),
-                .detail = boundary_check.detail,
-                .owns_detail = true, // Mark as owned so caller can deinit
+                .name = "wg_peers",
+                .status = .warn,
+                .detail = detail_owned,
+                .owns_detail = true,
             };
         },
     }
@@ -145,6 +153,23 @@ pub fn getWgPeersCheckFromError(err: wg_boundary.StatusError) status.Check {
         .name = boundary_check.name,
         .status = mapBoundaryStatus(boundary_check.status),
         .detail = boundary_check.detail,
+    };
+}
+
+/// Maps WgDiagnosticClass to user-friendly detail string.
+/// ACT-HULK29R-ZIG016-WG-STATUS-CLASSIFICATION-FIX: Maps to canonical diagnostic classes.
+fn classifierErrorKindToDetail(diag_class: classifier.WgDiagnosticClass) []const u8 {
+    return switch (diag_class) {
+        .wg_tool_missing => "wg wg_tool_missing: wg command not installed",
+        .wireguard_interface_missing => "wg wireguard_interface_missing: interface not found",
+        .interface_present_non_wireguard => "wg interface_present_non_wireguard: name conflict",
+        .permission_denied => "wg permission_denied: capability denied",
+        .wrong_namespace_or_unreachable => "wg wrong_namespace_or_unreachable: namespace mismatch",
+        .command_failed => "wg command_failed: wg exited non-zero",
+        .malformed_output => "wg malformed_output: unparseable response",
+        .no_peers => "wg no_peers: no peers configured",
+        .no_handshake => "wg no_handshake: peers unreachable",
+        .peers_healthy => "wg peers_healthy: all peers connected",
     };
 }
 

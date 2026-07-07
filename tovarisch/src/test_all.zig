@@ -146,6 +146,11 @@ test { std.testing.refAllDecls(@import("net/wg_status_boundary_netlink.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_status_boundary_netlink_tests.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_status_boundary_netlink_runtime_tests.zig")); }
 
+// WireGuard diagnostic classifier tests (ACT-HULK29R-ZIG016-WG-STATUS-CLASSIFICATION-FIX)
+test { std.testing.refAllDecls(@import("net/wg_diagnostic_classifier.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_diagnostic_classifier_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_cli_facts.zig")); }
+
 // BFD module tests
 test { std.testing.refAllDecls(@import("bfd/packet.zig")); }
 test { std.testing.refAllDecls(@import("bfd/config.zig")); }

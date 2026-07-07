@@ -6,6 +6,11 @@
 // Phase 1 CLI backend uses configured interface identity via `wg show <iface> dump`.
 // Phase 2 generic netlink remains future work.
 //
+// ACT-HULK29R-ZIG016-WG-STATUS-CLASSIFICATION-FIX:
+// Extended CLI backend that collects structured facts to enable precise WireGuard
+// diagnostic classification. Separates OS link presence from WireGuard interface
+// visibility for accurate status reporting.
+//
 // ACT-HULK29R-ZIG016-WG-PEERS-DIAGNOSTIC-INTEGRATION:
 // This module provides diagnostic-aware status collection that carries structured
 // diagnostic context (interface, backend, timeout_secs, exit code) on both success
@@ -15,6 +20,8 @@ const std = @import("std");
 const wg = @import("wg_status_boundary.zig");
 const config_parse_helpers = @import("../config_parse_helpers.zig");
 const wg_cli_run = @import("wg_status_boundary_cli_run.zig");
+const classifier = @import("wg_diagnostic_classifier.zig");
+const wg_cli_facts = @import("wg_cli_facts.zig");
 
 // Re-export from wg_status_boundary_cli_run.zig for backward compatibility
 pub const OwnedWgCommandResult = wg_cli_run.OwnedWgCommandResult;
@@ -231,6 +238,46 @@ fn buildCliDiagnostic(
     };
 }
 
+/// Builds a WireGuardPeerDiagnostic from classified facts.
+/// Extended to support precise classification (ACT-HULK29R-ZIG016-WG-STATUS-CLASSIFICATION-FIX).
+fn buildCliDiagnosticFromFacts(
+    facts: classifier.WgInterfaceFacts,
+    exit_code: ?u8,
+    timed_out: bool,
+    stdout_len: usize,
+    stderr_len: usize,
+) wg.WireGuardPeerDiagnostic {
+    // Classify the status
+    const diag_class = classifier.classifyWgStatus(facts);
+
+    // Map classifier class to error_kind string
+    const error_kind: []const u8 = switch (diag_class) {
+        .wg_tool_missing => "wg_tool_missing",
+        .wireguard_interface_missing => "wireguard_interface_missing",
+        .interface_present_non_wireguard => "interface_present_non_wireguard",
+        .permission_denied => "permission_denied",
+        .wrong_namespace_or_unreachable => "wrong_namespace_or_unreachable",
+        .command_failed => "command_failed",
+        .malformed_output => "malformed_output",
+        .no_peers => "no_peers",
+        .no_handshake => "no_handshake",
+        .peers_healthy => "peers_healthy",
+    };
+
+    return .{
+        .backend = "cli",
+        .selected_interface = facts.configured_name,
+        .command = "wg show wg-kgb0 dump",
+        .timeout_secs = if (timed_out) CliBackend.DEFAULT_TIMEOUT_SECS else null,
+        .exit_code = exit_code,
+        .error_kind = error_kind,
+        .stderr_len = stderr_len,
+        .stdout_len = stdout_len,
+        .os_link_kind = facts.os_link_kind,
+        .peer_count = facts.wg_dump_peer_count,
+    };
+}
+
 // ============================================================================
 // Diagnostic-Aware Status Collection (ACT-HULK29R-ZIG016-WG-PEERS-DIAGNOSTIC-INTEGRATION)
 // ============================================================================
@@ -385,3 +432,4 @@ fn findWgCommand() ?[*:0]const u8 {
     }
     return null;
 }
+

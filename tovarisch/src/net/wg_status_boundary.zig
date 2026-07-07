@@ -14,6 +14,9 @@
 //   WireGuard kernel remains the boundary; tovarisch owns observation semantics.
 //   We do NOT implement WireGuard protocol from scratch. We observe what the
 //   kernel exposes via the wg userspace tool.
+//
+// ACT-HULK29R-ZIG016-WG-STATUS-CLASSIFICATION-FIX:
+// Extended to support precise diagnostic classification via WgDiagnosticClass.
 
 const std = @import("std");
 
