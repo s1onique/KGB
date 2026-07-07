@@ -1,5 +1,5 @@
 {
-  "git_sha": "eebcfcfea02a7608fe6e0df3adf09cf73b42b23b",
+  "git_sha": "bb895b1ef39bb894f4c534acec2886f17ecbedfb",
   "zig_version": "0.16.0",
   "zig_target": "aarch64-macos.14.7.4...14.7.4-none",
   "os_info": "Darwin MacBook-Pro-3.local 23.6.0 Darwin Kernel Version 23.6.0: Thu Dec 19 20:47:16 PST 2024; root:xnu-10063.141.1.703.2~1/RELEASE_ARM64_T6031 arm64 arm Darwin",
@@ -7,15 +7,13 @@
   "cwd": "/Volumes/UserData/Users/chistyakov/Projects/SPbNIX/KGB",
   "exit_code": 0,
   "summary": {
-    "pass": 0,
-    "skip": 0,
+    "pass": 726,
+    "skip": 24,
     "fail": 0,
-    "total": 0
+    "total": 750
   },
-  "raw_summary_line": "",
-  "raw_output_tail": "\nBuild Summary: 4/4 steps succeeded\ntest-base cached\n+- run test cached\n   +- compile test Debug native cached 42ms MaxRSS:32M\n      +- options cached\n\n",
-  "timestamp": "2026-07-07T04:23:40.096492",
-  "command": "zig build test-base --summary all --seed 0xDEADBEEF",
-  "parse_error": "test summary not found in successful zig build output",
-  "raw_output_full": "\nBuild Summary: 4/4 steps succeeded\ntest-base cached\n+- run test cached\n   +- compile test Debug native cached 42ms MaxRSS:32M\n      +- options cached\n\n"
+  "raw_summary_line": "726/750 tests passed (24 skipped)",
+  "raw_output_tail": "\nBuild Summary: 4/4 steps succeeded; 726/750 tests passed (24 skipped)\ntest-base success\n+- run test 726 pass, 24 skip (750 total) 1s MaxRSS:14M\n   +- compile test Debug native success 2s MaxRSS:493M\n      +- options success\n\n",
+  "timestamp": "2026-07-07T04:42:59.961658",
+  "command": "zig build test-base --summary all --seed 0xDEADBEEF"
 }

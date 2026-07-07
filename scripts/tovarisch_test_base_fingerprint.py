@@ -311,6 +311,7 @@ Examples:
     # Write artifact (always, to capture parse errors too)
     with open(artifact_path, "w") as f:
         json.dump(fingerprint, f, indent=2)
+        f.write("\n")
     
     print(f"\nFingerprint written to: {artifact_path}")
     

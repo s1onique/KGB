@@ -170,6 +170,17 @@ class TestTovarischTestBaseFingerprint(unittest.TestCase):
         self.assertIn("test-base", self.fingerprint["command"])
         self.assertIn(self.test_seed, self.fingerprint["command"])
 
+    def test_artifact_ends_with_newline(self):
+        """Fingerprint artifact must be newline-terminated for hygiene gates."""
+        with open(self.artifact_path, "rb") as f:
+            data = f.read()
+
+        self.assertTrue(data, "Artifact should not be empty")
+        self.assertTrue(
+            data.endswith(b"\n"),
+            "Fingerprint artifact must end with a newline",
+        )
+
 
 class TestFingerprintParsing(unittest.TestCase):
     """Test the parsing logic in isolation."""
