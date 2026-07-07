@@ -70,14 +70,29 @@ pub fn getWgPeersCheck(allocator: std.mem.Allocator) status.Check {
         },
         .err => |bad| {
             // Error path: format diagnostic detail into the check
-            // Use a fixed-size buffer for the formatted detail string
+            // MemoryOwnership: detail string must be allocated via the passed allocator
+            // so it outlives this function and remains valid during JSON serialization.
+            // For CLI status rendering, this allocation is bounded and lives until
+            // process exit after JSON serialization. Callers that provide a freeing
+            // allocator may release it after rendering.
             var detail_buf: [wg_boundary.DIAGNOSTIC_DETAIL_BUF_SIZE]u8 = undefined;
-            const detail = wg_boundary.formatPeerDiagnosticDetail(bad.diagnostic, &detail_buf);
+            const detail_formatted = wg_boundary.formatPeerDiagnosticDetail(bad.diagnostic, &detail_buf);
 
-            // Create boundary check with the formatted diagnostic detail
+            // Allocate owned copy so the slice is valid until after JSON serialization
+            const detail_owned = allocator.dupe(u8, detail_formatted) catch {
+                // Fallback to static string on allocation failure
+                const detail = "wg diagnostic error";
+                return status.Check{
+                    .name = "wg_peers",
+                    .status = .warn,
+                    .detail = detail,
+                };
+            };
+
+            // Create boundary check with the allocated diagnostic detail
             const boundary_check = wg_boundary.toCheck(
                 wg_boundary.WireGuardStatus.noInterface(),
-                detail,
+                detail_owned,
             );
             return status.Check{
                 .name = boundary_check.name,
