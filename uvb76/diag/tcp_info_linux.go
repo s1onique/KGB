@@ -11,7 +11,6 @@ import (
 	"net"
 	"syscall"
 	"time"
-	"unsafe"
 
 	"golang.org/x/sys/unix"
 
@@ -27,16 +26,16 @@ const (
 // Linux TCP states
 const (
 	tcpStateEstablished = 1
-	tcpStateSynSent    = 2
-	tcpStateSynRecv    = 3
-	tcpStateFinWait1   = 4
-	tcpStateFinWait2   = 5
-	tcpStateTimeWait   = 6
-	tcpStateClose      = 7
-	tcpStateCloseWait  = 8
-	tcpStateLastAck    = 9
-	tcpStateListen     = 10
-	tcpStateClosing    = 11
+	tcpStateSynSent     = 2
+	tcpStateSynRecv     = 3
+	tcpStateFinWait1    = 4
+	tcpStateFinWait2    = 5
+	tcpStateTimeWait    = 6
+	tcpStateClose       = 7
+	tcpStateCloseWait   = 8
+	tcpStateLastAck     = 9
+	tcpStateListen      = 10
+	tcpStateClosing     = 11
 )
 
 // tcpInfoKernel is the stable prefix of Linux struct tcp_info.
@@ -55,7 +54,7 @@ type tcpInfoKernel struct {
 	TcpiAto          uint32
 	TcpiSndMss       uint32
 	TcpiRcvMss       uint32
-	TcpiUnacked       uint32
+	TcpiUnacked      uint32
 	TcpiSacked       uint32
 	TcpiLost         uint32
 	TcpiRetrans      uint32
@@ -71,7 +70,7 @@ type tcpInfoKernel struct {
 	TcpiSndSsthresh  uint32
 	TcpiSndCwnd      uint32
 	TcpiAdvmss       uint32
-	TcpiReordering    uint32
+	TcpiReordering   uint32
 	TcpiRcvRtt       uint32
 	TcpiRcvSpace     uint32
 	TcpiTotalRetrans uint32
@@ -88,16 +87,16 @@ type TcpInfoResult struct {
 	// State is the TCP connection state
 	State string
 
-	RTTUs            *int64
-	RTTVarUs         *int64
+	RTTUs              *int64
+	RTTVarUs           *int64
 	RetransmitsCurrent *int64
 	RetransmitsTotal   *int64
-	SndCwnd          *int32
-	Ssthresh         *int32
-	Unacked          *int64
-	Lost             *int64
-	Sacked           *int64
-	Reordering       *int64
+	SndCwnd            *int32
+	Ssthresh           *int32
+	Unacked            *int64
+	Lost               *int64
+	Sacked             *int64
+	Reordering         *int64
 
 	LocalAddr  string
 	RemoteAddr string
@@ -247,7 +246,7 @@ func GetTcpInfoFromSyntheticDial(ctx context.Context, address string) (*TcpInfoR
 		return &TcpInfoResult{
 			Available:   false,
 			IsSynthetic: true,
-			Error:      &TcpInfoError{Kind: "dial_failed", Message: fmt.Sprintf("dial failed: %v", err)},
+			Error:       &TcpInfoError{Kind: "dial_failed", Message: fmt.Sprintf("dial failed: %v", err)},
 		}, nil, err
 	}
 
