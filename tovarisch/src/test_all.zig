@@ -15,6 +15,7 @@ const _status_ownership_tests = @import("status_ownership_tests.zig");
 const _status_query = @import("status_query.zig");
 const _status_response = @import("status_response.zig");
 const _status_response_test = @import("status_response_test.zig");
+const _status_response_body_contract_test = @import("status_response_body_contract_test.zig");
 // Route contract table (ACT-TOVARISCH-ZIG-HULK02)
 const _status_route_contract = @import("http/status_route_contract.zig");
 const _status_route_contract_test = @import("http/status_route_contract_test.zig");
@@ -120,6 +121,7 @@ test { std.testing.refAllDecls(@import("status_ownership_tests.zig")); }
 test { std.testing.refAllDecls(@import("status_query.zig")); }
 test { std.testing.refAllDecls(@import("status_response.zig")); }
 test { std.testing.refAllDecls(@import("status_response_test.zig")); }
+test { std.testing.refAllDecls(@import("status_response_body_contract_test.zig")); }
 // Route contract table tests (ACT-TOVARISCH-ZIG-HULK02)
 test { std.testing.refAllDecls(@import("http/status_route_contract.zig")); }
 test { std.testing.refAllDecls(@import("http/status_route_contract_test.zig")); }
