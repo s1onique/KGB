@@ -2,9 +2,23 @@
 //
 // This file tests the critical body accessor contract:
 // - body() never exposes trailing allocation capacity
-// - body.len equals the logical length, not the allocation length
+// - body() exposes only initialized logical body bytes (not undefined memory)
+// - body.len equals the written length, not the allocation length
 //
 // These tests prove the OwnedResponse accessor boundary is enforced correctly.
+//
+// CONTRACT INVARIANTS:
+// 1. body.len == logical_len (written bytes count, not capacity)
+// 2. body[0..logical_len] contains only initialized data (ASCII range)
+// 3. body() never includes trailing allocation capacity
+//
+// The test is named to match the failure mode it catches:
+// "Initialized-length corruption" — when body.len matches logical_len,
+// but logical bytes contain uninitialized or invalid data.
+//
+// This is distinct from "trailing capacity exposure", where body.len exceeds
+// logical_len by exposing allocation[logical_len..].
+
 
 const std = @import("std");
 const status = @import("status.zig");
