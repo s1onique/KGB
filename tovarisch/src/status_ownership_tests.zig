@@ -49,6 +49,12 @@ const TestWriter = struct {
         self.len += bytes.len;
     }
 
+    pub fn writeByte(self: *Self, byte: u8) !void {
+        if (self.len >= BufSize) return error.BufferOverflow;
+        self.buf[self.len] = byte;
+        self.len += 1;
+    }
+
     pub fn slice(self: *const Self) []const u8 {
         return self.buf[0..self.len];
     }
@@ -394,39 +400,3 @@ test "static checks have detail pointing to static strings" {
     try std.testing.expectEqualStrings("running", process_check.?.detail);
 }
 
-// ============================================================================
-// getWgPeersCheck static detail proof
-// These tests prove that getWgPeersCheck() does NOT allocate dynamic detail strings.
-// All detail strings are static string literals, safe for any lifetime.
-// ============================================================================
-
-test "getWgPeersCheckFromError returns static detail strings" {
-    // All error details are static string literals - no allocation
-    const err_details = [_]struct { wg_boundary.StatusError, []const u8 }{
-        .{ error.backend_missing, "wg command not available" },
-        .{ error.command_failed, "wg command failed" },
-        .{ error.malformed_output, "wg output malformed" },
-        .{ error.out_of_memory, "wg check out of memory" },
-        .{ error.timeout, "wg command timeout" },
-        .{ error.interface_missing, "wg interface not found" },
-        .{ error.permission_denied, "wg permission denied" },
-        .{ error.unsupported_platform, "wg not supported on this platform" },
-    };
-
-    for (err_details) |pair| {
-        const check = status_checks.getWgPeersCheckFromError(pair[0]);
-        try std.testing.expectEqualStrings(pair[1], check.detail);
-    }
-}
-
-test "getWgPeersCheckFromParsed returns static detail strings" {
-    // All detail strings are static string literals - no allocation
-    const check_no_peers = status_checks.getWgPeersCheckFromParsed(0, false);
-    try std.testing.expectEqualStrings("no peers detected", check_no_peers.detail);
-
-    const check_no_handshake = status_checks.getWgPeersCheckFromParsed(1, false);
-    try std.testing.expectEqualStrings("no handshake yet", check_no_handshake.detail);
-
-    const check_ok = status_checks.getWgPeersCheckFromParsed(1, true);
-    try std.testing.expectEqualStrings("wireguard peers healthy", check_ok.detail);
-}

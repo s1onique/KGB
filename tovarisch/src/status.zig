@@ -1,24 +1,6 @@
 // status.zig — Status payload rendering for tovarisch
-//
-// Renders the v0 status JSON payload for `tovarisch status --json`.
-// Uses injectable checks for testability:
-// - getLocalChecks() returns all local health checks
-// - getStatus() builds the full status payload
-//
-// Key constraint: All status-check construction is render-owned/reentrant.
-// No module-level mutable buffers in status rendering paths.
-// All dynamic detail strings are backed by caller-owned scratch or immutable static strings.
-//
-// Check ordering (stable for operator readability):
-//   1. process  - daemon is running
-//   2. binary   - binary name is correct
-//   3. config   - configuration state
-//   4. state_dir - state directory exists
-//   5. http     - HTTP service route available
-//   6. tunnel   - tunnel interface presence
-//   7. wg_peers - WireGuard peer diagnostics
-//   8. bfd      - BFD multihop session status
-//   9. bgp      - BGP config/runtime state
+// Renders v0 status JSON. Check ordering: process, binary, config, state_dir,
+// http, tunnel, wg_peers, bfd, bgp. All dynamic detail uses caller-owned scratch.
 
 const std = @import("std");
 const telemetry = @import("runtime/telemetry.zig");
@@ -51,6 +33,19 @@ pub const Check = struct {
     name: []const u8,
     status: CheckStatus,
     detail: []const u8,
+    /// Whether this check owns the detail string allocation.
+    /// When true, caller must free detail via deinit() or track ownership.
+    owns_detail: bool = false,
+
+    /// Free the detail string if this check owns it.
+    /// Safe to call multiple times or on checks that don't own detail.
+    pub fn deinit(self: *Check, allocator: std.mem.Allocator) void {
+        if (self.owns_detail and self.detail.len > 0) {
+            allocator.free(self.detail);
+            self.detail = "";
+            self.owns_detail = false;
+        }
+    }
 };
 
 pub const ConfigCheckState = union(enum) {
@@ -182,6 +177,15 @@ pub fn getLocalChecksWithBgp(
     return getLocalChecksWithBgpAndLab(bfd_runtime, config_check_injected, bgp_state, scratch, .{});
 }
 
+/// Deinitialize all checks in a StatusScratch that may have owned allocations.
+/// This must be called after rendering is complete and before the scratch is discarded.
+/// Safe to call even if some checks don't have owned detail strings.
+pub fn deinitScratchChecks(scratch: *StatusScratch) void {
+    for (&scratch.checks) |*check| {
+        check.deinit(scratch.allocator);
+    }
+}
+
 pub fn getLocalChecksWithBgpAndLab(
     bfd_runtime: ?*const bfd_status.BfdRuntime,
     config_check_injected: Check,
@@ -200,10 +204,9 @@ pub fn getLocalChecksWithBgpAndLab(
     if (lab_config.disable_wg_checks) {
         scratch.checks[6] = Check{ .name = "wg_peers", .status = .warn, .detail = "disabled via lab_config" };
     } else {
-        // MemoryOwnership: page_allocator is used to collect WireGuard diagnostics.
-        // The getWgPeersCheck() function deallocates via defer diag.deinit(allocator)
-        // before returning, so memory is released within the same call scope.
-        scratch.checks[6] = status_checks.getWgPeersCheck(std.heap.page_allocator);
+        // MemoryOwnership: Use scratch.allocator for wg_peers detail allocation.
+        // Caller must call deinitScratchChecks() after rendering to free owned detail.
+        scratch.checks[6] = status_checks.getWgPeersCheck(scratch.allocator);
     }
 
     // BFD check: return "disabled" if lab toggle is set
@@ -236,16 +239,8 @@ pub const RuntimeStatusInputs = struct {
     bfd_runtime: ?*const bfd_status.BfdRuntime = null,
     config_check: ConfigCheckState = .no_config,
     bgp_result: bgp_serve.BgpLoadResult = .{ .no_config = {} },
-    /// Network diagnostics configuration parsed from daemon config.
-    /// When null, network diagnostics are not included in status response.
     network_diag_config: network_diag_config.NetworkDiagConfig = .{},
-    /// Lab config for runtime toggles and native event emission.
-    /// When lab_config.disable_wg_checks is true, WG check returns "disabled".
-    /// When lab_config.disable_bgp is true, BGP check returns "disabled".
-    /// When lab_config.disable_bfd is true, BFD check returns "disabled".
     lab_config: tovarisch_config.LabConfig = .{},
-    /// Optional lab event emitter for native event exposure in status JSON.
-    /// When provided, native events are included in the status response.
     lab_event_emitter: ?*const lab_events.LabEventEmitter = null,
 };
 
@@ -333,7 +328,7 @@ fn renderBgpDiagnostics(writer: anytype, bgp: ?BgpDiagnostics) !void {
     }
 }
 
-fn renderStatus(writer: anytype, s: Status) !void {
+pub fn renderStatus(writer: anytype, s: Status) !void {
     try writer.writeAll("{\"service\":\"");
     try writer.writeAll(s.service);
     try writer.writeAll("\",\"version\":\"");
@@ -368,9 +363,7 @@ fn renderStatus(writer: anytype, s: Status) !void {
 
 /// Render status payload with optional network diagnostics.
 /// When include_network_diag is true, includes the network_diag field.
-/// MemoryOwnership: Transient allocation for network_diag within request scope.
-/// The collectNetworkDiag() call allocates via page_allocator, but deinit()
-/// is called via defer before the handler returns, releasing all memory.
+/// MemoryOwnership: transient allocations freed via defer before return.
 pub fn renderPayloadWithContextAndDiag(
     writer: anytype,
     inputs: RuntimeStatusInputs,
@@ -383,15 +376,13 @@ pub fn renderPayloadWithContextAndDiag(
     // Collect network diagnostics if requested
     var network_diag_opt: ?status_network_diag.NetworkDiag = null;
     if (include_network_diag) {
-        // Use the parsed daemon config from RuntimeStatusInputs.
-        // This honors the operator's [network_diagnostics] config for underlay TCP.
-        const diag_cfg = inputs.network_diag_config;
-        network_diag_opt = status_network_diag.collectNetworkDiag(allocator, diag_cfg) catch null;
+        network_diag_opt = status_network_diag.collectNetworkDiag(allocator, inputs.network_diag_config) catch null;
     }
     defer {
         if (network_diag_opt) |*d| {
             d.deinit(allocator);
         }
+        deinitScratchChecks(&scratch);
     }
 
     // Render the status JSON with optional network_diag
@@ -436,14 +427,5 @@ pub fn renderPayloadWithContextAndDiag(
     } else {
         try writer.writeAll(",\"rss_kib\":null");
     }
-    try writer.writeAll("}");
-
-    // Note: Native lab events are NOT exposed via /status JSON until JSON escaping
-    // is properly implemented. Detail strings contain raw bytes from subsystem output
-    // (e.g., wg_show output) that could contain quotes or control characters.
-    // Native events are written to the TSV output file instead, which is the
-    // primary channel for idle staircase lab attribution.
-    // TODO: Add JSON escaping to enable status exposure in future hardening ACT.
-
     try writer.writeAll("}\n");
 }

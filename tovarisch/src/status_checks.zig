@@ -72,9 +72,7 @@ pub fn getWgPeersCheck(allocator: std.mem.Allocator) status.Check {
             // Error path: format diagnostic detail into the check
             // MemoryOwnership: detail string must be allocated via the passed allocator
             // so it outlives this function and remains valid during JSON serialization.
-            // For CLI status rendering, this allocation is bounded and lives until
-            // process exit after JSON serialization. Callers that provide a freeing
-            // allocator may release it after rendering.
+            // Caller is responsible for freeing via Check.deinit() after rendering.
             var detail_buf: [wg_boundary.DIAGNOSTIC_DETAIL_BUF_SIZE]u8 = undefined;
             const detail_formatted = wg_boundary.formatPeerDiagnosticDetail(bad.diagnostic, &detail_buf);
 
@@ -86,6 +84,7 @@ pub fn getWgPeersCheck(allocator: std.mem.Allocator) status.Check {
                     .name = "wg_peers",
                     .status = .warn,
                     .detail = detail,
+                    .owns_detail = false,
                 };
             };
 
@@ -98,6 +97,7 @@ pub fn getWgPeersCheck(allocator: std.mem.Allocator) status.Check {
                 .name = boundary_check.name,
                 .status = mapBoundaryStatus(boundary_check.status),
                 .detail = boundary_check.detail,
+                .owns_detail = true, // Mark as owned so caller can deinit
             };
         },
     }
