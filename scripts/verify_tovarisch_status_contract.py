@@ -17,6 +17,7 @@ Exit codes:
     3   Invalid JSON
 """
 
+import binascii
 import json
 import os
 import re
@@ -222,6 +223,23 @@ def normalize_for_comparison(data: dict) -> dict:
     return normalized
 
 
+def _decode_diagnostic(data: bytes) -> str:
+    """Decode bytes for diagnostics only, replacing invalid UTF-8."""
+    return data.decode("utf-8", errors="backslashreplace")
+
+
+def _bad_utf8_context(data: bytes, exc: UnicodeDecodeError) -> str:
+    """Format UTF-8 decode error with byte context for forensics."""
+    start = max(0, exc.start - 32)
+    end = min(len(data), exc.end + 32)
+    window = data[start:end]
+    return (
+        f"{exc}; byte_offset={exc.start}; "
+        f"context_hex={binascii.hexlify(window, sep=b' ').decode('ascii')}; "
+        f"context_repr={window!r}"
+    )
+
+
 def run_cli_status() -> CliResult:
     """Run tovarisch status --json via Zig build.
     
@@ -234,31 +252,40 @@ def run_cli_status() -> CliResult:
     env["TOVARISCH_WG_COMMAND_PATH"] = "/nonexistent"
     
     try:
-        result = subprocess.run(
+        proc = subprocess.run(
             ["zig", "build", "run", "--", "status", "--json"],
             cwd="tovarisch",
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
             timeout=60,
             env=env,
         )
-        if result.returncode != 0:
-            return CliResult(error=f"[status-contract] FAIL: zig build run failed: {result.stderr}")
-        
-        output = result.stdout.strip()
-        if not output:
-            return CliResult(error="[status-contract] FAIL: could not get CLI output")
-        
-        try:
-            return CliResult(data=json.loads(output))
-        except json.JSONDecodeError as e:
-            return CliResult(error=f"[status-contract] FAIL: CLI output is not valid JSON: {e}")
     except FileNotFoundError:
         return CliResult(unavailable=True)
+    except OSError as exc:
+        return CliResult(error=f"[status-contract] FAIL: could not start CLI: {exc}")
     except subprocess.TimeoutExpired:
         return CliResult(error="[status-contract] FAIL: zig build run timed out")
-    except Exception as e:
-        return CliResult(error=f"[status-contract] FAIL: could not run CLI: {e}")
+
+    stderr_text = _decode_diagnostic(proc.stderr)
+
+    if proc.returncode != 0:
+        return CliResult(error=f"[status-contract] FAIL: CLI exited non-zero\n  exit_code: {proc.returncode}\n  stderr:\n{stderr_text}")
+
+    try:
+        stdout_text = proc.stdout.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return CliResult(error="[status-contract] FAIL: CLI stdout is not valid UTF-8 JSON: " + _bad_utf8_context(proc.stdout, exc) + ("\n  stderr:\n" + stderr_text if stderr_text else ""))
+
+    output = stdout_text.strip()
+    if not output:
+        return CliResult(error="[status-contract] FAIL: could not get CLI output")
+
+    try:
+        return CliResult(data=json.loads(output))
+    except json.JSONDecodeError as e:
+        return CliResult(error=f"[status-contract] FAIL: CLI output is not valid JSON: {e}\nstdout:\n{output}\nstderr:\n{stderr_text}")
 
 
 def verify() -> int:
