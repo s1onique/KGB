@@ -7,6 +7,7 @@ package diag
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"syscall"
@@ -258,7 +259,7 @@ func GetTcpInfoFromSyntheticDial(ctx context.Context, address string) (*TcpInfoR
 	}
 	if result != nil && !result.Available {
 		conn.Close()
-		return result, nil, fmt.Errorf(result.Error.Message)
+		return result, nil, errors.New(result.Error.Message)
 	}
 
 	return result, conn, nil
