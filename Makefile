@@ -599,3 +599,16 @@ tovarisch-test-base-fingerprint:
 	@echo "Seed: $(SEED)"
 	python3 scripts/tovarisch_test_base_fingerprint.py --seed $(SEED)
 
+
+# === UVB-76 Latency Series Query Boundary Hulk Gate ===
+# ACT-UVB76-HULK03-LATENCY-SERIES-QUERY-BOUNDARY-FUZZ
+hulk-uvb76-latency-gate:
+	@echo "=== UVB-76 Hulk Gate: Latency Series Query Boundary ==="
+	@cd uvb76 && go test -race -v ./state/... ./server/... -run 'LatencySeries|FuzzLatencySeries'
+	@echo "=== UVB-76 Hulk Gate: Running Bounded Fuzz Tests ==="
+	@cd uvb76 && go test ./server/... -run '^$$' -fuzz FuzzLatencySeriesQueryParams -fuzztime=10s
+	@cd uvb76 && go test ./server/... -run '^$$' -fuzz FuzzLatencySeriesWindowStepRange -fuzztime=10s
+	@echo "=== UVB-76 Hulk Gate: Verifying Latency Series Contract Inventory ==="
+	@python3 scripts/verify_uvb76_latency_series_contracts.py
+	@echo "=== UVB-76 Hulk Gate: Verifier Self-Test ==="
+	@python3 scripts/verify_uvb76_latency_series_contracts.py --self-test
