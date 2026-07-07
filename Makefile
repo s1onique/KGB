@@ -612,3 +612,16 @@ hulk-uvb76-latency-gate:
 	@python3 scripts/verify_uvb76_latency_series_contracts.py
 	@echo "=== UVB-76 Hulk Gate: Verifier Self-Test ==="
 	@python3 scripts/verify_uvb76_latency_series_contracts.py --self-test
+
+# === UVB-76 Probe Reachability Semantics Hulk Gate ===
+# ACT-UVB76-HULK04-PROBE-REACHABILITY-SEMANTICS
+# Explicit reachability vocabulary contract tests for HTTP/ICMP probe independence.
+# Canonical statuses: target_reachable, service_reachable, partially_reachable,
+# service_unreachable, network_unreachable, unknown.
+hulk-uvb76-reachability-gate:
+	@echo "=== UVB-76 Hulk Gate: Probe Reachability Semantics ==="
+	@cd uvb76 && go test -race -v ./probe/... ./state/... ./server/... -run 'Reachability|ProbeSemantics'
+	@echo "=== UVB-76 Hulk Gate: Verifying Reachability Contract Inventory ==="
+	@python3 scripts/verify_uvb76_reachability_contracts.py
+	@echo "=== UVB-76 Hulk Gate: Verifier Self-Test ==="
+	@python3 scripts/verify_uvb76_reachability_contracts.py --self-test
