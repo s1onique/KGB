@@ -114,6 +114,17 @@ verification. Real WireGuard deployments may show `"wireguard peers healthy"`,
 }
 ```
 
+### Namespace mismatch (ACT-HULK29R-ZIG016-WG-PEERS-NAMESPACE-DIAGNOSTIC-PROOF):
+```json
+{
+  "name": "wg_peers",
+  "status": "warn",
+  "detail": "wg wrong_namespace_or_unreachable: namespace mismatch"
+}
+```
+
+**Interpretation:** WireGuard interface detected by tunnel check but `wg show` cannot see it from the current network namespace. BFD/BGP health indicates the tunnel is functional despite peer diagnostic limitation. This is an expected deployment invariant for certain namespace configurations.
+
 ## Tunnel Check (`tunnel`)
 
 The status payload includes a `tunnel` check that detects tunnel-like interfaces by name.

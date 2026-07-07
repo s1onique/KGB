@@ -1,0 +1,66 @@
+{
+  "_description": "Status contract fixture for wg_peers namespace mismatch state",
+  "_act": "ACT-HULK29R-ZIG016-WG-PEERS-NAMESPACE-DIAGNOSTIC-PROOF",
+  "_scenario": "WireGuard interface detected by tunnel check but wg CLI cannot see it from current namespace",
+  "_notes": [
+    "Tunnel check detects wg-kgb0 via sysfs",
+    "wg_peers check warns because wg show interfaces does not contain wg-kgb0",
+    "BFD and BGP are healthy - the tunnel is functional despite peer diagnostic limitation",
+    "This is an expected deployment invariant for certain namespace configurations"
+  ],
+  "service": "tovarisch",
+  "version": "0.1.2+<sha>",
+  "node_id": "local-dev",
+  "status": "warn",
+  "checks": [
+    {
+      "name": "process",
+      "status": "ok",
+      "detail": "running"
+    },
+    {
+      "name": "binary",
+      "status": "ok",
+      "detail": "tovarisch"
+    },
+    {
+      "name": "config",
+      "status": "ok",
+      "detail": "/etc/kgb/tovarisch.conf"
+    },
+    {
+      "name": "state_dir",
+      "status": "ok",
+      "detail": "state directory exists"
+    },
+    {
+      "name": "http",
+      "status": "ok",
+      "detail": "http service route available"
+    },
+    {
+      "name": "tunnel",
+      "status": "ok",
+      "detail": "detected tunnel interfaces: wg-kgb0"
+    },
+    {
+      "name": "wg_peers",
+      "status": "warn",
+      "detail": "wg wrong_namespace_or_unreachable: namespace mismatch"
+    },
+    {
+      "name": "bfd",
+      "status": "ok",
+      "detail": "bfd sessions up"
+    },
+    {
+      "name": "bgp",
+      "status": "ok",
+      "detail": "BGP established; 15811 configured prefixes"
+    }
+  ],
+  "runtime": {
+    "pid": 1044345,
+    "rss_kib": null
+  }
+}

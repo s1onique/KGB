@@ -264,6 +264,27 @@ test "formatter: peers_healthy with peer count" {
     try testing.expect(std.mem.containsAtLeast(u8, result, 1, "peers=2"));
 }
 
+test "formatter: wrong_namespace_or_unreachable" {
+    const wg_peer_diag = @import("wg_peer_diagnostic.zig");
+    const diag = wg_peer_diag.WireGuardPeerDiagnostic{
+        .backend = "cli",
+        .selected_interface = "wg-kgb0",
+        .command = "wg show wg-kgb0 dump",
+        .timeout_secs = null,
+        .exit_code = 1,
+        .error_kind = "wrong_namespace_or_unreachable",
+        .stderr_len = 15,
+        .stdout_len = 0,
+        .os_link_kind = .wireguard,
+        .peer_count = 0,
+    };
+    var buf: [256]u8 = undefined;
+    const result = wg_peer_diag.formatPeerDiagnosticDetail(diag, &buf);
+    try testing.expect(std.mem.startsWith(u8, result, "wg wrong_namespace_or_unreachable:"));
+    try testing.expect(std.mem.containsAtLeast(u8, result, 1, "interface=wg-kgb0"));
+    try testing.expect(std.mem.containsAtLeast(u8, result, 1, "backend=cli"));
+}
+
 test "formatter: no_handshake with peer count" {
     const wg_peer_diag = @import("wg_peer_diagnostic.zig");
     const diag = wg_peer_diag.WireGuardPeerDiagnostic{
