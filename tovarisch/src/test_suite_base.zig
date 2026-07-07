@@ -60,6 +60,7 @@ const _status_vpn_masquerade = @import("status_vpn_masquerade.zig");
 const _status_query = @import("status_query.zig");
 const _status_response = @import("status_response.zig");
 const _status_response_test = @import("status_response_test.zig");
+const _status_response_body_contract_test = @import("status_response_body_contract_test.zig");
 
 // Network diagnostics (ACT: Add tovarisch WireGuard and XRay TCP underlay diagnostics)
 const _net_network_diag_config = @import("net/network_diag_config.zig");
@@ -153,3 +154,4 @@ test { std.testing.refAllDecls(@import("net/wg_status_boundary_netlink_runtime_t
 test { std.testing.refAllDecls(@import("status_query.zig")); }
 test { std.testing.refAllDecls(@import("status_response.zig")); }
 test { std.testing.refAllDecls(@import("status_response_test.zig")); }
+test { std.testing.refAllDecls(@import("status_response_body_contract_test.zig")); }
