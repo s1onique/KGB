@@ -207,6 +207,20 @@ hulk-uvb76-gate:
 	@echo "=== UVB-76 Hulk Gate: Verifier Self-Test ==="
 	@python3 scripts/verify_uvb76_runtime_contracts.py --self-test
 
+# === UVB-76 Capture Hulk Gate ===
+# ACT-UVB76-HULK02-DIAGNOSTIC-CAPTURE-STATE-MACHINE
+# Diagnostic capture state machine contract tests for canonical statuses:
+# captured, skipped_cooldown, failed, disabled, not_configured, not_attempted,
+# in_progress, missing
+
+hulk-uvb76-capture-gate:
+	@echo "=== UVB-76 Hulk Gate: Diagnostic Capture State Machine ==="
+	@cd uvb76 && go test -race -v ./state/... ./server/... ./diag/...
+	@echo "=== UVB-76 Hulk Gate: Verifying Capture State Contract Inventory ==="
+	@python3 scripts/verify_uvb76_capture_state_contracts.py
+	@echo "=== UVB-76 Hulk Gate: Capture Contract Verifier Self-Test ==="
+	@python3 scripts/verify_uvb76_capture_state_contracts.py --self-test
+
 # === UVB-76 Capture Netns Polling ===
 
 # Build and test the polling binary (Go port of shell/JQ polling logic)
