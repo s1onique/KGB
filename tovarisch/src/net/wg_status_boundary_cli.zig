@@ -217,6 +217,25 @@ fn cliWireguardStatus(allocator: std.mem.Allocator, test_path_override: ?[*:0]co
 // Diagnostic Builder (ACT-HULK29R-ZIG016-WG-PEERS-DIAGNOSTIC-INTEGRATION)
 // ============================================================================
 
+// WireGuard command kinds for diagnostic reporting.
+const WgCommandKind = enum {
+    /// wg show <interface> dump
+    show_dump,
+    /// wg show interfaces
+    show_interfaces,
+    /// ip -d link show <interface>
+    ip_link_show,
+};
+
+/// Returns a stable command label without the interface name.
+fn wgCommandLabel(kind: WgCommandKind) []const u8 {
+    return switch (kind) {
+        .show_dump => "wg show <interface> dump",
+        .show_interfaces => "wg show interfaces",
+        .ip_link_show => "ip -d link show <interface>",
+    };
+}
+
 /// Builds a value-only WireGuardPeerDiagnostic from command result data.
 /// All fields are value types - no borrowed slices escape the command result.
 fn buildCliDiagnostic(
@@ -229,7 +248,7 @@ fn buildCliDiagnostic(
     return .{
         .backend = "cli",
         .selected_interface = DEFAULT_WG_INTERFACE,
-        .command = "wg show wg-kgb0 dump",
+        .command = wgCommandLabel(.show_dump),
         .timeout_secs = if (timed_out) CliBackend.DEFAULT_TIMEOUT_SECS else null,
         .exit_code = exit_code,
         .error_kind = error_kind,
@@ -267,7 +286,7 @@ fn buildCliDiagnosticFromFacts(
     return .{
         .backend = "cli",
         .selected_interface = facts.configured_name,
-        .command = "wg show wg-kgb0 dump",
+        .command = wgCommandLabel(.show_dump),
         .timeout_secs = if (timed_out) CliBackend.DEFAULT_TIMEOUT_SECS else null,
         .exit_code = exit_code,
         .error_kind = error_kind,
