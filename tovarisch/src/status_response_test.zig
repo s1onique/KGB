@@ -399,6 +399,80 @@ test "OwnedResponse.slice() has same length as body()" {
     try std.testing.expectEqual(@as(usize, @intFromPtr(body.ptr)), @as(usize, @intFromPtr(slice.ptr)));
 }
 
+/// Diagnostic helper for body byte validation.
+///
+/// Reports enough context to distinguish:
+/// - len corruption (body.len != len)
+/// - writer position drift (body too long/short)
+/// - memory overwrite elsewhere
+/// - trailing capacity exposure (undefined memory)
+fn expectBodyBytesInAsciiRange(body: []const u8, logical_len: usize, alloc_len: usize) !void {
+    // First, verify the contract: body.len should equal logical_len
+    if (body.len != logical_len) {
+        std.debug.print(
+            \\BODY LENGTH MISMATCH:
+            \\  body.len     = {d}
+            \\  logical_len  = {d}
+            \\  alloc_len    = {d}
+            \\
+        , .{ body.len, logical_len, alloc_len });
+        return error.TestExpectedEqual;
+    }
+
+    // Check each byte
+    for (body, 0..) |byte, i| {
+        if (byte >= 128) {
+            // Determine if this is in the logical body or trailing capacity
+            const in_body = i < logical_len;
+            const in_trailing = i >= logical_len;
+
+            // Show a bounded preview around the offending byte
+            const preview_start = if (i < 16) 0 else i - 16;
+            const preview_end = @min(body.len, i + 17);
+            const preview = body[preview_start..preview_end];
+
+            std.debug.print(
+                \\OFFENDING BYTE IN BODY:
+                \\  index         = {d}
+                \\  byte          = 0x{x} ({d})
+                \\  in_body_range = {s} (index {d} < logical_len {d})
+                \\  in_trailing   = {s} (index {d} >= logical_len {d})
+                \\  alloc_len     = {d}
+                \\  body.len      = {d}
+                \\  preview[{d}..{d}] = {any}
+                \\
+            , .{
+                i,
+                byte,
+                byte,
+                if (in_body) "true" else "false",
+                i,
+                logical_len,
+                if (in_trailing) "true" else "false",
+                i,
+                logical_len,
+                alloc_len,
+                body.len,
+                preview_start,
+                preview_end,
+                preview,
+            });
+
+            // If the offending byte is in trailing capacity, this is likely undefined memory
+            if (in_trailing) {
+                std.debug.print(
+                    \\  NOTE: Offending byte at index {d} is in trailing capacity.
+                    \\  This indicates body() is exposing memory beyond logical_len.
+                    \\  This may be undefined behavior or len corruption.
+                    \\
+                , .{i});
+            }
+
+            return error.TestExpectedValue;
+        }
+    }
+}
+
 test "OwnedResponse body does not expose trailing allocation capacity" {
     const allocator = std.testing.allocator;
     const inputs = status.RuntimeStatusInputs{};
@@ -408,11 +482,62 @@ test "OwnedResponse body does not expose trailing allocation capacity" {
     defer response.deinit(allocator);
 
     const body = response.body();
-    for (body) |byte| {
-        try std.testing.expect(byte < 128);
-    }
+
+    // Use diagnostic helper instead of bare per-byte check
+    try expectBodyBytesInAsciiRange(body, response.len, response.allocation.len);
 
     try std.testing.expectEqual(@as(u8, '{'), body[0]);
     try std.testing.expectEqual(@as(u8, '\n'), body[body.len - 1]);
+}
+
+// Test that OwnedResponse body() does not expose trailing allocation capacity.
+//
+// This test constructs an OwnedResponse with explicit capacity separation:
+// 1. Allocation is intentionally larger than len
+// 2. Bytes after len are poisoned with 0xaa
+// 3. body() must return only the prefix [0..len], never the poisoned tail
+//
+// The 0xaa pattern is a Debug-build poison value that can indicate undefined
+// memory. We use it here to detect if body() ever accesses beyond len.
+//
+// Note: This test is NOT testing undefined behavior. We explicitly control
+// all bytes in the allocation. The test proves the accessor contract:
+// body() always returns allocation[0..len], regardless of what follows.
+test "OwnedResponse body accessor contract: never exposes trailing capacity" {
+    const allocator = std.testing.allocator;
+    const inputs = status.RuntimeStatusInputs{};
+    const query = status_query.StatusQuery.parse("");
+
+    var response = try status_response.OwnedResponse.init(allocator, inputs, query);
+    defer response.deinit(allocator);
+
+    // Invariant: len <= allocation.len (must hold for OwnedResponse)
+    try std.testing.expect(response.len <= response.allocation.len);
+
+    // If no trailing capacity, nothing to prove
+    if (response.len == response.allocation.len) {
+        return;
+    }
+
+    // Poison the trailing capacity with 0xaa
+    // This value in Debug builds often indicates undefined/poisoned memory
+    @memset(response.allocation[response.len..], 0xaa);
+
+    // Get the body - this MUST only return [0..len]
+    const body = response.body();
+
+    // Contract: body() returns allocation[0..len]
+    try std.testing.expect(body.ptr == response.allocation.ptr);
+    try std.testing.expect(body.len == response.len);
+
+    // Contract: body must NOT include the poisoned trailing bytes
+    // If body.len == response.len (correct), then body never saw the 0xaa bytes
+    // We verify by checking that body.len < alloc_len (proving we're not exposing tail)
+    try std.testing.expect(body.len < response.allocation.len);
+
+    // Verify body contains valid ASCII JSON (proving it read from written bytes)
+    for (body) |byte| {
+        try std.testing.expect(byte < 128);
+    }
 }
 
