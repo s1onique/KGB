@@ -84,9 +84,9 @@ pub fn getWgPeersCheck(allocator: std.mem.Allocator) status.Check {
             };
         },
         .err => |bad| {
-            // Classify stderr from the failed command result
-            // Get stderr from the diagnostic in the attempt
-            const stderr_class = classifyDiagnosticStderr(bad.diagnostic, allocator);
+            // Get pre-classified stderr from the diagnostic in the attempt.
+            // Stderr classification was done at the CLI boundary.
+            const stderr_class = bad.diagnostic.wg_show_stderr_class;
 
             // Update evidence with stderr classification
             evidence.wg_show_stderr_class = stderr_class;
@@ -121,23 +121,11 @@ pub fn getWgPeersCheck(allocator: std.mem.Allocator) status.Check {
 }
 
 /// Classify stderr from diagnostic output.
-/// Falls back to unknown if we can't safely read stderr content.
+/// Uses the pre-classified stderr_class from the diagnostic.
 fn classifyDiagnosticStderr(
     diag: wg_boundary.WireGuardPeerDiagnostic,
-    allocator: std.mem.Allocator,
 ) classifier.WgStderrClass {
-    // If stderr_len is 0, no stderr was captured
-    if (diag.stderr_len == 0) {
-        return .none;
-    }
-
-    // For actual classification, we need the raw stderr content.
-    // Since the diagnostic doesn't store raw stderr, we classify based on
-    // the error_kind field which is derived from the command result.
-    // This is a safe approximation - the classifier uses error_kind
-    // to determine the classification.
-    _ = allocator;
-    return .other;
+    return diag.wg_show_stderr_class;
 }
 
 /// Test helper: creates a wg_peers check from pre-parsed WireGuard data.

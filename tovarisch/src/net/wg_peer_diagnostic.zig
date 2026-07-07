@@ -42,6 +42,8 @@ pub const WireGuardPeerDiagnostic = struct {
     os_link_kind: classifier.OsLinkKind = .unknown,
     /// Number of peers when dump succeeds (ACT-HULK29R-ZIG016-WG-STATUS-CLASSIFICATION-FIX).
     peer_count: u32 = 0,
+    /// Pre-classified stderr from wg show command (ACT-HULK29R-ZIG016-WG-STATUS-EVIDENCE-WIRING-R3).
+    wg_show_stderr_class: classifier.WgStderrClass = .none,
 };
 
 /// Maximum length for formatted diagnostic detail strings.
