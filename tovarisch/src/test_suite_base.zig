@@ -13,6 +13,7 @@ const _logging = @import("logging.zig");
 const _status = @import("status.zig");
 const _status_checks = @import("status_checks.zig");
 const _status_ownership_tests = @import("status_ownership_tests.zig");
+const _status_wg_ownership_tests = @import("status_wg_ownership_tests.zig");
 
 // Metrics modules
 const _metrics = @import("metrics.zig");
@@ -55,6 +56,14 @@ const _net_private_interface_stats = @import("net/private_interface_stats.zig");
 const _net_private_interface_stats_tests = @import("net/private_interface_stats_tests.zig");
 const _net_iptables = @import("net/iptables.zig");
 const _status_vpn_masquerade = @import("status_vpn_masquerade.zig");
+
+// WireGuard diagnostic classifier tests (ACT-HULK29R-ZIG016-WG-STATUS-CLASSIFICATION-FIX)
+// WireGuard CLI evidence tests (ACT-HULK29R-ZIG016-WG-STATUS-EVIDENCE-WIRING-R3)
+const _net_wg_diagnostic_classifier = @import("net/wg_diagnostic_classifier.zig");
+const _net_wg_diagnostic_classifier_tests = @import("net/wg_diagnostic_classifier_tests.zig");
+const _net_wg_cli_facts = @import("net/wg_cli_facts.zig");
+const _net_wg_cli_facts_tests = @import("net/wg_cli_facts_tests.zig");
+const _net_wg_cli_facts_classifier_tests = @import("net/wg_cli_facts_classifier_tests.zig");
 
 // Status response contract (Hulk-Zig foundation ACT)
 const _status_query = @import("status_query.zig");
@@ -155,3 +164,9 @@ test { std.testing.refAllDecls(@import("status_query.zig")); }
 test { std.testing.refAllDecls(@import("status_response.zig")); }
 test { std.testing.refAllDecls(@import("status_response_test.zig")); }
 test { std.testing.refAllDecls(@import("status_response_body_contract_test.zig")); }
+test { std.testing.refAllDecls(@import("status_wg_ownership_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_diagnostic_classifier.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_diagnostic_classifier_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_cli_facts.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_cli_facts_tests.zig")); }
+test { std.testing.refAllDecls(@import("net/wg_cli_facts_classifier_tests.zig")); }
