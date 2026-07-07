@@ -37,7 +37,7 @@
     {
       "name": "wg_peers",
       "status": "warn",
-      "detail": "wg backend_missing: interface=wg-kgb0 backend=cli"
+      "detail": "wg wg_tool_missing: wg command not installed"
     },
     {
       "name": "bfd",

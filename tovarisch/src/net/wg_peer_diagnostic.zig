@@ -164,6 +164,10 @@ fn truncatedDiagnostic(buf: *[DIAGNOSTIC_DETAIL_BUF_SIZE]u8) []const u8 {
 const testing = std.testing;
 
 test "formatPeerDiagnosticDetail: no optional fields" {
+    // Test that formatPeerDiagnosticDetail produces legacy error_kind format.
+    // Note: Production path uses classifierErrorKindToDetail() which outputs
+    // canonical format like "wg wg_tool_missing: wg command not installed".
+    // This test verifies the raw diagnostic formatter with arbitrary error_kind.
     const diag = WireGuardPeerDiagnostic{
         .backend = "cli",
         .selected_interface = "wg-kgb0",
