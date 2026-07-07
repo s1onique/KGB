@@ -248,6 +248,18 @@ fn refreshWatch(state: *anyopaque, path: []const u8) !void {
     _ = try self.state.updateWatch(path);
 }
 
+/// Drain pending refresh entries (frees allocated paths).
+/// Returns the count of entries that were drained.
+fn drainPendingRefresh(state: *anyopaque) usize {
+    const self = @as(*State, @ptrCast(@alignCast(state)));
+    const count = self.pending_refresh.items.len;
+    for (self.pending_refresh.items) |path| {
+        self.allocator.free(path);
+    }
+    self.pending_refresh.clearRetainingCapacity();
+    return count;
+}
+
 /// Virtual table for Linux watcher.
 const vtable = prefix_watch.Watcher.WatcherVTable{
     .destroy = destroy,
@@ -255,11 +267,19 @@ const vtable = prefix_watch.Watcher.WatcherVTable{
     .hasEvent = hasEvent,
     .getEventPath = getEventPath,
     .refreshWatch = refreshWatch,
+    .drainPendingRefresh = drainPendingRefresh,
 };
 
 /// Add a watch for a file path via the State wrapper.
 pub fn addWatch(state: *State, path: []const u8) !void {
     _ = try state.state.addWatch(path);
+}
+
+/// Add a path to pending_refresh for testing.
+/// Allows tests to inject entries and verify drain behavior.
+pub fn injectPendingRefreshPath(state: *State, path: []const u8) !void {
+    const path_copy = try state.allocator.dupe(u8, path);
+    try state.pending_refresh.append(state.allocator, path_copy);
 }
 
 /// Map inotify event mask to WatcherEvent.

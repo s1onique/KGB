@@ -80,6 +80,9 @@ pub const Watcher = struct {
         getEventPath: *const fn (state: *anyopaque) ?[]const u8,
         /// Close and reopen watch for a path (handles delete_self/move_self).
         refreshWatch: *const fn (state: *anyopaque, path: []const u8) anyerror!void,
+        /// Drain pending refresh entries (frees allocated paths).
+        /// Returns the count of entries that were drained.
+        drainPendingRefresh: *const fn (state: *anyopaque) usize,
     };
 
     /// Destroy the watcher.
@@ -105,6 +108,12 @@ pub const Watcher = struct {
     /// Refresh watch for a path (handles delete_self/move_self).
     pub fn refreshWatch(self: Self, path: []const u8) !void {
         return self.vtable.refreshWatch(self.state, path);
+    }
+
+    /// Drain pending refresh entries (frees allocated paths).
+    /// Returns the count of entries that were drained.
+    pub fn drainPendingRefresh(self: Self) usize {
+        return self.vtable.drainPendingRefresh(self.state);
     }
 };
 

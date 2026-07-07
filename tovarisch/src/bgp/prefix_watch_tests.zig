@@ -143,6 +143,75 @@ test "FakeWatcher deactivate" {
 }
 
 // ============================================================================
+// drainPendingRefresh Tests
+// ============================================================================
+
+test "FakeWatcher drainPendingRefresh returns 0 (no pending refresh)" {
+    const watcher = try prefix_watch_fake.create(std.testing.allocator);
+    defer watcher.destroy();
+
+    const drained = watcher.drainPendingRefresh();
+    try std.testing.expectEqual(@as(usize, 0), drained);
+}
+
+test "FakeWatcher drainPendingRefresh called multiple times returns 0" {
+    const watcher = try prefix_watch_fake.create(std.testing.allocator);
+    defer watcher.destroy();
+
+    const drained1 = watcher.drainPendingRefresh();
+    const drained2 = watcher.drainPendingRefresh();
+    const drained3 = watcher.drainPendingRefresh();
+
+    try std.testing.expectEqual(@as(usize, 0), drained1);
+    try std.testing.expectEqual(@as(usize, 0), drained2);
+    try std.testing.expectEqual(@as(usize, 0), drained3);
+}
+
+// ============================================================================
+// Linux Watcher drainPendingRefresh Tests
+// ============================================================================
+
+test "Linux watcher drainPendingRefresh frees queued path copies" {
+    if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
+
+    const prefix_watch_linux = @import("prefix_watch_linux.zig");
+
+    // Create a watcher - this allocates internal state
+    var watcher = try prefix_watch_linux.create(std.testing.allocator);
+    defer watcher.destroy();
+
+    // Inject a pending refresh path using the test helper
+    const impl_state = @as(*prefix_watch_linux.State, @ptrCast(@alignCast(watcher.state)));
+    try prefix_watch_linux.injectPendingRefreshPath(impl_state, "/tmp/tovarisch-prefixes.test");
+
+    // First drain should return 1 (one path was pending)
+    try std.testing.expectEqual(@as(usize, 1), watcher.drainPendingRefresh());
+
+    // Second drain should return 0 (list is now empty)
+    try std.testing.expectEqual(@as(usize, 0), watcher.drainPendingRefresh());
+}
+
+test "Linux watcher drainPendingRefresh handles multiple queued paths" {
+    if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
+
+    const prefix_watch_linux = @import("prefix_watch_linux.zig");
+
+    var watcher = try prefix_watch_linux.create(std.testing.allocator);
+    defer watcher.destroy();
+
+    const impl_state = @as(*prefix_watch_linux.State, @ptrCast(@alignCast(watcher.state)));
+    try prefix_watch_linux.injectPendingRefreshPath(impl_state, "/tmp/prefix1.conf");
+    try prefix_watch_linux.injectPendingRefreshPath(impl_state, "/tmp/prefix2.conf");
+    try prefix_watch_linux.injectPendingRefreshPath(impl_state, "/tmp/prefix3.conf");
+
+    // Drain all three paths
+    try std.testing.expectEqual(@as(usize, 3), watcher.drainPendingRefresh());
+
+    // Drain again should return 0
+    try std.testing.expectEqual(@as(usize, 0), watcher.drainPendingRefresh());
+}
+
+// ============================================================================
 // Reload Logic Tests (using inline test data)
 // ============================================================================
 

@@ -351,6 +351,11 @@ pub fn watchAndApply(
     debouncer: *prefix_watch.Debouncer,
     now_ms: u64,
 ) ReloadApplyResult {
+    // Drain any pending refresh entries from previous cycles.
+    // This prevents pending_refresh from accumulating unboundedly when watched files
+    // are repeatedly deleted/moved (e.g., log rotation).
+    _ = watcher.drainPendingRefresh();
+
     // Check for watcher events
     const events = watcher.poll() catch {
         // Watcher poll failed - don't trigger reload, just return current state

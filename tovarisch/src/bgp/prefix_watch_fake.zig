@@ -87,6 +87,13 @@ fn refreshWatch(state: *anyopaque, path: []const u8) !void {
     // No-op for fake watcher
 }
 
+/// Drain pending refresh entries (no-op for fake watcher).
+/// Fake watcher doesn't have pending_refresh, so always returns 0.
+fn drainPendingRefresh(state: *anyopaque) usize {
+    _ = state;
+    return 0;
+}
+
 /// Virtual table for fake watcher.
 const vtable = prefix_watch.Watcher.WatcherVTable{
     .destroy = destroy,
@@ -94,6 +101,7 @@ const vtable = prefix_watch.Watcher.WatcherVTable{
     .hasEvent = hasEvent,
     .getEventPath = getEventPath,
     .refreshWatch = refreshWatch,
+    .drainPendingRefresh = drainPendingRefresh,
 };
 
 // ============================================================================
