@@ -21,9 +21,7 @@
 
 
 const std = @import("std");
-const status = @import("status.zig");
 const status_response = @import("status_response.zig");
-const status_query = @import("status_query.zig");
 
 // ============================================================================
 // Diagnostic helper for body byte validation
@@ -88,27 +86,6 @@ fn expectBodyBytesInAsciiRange(body: []const u8, logical_len: usize, alloc_len: 
     }
 }
 
-// ============================================================================
-// Test: Body accessor never exposes trailing allocation capacity
-// ============================================================================
-
-test "OwnedResponse body does not expose trailing allocation capacity" {
-    const allocator = std.testing.allocator;
-    const inputs = status.RuntimeStatusInputs{};
-    const query = status_query.StatusQuery.parse("");
-
-    var response = try status_response.OwnedResponse.init(allocator, inputs, query);
-    defer response.deinit(allocator);
-
-    const body = response.body();
-
-    // Use diagnostic helper instead of bare per-byte check
-    try expectBodyBytesInAsciiRange(body, response.len, response.allocation.len);
-
-    try std.testing.expectEqual(@as(u8, '{'), body[0]);
-    try std.testing.expectEqual(@as(u8, '\n'), body[body.len - 1]);
-}
-
 // Test that OwnedResponse body() does not expose trailing allocation capacity.
 //
 // This test constructs an OwnedResponse with a DETERMINISTIC fixture:
@@ -129,7 +106,6 @@ test "OwnedResponse body accessor contract: never exposes trailing capacity" {
     // Allocate the full buffer
     const allocator = std.testing.allocator;
     const full_alloc = try allocator.alloc(u8, total_alloc_len);
-    defer allocator.free(full_alloc);
 
     // Write valid JSON into the logical portion
     // MemoryCopySafety: full_alloc is a fresh allocation from allocator.alloc();
@@ -140,10 +116,12 @@ test "OwnedResponse body accessor contract: never exposes trailing capacity" {
     @memset(full_alloc[logical_len..], 0xaa);
 
     // Build OwnedResponse directly with controlled fields
+    // Ownership is attached to OwnedResponse; deinit will free allocation.
     var response = status_response.OwnedResponse{
         .allocation = full_alloc,
         .len = logical_len,
     };
+    defer response.deinit(allocator);
 
     // ====== ASSERT EXACT ACCESSOR CONTRACT ======
 
