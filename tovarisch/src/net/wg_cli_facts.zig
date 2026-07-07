@@ -7,11 +7,16 @@
 // ACT-HULK29R-ZIG016-WG-STATUS-EVIDENCE-WIRING:
 // Extended to collect real OS-link facts and wg show interfaces membership
 // for accurate WireGuard diagnostic classification.
+//
+// ACT-HULK29R-ZIG016-WG-STATUS-BACKEND-COHERENCE:
+// Added sysfs fallback for OS link detection. When `ip link show` fails,
+// this provides an independent backend-visible link-presence signal.
 
 const std = @import("std");
 const wg = @import("wg_status_boundary.zig");
 const classifier = @import("wg_diagnostic_classifier.zig");
 const probes = @import("wg_cli_probes.zig");
+const linux_read = @import("linux_read.zig");
 
 // Re-export from probes for backward compatibility.
 pub const OwnedWgCommandResult = probes.OwnedWgCommandResult;
@@ -48,36 +53,43 @@ pub const emptyEvidence = CliEvidence{
     .wg_show_stderr_class = .none,
 };
 
+// Default sysfs path for network interfaces
+const DEFAULT_SYSFS_NET_PATH = "/sys/class/net";
+
+// Return type alias for consistency
+const OsLinkEvidenceResult = struct {
+    os_link_seen: bool,
+    os_link_kind: classifier.OsLinkKind,
+};
+
 /// Collect OS-link evidence for the configured interface.
-/// Uses `ip -d link show <interface>` probe.
+/// Uses `ip -d link show <interface>` probe first, then falls back to sysfs
+/// check when the CLI probe fails.
+///
+/// ACT-HULK29R-ZIG016-WG-STATUS-BACKEND-COHERENCE:
+/// When `ip link show` fails (e.g., namespace isolation), sysfs may still show
+/// the interface path. This provides an independent backend-visible link-presence
+/// signal that helps distinguish backend/namespace visibility mismatch from true
+/// interface absence.
 pub fn collectOsLinkEvidence(
     allocator: std.mem.Allocator,
     interface_name: []const u8,
-) !struct {
-    os_link_seen: bool,
-    os_link_kind: classifier.OsLinkKind,
-} {
+) !OsLinkEvidenceResult {
     var result = runIpLinkShow(allocator, interface_name, PROBE_TIMEOUT_SECS) catch {
-        return .{
-            .os_link_seen = false,
-            .os_link_kind = .probe_failed,
-        };
+        // CLI probe failed - fall back to sysfs check
+        return collectOsLinkEvidenceFromSysfs(interface_name);
     };
     defer result.deinit(allocator);
 
     // ip link returns exit 1 if interface doesn't exist
     if (result.exit_code == 1) {
-        return .{
-            .os_link_seen = false,
-            .os_link_kind = .missing,
-        };
+        // CLI says interface missing - fall back to sysfs to confirm
+        return collectOsLinkEvidenceFromSysfs(interface_name);
     }
 
     if (result.exit_code != 0) {
-        return .{
-            .os_link_seen = false,
-            .os_link_kind = .probe_failed,
-        };
+        // CLI returned error - fall back to sysfs
+        return collectOsLinkEvidenceFromSysfs(interface_name);
     }
 
     // Parse stdout to determine link kind
@@ -85,6 +97,49 @@ pub fn collectOsLinkEvidence(
     return .{
         .os_link_seen = true,
         .os_link_kind = kind,
+    };
+}
+
+/// Fallback OS link detection using sysfs.
+///
+/// ACT-HULK29R-ZIG016-WG-STATUS-BACKEND-COHERENCE:
+///
+/// This function provides an independent backend-visible link-presence signal.
+/// When `ip link show` fails (e.g., namespace isolation), sysfs may still show
+/// the interface path.
+///
+/// IMPORTANT: We cannot determine WireGuard link kind from sysfs alone.
+/// We return `os_link_kind = .unknown` to indicate that sysfs detected the
+/// interface but we cannot verify its type. The classifier uses this to avoid
+/// false `wireguard_interface_missing` classification when sysfs sees the path.
+fn collectOsLinkEvidenceFromSysfs(interface_name: []const u8) !OsLinkEvidenceResult {
+    // Build sysfs path for the interface
+    var sysfs_path: [256]u8 = undefined;
+    const full_path = std.fmt.bufPrint(&sysfs_path, "{s}/{s}", .{
+        DEFAULT_SYSFS_NET_PATH,
+        interface_name,
+    }) catch {
+        return .{
+            .os_link_seen = false,
+            .os_link_kind = .probe_failed,
+        };
+    };
+
+    // Check if sysfs path exists using linux_read boundary
+    if (linux_read.linuxExists(full_path, .sysfs_net)) {
+        // Interface exists in sysfs - but we cannot determine link kind from sysfs alone.
+        // Return .unknown to indicate sysfs detected presence without type confirmation.
+        // The classifier will use this to avoid false wireguard_interface_missing.
+        return .{
+            .os_link_seen = true,
+            .os_link_kind = .unknown,
+        };
+    }
+
+    // Interface not found in sysfs either - true absence
+    return .{
+        .os_link_seen = false,
+        .os_link_kind = .missing,
     };
 }
 

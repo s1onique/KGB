@@ -114,7 +114,8 @@ verification. Real WireGuard deployments may show `"wireguard peers healthy"`,
 }
 ```
 
-### Namespace mismatch (ACT-HULK29R-ZIG016-WG-PEERS-NAMESPACE-DIAGNOSTIC-PROOF):
+### Namespace mismatch / Backend visibility (ACT-HULK29R-ZIG016-WG-STATUS-BACKEND-COHERENCE):
+
 ```json
 {
   "name": "wg_peers",
@@ -124,6 +125,37 @@ verification. Real WireGuard deployments may show `"wireguard peers healthy"`,
 ```
 
 **Interpretation:** WireGuard interface detected by tunnel check but `wg show` cannot see it from the current network namespace. BFD/BGP health indicates the tunnel is functional despite peer diagnostic limitation. This is an expected deployment invariant for certain namespace configurations.
+
+**Backend Split Explanation:**
+
+The `tunnel` and `wg_peers` checks use different observation backends:
+
+| Check | Backend | Visibility |
+|-------|---------|------------|
+| `tunnel` | sysfs (`/sys/class/net`) | Kernel-level interface presence |
+| `wg_peers` | CLI (`wg show`) | WireGuard control plane |
+
+**Classification rules (ACT-HULK29R-ZIG016-WG-STATUS-BACKEND-COHERENCE):**
+
+When `ip link show` fails (e.g., namespace isolation), sysfs provides an independent backend-visible link-presence signal. If sysfs sees the selected interface while wg CLI cannot inspect it, this indicates a backend/namespace visibility mismatch rather than true interface absence.
+
+1. **True interface absence** (neither sysfs nor wg CLI sees it):
+   ```json
+   {
+     "name": "wg_peers",
+     "status": "warn",
+     "detail": "wg wireguard_interface_missing: interface not found"
+   }
+   ```
+
+2. **Backend/namespace visibility mismatch** (sysfs sees it, wg CLI doesn't):
+   ```json
+   {
+     "name": "wg_peers",
+     "status": "warn",
+     "detail": "wg wrong_namespace_or_unreachable: namespace mismatch"
+   }
+   ```
 
 ## Tunnel Check (`tunnel`)
 
