@@ -9,7 +9,7 @@ import (
 )
 
 // =============================================================================
-// ACT-UVB76-HULK02: Capture Service TCP Absence Contract Tests
+// ACT-UVB76-HULK02R4: Capture Service TCP Absence Contract Tests
 // =============================================================================
 //
 // These tests verify TCP absence reason handling:
@@ -26,10 +26,10 @@ import (
 // - target_mapping_missing
 // - unsupported_platform
 //
-// Production behavior (source of truth):
-// - Known reasons are preserved in TcpAbsenceEvents.ReasonCode
-// - Unknown reasons are also preserved (not rejected) - capture still succeeds
-// - JSON parse failures result in reason_code "parse_failed"
+// Layer contract (HULK02R4):
+// - DiagCaptureStatus records the low-level capture operation result
+// - CaptureStatus records the canonical lifecycle/projection status
+// - Both are set on service-created capture rows
 //
 // =============================================================================
 
@@ -93,6 +93,10 @@ func TestCaptureServiceContract_KnownAbsenceReasonsPass(t *testing.T) {
 			}
 			if capture.TcpAbsenceEvents[0].ReasonCode != reason {
 				t.Errorf("expected reason_code '%s', got '%s'", reason, capture.TcpAbsenceEvents[0].ReasonCode)
+			}
+			// HULK02R4: CaptureStatus should be captured for success with TCP absence
+			if capture.CaptureStatus != state.CaptureStatusCaptured {
+				t.Errorf("expected captured status, got %s", capture.CaptureStatus)
 			}
 		})
 	}

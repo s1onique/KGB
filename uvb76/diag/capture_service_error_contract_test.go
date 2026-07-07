@@ -10,7 +10,7 @@ import (
 )
 
 // =============================================================================
-// ACT-UVB76-HULK02: Capture Service Error Contract Tests
+// ACT-UVB76-HULK02R4: Capture Service Error Contract Tests
 // =============================================================================
 //
 // These tests verify capture service error scenarios:
@@ -21,14 +21,17 @@ import (
 // - context canceled
 // - backend errors map to canonical statuses
 //
-// Production behavior (source of truth):
-// - HTTP non-200 -> DiagCaptureStatusError, Error set, CaptureStatus NOT set
-// - Timeout -> DiagCaptureStatusTimeout, Error set, CaptureStatus NOT set
-// - Disabled -> DiagCaptureStatusDisabled, no NetworkDiag, CaptureStatus NOT set
-// - No peer mapping -> DiagCaptureStatusNoPeerMapping, CaptureStatus NOT set
+// Layer contract (HULK02R4):
+// - DiagCaptureStatus records the low-level capture operation result
+// - CaptureStatus records the canonical lifecycle/projection status
+// - Both are set on service-created capture rows
 //
-// Note: CaptureStatus is only set when NetworkDiag is present (success case).
-// For error cases, only Status and Error are set.
+// Mapping rules:
+//   DiagCaptureStatusError         -> CaptureStatusFailed
+//   DiagCaptureStatusTimeout       -> CaptureStatusFailed
+//   DiagCaptureStatusDisabled      -> CaptureStatusDisabled
+//   DiagCaptureStatusNoPeerMapping -> CaptureStatusNotConfigured
+//
 // =============================================================================
 
 // TestCaptureServiceContract_CommandFailed verifies HTTP error responses result in error capture.
@@ -56,13 +59,16 @@ func TestCaptureServiceContract_CommandFailed(t *testing.T) {
 	if capture.Status != state.DiagCaptureStatusError {
 		t.Errorf("expected error status for HTTP 500, got %s", capture.Status)
 	}
+	// HULK02R4: CaptureStatus is now set for error cases
+	if capture.CaptureStatus != state.CaptureStatusFailed {
+		t.Errorf("expected failed capture status, got %s", capture.CaptureStatus)
+	}
 	if capture.Error == nil {
 		t.Error("error capture must have Error")
 	}
 	if capture.NetworkDiag != nil {
 		t.Error("error capture should not have NetworkDiag")
 	}
-	// Note: CaptureStatus is not set for error cases (only for success with NetworkDiag)
 }
 
 // TestCaptureServiceContract_Timeout verifies timeout scenario with bounded slow handler.
@@ -91,6 +97,10 @@ func TestCaptureServiceContract_Timeout(t *testing.T) {
 	if capture.Status != state.DiagCaptureStatusTimeout {
 		t.Errorf("expected timeout status, got %s", capture.Status)
 	}
+	// HULK02R4: CaptureStatus is now set for timeout cases
+	if capture.CaptureStatus != state.CaptureStatusFailed {
+		t.Errorf("expected failed capture status for timeout, got %s", capture.CaptureStatus)
+	}
 	if capture.Error == nil {
 		t.Error("timeout capture should have Error")
 	}
@@ -118,6 +128,10 @@ func TestCaptureServiceContract_TargetMappingMissing(t *testing.T) {
 	if capture.Status != state.DiagCaptureStatusNoPeerMapping {
 		t.Errorf("expected no_peer_mapping status, got %s", capture.Status)
 	}
+	// HULK02R4: CaptureStatus is now set for no-mapping cases
+	if capture.CaptureStatus != state.CaptureStatusNotConfigured {
+		t.Errorf("expected not_configured capture status, got %s", capture.CaptureStatus)
+	}
 	if capture.NetworkDiag != nil {
 		t.Error("no mapping capture should not have NetworkDiag")
 	}
@@ -141,6 +155,10 @@ func TestCaptureServiceContract_Disabled(t *testing.T) {
 	// Disabled maps to disabled status
 	if capture.Status != state.DiagCaptureStatusDisabled {
 		t.Errorf("expected disabled status, got %s", capture.Status)
+	}
+	// HULK02R4: CaptureStatus is now set for disabled cases
+	if capture.CaptureStatus != state.CaptureStatusDisabled {
+		t.Errorf("expected disabled capture status, got %s", capture.CaptureStatus)
 	}
 	if capture.NetworkDiag != nil {
 		t.Error("disabled capture should not have NetworkDiag")
@@ -177,6 +195,10 @@ func TestCaptureServiceContract_ContextCanceled(t *testing.T) {
 	if capture.Status != state.DiagCaptureStatusTimeout {
 		t.Errorf("expected timeout status for context cancellation, got %s", capture.Status)
 	}
+	// HULK02R4: CaptureStatus is now set for context canceled cases
+	if capture.CaptureStatus != state.CaptureStatusFailed {
+		t.Errorf("expected failed capture status for context canceled, got %s", capture.CaptureStatus)
+	}
 	if capture.Error == nil {
 		t.Error("context canceled capture should have Error")
 	}
@@ -189,37 +211,42 @@ func TestCaptureServiceContract_ContextCanceled(t *testing.T) {
 // backend errors map to canonical statuses deterministically.
 func TestCaptureServiceContract_BackendErrorsMapToCanonicalStatuses(t *testing.T) {
 	testCases := []struct {
-		name           string
-		handler        http.HandlerFunc
-		expectedStatus state.DiagCaptureStatus
+		name                  string
+		handler               http.HandlerFunc
+		expectedDiagStatus    state.DiagCaptureStatus
+		expectedCaptureStatus state.CaptureStatus
 	}{
 		{
 			name: "http_500_internal_error",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusInternalServerError)
 			},
-			expectedStatus: state.DiagCaptureStatusError,
+			expectedDiagStatus:    state.DiagCaptureStatusError,
+			expectedCaptureStatus: state.CaptureStatusFailed,
 		},
 		{
 			name: "http_404_not_found",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "not found", http.StatusNotFound)
 			},
-			expectedStatus: state.DiagCaptureStatusError,
+			expectedDiagStatus:    state.DiagCaptureStatusError,
+			expectedCaptureStatus: state.CaptureStatusFailed,
 		},
 		{
 			name: "http_403_forbidden",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "forbidden", http.StatusForbidden)
 			},
-			expectedStatus: state.DiagCaptureStatusError,
+			expectedDiagStatus:    state.DiagCaptureStatusError,
+			expectedCaptureStatus: state.CaptureStatusFailed,
 		},
 		{
 			name: "http_503_service_unavailable",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 			},
-			expectedStatus: state.DiagCaptureStatusError,
+			expectedDiagStatus:    state.DiagCaptureStatusError,
+			expectedCaptureStatus: state.CaptureStatusFailed,
 		},
 		{
 			name: "malformed_json",
@@ -227,14 +254,16 @@ func TestCaptureServiceContract_BackendErrorsMapToCanonicalStatuses(t *testing.T
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("not json"))
 			},
-			expectedStatus: state.DiagCaptureStatusError,
+			expectedDiagStatus:    state.DiagCaptureStatusError,
+			expectedCaptureStatus: state.CaptureStatusFailed,
 		},
 		{
 			name: "empty_body",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			},
-			expectedStatus: state.DiagCaptureStatusError,
+			expectedDiagStatus:    state.DiagCaptureStatusError,
+			expectedCaptureStatus: state.CaptureStatusFailed,
 		},
 	}
 
@@ -256,8 +285,13 @@ func TestCaptureServiceContract_BackendErrorsMapToCanonicalStatuses(t *testing.T
 
 			capture := captures[0]
 
-			if capture.Status != tc.expectedStatus {
-				t.Errorf("expected status %s, got %s", tc.expectedStatus, capture.Status)
+			// Assert low-level DiagCaptureStatus
+			if capture.Status != tc.expectedDiagStatus {
+				t.Errorf("expected diag status %s, got %s", tc.expectedDiagStatus, capture.Status)
+			}
+			// HULK02R4: Assert canonical CaptureStatus
+			if capture.CaptureStatus != tc.expectedCaptureStatus {
+				t.Errorf("expected capture status %s, got %s", tc.expectedCaptureStatus, capture.CaptureStatus)
 			}
 			if capture.Error == nil {
 				t.Error("error case should have Error set")

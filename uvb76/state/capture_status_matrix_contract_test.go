@@ -8,7 +8,7 @@ import (
 )
 
 // =============================================================================
-// ACT-UVB76-HULK02: Diagnostic Capture Status Matrix Contract Tests
+// ACT-UVB76-HULK02R4: Diagnostic Capture Status Matrix Contract Tests
 // =============================================================================
 //
 // These tests verify the canonical capture status matrix is correctly enforced.
@@ -24,6 +24,20 @@ import (
 //   - not_attempted    : No capture attempt should have happened
 //   - in_progress      : Transient runtime state
 //   - missing          : Expected artifact missing or lookup failed
+//
+// Layer contract (HULK02R4):
+// - DiagCaptureStatus records the low-level capture operation result
+// - CaptureStatus records the canonical lifecycle/projection status
+// - Both are set on service-created capture rows
+//
+// Mapping rules (from CanonicalCaptureStatusFromDiagStatus):
+//   DiagCaptureStatusOK + hasNetworkDiag -> CaptureStatusCaptured
+//   DiagCaptureStatusOK + no NetworkDiag  -> CaptureStatusFailed
+//   DiagCaptureStatusError                -> CaptureStatusFailed
+//   DiagCaptureStatusTimeout              -> CaptureStatusFailed
+//   DiagCaptureStatusUnavailable         -> CaptureStatusNotAttempted
+//   DiagCaptureStatusDisabled             -> CaptureStatusDisabled
+//   DiagCaptureStatusNoPeerMapping       -> CaptureStatusNotConfigured
 //
 // Contract matrix:
 //
@@ -291,5 +305,34 @@ func TestCaptureStatusMatrix_MissingRequiresReason(t *testing.T) {
 	// missing status MUST have Error explaining what's missing
 	if capture.Error == nil {
 		t.Error("missing status requires Error explaining what's missing")
+	}
+}
+
+// TestCaptureStatusMatrix_DiagStatusMapsToCanonicalCaptureStatus verifies the canonical
+// mapping helper correctly maps DiagCaptureStatus to CaptureStatus.
+func TestCaptureStatusMatrix_DiagStatusMapsToCanonicalCaptureStatus(t *testing.T) {
+	tests := []struct {
+		name        string
+		diagStatus  DiagCaptureStatus
+		hasNetworkDiag bool
+		expected    CaptureStatus
+	}{
+		{"ok_with_network_diag", DiagCaptureStatusOK, true, CaptureStatusCaptured},
+		{"ok_without_network_diag", DiagCaptureStatusOK, false, CaptureStatusFailed},
+		{"error", DiagCaptureStatusError, false, CaptureStatusFailed},
+		{"timeout", DiagCaptureStatusTimeout, false, CaptureStatusFailed},
+		{"disabled", DiagCaptureStatusDisabled, false, CaptureStatusDisabled},
+		{"no_peer_mapping", DiagCaptureStatusNoPeerMapping, false, CaptureStatusNotConfigured},
+		{"unavailable", DiagCaptureStatusUnavailable, false, CaptureStatusNotAttempted},
+		{"unknown_status", DiagCaptureStatus("unknown"), false, CaptureStatusFailed},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := CanonicalCaptureStatusFromDiagStatus(tc.diagStatus, tc.hasNetworkDiag)
+			if result != tc.expected {
+				t.Errorf("expected %s, got %s", tc.expected, result)
+			}
+		})
 	}
 }

@@ -103,7 +103,7 @@ def run_verifier() -> list[str]:
     skip_errors = validate_skip_allowlist(UVB76_DIR, verbose=True)
     all_errors.extend(skip_errors)
 
-    # D+E+F: Status contracts (includes fake backend check)
+    # D+E+F+G: Status contracts (includes fake backend check)
     status_errors = validate_status_contracts(UVB76_DIR, verbose=True)
     all_errors.extend(status_errors)
 
@@ -354,6 +354,112 @@ def run_self_tests() -> tuple[list[str], dict[str, bool], int, int]:
         else:
             results["core_service_allowskip_still_fails"] = False
             errors.append("Core service allowskip not detected")
+            print("  FAIL")
+
+        # HULK02R4 Self-Tests
+
+        # Test 10: Error contract without CaptureStatusFailed fails
+        test_count += 1
+        print("Test 10: Error contract without CaptureStatusFailed fails")
+        from .skip_allowlist import check_capture_status_assertions_in_core_service_files
+        error_contract_file = os.path.join(test_dir, "diag/capture_service_error_contract_test.go")
+        os.makedirs(os.path.dirname(error_contract_file), exist_ok=True)
+        with open(error_contract_file, 'w') as f:
+            f.write('package diag\n')
+            f.write('// ACT-UVB76-HULK02: Test\n')
+            f.write('func TestSomething(t *testing.T) {\n')
+            f.write('    // Test without CaptureStatusFailed assertion\n')
+            f.write('    if capture.Status != state.DiagCaptureStatusError {\n')
+            f.write('        t.Errorf("expected error status")\n')
+            f.write('    }\n')
+            f.write('}\n')
+
+        capture_status_errors = check_capture_status_assertions_in_core_service_files("diag/capture_service_error_contract_test.go", test_dir)
+        if capture_status_errors:
+            results["error_contract_missing_capture_status_failed"] = True
+            pass_count += 1
+            print("  PASS")
+        else:
+            results["error_contract_missing_capture_status_failed"] = False
+            errors.append("Error contract without CaptureStatusFailed not detected")
+            print("  FAIL")
+
+        # Test 11: Error contract with CaptureStatusFailed passes
+        test_count += 1
+        print("Test 11: Error contract with CaptureStatusFailed passes")
+        error_contract_file2 = os.path.join(test_dir, "diag/capture_service_error_contract_test.go")
+        os.makedirs(os.path.dirname(error_contract_file2), exist_ok=True)
+        with open(error_contract_file2, 'w') as f:
+            f.write('package diag\n')
+            f.write('// ACT-UVB76-HULK02: Test\n')
+            f.write('func TestSomething(t *testing.T) {\n')
+            f.write('    if capture.Status != state.DiagCaptureStatusError {\n')
+            f.write('        t.Errorf("expected error status")\n')
+            f.write('    }\n')
+            f.write('    if capture.CaptureStatus != state.CaptureStatusFailed {\n')
+            f.write('        t.Errorf("expected failed capture status")\n')
+            f.write('    }\n')
+            f.write('}\n')
+
+        capture_status_errors2 = check_capture_status_assertions_in_core_service_files("diag/capture_service_error_contract_test.go", test_dir)
+        if not capture_status_errors2:
+            results["error_contract_with_capture_status_failed"] = True
+            pass_count += 1
+            print("  PASS")
+        else:
+            results["error_contract_with_capture_status_failed"] = False
+            errors.append("Error contract with CaptureStatusFailed incorrectly flagged")
+            print("  FAIL")
+
+        # Test 12: Success contract without CaptureStatusCaptured fails
+        test_count += 1
+        print("Test 12: Success contract without CaptureStatusCaptured fails")
+        success_contract_file = os.path.join(test_dir, "diag/capture_service_success_contract_test.go")
+        os.makedirs(os.path.dirname(success_contract_file), exist_ok=True)
+        with open(success_contract_file, 'w') as f:
+            f.write('package diag\n')
+            f.write('// ACT-UVB76-HULK02: Test\n')
+            f.write('func TestSomething(t *testing.T) {\n')
+            f.write('    if capture.Status != state.DiagCaptureStatusOK {\n')
+            f.write('        t.Errorf("expected ok status")\n')
+            f.write('    }\n')
+            f.write('}\n')
+
+        capture_status_errors3 = check_capture_status_assertions_in_core_service_files("diag/capture_service_success_contract_test.go", test_dir)
+        if capture_status_errors3:
+            results["success_contract_missing_capture_status_captured"] = True
+            pass_count += 1
+            print("  PASS")
+        else:
+            results["success_contract_missing_capture_status_captured"] = False
+            errors.append("Success contract without CaptureStatusCaptured not detected")
+            print("  FAIL")
+
+        # Test 13: Success contract with CaptureStatusCaptured passes
+        test_count += 1
+        print("Test 13: Success contract with CaptureStatusCaptured passes")
+        success_contract_file2 = os.path.join(test_dir, "diag/capture_service_success_contract_test.go")
+        os.makedirs(os.path.dirname(success_contract_file2), exist_ok=True)
+        with open(success_contract_file2, 'w') as f:
+            f.write('package diag\n')
+            f.write('// ACT-UVB76-HULK02: Test\n')
+            f.write('func TestSomething(t *testing.T) {\n')
+            f.write('    if capture.Status != state.DiagCaptureStatusOK {\n')
+            f.write('        t.Errorf("expected ok status")\n')
+            f.write('    }\n')
+            f.write('    if capture.CaptureStatus != state.CaptureStatusCaptured {\n')
+            f.write('        t.Errorf("expected captured status")\n')
+            f.write('    }\n')
+            f.write('}\n')
+
+        capture_status_errors4 = check_capture_status_assertions_in_core_service_files("diag/capture_service_success_contract_test.go", test_dir)
+        if not capture_status_errors4:
+            results["success_contract_with_capture_status_captured"] = True
+            pass_count += 1
+            print("  PASS")
+        else:
+            results["success_contract_with_capture_status_captured"] = False
+            errors.append("Success contract with CaptureStatusCaptured incorrectly flagged")
             print("  FAIL")
 
     finally:

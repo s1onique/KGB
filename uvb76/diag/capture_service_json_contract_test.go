@@ -10,7 +10,7 @@ import (
 )
 
 // =============================================================================
-// ACT-UVB76-HULK02: Capture Service JSON Encoding Contract Tests
+// ACT-UVB76-HULK02R4: Capture Service JSON Encoding Contract Tests
 // =============================================================================
 //
 // These tests verify JSON encoding of capture events:
@@ -19,12 +19,10 @@ import (
 // - nested fields encoding
 // - roundtrip preservation
 //
-// Production behavior (source of truth):
-// - TovarischStatusResponse wraps network_diag at the root level
-// - TCP absence event fields are parsed from JSON String "fields" in events
-// - Both JSON string and JSON object forms are supported within the fields string
-// - The capture service extracts TcpAbsenceEvents from events with source="underlay_tcp"
-// - Reason codes are preserved from the fields JSON
+// Layer contract (HULK02R4):
+// - DiagCaptureStatus records the low-level capture operation result
+// - CaptureStatus records the canonical lifecycle/projection status
+// - Both are set on service-created capture rows
 //
 // =============================================================================
 
@@ -123,7 +121,7 @@ func TestCaptureServiceContract_JsonStringAndObjectEncodings(t *testing.T) {
 			if capture.Status != state.DiagCaptureStatusOK {
 				t.Errorf("expected ok status, got %s", capture.Status)
 			}
-			// Reference canonical CaptureStatus (verifier requirement)
+			// HULK02R4: CaptureStatus is set for success cases
 			if capture.CaptureStatus != state.CaptureStatusCaptured {
 				t.Errorf("expected captured status, got %s", capture.CaptureStatus)
 			}

@@ -9,12 +9,20 @@ import (
 )
 
 // =============================================================================
-// ACT-UVB76-HULK02: Capture Service Success Contract Tests
+// ACT-UVB76-HULK02R4: Capture Service Success Contract Tests
 // =============================================================================
 //
 // These tests verify capture service success scenarios:
 // - success with packet
 // - success with structured TCP absence
+//
+// Layer contract (HULK02R4):
+// - DiagCaptureStatus records the low-level capture operation result
+// - CaptureStatus records the canonical lifecycle/projection status
+// - Both are set on service-created capture rows
+//
+// Mapping rules:
+//   DiagCaptureStatusOK + hasNetworkDiag -> CaptureStatusCaptured
 //
 // =============================================================================
 

@@ -171,6 +171,7 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig, probeKind 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
 	if err != nil {
 		capture.Status = state.DiagCaptureStatusError
+		capture.CaptureStatus = state.CanonicalCaptureStatusFromDiagStatus(capture.Status, false)
 		capture.Error = SafeErrorMessage(fmt.Sprintf("request creation failed: %v", err))
 		capture.RequestedPath = &sanitizedPath
 		finishCapture(&capture)
@@ -181,11 +182,11 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig, probeKind 
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			capture.Status = state.DiagCaptureStatusTimeout
-			capture.Error = SafeErrorMessage("request timed out")
 		} else {
 			capture.Status = state.DiagCaptureStatusError
-			capture.Error = SafeErrorMessage(fmt.Sprintf("request failed: %v", err))
 		}
+		capture.CaptureStatus = state.CanonicalCaptureStatusFromDiagStatus(capture.Status, false)
+		capture.Error = SafeErrorMessage(fmt.Sprintf("request failed: %v", err))
 		capture.RequestedPath = &sanitizedPath
 		finishCapture(&capture)
 		return capture
@@ -196,6 +197,7 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig, probeKind 
 
 	if resp.StatusCode != http.StatusOK {
 		capture.Status = state.DiagCaptureStatusError
+		capture.CaptureStatus = state.CanonicalCaptureStatusFromDiagStatus(capture.Status, false)
 		if resp.StatusCode == http.StatusNotFound {
 			capture.Error = SafeErrorMessage("Capture request returned HTTP 404 (check base_url is origin-only, not full path)")
 		} else {
@@ -209,6 +211,7 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig, probeKind 
 	var tovarischResp TovarischStatusResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tovarischResp); err != nil {
 		capture.Status = state.DiagCaptureStatusError
+		capture.CaptureStatus = state.CanonicalCaptureStatusFromDiagStatus(capture.Status, false)
 		capture.Error = SafeErrorMessage(fmt.Sprintf("parse failed: %v", err))
 		capture.RequestedPath = &sanitizedPath
 		finishCapture(&capture)
@@ -217,7 +220,7 @@ func (cs *CaptureService) performCapture(peer *config.DiagPeerConfig, probeKind 
 
 	if tovarischResp.NetworkDiag != nil {
 		capture.NetworkDiag = tovarischResp.NetworkDiag
-		capture.CaptureStatus = state.CaptureStatusCaptured
+		capture.CaptureStatus = state.CanonicalCaptureStatusFromDiagStatus(capture.Status, true)
 
 		if len(tovarischResp.NetworkDiag.UnderlayTCP) == 0 && len(tovarischResp.NetworkDiag.Events) > 0 {
 			capture.TcpAbsenceEvents = buildTcpAbsenceEvents(tovarischResp.NetworkDiag.Events, peer)
@@ -268,6 +271,7 @@ func (cs *CaptureService) recordDisabledCapture(eventID, targetID string) {
 	capture := state.DiagCapture{
 		CaptureStartedAt: time.Now().UTC(),
 		Status:           state.DiagCaptureStatusDisabled,
+		CaptureStatus:    state.CanonicalCaptureStatusFromDiagStatus(state.DiagCaptureStatusDisabled, false),
 	}
 	finishCapture(&capture)
 	cs.captures.AddCapture(eventID, capture)
@@ -277,6 +281,7 @@ func (cs *CaptureService) recordNoPeerMappingCapture(eventID, targetID string) {
 	capture := state.DiagCapture{
 		CaptureStartedAt: time.Now().UTC(),
 		Status:           state.DiagCaptureStatusNoPeerMapping,
+		CaptureStatus:    state.CanonicalCaptureStatusFromDiagStatus(state.DiagCaptureStatusNoPeerMapping, false),
 	}
 	finishCapture(&capture)
 	cs.captures.AddCapture(eventID, capture)
