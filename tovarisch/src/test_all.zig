@@ -13,6 +13,7 @@ const _status = @import("status.zig");
 const _status_checks = @import("status_checks.zig");
 const _status_ownership_tests = @import("status_ownership_tests.zig");
 const _status_wg_ownership_tests = @import("status_wg_ownership_tests.zig");
+const _status_wg_evidence_tests = @import("status_wg_evidence_tests.zig");
 const _status_query = @import("status_query.zig");
 const _status_response = @import("status_response.zig");
 const _status_response_test = @import("status_response_test.zig");
@@ -120,6 +121,7 @@ test { std.testing.refAllDecls(@import("status.zig")); }
 test { std.testing.refAllDecls(@import("status_checks.zig")); }
 test { std.testing.refAllDecls(@import("status_ownership_tests.zig")); }
 test { std.testing.refAllDecls(@import("status_wg_ownership_tests.zig")); }
+test { std.testing.refAllDecls(@import("status_wg_evidence_tests.zig")); }
 test { std.testing.refAllDecls(@import("status_query.zig")); }
 test { std.testing.refAllDecls(@import("status_response.zig")); }
 test { std.testing.refAllDecls(@import("status_response_test.zig")); }

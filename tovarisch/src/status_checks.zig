@@ -95,8 +95,10 @@ pub fn getWgPeersCheck(allocator: std.mem.Allocator) status.Check {
             const facts = wg_cli_facts.factsFromDiagnosticAttempt(attempt, evidence);
             const diag_class = classifier.classifyWgStatus(facts);
 
-            // Format detail using the classified diagnostic
-            const detail_formatted = classifierErrorKindToDetail(diag_class);
+            // Format detail using evidence-enhanced formatter for richer diagnostics
+            // ACT-HULK29R-ZIG016-WG-PEERS-NAMESPACE-EVIDENCE
+            var detail_buf: [DIAGNOSTIC_DETAIL_BUF_SIZE]u8 = undefined;
+            const detail_formatted = classifierErrorKindToDetailWithEvidence(diag_class, evidence, &detail_buf);
 
             // Allocate owned copy so the slice is valid until after JSON serialization
             const detail_owned = allocator.dupe(u8, detail_formatted) catch {
@@ -175,7 +177,8 @@ pub fn getWgPeersCheckFromError(err: wg_boundary.StatusError) status.Check {
 
 /// Maps WgDiagnosticClass to user-friendly detail string.
 /// ACT-HULK29R-ZIG016-WG-STATUS-CLASSIFICATION-FIX: Maps to canonical diagnostic classes.
-fn classifierErrorKindToDetail(diag_class: classifier.WgDiagnosticClass) []const u8 {
+/// ACT-HULK29R-ZIG016-WG-PEERS-NAMESPACE-EVIDENCE: Adds evidence sources for namespace mismatch.
+pub fn classifierErrorKindToDetail(diag_class: classifier.WgDiagnosticClass) []const u8 {
     return switch (diag_class) {
         .wg_tool_missing => "wg wg_tool_missing: wg command not installed",
         .wireguard_interface_missing => "wg wireguard_interface_missing: interface not found",
@@ -188,6 +191,44 @@ fn classifierErrorKindToDetail(diag_class: classifier.WgDiagnosticClass) []const
         .no_handshake => "wg no_handshake: peers unreachable",
         .peers_healthy => "wg peers_healthy: all peers connected",
     };
+}
+
+/// Enhanced detail formatter that includes evidence sources for namespace mismatch.
+/// ACT-HULK29R-ZIG016-WG-PEERS-NAMESPACE-EVIDENCE
+/// Uses a bounded buffer for safety; returns truncatedDiagnostic on overflow.
+pub fn classifierErrorKindToDetailWithEvidence(
+    diag_class: classifier.WgDiagnosticClass,
+    evidence: wg_cli_facts.CliEvidence,
+    buf: *[DIAGNOSTIC_DETAIL_BUF_SIZE]u8,
+) []const u8 {
+    // Special handling for namespace mismatch - include evidence sources
+    if (diag_class == .wrong_namespace_or_unreachable) {
+        const os_link_str: []const u8 = if (evidence.os_link_seen) "true" else "false";
+        const wg_seen_str: []const u8 = if (evidence.wg_interface_list_contains_name) "true" else "false";
+        return std.fmt.bufPrint(
+            buf,
+            "wg wrong_namespace_or_unreachable: namespace mismatch os_link_seen={s} wg_cli_seen={s}",
+            .{ os_link_str, wg_seen_str },
+        ) catch truncatedDiagnosticEvidence(buf);
+    }
+
+    // Fall back to standard detail for other classes
+    const detail = classifierErrorKindToDetail(diag_class);
+    const n = @min(detail.len, buf.len);
+    std.mem.copyForwards(u8, buf[0..n], detail[0..n]);
+    return buf[0..n];
+}
+
+/// Maximum buffer size for evidence-enhanced diagnostic detail.
+/// ACT-HULK29R-ZIG016-WG-PEERS-NAMESPACE-EVIDENCE: Made public for test seam.
+pub const DIAGNOSTIC_DETAIL_BUF_SIZE: usize = 256;
+
+/// Truncated fallback when buffer capacity is exhausted for evidence format.
+fn truncatedDiagnosticEvidence(buf: *[DIAGNOSTIC_DETAIL_BUF_SIZE]u8) []const u8 {
+    const fallback = "wg wrong_namespace_or_unreachable: namespace mismatch";
+    const n = @min(fallback.len, buf.len);
+    std.mem.copyForwards(u8, buf[0..n], fallback[0..n]);
+    return buf[0..n];
 }
 
 // ============================================================================
@@ -364,7 +405,6 @@ test "getWgPeersCheckFromParsed: no handshake has static detail" {
     const check = getWgPeersCheckFromParsed(1, false);
     try std.testing.expectEqual(false, check.owns_detail);
 }
-
 test "getWgPeersCheckFromError returns warn for out_of_memory" {
     const check = getWgPeersCheckFromError(error.out_of_memory);
     try std.testing.expectEqualStrings("wg_peers", check.name);

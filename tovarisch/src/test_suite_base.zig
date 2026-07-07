@@ -14,6 +14,7 @@ const _status = @import("status.zig");
 const _status_checks = @import("status_checks.zig");
 const _status_ownership_tests = @import("status_ownership_tests.zig");
 const _status_wg_ownership_tests = @import("status_wg_ownership_tests.zig");
+const _status_wg_evidence_tests = @import("status_wg_evidence_tests.zig");
 
 // Metrics modules
 const _metrics = @import("metrics.zig");
@@ -165,6 +166,7 @@ test { std.testing.refAllDecls(@import("status_response.zig")); }
 test { std.testing.refAllDecls(@import("status_response_test.zig")); }
 test { std.testing.refAllDecls(@import("status_response_body_contract_test.zig")); }
 test { std.testing.refAllDecls(@import("status_wg_ownership_tests.zig")); }
+test { std.testing.refAllDecls(@import("status_wg_evidence_tests.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_diagnostic_classifier.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_diagnostic_classifier_tests.zig")); }
 test { std.testing.refAllDecls(@import("net/wg_cli_facts.zig")); }
