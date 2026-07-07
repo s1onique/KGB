@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate memory-lab memory-lab-test lab-tovarisch-memory lab-uvb76-memory lab-uvb76-memory-attribution verify-uvb76-memory-attribution hulk-uvb76-gate
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate memory-lab memory-lab-test lab-tovarisch-memory lab-uvb76-memory lab-uvb76-memory-attribution verify-uvb76-memory-attribution hulk-uvb76-gate tovarisch-test-base-fingerprint
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 87
@@ -580,4 +580,22 @@ tovarisch-status-rss-canary-local:
 	python3 scripts/tovarisch_status_rss_canary.py \
 		--url "$${TOVARISCH_STATUS_URL:-http://127.0.0.1:8317/status}" \
 		--pid "$${TOVARISCH_PID:?set TOVARISCH_PID}"
+
+# === Tovarisch Test-Base Fingerprint ===
+# ACT-HULK29R-ZIG016-TEST-BASE-SKIP-PROFILE-FINGERPRINT
+# Diagnostic fingerprint for `zig build test-base` to capture environment context
+# and explain pass/skip/fail profile divergence between CI and local runs.
+# NOT part of make gate - diagnostic ACT first.
+#
+# Usage:
+#   make tovarisch-test-base-fingerprint
+#   make tovarisch-test-base-fingerprint SEED=0xa710199f
+
+SEED ?= 0xa710199f
+
+.PHONY: tovarisch-test-base-fingerprint
+tovarisch-test-base-fingerprint:
+	@echo "=== Tovarisch Test-Base Fingerprint ==="
+	@echo "Seed: $(SEED)"
+	python3 scripts/tovarisch_test_base_fingerprint.py --seed $(SEED)
 
