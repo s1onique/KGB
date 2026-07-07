@@ -18,20 +18,21 @@ import (
 
 // waitForCapture waits for a capture to appear in the store.
 // Uses a polling approach instead of fixed sleeps to reduce flakiness.
-func waitForCapture(t *testing.T, store *state.CaptureStore, eventID string) {
+// Returns the captures if found, or fails the test if timeout occurs.
+func waitForCapture(t *testing.T, store *state.CaptureStore, eventID string) []state.DiagCapture {
 	t.Helper()
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		captures := store.GetCaptures(eventID)
 		if len(captures) > 0 {
-			return
+			return captures
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Give a bit more time for async operations
-	time.Sleep(100 * time.Millisecond)
+	t.Fatalf("timed out waiting for capture %s", eventID)
+	return nil
 }
 
 // testCaptureConfig creates a test capture config with the given base URL.

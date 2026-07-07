@@ -51,9 +51,8 @@ func TestCaptureServiceContract_SuccessWithPacket(t *testing.T) {
 	svc := NewCaptureService(cfg, store)
 
 	svc.TriggerCapture("event-success", "target-1", "http")
-	waitForCapture(t, store, "event-success")
+	captures := waitForCapture(t, store, "event-success")
 
-	captures := store.GetCaptures("event-success")
 	if len(captures) != 1 {
 		t.Fatalf("expected 1 capture, got %d", len(captures))
 	}
@@ -61,6 +60,9 @@ func TestCaptureServiceContract_SuccessWithPacket(t *testing.T) {
 	capture := captures[0]
 
 	// Success with packet maps to captured
+	if capture.Status != state.DiagCaptureStatusOK {
+		t.Errorf("expected ok status, got %s", capture.Status)
+	}
 	if capture.CaptureStatus != state.CaptureStatusCaptured {
 		t.Errorf("expected captured status, got %s", capture.CaptureStatus)
 	}
@@ -104,9 +106,8 @@ func TestCaptureServiceContract_SuccessWithStructuredTcpAbsence(t *testing.T) {
 	svc := NewCaptureService(cfg, store)
 
 	svc.TriggerCapture("event-absence", "target-1", "http")
-	waitForCapture(t, store, "event-absence")
+	captures := waitForCapture(t, store, "event-absence")
 
-	captures := store.GetCaptures("event-absence")
 	if len(captures) != 1 {
 		t.Fatalf("expected 1 capture, got %d", len(captures))
 	}
@@ -114,15 +115,18 @@ func TestCaptureServiceContract_SuccessWithStructuredTcpAbsence(t *testing.T) {
 	capture := captures[0]
 
 	// Success with TCP absence still maps to captured (network diag is present)
+	if capture.Status != state.DiagCaptureStatusOK {
+		t.Errorf("expected ok status, got %s", capture.Status)
+	}
 	if capture.CaptureStatus != state.CaptureStatusCaptured {
 		t.Errorf("expected captured status, got %s", capture.CaptureStatus)
 	}
 	if capture.NetworkDiag == nil {
 		t.Error("captured capture must have NetworkDiag")
 	}
-	// TCP absence events should be preserved
+	// TCP absence events should be extracted
 	if len(capture.TcpAbsenceEvents) == 0 {
-		t.Error("TCP absence events should be preserved")
+		t.Error("TCP absence events should be extracted")
 	}
 	if len(capture.TcpAbsenceEvents) > 0 && capture.TcpAbsenceEvents[0].ReasonCode != "no_matching_socket" {
 		t.Errorf("expected reason_code 'no_matching_socket', got '%s'", capture.TcpAbsenceEvents[0].ReasonCode)

@@ -73,3 +73,12 @@ ALLOWLIST_SKIP_PATTERN = re.compile(
 
 # LLM-friendliness line limit
 MAX_LINES = 450
+
+# Core HULK02 service contract files - these MUST NOT contain t.Skip
+# even with ACT-UVB76-HULK02-ALLOW-SKIP comments
+CORE_SERVICE_CONTRACT_FILES = [
+    "diag/capture_service_success_contract_test.go",
+    "diag/capture_service_error_contract_test.go",
+    "diag/capture_service_tcp_absence_contract_test.go",
+    "diag/capture_service_json_contract_test.go",
+]

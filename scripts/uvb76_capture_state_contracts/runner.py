@@ -99,7 +99,7 @@ def run_verifier() -> list[str]:
     inv_errors, _ = validate_inventory(UVB76_DIR, verbose=True)
     all_errors.extend(inv_errors)
 
-    # C: Skip allowlist
+    # C: Skip allowlist (includes core service file skip check)
     skip_errors = validate_skip_allowlist(UVB76_DIR, verbose=True)
     all_errors.extend(skip_errors)
 
@@ -309,6 +309,51 @@ def run_self_tests() -> tuple[list[str], dict[str, bool], int, int]:
         else:
             results["line_limit"] = False
             errors.append("Line limit not enforced")
+            print("  FAIL")
+
+        # Test 8: Core service file with t.Skip fails
+        test_count += 1
+        print("Test 8: Core service file with t.Skip fails")
+        from .skip_allowlist import check_no_skips_in_core_service_files
+        core_test_file = os.path.join(test_dir, "diag/capture_service_error_contract_test.go")
+        os.makedirs(os.path.dirname(core_test_file), exist_ok=True)
+        with open(core_test_file, 'w') as f:
+            f.write('package diag\n')
+            f.write('// ACT-UVB76-HULK02: Test\n')
+            f.write('func TestSomething(t *testing.T) {\n')
+            f.write('    t.Skip("test")\n')  # Skip in core service file
+            f.write('}\n')
+
+        skip_errors = check_no_skips_in_core_service_files("diag/capture_service_error_contract_test.go", test_dir)
+        if skip_errors:
+            results["core_service_skip_fails"] = True
+            pass_count += 1
+            print("  PASS")
+        else:
+            results["core_service_skip_fails"] = False
+            errors.append("Core service skip not detected")
+            print("  FAIL")
+
+        # Test 9: Core service file with ACT-UVB76-HULK02-ALLOW-SKIP still fails
+        test_count += 1
+        print("Test 9: Core service file with ALLOW-SKIP still fails")
+        core_test_file2 = os.path.join(test_dir, "diag/capture_service_success_contract_test.go")
+        with open(core_test_file2, 'w') as f:
+            f.write('package diag\n')
+            f.write('// ACT-UVB76-HULK02: Test\n')
+            f.write('func TestSomething(t *testing.T) {\n')
+            f.write('    // ACT-UVB76-HULK02-ALLOW-SKIP: reason\n')
+            f.write('    t.Skip("test")\n')  # Allowlisted skip in core service file
+            f.write('}\n')
+
+        skip_errors2 = check_no_skips_in_core_service_files("diag/capture_service_success_contract_test.go", test_dir)
+        if skip_errors2:
+            results["core_service_allowskip_still_fails"] = True
+            pass_count += 1
+            print("  PASS")
+        else:
+            results["core_service_allowskip_still_fails"] = False
+            errors.append("Core service allowskip not detected")
             print("  FAIL")
 
     finally:
