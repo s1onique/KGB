@@ -228,6 +228,12 @@ func (c *RouteCollector) CollectRouteLookup(ctx context.Context, probeKind state
 
 // collectViaNative performs route lookup using native NETLINK_ROUTE.
 func (c *RouteCollector) collectViaNative(ctx context.Context, route *state.ProbeRoute, lookupTarget string) *state.ProbeRoute {
+	// Check if parent context is already expired/canceled before starting native lookup
+	if ctx.Err() != nil {
+		route.ErrorKind = state.RouteLookupErrorTimeout
+		route.Error = "route lookup context already expired"
+		return route
+	}
 	// Derive a child timeout from the parent context
 	childCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()

@@ -110,7 +110,9 @@ func TestParseRtMsg_WithGateway_Type5(t *testing.T) {
 	data := make([]byte, 12+8+4)
 	data[7] = RTN_UNICAST
 	data[12], data[14] = 8, 5 // RTA_GATEWAY=5
-	data[15], data[16], data[17], data[18] = 192, 0, 2, 1
+	// attr header: len=8 at bytes 12-13, type=5 at bytes 14-15
+	// attr data starts at byte 16: IP bytes [192, 0, 2, 1]
+	data[16], data[17], data[18], data[19] = 192, 0, 2, 1
 
 	result := parseRtMsg(data)
 	if result == nil || result.Gateway == nil || result.Gateway.String() != "192.0.2.1" {
@@ -122,7 +124,9 @@ func TestParseRtMsg_Type1IsDstNotGateway(t *testing.T) {
 	data := make([]byte, 12+8+4)
 	data[7] = RTN_UNICAST
 	data[12], data[14] = 8, 1 // type=1 is RTA_DST, NOT gateway
-	data[15], data[16], data[17], data[18] = 192, 0, 2, 1
+	// attr header: len=8 at bytes 12-13, type=1 at bytes 14-15
+	// attr data starts at byte 16: IP bytes [192, 0, 2, 1]
+	data[16], data[17], data[18], data[19] = 192, 0, 2, 1
 
 	result := parseRtMsg(data)
 	if result != nil && result.Gateway != nil {
@@ -134,7 +138,9 @@ func TestParseRtMsg_WithOIF_Type4(t *testing.T) {
 	data := make([]byte, 12+8+4)
 	data[7] = RTN_UNICAST
 	data[12], data[14] = 8, 4 // RTA_OIF=4
-	data[15] = 2
+	// attr header: len=8 at bytes 12-13, type=4 at bytes 14-15
+	// attr data starts at byte 16: interface index
+	data[16] = 2
 
 	result := parseRtMsg(data)
 	if result == nil || result.Interface != 2 {
@@ -146,7 +152,9 @@ func TestParseRtMsg_WithPriority_Type6(t *testing.T) {
 	data := make([]byte, 12+8+4)
 	data[7] = RTN_UNICAST
 	data[12], data[14] = 8, 6 // RTA_PRIORITY=6
-	data[15] = 100
+	// attr header: len=8 at bytes 12-13, type=6 at bytes 14-15
+	// attr data starts at byte 16: metric value (uint32)
+	data[16] = 100
 
 	result := parseRtMsg(data)
 	if result == nil || result.Metric != 100 {
@@ -158,7 +166,9 @@ func TestParseRtMsg_WithPrefsrc_Type7(t *testing.T) {
 	data := make([]byte, 12+8+4)
 	data[7] = RTN_UNICAST
 	data[12], data[14] = 8, 7 // RTA_PREFSRC=7
-	data[15], data[18] = 10, 1
+	// attr header: len=8 at bytes 12-13, type=7 at bytes 14-15
+	// attr data starts at byte 16: IP bytes [10, 0, 0, 1]
+	data[16], data[17], data[18], data[19] = 10, 0, 0, 1
 
 	result := parseRtMsg(data)
 	if result == nil || result.SourceIP == nil || result.SourceIP.String() != "10.0.0.1" {
@@ -170,7 +180,9 @@ func TestParseRtMsg_WithTable_Type15(t *testing.T) {
 	data := make([]byte, 12+8+4)
 	data[7] = RTN_UNICAST
 	data[12], data[14] = 8, 15 // RTA_TABLE=15
-	data[15] = 254
+	// attr header: len=8 at bytes 12-13, type=15 at bytes 14-15
+	// attr data starts at byte 16: table ID (uint32)
+	data[16] = 254
 
 	result := parseRtMsg(data)
 	if result == nil || result.Table != 254 {
@@ -182,17 +194,25 @@ func TestParseRtMsg_CompleteRoute(t *testing.T) {
 	data := make([]byte, 12+8+4+8+4+8+4+8+4)
 	data[7] = RTN_UNICAST
 	off := 12
-	// RTA_GATEWAY (5)
-	data[off], data[off+2], data[off+4], data[off+5], data[off+6], data[off+7] = 8, 5, 192, 0, 2, 1
+	// RTA_GATEWAY: rta_len=8, rta_type=5, data=192.0.2.1
+	data[off+0], data[off+1] = 8, 0   // rta_len = 8 (little-endian)
+	data[off+2], data[off+3] = 5, 0  // rta_type = 5 (RTA_GATEWAY)
+	data[off+4], data[off+5], data[off+6], data[off+7] = 192, 0, 2, 1
 	off += 8
-	// RTA_OIF (4)
-	data[off], data[off+2], data[off+4] = 8, 4, 1
+	// RTA_OIF: rta_len=8, rta_type=4, data=1
+	data[off+0], data[off+1] = 8, 0   // rta_len = 8
+	data[off+2], data[off+3] = 4, 0  // rta_type = 4 (RTA_OIF)
+	data[off+4], data[off+5], data[off+6], data[off+7] = 1, 0, 0, 0
 	off += 8
-	// RTA_PREFSRC (7)
-	data[off], data[off+2], data[off+4], data[off+7] = 8, 7, 10, 1
+	// RTA_PREFSRC: rta_len=8, rta_type=7, data=10.0.0.1
+	data[off+0], data[off+1] = 8, 0   // rta_len = 8
+	data[off+2], data[off+3] = 7, 0  // rta_type = 7 (RTA_PREFSRC)
+	data[off+4], data[off+5], data[off+6], data[off+7] = 10, 0, 0, 1
 	off += 8
-	// RTA_PRIORITY (6)
-	data[off], data[off+2], data[off+4] = 8, 6, 100
+	// RTA_PRIORITY: rta_len=8, rta_type=6, data=100
+	data[off+0], data[off+1] = 8, 0   // rta_len = 8
+	data[off+2], data[off+3] = 6, 0  // rta_type = 6 (RTA_PRIORITY)
+	data[off+4], data[off+5], data[off+6], data[off+7] = 100, 0, 0, 0
 
 	result := parseRtMsg(data)
 	if result == nil {

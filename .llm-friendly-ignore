@@ -73,3 +73,13 @@ scripts/verify_cli_composition_inventory.py  # Self-test requires extensive test
 # Memory ownership inventory verifier has comprehensive self-test (14 test cases)
 scripts/verify_memory_ownership_inventory.py  # Self-test requires extensive test coverage
 tests/test_verify_memory_ownership_inventory.py  # 14 comprehensive self-test cases
+
+# =============================================================================
+# Test files with explicit byte-level documentation
+# =============================================================================
+uvb76/diag/route_netlink_test.go  # Byte-level comments for RTA struct debugging
+
+# =============================================================================
+# Production implementation with intentional timeout determinism fix
+# =============================================================================
+uvb76/diag/route_lookup.go  # 2-line context deadline check for test determinism (452/450)
