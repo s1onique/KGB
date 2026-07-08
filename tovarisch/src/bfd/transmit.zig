@@ -17,6 +17,7 @@ const std = @import("std");
 const c = std.c;
 const runtime = @import("runtime.zig");
 const receive = @import("receive.zig");
+const idle_telemetry = @import("../runtime/idle_telemetry.zig");
 
 // Re-export StopSignal from receive.zig for compatibility
 // Both loops share the same stop signal type
@@ -85,6 +86,9 @@ pub fn bfdTransmitLoop(state: *BfdTransmitLoopState) void {
     const sleep_ts = makeTimespec(state.tick_interval_ms);
 
     while (!state.stop.load()) {
+        // Increment BFD transmit tick counter for memory attribution
+        idle_telemetry.incrementBfdTransmitTicks();
+
         // Call runtime.tick() to process detection timeouts and send due packets
         state.runtime.tick() catch {
             // On error, yield and retry

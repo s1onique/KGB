@@ -38,6 +38,7 @@ const passive_listener_integration = @import("passive_listener_integration.zig")
 const tcp_transport = @import("tcp_transport.zig");
 const clock = @import("clock.zig");
 const serve_export_integration = @import("serve_export_integration.zig");
+const idle_telemetry = @import("../runtime/idle_telemetry.zig");
 
 /// BGP FSM loop interval in milliseconds.
 /// This is the sleep between runSessionOnce calls.
@@ -211,6 +212,9 @@ pub fn bgpRuntimeThread(bundle: *serve_integration.BgpServeBundle) void {
                 } else |_| {}
             }
         }
+
+        // Increment BGP FSM tick counter for memory attribution
+        idle_telemetry.incrementBgpFsmTicks();
 
         // Run one FSM iteration
         const result = serve_integration.runSessionOnce(bundle);

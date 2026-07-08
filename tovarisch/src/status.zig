@@ -358,7 +358,16 @@ pub fn renderStatus(writer: anytype, s: Status) !void {
     } else {
         try writer.writeAll(",\"rss_kib\":null");
     }
-    try writer.writeAll("}}\n");
+    // Include tick counters for idle memory attribution
+    try writer.writeAll(",\"ticks\":{\"bgp_fsm\":");
+    try writer.print("{d}", .{s.runtime.ticks.bgp_fsm_ticks});
+    try writer.writeAll(",\"bfd_transmit\":");
+    try writer.print("{d}", .{s.runtime.ticks.bfd_transmit_ticks});
+    try writer.writeAll(",\"bfd_receive\":");
+    try writer.print("{d}", .{s.runtime.ticks.bfd_receive_ticks});
+    try writer.writeAll(",\"heartbeat\":");
+    try writer.print("{d}", .{s.runtime.ticks.heartbeat_ticks});
+    try writer.writeAll("}}}\n");
 }
 
 /// Render status payload with optional network diagnostics.
@@ -427,5 +436,14 @@ pub fn renderPayloadWithContextAndDiag(
     } else {
         try writer.writeAll(",\"rss_kib\":null");
     }
-    try writer.writeAll("}}\n");
+    // Include tick counters for idle memory attribution
+    try writer.writeAll(",\"ticks\":{\"bgp_fsm\":");
+    try writer.print("{d}", .{s.runtime.ticks.bgp_fsm_ticks});
+    try writer.writeAll(",\"bfd_transmit\":");
+    try writer.print("{d}", .{s.runtime.ticks.bfd_transmit_ticks});
+    try writer.writeAll(",\"bfd_receive\":");
+    try writer.print("{d}", .{s.runtime.ticks.bfd_receive_ticks});
+    try writer.writeAll(",\"heartbeat\":");
+    try writer.print("{d}", .{s.runtime.ticks.heartbeat_ticks});
+    try writer.writeAll("}}}\n");
 }

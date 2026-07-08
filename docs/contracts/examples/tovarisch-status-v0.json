@@ -52,6 +52,12 @@
   ],
   "runtime": {
     "pid": 1044345,
-    "rss_kib": null
+    "rss_kib": null,
+    "ticks": {
+      "bgp_fsm": 0,
+      "bfd_transmit": 0,
+      "bfd_receive": 0,
+      "heartbeat": 0
+    }
   }
 }

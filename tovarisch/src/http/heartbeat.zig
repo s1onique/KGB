@@ -16,6 +16,7 @@
 const std = @import("std");
 const c = std.c;
 const heartbeat_emit = @import("heartbeat_emit.zig");
+const idle_telemetry = @import("../runtime/idle_telemetry.zig");
 
 /// Heartbeat thread configuration.
 pub const HEARTBEAT_INTERVAL_SECS: u64 = 30;
@@ -65,6 +66,10 @@ pub fn heartbeatThreadWithEvents(lab_emitter: ?*anyopaque) void {
 
         // Increment uptime (local state, no mutex needed)
         uptime_seconds += HEARTBEAT_INTERVAL_SECS;
+
+        // Increment heartbeat tick counter for memory attribution
+        // This is called every HEARTBEAT_INTERVAL_SECS (30s)
+        idle_telemetry.incrementHeartbeatTicks();
 
         // Convert uptime to milliseconds for native event emission
         const elapsed_millis = @as(u32, @intCast(uptime_seconds * 1000));

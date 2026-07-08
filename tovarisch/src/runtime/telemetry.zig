@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const linux_read = @import("../net/linux_read.zig");
+const idle_telemetry = @import("idle_telemetry.zig");
 
 // ============================================================================
 // Constants
@@ -20,10 +21,25 @@ const PROC_SELF_STATUS_MAX_BYTES: usize = 8192;
 // Types
 // ============================================================================
 
+/// Tick counters for idle memory attribution.
+/// Each counter tracks iterations of a specific background loop.
+/// Used to correlate anonymous heap growth with tick activity.
+pub const TickCounters = struct {
+    /// BGP FSM loop iterations (100ms interval)
+    bgp_fsm_ticks: u64 = 0,
+    /// BFD transmit loop iterations (100ms interval)
+    bfd_transmit_ticks: u64 = 0,
+    /// BFD receive loop iterations (50ms poll timeout)
+    bfd_receive_ticks: u64 = 0,
+    /// Heartbeat thread iterations (30s interval)
+    heartbeat_ticks: u64 = 0,
+};
+
 /// Runtime telemetry - self-observed process metrics.
 pub const RuntimeTelemetry = struct {
     pid: u32,
     rss_kib: ?u64,
+    ticks: TickCounters = .{},
 };
 
 /// Telemetry availability state for structured reporting
@@ -130,43 +146,44 @@ pub fn getRuntimeTelemetryWithAllocator(allocator: std.mem.Allocator) TelemetryR
                     .telemetry = RuntimeTelemetry{
                         .pid = pid,
                         .rss_kib = rss_kib,
+                        .ticks = idle_telemetry.getTickCounters(),
                     },
                     .availability = if (rss_kib != null) .available else .available,
                 };
             },
             .permission_denied => {
                 return TelemetryResult{
-                    .telemetry = RuntimeTelemetry{ .pid = pid, .rss_kib = null },
+                    .telemetry = RuntimeTelemetry{ .pid = pid, .rss_kib = null, .ticks = idle_telemetry.getTickCounters() },
                     .availability = .unavailable_permission_denied,
                 };
             },
             .missing => {
                 return TelemetryResult{
-                    .telemetry = RuntimeTelemetry{ .pid = pid, .rss_kib = null },
+                    .telemetry = RuntimeTelemetry{ .pid = pid, .rss_kib = null, .ticks = idle_telemetry.getTickCounters() },
                     .availability = .unavailable_missing,
                 };
             },
             .unsupported_platform => {
                 return TelemetryResult{
-                    .telemetry = RuntimeTelemetry{ .pid = pid, .rss_kib = null },
+                    .telemetry = RuntimeTelemetry{ .pid = pid, .rss_kib = null, .ticks = idle_telemetry.getTickCounters() },
                     .availability = .unavailable_unsupported_platform,
                 };
             },
             .too_large => {
                 return TelemetryResult{
-                    .telemetry = RuntimeTelemetry{ .pid = pid, .rss_kib = null },
+                    .telemetry = RuntimeTelemetry{ .pid = pid, .rss_kib = null, .ticks = idle_telemetry.getTickCounters() },
                     .availability = .unavailable_too_large,
                 };
             },
             .malformed => {
                 return TelemetryResult{
-                    .telemetry = RuntimeTelemetry{ .pid = pid, .rss_kib = null },
+                    .telemetry = RuntimeTelemetry{ .pid = pid, .rss_kib = null, .ticks = idle_telemetry.getTickCounters() },
                     .availability = .unavailable_malformed,
                 };
             },
             .io_error => {
                 return TelemetryResult{
-                    .telemetry = RuntimeTelemetry{ .pid = pid, .rss_kib = null },
+                    .telemetry = RuntimeTelemetry{ .pid = pid, .rss_kib = null, .ticks = idle_telemetry.getTickCounters() },
                     .availability = .unavailable_io_error,
                 };
             },
@@ -175,7 +192,7 @@ pub fn getRuntimeTelemetryWithAllocator(allocator: std.mem.Allocator) TelemetryR
 
     // Non-Linux platforms: honest fallback
     return TelemetryResult{
-        .telemetry = RuntimeTelemetry{ .pid = pid, .rss_kib = null },
+        .telemetry = RuntimeTelemetry{ .pid = pid, .rss_kib = null, .ticks = idle_telemetry.getTickCounters() },
         .availability = .unavailable_unsupported_platform,
     };
 }

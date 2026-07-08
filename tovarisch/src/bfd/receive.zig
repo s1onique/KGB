@@ -11,6 +11,7 @@ const c = std.c;
 const packet = @import("packet.zig");
 const runtime = @import("runtime.zig");
 const transport = @import("transport.zig");
+const idle_telemetry = @import("../runtime/idle_telemetry.zig");
 
 /// Atomic-like stop signal for BFD receive loop.
 /// Uses volatile bool pattern compatible with Zig 0.16.
@@ -290,6 +291,9 @@ pub fn bfdReceiveLoopWithTimeout(state: *BfdReceiveLoopState, poll_timeout_ms: c
         // This is the key fix: instead of busy-polling with yield(), we block
         // on poll() until data is available or timeout expires.
         const poll_result = c.poll(&pfd_arr, 1, poll_timeout_ms);
+
+        // Increment BFD receive tick counter for memory attribution
+        idle_telemetry.incrementBfdReceiveTicks();
 
         if (poll_result < 0) {
             // Poll error - this shouldn't happen for UDP socket
