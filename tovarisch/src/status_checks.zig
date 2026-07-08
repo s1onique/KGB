@@ -49,10 +49,12 @@ pub fn getWgPeersCheck(allocator: std.mem.Allocator) status.Check {
 
     // Collect real OS-link and WG interface evidence for accurate classification
     // ACT-HULK29R-ZIG016-WG-STATUS-EVIDENCE-WIRING: Wire real evidence into classifier
-    var evidence = wg_cli_facts.collectAllEvidence(allocator, interface_name) catch {
-        // On evidence collection failure, use empty evidence (will classify as unknown)
-        wg_cli_facts.emptyEvidence;
-    };
+    // MemoryOwnership: collectAllEvidence allocates memory for probe results via
+    // runIpLinkShow/runWgShowInterfaces, but CliEvidence is a value type (no owned
+    // allocations). The probe result memory is freed via defer in collectOsLinkEvidence
+    // and collectWgInterfacesEvidence. Zig defer runs at scope exit, including early
+    // returns after the defer is registered, ensuring cleanup on all code paths.
+    var evidence = wg_cli_facts.collectAllEvidence(allocator, interface_name) catch wg_cli_facts.emptyEvidence;
 
     // Use diagnostic-aware status collection for structured error detail
     const attempt = wg_boundary_cli.cliWireguardStatusDiagnosticAttemptWithRunner(

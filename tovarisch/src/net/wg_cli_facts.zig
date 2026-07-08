@@ -75,8 +75,12 @@ pub fn collectOsLinkEvidence(
     allocator: std.mem.Allocator,
     interface_name: []const u8,
 ) !OsLinkEvidenceResult {
+    // Pattern: catch handles probe failure (CLI not available), defer handles
+    // successful probe with exit_code fallback. Zig defer runs at scope exit,
+    // including early return after the assignment and defer registration.
     var result = runIpLinkShow(allocator, interface_name, PROBE_TIMEOUT_SECS) catch {
         // CLI probe failed - fall back to sysfs check
+        // NOTE: result was never assigned, so no defer cleanup needed here
         return collectOsLinkEvidenceFromSysfs(interface_name);
     };
     defer result.deinit(allocator);
@@ -84,11 +88,13 @@ pub fn collectOsLinkEvidence(
     // ip link returns exit 1 if interface doesn't exist
     if (result.exit_code == 1) {
         // CLI says interface missing - fall back to sysfs to confirm
+        // defer runs here, freeing stdout/stderr allocations
         return collectOsLinkEvidenceFromSysfs(interface_name);
     }
 
     if (result.exit_code != 0) {
         // CLI returned error - fall back to sysfs
+        // defer runs here, freeing stdout/stderr allocations
         return collectOsLinkEvidenceFromSysfs(interface_name);
     }
 
