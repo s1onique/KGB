@@ -10,6 +10,14 @@ const build_info = @import("build_info.zig");
 /// Stable event identifiers.
 /// Each event has a defined log level to ensure consistency.
 pub const Event = enum(u8) {
+    /// Startup phase has started.
+    startup_phase_started,
+    /// Startup phase has finished (with duration_ms).
+    startup_phase_finished,
+    /// Startup phase exceeded slow threshold.
+    startup_phase_slow,
+    /// Application is fully ready to accept connections.
+    startup_ready,
     /// HTTP server has bound and is listening.
     http_server_listening,
     /// Accept loop has started.
@@ -76,7 +84,11 @@ fn levelFor(event: Event) []const u8 {
         .bgp_open_received,
         .bgp_keepalive_sent,
         .bgp_established,
-        .bgp_outgoing_update => "info",
+        .bgp_outgoing_update,
+        .startup_phase_started,
+        .startup_phase_finished,
+        .startup_ready,
+        .lab_native_events_enabled => "info",
 
         .bgp_notification,
         .bgp_error,
@@ -86,9 +98,8 @@ fn levelFor(event: Event) []const u8 {
         .heartbeat_thread_start_failed,
         .bgp_outgoing_update_parse_failed,
         .bgp_outgoing_update_decode_failed,
-        .lab_native_events_open_failed => "error",
-
-        .lab_native_events_enabled => "info",
+        .lab_native_events_open_failed,
+        .startup_phase_slow => "error",
     };
 }
 

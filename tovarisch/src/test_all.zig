@@ -338,3 +338,15 @@ test { std.testing.refAllDecls(@import("status_network_diag_ownership_tests.zig"
 // Network diagnostics config wiring regression tests
 // ACT: Wire parsed tovarisch network diagnostics config into HTTP status path
 test { std.testing.refAllDecls(@import("status_network_diag_wiring_tests.zig")); }
+
+// ============================================================================
+// Startup Tracing (ACT-TOVARISCH-STARTUP-READINESS-TRACE01)
+// Startup phase timing for diagnosing gaps between process start and HTTP readiness
+// ============================================================================
+const _serve_startup = @import("http/serve_startup.zig");
+
+test { std.testing.refAllDecls(@import("startup_trace.zig")); }
+test { std.testing.refAllDecls(@import("startup_trace_time.zig")); }
+test { std.testing.refAllDecls(@import("startup_trace_unit_tests.zig")); }
+test { std.testing.refAllDecls(@import("startup_trace_integration_tests.zig")); }
+test { std.testing.refAllDecls(@import("http/serve_startup.zig")); }

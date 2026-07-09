@@ -12,6 +12,11 @@ const tovarisch_config = @import("../config.zig");
 const network_diag_config = @import("../net/network_diag_config.zig");
 const lab_events = @import("../runtime/lab_events.zig");
 const startup_logs = @import("startup_logs.zig");
+const startup_trace = @import("../startup_trace.zig");
+const serve_startup = @import("serve_startup.zig");
+
+// Re-export for external callers
+pub const serveForeverNormalWithTracer = serve_startup.serveForeverNormalWithTracer;
 
 // Re-export ServeContext for external use
 pub const ServeContext = serve_context.ServeContext;
@@ -269,9 +274,36 @@ pub fn serveForeverWithContextAndLab(
     network_diag_cfg: network_diag_config.NetworkDiagConfig,
     out_writer: anytype,
 ) !void {
-    var server = Server.init(config);
-    defer server.deinit();
+    try serveForeverWithContextAndLabInternal(config, inputs, lab_config, network_diag_cfg, out_writer, null);
+}
 
+/// Daemon-style serve loop with full runtime inputs, lab config, and startup tracer.
+///
+/// This function wraps serveForeverWithContextAndLab and adds startup phase timing.
+/// It emits startup_ready after the HTTP accept loop starts, completing the startup
+/// phase trace from daemon_command.zig.
+///
+/// The tracer parameter may be null for backward compatibility.
+pub fn serveForeverWithContextAndLabAndTracer(
+    config: Config,
+    inputs: status.RuntimeStatusInputs,
+    lab_config: tovarisch_config.LabConfig,
+    network_diag_cfg: network_diag_config.NetworkDiagConfig,
+    out_writer: anytype,
+    tracer: ?*startup_trace.StartupTracer,
+) !void {
+    try serveForeverWithContextAndLabInternal(config, inputs, lab_config, network_diag_cfg, out_writer, tracer);
+}
+
+/// Internal serve function that optionally emits startup_ready.
+fn serveForeverWithContextAndLabInternal(
+    config: Config,
+    inputs: status.RuntimeStatusInputs,
+    lab_config: tovarisch_config.LabConfig,
+    network_diag_cfg: network_diag_config.NetworkDiagConfig,
+    out_writer: anytype,
+    tracer: ?*startup_trace.StartupTracer,
+) !void {
     // Initialize lab event emitter if native events are enabled.
     // The emitter is owned by this function and deinitialized via defer.
     // Uses std.time.monoTime() internally for real elapsed time measurement.
@@ -312,74 +344,21 @@ pub fn serveForeverWithContextAndLab(
         }
     }
 
-    // Initialize serve context with full runtime inputs (BFD + config check + BGP bundle + lab config + network diag config).
-    // MemoryOwnership: Startup-only one-time allocation at daemon init.
-    // The ServeContext allocator is used once at serve startup, not per-request.
-    // This is a single allocation that persists for daemon lifetime (acceptable).
-    var serve_ctx = ServeContext.initWithContext(
-        std.heap.page_allocator,
-        inputs.bfd_runtime,
-        inputs.config_check,
-        inputs.bgp_result,
-        lab_config,
-        network_diag_cfg,
-    );
-    // Wire lab event emitter into serve context for /status exposure
-    serve_ctx.lab_event_emitter = lab_emitter_opt;
-    defer serve_ctx.deinit();
-
-    try server.listen();
-
-    // Emit startup logs only if not in statonly mode
-    try startup_logs.emitStartupLogsIfNormal(config.log_mode, config.port, config.address, out_writer);
-
-    // Get opaque pointer to ServeContext for passing to route handlers.
-    const ctx_ptr: *anyopaque = &serve_ctx;
-
-    // Heartbeat thread: only spawn in normal mode.
-    // In statonly mode, we skip heartbeat to keep output clean.
-    // When lab emitter is available, use heartbeatThreadWithEvents for native event emission.
-    // Skip heartbeat if lab_config.disable_heartbeat is true (lab runtime toggle).
-    var log_buf = logging.BufferedWriter.init();
-    if (config.log_mode == .normal and !lab_config.disable_heartbeat) {
-        if (lab_emitter_opt) |emitter| {
-            if (std.Thread.spawn(.{}, heartbeat.heartbeatThreadWithEvents, .{emitter})) |thread| {
-                thread.detach();
-            } else |spawn_err| {
-                log_buf.reset();
-                logging.emit(.heartbeat_thread_start_failed, &log_buf, &.{
-                    .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(spawn_err) } },
-                    .{ .name = "detail", .value = logging.FieldValue{ .string = "heartbeat spawn failed, continuing without heartbeat" } },
-                }) catch {};
-                startup_logs.writeLogRecord(out_writer, log_buf.slice()) catch {};
-            }
-        } else {
-            if (std.Thread.spawn(.{}, heartbeat.heartbeatThread, .{})) |thread| {
-                thread.detach();
-            } else |spawn_err| {
-                log_buf.reset();
-                logging.emit(.heartbeat_thread_start_failed, &log_buf, &.{
-                    .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(spawn_err) } },
-                    .{ .name = "detail", .value = logging.FieldValue{ .string = "heartbeat spawn failed, continuing without heartbeat" } },
-                }) catch {};
-                startup_logs.writeLogRecord(out_writer, log_buf.slice()) catch {};
-            }
-        }
-    } else if (lab_config.disable_heartbeat) {
-        // Log when heartbeat is disabled via lab runtime toggle
-        log_buf.reset();
-        logging.emit(.heartbeat_thread_start_failed, &log_buf, &.{
-            .{ .name = "error", .value = logging.FieldValue{ .string = "disabled" } },
-            .{ .name = "detail", .value = logging.FieldValue{ .string = "heartbeat disabled via lab_config.disable_heartbeat" } },
-        }) catch {};
-        startup_logs.writeLogRecord(out_writer, log_buf.slice()) catch {};
-    }
-
-    // Branch based on log mode
-    if (config.log_mode == .statonly) {
-        try statonly.serveStatonlyWithStderr(server.listener_fd, ctx_ptr, config.stats_interval_seconds, out_writer);
+    // Phase: http_bind — HTTP server socket creation and bind
+    // Guard ends before continuing to accept loop.
+    if (tracer) |t| {
+        var guard = t.begin(.http_bind);
+        try guard.emitStarted(out_writer);
+        var server = Server.init(config);
+        try server.listen();
+        try guard.finish(out_writer);
+        try serve_startup.serveForeverAfterBind(&server, config, inputs, lab_config, network_diag_cfg, out_writer, lab_emitter_opt, t);
+        return;
     } else {
-        try serveForeverNormal(server.listener_fd, ctx_ptr, &log_buf, out_writer);
+        var server = Server.init(config);
+        try server.listen();
+        try serve_startup.serveForeverAfterBind(&server, config, inputs, lab_config, network_diag_cfg, out_writer, lab_emitter_opt, null);
+        return;
     }
 }
 
@@ -399,27 +378,5 @@ pub fn acceptOneNormal(listener_fd: i32, state: *anyopaque) !void {
     }
 
     handleConnection(conn_fd, state);
-}
-
-/// Normal mode serve loop with structured JSON logging.
-fn serveForeverNormal(
-    listener_fd: i32,
-    state_ptr: *anyopaque,
-    log_buf: *logging.BufferedWriter,
-    out_writer: anytype,
-) !void {
-    try logging.emit(.http_accept_loop_started, log_buf, &.{});
-    try startup_logs.writeLogRecord(out_writer, log_buf.slice());
-
-    // Blocking accept loop - stays alive until interrupted.
-    while (true) {
-        acceptOneNormal(listener_fd, state_ptr) catch |err| {
-            log_buf.reset();
-            try logging.emit(.http_accept_loop_error, log_buf, &.{
-                .{ .name = "error", .value = logging.FieldValue{ .string = @errorName(err) } },
-            });
-            try startup_logs.writeLogRecord(out_writer, log_buf.slice());
-        };
-    }
 }
 

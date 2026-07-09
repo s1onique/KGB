@@ -16,6 +16,13 @@ const _status_route_contract_test = @import("http/status_route_contract_test.zig
 const _runtime_telemetry = @import("runtime/telemetry.zig");
 const _runtime_heartbeat_log = @import("runtime/heartbeat_log.zig");
 
+// Startup tracing (ACT-TOVARISCH-STARTUP-READINESS-TRACE01)
+const _startup_trace = @import("startup_trace.zig");
+const _startup_trace_time = @import("startup_trace_time.zig");
+const _startup_trace_unit_tests = @import("startup_trace_unit_tests.zig");
+const _startup_trace_integration_tests = @import("startup_trace_integration_tests.zig");
+const _serve_startup = @import("http/serve_startup.zig");
+
 // Status + network diagnostics wiring tests
 const _status_network_diag_wiring_tests = @import("status_network_diag_wiring_tests.zig");
 
@@ -42,3 +49,9 @@ test { std.testing.refAllDecls(@import("http/status_route_active_tests.zig")); }
 test { std.testing.refAllDecls(@import("http/status_handler_fd_tests.zig")); }
 // Forced render failure tests (ACT-TOVARISCH-ZIG-HULK11)
 test { std.testing.refAllDecls(@import("http/status_handler_failure_tests.zig")); }
+// Startup tracing (ACT-TOVARISCH-STARTUP-READINESS-TRACE01)
+test { std.testing.refAllDecls(@import("startup_trace.zig")); }
+test { std.testing.refAllDecls(@import("startup_trace_time.zig")); }
+test { std.testing.refAllDecls(@import("startup_trace_unit_tests.zig")); }
+test { std.testing.refAllDecls(@import("startup_trace_integration_tests.zig")); }
+test { std.testing.refAllDecls(@import("http/serve_startup.zig")); }
