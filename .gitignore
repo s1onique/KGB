@@ -27,3 +27,4 @@ scripts/memory_attribution_matrix_verifier/__pycache__/
 tools/wg-netlink-lab/wg-netlink-lab
 artifacts/wg-netlink-lab/preflight.json
 uvb76/cmd/uvb76-capture-netns-lab/uvb76-capture-netns-lab
+uvb76/uvb76-memory-lab

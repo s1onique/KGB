@@ -53,6 +53,11 @@ func (d *DiagnosticsConfig) Validate() error {
 		return nil
 	}
 
+	// Validate pprof config when diagnostics is enabled
+	if err := d.PProf.Validate(); err != nil {
+		return fmt.Errorf("pprof: %w", err)
+	}
+
 	if len(d.Peers) == 0 {
 		return fmt.Errorf("diagnostics enabled but no peers configured")
 	}

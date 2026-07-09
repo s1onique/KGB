@@ -143,7 +143,8 @@ lab-tcp-diag-telemetry-verify: lab-tcp-diag-telemetry-build
 test-memory-lab:
 	$(GOTEST) -v ./config/... -run "PProf"
 	$(GOTEST) -v ./tools/memory-lab/...
+	cd cmd/uvb76-memory-lab && $(GOTEST) -v ./...
 
-# Build memory lab artifacts (placeholder for future)
+# Build the memory lab collector command
 memory-lab-build:
-	@echo "Memory lab runner not yet implemented. See docs/labs/ for the plan."
+	cd cmd/uvb76-memory-lab && go build -o ../../uvb76-memory-lab .

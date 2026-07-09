@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"testing"
 )
 
@@ -66,24 +67,72 @@ func TestPProfConfigValidate(t *testing.T) {
 }
 
 func TestApplyPProfRuntimeConfigDisabled(t *testing.T) {
-	// Disabled config should not panic or error
-	cfg := PProfConfig{Enabled: false, MemProfileRate: 16384}
+	// Save original rate and restore after test
+	originalRate := runtime.MemProfileRate
+	defer func() { runtime.MemProfileRate = originalRate }()
+
+	// Set a known rate before test
+	runtime.MemProfileRate = 16384
+
+	// Disabled config should NOT modify MemProfileRate
+	cfg := PProfConfig{Enabled: false, MemProfileRate: 32768}
 	ApplyPProfRuntimeConfig(cfg)
-	// Function should complete without error
+
+	// Rate should remain unchanged (16384)
+	if runtime.MemProfileRate != 16384 {
+		t.Errorf("Expected MemProfileRate=16384 after disabled config, got %d", runtime.MemProfileRate)
+	}
 }
 
 func TestApplyPProfRuntimeConfigEnabled(t *testing.T) {
-	// Enabled config should not panic or error
+	// Save original rate and restore after test
+	originalRate := runtime.MemProfileRate
+	defer func() { runtime.MemProfileRate = originalRate }()
+
+	// Set a known rate before test
+	runtime.MemProfileRate = 8192
+
+	// Enabled config with positive rate should modify MemProfileRate
 	cfg := PProfConfig{Enabled: true, MemProfileRate: 16384}
 	ApplyPProfRuntimeConfig(cfg)
-	// Function should complete without error
+
+	// Rate should be updated to configured value
+	if runtime.MemProfileRate != 16384 {
+		t.Errorf("Expected MemProfileRate=16384 after enabled config, got %d", runtime.MemProfileRate)
+	}
 }
 
 func TestApplyPProfRuntimeConfigZeroRate(t *testing.T) {
-	// Zero rate should not panic or error
+	// Save original rate and restore after test
+	originalRate := runtime.MemProfileRate
+	defer func() { runtime.MemProfileRate = originalRate }()
+
+	// Set a known rate before test
+	runtime.MemProfileRate = 8192
+
+	// Zero rate should NOT modify MemProfileRate (guard against accidental changes)
 	cfg := PProfConfig{Enabled: true, MemProfileRate: 0}
 	ApplyPProfRuntimeConfig(cfg)
-	// Function should complete without error
+
+	// Rate should remain unchanged
+	if runtime.MemProfileRate != 8192 {
+		t.Errorf("Expected MemProfileRate=8192 after zero-rate config, got %d", runtime.MemProfileRate)
+	}
+}
+
+func TestApplyPProfRuntimeConfigDisabledWithPositiveRate(t *testing.T) {
+	// Regression test: disabled config with positive MemProfileRate should not change rate
+	originalRate := runtime.MemProfileRate
+	defer func() { runtime.MemProfileRate = originalRate }()
+
+	runtime.MemProfileRate = 4096
+
+	cfg := PProfConfig{Enabled: false, MemProfileRate: 16384}
+	ApplyPProfRuntimeConfig(cfg)
+
+	if runtime.MemProfileRate != 4096 {
+		t.Errorf("Disabled config changed MemProfileRate from 4096 to %d", runtime.MemProfileRate)
+	}
 }
 
 func TestPProfMuxEndpoints(t *testing.T) {
