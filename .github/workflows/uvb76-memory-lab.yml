@@ -1,0 +1,85 @@
+# uvb76-memory-lab.yml — GitHub Actions workflow for UVB-76 memory-lab collector foundation
+#
+# Runs cheap, deterministic PR signal for the memory-lab collector:
+# - pprof config tests
+# - memory-lab artifact/verdict tests
+# - uvb76-memory-lab collector/fetcher/sampler/pprof argv tests
+# - collector binary build
+#
+# Does NOT run the 10-minute LAB01C runner — that is manual/scheduled only.
+#
+# Reference: kgb://epics/LAB01A-R1-LAB01B-R1-R2
+
+name: UVB-76 Memory Lab Collector Foundation
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - "uvb76/config/**"
+      - "uvb76/tools/memory-lab/**"
+      - "uvb76/cmd/uvb76-memory-lab/**"
+      - "uvb76/Makefile"
+      - ".github/workflows/uvb76-memory-lab.yml"
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "uvb76/config/**"
+      - "uvb76/tools/memory-lab/**"
+      - "uvb76/cmd/uvb76-memory-lab/**"
+      - "uvb76/Makefile"
+      - ".github/workflows/uvb76-memory-lab.yml"
+  workflow_dispatch:
+
+jobs:
+  memory-lab-foundation:
+    name: Collector foundation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: uvb76/go.mod
+          cache: true
+          cache-dependency-path: uvb76/go.sum
+
+      - name: Test memory lab
+        run: |
+          cd uvb76
+          make test-memory-lab
+
+      - name: Build collector
+        run: |
+          cd uvb76
+          make memory-lab-build
+          test -x uvb76-memory-lab
+
+      - name: Verify no root-level generated binary
+        run: |
+          test ! -e uvb76-memory-lab
+
+      - name: Check unexpected dirty files
+        run: |
+          git status --short
+          if git status --short | grep -v '^?? uvb76/uvb76-memory-lab$' | grep .; then
+            echo "Unexpected dirty files after memory-lab build"
+            git status --short
+            exit 1
+          fi
+
+      - name: Upload collector binary
+        if: failure() || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: uvb76-memory-lab-binary
+          path: uvb76/uvb76-memory-lab
+          retention-days: 3
