@@ -22,6 +22,7 @@ type DiagnosticsConfig struct {
 	CooldownSeconds     int              `json:"cooldown_seconds"`
 	MaxUncapturedSpikes int              `json:"max_uncaptured_spikes"` // cap for purge-eligible spikes
 	Peers               []DiagPeerConfig `json:"peers"`
+	PProf               PProfConfig      `json:"pprof"`
 }
 
 type DiagPeerConfig struct {
@@ -44,6 +45,7 @@ func (d *DiagnosticsConfig) ApplyDefaults() {
 	if d.MaxUncapturedSpikes <= 0 {
 		d.MaxUncapturedSpikes = DefaultMaxUncapturedSpikes
 	}
+	d.PProf.ApplyDefaults()
 }
 
 func (d *DiagnosticsConfig) Validate() error {

@@ -136,3 +136,14 @@ lab-tcp-diag-telemetry: lab-tcp-diag-telemetry-build
 # Run the verifier on an artifact directory
 lab-tcp-diag-telemetry-verify: lab-tcp-diag-telemetry-build
 	./uvb76-tcp-diag-telemetry-lab --verify --artifact-dir "$(ARTIFACT_DIR)"
+
+# === Memory Lab Foundation ===
+# Tests for pprof config and memory lab artifact/verdict model.
+# These tests run the pure logic without spawning real processes.
+test-memory-lab:
+	$(GOTEST) -v ./config/... -run "PProf"
+	$(GOTEST) -v ./tools/memory-lab/...
+
+# Build memory lab artifacts (placeholder for future)
+memory-lab-build:
+	@echo "Memory lab runner not yet implemented. See docs/labs/ for the plan."
