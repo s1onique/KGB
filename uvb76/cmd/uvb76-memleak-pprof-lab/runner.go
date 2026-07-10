@@ -33,6 +33,33 @@ func runLab() LabResult {
 		log.Printf("[SETUP] Warning: failed to clean stale artifacts: %v", err)
 	}
 
+	// === SETUP: Start dependencies BEFORE launching UVB-76 ===
+	// UVB-76's config includes a target pointing to tovarisch's status endpoint.
+	// Starting tovarisch first eliminates a startup race condition.
+	if *flagUseFakeTovarisch {
+		log.Printf("[SETUP] Starting fake tovarisch on port %s", tovarischPort)
+		if err := startFakeTovarisch(); err != nil {
+			result.Errors = append(
+				result.Errors,
+				fmt.Sprintf("start fake tovarisch: %v", err),
+			)
+			return result
+		}
+
+		result.TovarischReachable = waitForHTTPReady(
+			"http://localhost:"+tovarischPort+"/status",
+			5*time.Second,
+		)
+		if !result.TovarischReachable {
+			result.Errors = append(
+				result.Errors,
+				"fake tovarisch did not become ready",
+			)
+			return result
+		}
+		log.Printf("[SETUP] Fake tovarisch ready on port %s", tovarischPort)
+	}
+
 	// === LAUNCH PHASE ===
 	log.Printf("[LAUNCH] Starting UVB-76...")
 
@@ -58,6 +85,8 @@ func runLab() LabResult {
 	cmd, err := startUVB76(uvb76Bin, processState)
 	if err != nil {
 		log.Printf("[LAUNCH] FAILED: %v", err)
+		evidence.PID = 0
+		evidence.StartupDurationMs = time.Since(launchStart).Milliseconds()
 		writeStartupEvidence(evidence)
 		writeCrashEvidence(CrashEvidence{
 			PID:              0,
@@ -72,8 +101,10 @@ func runLab() LabResult {
 		return result
 	}
 
+	result.UVB76Started = true
 	evidence.PID = uvb76PID
 	evidence.StartupDurationMs = time.Since(launchStart).Milliseconds()
+	writeStartupEvidence(evidence) // Write immediately so crash path has valid evidence
 	log.Printf("[LAUNCH] UVB-76 started: PID=%d", uvb76PID)
 
 	// === READINESS PHASE ===
@@ -82,6 +113,9 @@ func runLab() LabResult {
 	readinessStart := time.Now()
 	pprofReady, pprofErr := waitForPPROFReady(pprofPort, 30*time.Second, processState)
 	evidence.ReadinessDurationMs = time.Since(readinessStart).Milliseconds()
+
+	// Persist completed readiness timing for success, timeout, and early exit paths.
+	writeStartupEvidence(evidence)
 
 		if !pprofReady {
 		// Check if process exited
@@ -92,6 +126,9 @@ func runLab() LabResult {
 			crashEvidence.ExitSignal = int(exitSignal)
 			crashEvidence.RuntimeMs = time.Since(launchStart).Milliseconds()
 			writeCrashEvidence(crashEvidence)
+			if crashEvidence.StderrExcerpt != "" {
+				log.Printf("[CRASH] uvb76.log tail:\n%s", crashEvidence.StderrExcerpt)
+			}
 			result.Errors = append(result.Errors,
 				fmt.Sprintf("uvb76 exited with code %d before pprof became ready: %v",
 					exitCode, pprofErr))
@@ -120,26 +157,16 @@ func runLab() LabResult {
 		return result
 	}
 
-	// === START TOVARISCH (fake or real) ===
-	if *flagUseFakeTovarisch {
-		log.Printf("[LAUNCH] Starting fake tovarisch status server on port %s...", tovarischPort)
-		if err := startFakeTovarisch(); err != nil {
-			log.Printf("[LAUNCH] Warning: failed to start fake tovarisch: %v", err)
-		} else {
-			result.TovarischReachable = waitForHTTPReady(
-				"http://localhost:"+tovarischPort+"/status", 5*time.Second)
-			log.Printf("[READY] Fake tovarisch reachable: %v", result.TovarischReachable)
-		}
-	} else {
+	// === START TOVARISCH (real mode only — fake already started in SETUP) ===
+	if !*flagUseFakeTovarisch {
 		// Real tovarisch mode: check if it's reachable
 		result.TovarischReachable = waitForHTTPReady(
 			"http://localhost:"+tovarischPort+"/status", 5*time.Second)
 		log.Printf("[READY] Tovarisch reachable: %v", result.TovarischReachable)
+	} else {
+		// Fake tovarisch was already started in SETUP; mark as reachable
+		result.TovarischReachable = true
 	}
-
-	// Write startup evidence
-	writeStartupEvidence(evidence)
-	result.UVB76Started = true
 	log.Printf("[READY] All systems ready, starting collection...")
 
 	// === COLLECTION PHASE ===

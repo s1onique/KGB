@@ -60,8 +60,16 @@ func Generate(uvb76Port, pprofPort, tovarischPort string) *Config {
 			},
 		},
 		// pprof is ONLY enabled here in lab config; disabled by default
+		// Include a minimal valid peer config to satisfy diagnostics validation.
 		Diagnostics: config.DiagnosticsConfig{
 			Enabled: true,
+			Peers: []config.DiagPeerConfig{
+				{
+					Name:    "fake-tovarisch-peer",
+					BaseURL: "http://localhost:" + tovarischPort,
+					Targets: []string{"fake-tovarisch"},
+				},
+			},
 			PProf: config.PProfConfig{
 				Enabled:        true,
 				Listen:         "localhost:" + pprofPort,

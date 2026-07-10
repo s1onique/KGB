@@ -42,6 +42,8 @@ jobs:
     name: Localhost pprof lab
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      ARTIFACT_DIR: artifacts/uvb76-memleak-pprof-lab-ci
 
     steps:
       - name: Checkout
@@ -88,6 +90,28 @@ jobs:
         run: |
           cd uvb76
           make verify-uvb76-memleak-pprof-artifacts ARTIFACT_DIR="${ARTIFACT_DIR}"
+
+      - name: Dump pprof-lab startup diagnostics
+        if: ${{ failure() }}
+        run: |
+          cd uvb76
+          dir="${ARTIFACT_DIR}"
+
+          for file in \
+            uvb76.log \
+            exit.json \
+            startup_evidence.json \
+            result.json \
+            uvb76-lab-config.json
+          do
+            echo "::group::${file}"
+            if test -f "${dir}/${file}"; then
+              cat "${dir}/${file}"
+            else
+              echo "[missing] ${dir}/${file}"
+            fi
+            echo "::endgroup::"
+          done
 
       - name: Print result summary
         if: always()
