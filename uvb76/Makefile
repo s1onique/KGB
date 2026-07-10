@@ -140,7 +140,7 @@ lab-tcp-diag-telemetry-verify: lab-tcp-diag-telemetry-build
 # === Memory Lab Foundation ===
 # Tests for pprof config and memory lab artifact/verdict model.
 # These tests run the pure logic without spawning real processes.
-test-memory-lab:
+test-memory-lab-collector:
 	$(GOTEST) -v ./config/... -run "PProf"
 	$(GOTEST) -v ./tools/memory-lab/...
 	cd cmd/uvb76-memory-lab && $(GOTEST) -v ./...
@@ -148,3 +148,50 @@ test-memory-lab:
 # Build the memory lab collector command
 memory-lab-build:
 	cd cmd/uvb76-memory-lab && go build -o ../../uvb76-memory-lab .
+
+# === UVB-76 Memory Leak pprof Lab (LAB01C) ===
+# Localhost 10-minute lab for UVB-76/tovarisch pprof memory leak analysis.
+# Uses fake-tovarisch status server, does not require netns.
+# NOT part of make gate - manual execution only.
+
+# Build the pprof memory lab command
+lab-uvb76-memleak-pprof-build:
+	cd cmd/uvb76-memleak-pprof-lab && go build -o ../../uvb76-memleak-pprof-lab .
+
+# Build the pprof memory lab verifier
+lab-uvb76-memleak-pprof-verify-build:
+	cd cmd/uvb76-memleak-pprof-lab/verify && go build -o ../../../uvb76-memleak-pprof-verify .
+
+# Run the localhost pprof memory leak lab
+# Usage: make lab-uvb76-memleak-pprof ARTIFACT_DIR=artifacts/uvb76-memleak-pprof-lab
+# Or with custom duration: make lab-uvb76-memleak-pprof DURATION=5m
+lab-uvb76-memleak-pprof: lab-uvb76-memleak-pprof-build memory-lab-build
+	@echo "=== UVB-76 Memory Leak pprof Lab ==="
+	@if [ "$$(uname -s)" != "Linux" ]; then \
+		echo "[SKIP] Memory labs require Linux (needs /proc)"; \
+		exit 0; \
+	fi
+	@mkdir -p $(ARTIFACT_DIR)
+	@./uvb76-memleak-pprof-lab \
+		--duration $(DURATION) \
+		--artifact-dir $(ARTIFACT_DIR)
+
+# Verify pprof memory lab artifacts
+# Usage: make verify-uvb76-memleak-pprof-artifacts ARTIFACT_DIR=artifacts/uvb76-memleak-pprof-lab
+verify-uvb76-memleak-pprof-artifacts: lab-uvb76-memleak-pprof-verify-build
+	@./uvb76-memleak-pprof-verify --artifact-dir $(ARTIFACT_DIR)
+
+# Test all memory lab components (collector + pprof)
+test-memory-lab: test-memory-lab-collector test-memory-lab-pprof
+	@echo "=== Memory Lab Tests Complete ==="
+
+# Tests for pprof lab components
+test-memory-lab-pprof:
+	cd cmd/uvb76-memleak-pprof-lab && $(GOTEST) -v ./...
+	cd cmd/uvb76-memleak-pprof-lab/verify && $(GOTEST) -v ./...
+
+# Default duration for lab (can override with DURATION= parameter)
+DURATION ?= 10m
+
+# Default artifact directory
+ARTIFACT_DIR ?= artifacts/uvb76-memleak-pprof-lab
