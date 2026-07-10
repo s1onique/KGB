@@ -6,7 +6,7 @@
   },
   "auth": {
     "username": "admin",
-    "password_sha256": "sha256:aabbccddeeff00112233445566778899:abc123def456789012345678901234567890123456789012345678901234"
+    "password_sha256": "[REDACTED]"
   },
   "scrape": {
     "interval_seconds": 30,

@@ -625,3 +625,20 @@ hulk-uvb76-reachability-gate:
 	@python3 scripts/verify_uvb76_reachability_contracts.py
 	@echo "=== UVB-76 Hulk Gate: Verifier Self-Test ==="
 	@python3 scripts/verify_uvb76_reachability_contracts.py --self-test
+
+# === UVB-76 Artifact Secret Hygiene Hulk Gate ===
+# ACT-UVB76-HULK05-ARTIFACT-SECRET-HYGIENE
+# Repository-wide deterministic artifact-secret-hygiene contract.
+# Verifies tracked artifacts do not contain prohibited secret classes.
+# Implements two-tier scanning: universal critical rules + artifact-context rules.
+# Diagnostics never expose detected values.
+hulk-uvb76-artifact-secret-gate:
+	@echo "=== UVB-76 Hulk Gate: Artifact Secret Hygiene ==="
+	@echo "=== Verifier Self-Test ==="
+	@python3 scripts/verify_uvb76_artifact_secret_hygiene.py --self-test
+	@echo "=== Go Redaction Tests ==="
+	@cd uvb76 && go test ./internal/redact -v
+	@cd uvb76 && go test ./internal/redact -race
+	@echo "=== Scanning Artifact Surfaces ==="
+	@python3 scripts/verify_uvb76_artifact_secret_hygiene.py
+	@echo "=== UVB-76 Hulk Gate: Artifact Secret Hygiene PASSED ==="

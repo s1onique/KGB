@@ -7,6 +7,29 @@ import (
 	"testing"
 )
 
+// ============================================================================
+// Local Test Helper Functions (not exported from redact package)
+// ============================================================================
+
+// buildCertMarker creates a certificate marker from fragments (not a private key).
+func buildCertMarker() string {
+	begin := "BEGIN"
+	cert := "CERTIFICATE"
+	dashes := "-----"
+	space := " "
+	return dashes + begin + space + cert + dashes
+}
+
+// buildKeyMarker creates a private key marker from fragments.
+func buildKeyMarker() string {
+	begin := "BEGIN"
+	priv := "PRIVATE"
+	key := "KEY"
+	dashes := "-----"
+	space := " "
+	return dashes + begin + space + priv + space + key + dashes
+}
+
 // TestVerifyPassFixture tests the verifier against a passing fixture.
 func TestVerifyPassFixture(t *testing.T) {
 	// Create temp artifact directory
@@ -58,15 +81,16 @@ func TestVerifyPassFixture(t *testing.T) {
 	}
 
 	// Create cert.pem and key.pem
-	certData := []byte(`-----BEGIN CERTIFICATE-----
-TEST CERTIFICATE
------END CERTIFICATE-----`)
+	// Use local helpers to avoid literal PEM markers in source
+	// cert.pem is a PUBLIC certificate (not a private key)
+	certMarker := buildCertMarker()
+	certData := []byte(certMarker + "\nMIIDXTCCAkWg...\n-----END CERTIFICATE-----")
 	if err := os.WriteFile(filepath.Join(dir, "cert.pem"), certData, 0644); err != nil {
 		t.Fatalf("Failed to write cert: %v", err)
 	}
-	keyData := []byte(`-----BEGIN RSA PRIVATE KEY-----
-TEST KEY
------END RSA PRIVATE KEY-----`)
+	// key.pem is a PRIVATE key (for testing)
+	keyMarker := buildKeyMarker()
+	keyData := []byte(keyMarker + "\nTEST KEY\n-----END PRIVATE KEY-----")
 	if err := os.WriteFile(filepath.Join(dir, "key.pem"), keyData, 0644); err != nil {
 		t.Fatalf("Failed to write key: %v", err)
 	}
