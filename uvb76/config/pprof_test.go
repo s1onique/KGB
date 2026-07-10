@@ -208,7 +208,7 @@ func TestPProfMuxHeapHandler(t *testing.T) {
 func TestNewPProfServer(t *testing.T) {
 	cfg := PProfConfig{
 		Enabled: true,
-		Listen: "127.0.0.1:6060",
+		Listen:  "127.0.0.1:6060",
 	}
 
 	srv := NewPProfServer(cfg)
@@ -227,7 +227,7 @@ func TestNewPProfServer(t *testing.T) {
 func TestPProfConfigJSONRoundTrip(t *testing.T) {
 	cfg := PProfConfig{
 		Enabled:        true,
-		Listen:        "127.0.0.1:6060",
+		Listen:         "127.0.0.1:6060",
 		MemProfileRate: 65536,
 	}
 

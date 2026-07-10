@@ -1,15 +1,20 @@
 package main
 
 import (
+	"context"
 	"embed"
+	"errors"
 	"flag"
 	"io/fs"
 	"log"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/s1onique/KGB/uvb76/config"
 	"github.com/s1onique/KGB/uvb76/diag"
@@ -52,6 +57,13 @@ func main() {
 	cfg, err := config.LoadWithOptions(*configPath, opts)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Apply memory profile rate as early as possible.
+	// Go requires MemProfileRate to be constant across the program lifetime;
+	// changing it early ensures all allocations are sampled consistently.
+	if cfg.Diagnostics.Enabled && cfg.Diagnostics.PProf.Enabled {
+		config.ApplyPProfRuntimeConfig(cfg.Diagnostics.PProf)
 	}
 
 	if *devMode {
@@ -146,6 +158,27 @@ func main() {
 	// Initialize server (HTTPS in production, HTTP in dev mode)
 	srv := server.NewServer(cfg, stateManager, client, *devMode)
 
+	// Initialize pprof server if enabled
+	var pprofServer *http.Server
+	if cfg.Diagnostics.Enabled && cfg.Diagnostics.PProf.Enabled {
+		// Create the pprof server
+		pprofServer = config.NewPProfServer(cfg.Diagnostics.PProf)
+
+		// Bind synchronously - fail fast if address is in use
+		listener, err := net.Listen("tcp", cfg.Diagnostics.PProf.Listen)
+		if err != nil {
+			log.Fatalf("bind pprof listener %q: %v", cfg.Diagnostics.PProf.Listen, err)
+		}
+		log.Printf("pprof server listening on %s", listener.Addr().String())
+
+		// Start pprof server in background
+		go func() {
+			if err := pprofServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("pprof server error: %v", err)
+			}
+		}()
+	}
+
 	// Set up graceful shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -164,6 +197,18 @@ func main() {
 	httpProbeClient.Stop()
 	icmpProbeClient.Stop()
 	srv.Stop()
+
+	// Shutdown pprof server gracefully if it was started
+	if pprofServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := pprofServer.Shutdown(ctx); err != nil {
+			log.Printf("pprof server shutdown error: %v", err)
+		} else {
+			log.Println("pprof server stopped")
+		}
+	}
+
 	log.Println("Shutdown complete.")
 }
 
