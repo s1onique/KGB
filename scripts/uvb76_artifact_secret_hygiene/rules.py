@@ -1,10 +1,14 @@
 """
 Rules module for UVB-76 Artifact Secret Hygiene.
 
-Defines canonical rule registry and rule sets.
+Derives rule definitions from the canonical registry.
+Registry path: registry.json
 """
 
 import re
+
+from .registry_loader import get_registry, get_universal_rules, get_artifact_context_rules
+
 
 # ============================================================================
 # Fragment helper - breaks strings to avoid containing complete secret markers
@@ -17,12 +21,14 @@ def _FRAG(s: str) -> str:
         return s[:mid] + s[mid+1:]
     return s
 
+
 # Build PEM markers at runtime from fragments to avoid self-rejection
 def _build_pem_marker(parts: list) -> str:
     """Build a PEM marker from parts at runtime."""
     dashes = "-----"
     space = " "
     return dashes + space.join(parts) + dashes
+
 
 # Fragmented parts for bootstrap safety
 _BEGIN = "BEGIN"
@@ -40,162 +46,120 @@ _RSA_KEY = _build_pem_marker([_BEGIN, _RSA, _PRIVATE, _KEY])
 _EC_KEY = _build_pem_marker([_BEGIN, _EC, _PRIVATE, _KEY])
 _OPENSSH_KEY = _build_pem_marker([_BEGIN, _OPENSSH, _PRIVATE, _KEY])
 
-# ============================================================================
-# Canonical Rule Registry (authoritative mapping)
-# All languages must agree on rule IDs and meanings.
-# ============================================================================
-
-RULE_REGISTRY = {
-    # Universal Critical Rules (applied across all relevant tracked files)
-    "UVB76-SECRET-0001": {
-        "class": "private_key_pem",
-        "scope": "universal",
-        "severity": "critical",
-        "allowlistable": False,
-        "explanation": "private key PEM block detected",
-        "remediation": "Remove or replace with [REDACTED]",
-        "pattern": _PRIVATE_KEY,
-    },
-    "UVB76-SECRET-0002": {
-        "class": "encrypted_private_key_pem",
-        "scope": "universal",
-        "severity": "critical",
-        "allowlistable": False,
-        "explanation": "encrypted private key PEM block detected",
-        "remediation": "Remove or replace with [REDACTED]",
-        "pattern": _ENCRYPTED_KEY,
-    },
-    "UVB76-SECRET-0003": {
-        "class": "rsa_private_key_pem",
-        "scope": "universal",
-        "severity": "critical",
-        "allowlistable": False,
-        "explanation": "RSA private key PEM block detected",
-        "remediation": "Remove or replace with [REDACTED]",
-        "pattern": _RSA_KEY,
-    },
-    "UVB76-SECRET-0004": {
-        "class": "ec_private_key_pem",
-        "scope": "universal",
-        "severity": "critical",
-        "allowlistable": False,
-        "explanation": "EC private key PEM block detected",
-        "remediation": "Remove or replace with [REDACTED]",
-        "pattern": _EC_KEY,
-    },
-    "UVB76-SECRET-0005": {
-        "class": "openssh_private_key_pem",
-        "scope": "universal",
-        "severity": "critical",
-        "allowlistable": False,
-        "explanation": "OpenSSH private key PEM block detected",
-        "remediation": "Remove or replace with [REDACTED]",
-        "pattern": _OPENSSH_KEY,
-    },
-}
-
-# Build universal rules from registry
-UNIVERSAL_RULES = [
-    {
-        "id": rule_id,
-        "pattern": re.compile(rules["pattern"]),
-        "explanation": rules["explanation"],
-        "remediation": rules["remediation"],
-    }
-    for rule_id, rules in RULE_REGISTRY.items()
-    if rules["scope"] == "universal"
-]
 
 # ============================================================================
-# Artifact Context Rules (applied to inventory artifact surfaces)
+# Registry-derived Universal Rules
+# Loaded once at module import for performance.
 # ============================================================================
 
-ARTIFACT_CONTEXT_RULES = [
-    {
-        "id": "UVB76-SECRET-0010",
-        "pattern": re.compile(r'Authorization:\s*(?:Bearer|Basic|Token)\s+[A-Za-z0-9+/=_-]+', re.IGNORECASE),
-        "explanation": "non-redacted Authorization header value",
-        "remediation": "Replace credential value with [REDACTED]",
-    },
-    {
-        "id": "UVB76-SECRET-0011",
-        "pattern": re.compile(r'(?:Cookie|Set-Cookie):\s*[A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9+/=_-]{16,}', re.IGNORECASE),
-        "explanation": "non-redacted session cookie value",
-        "remediation": "Replace cookie value with [REDACTED]",
-    },
-    {
-        "id": "UVB76-SECRET-0012",
-        "pattern": re.compile(r'uvb76_session=[A-Za-z0-9+/=_-]+', re.IGNORECASE),
-        "explanation": "non-redacted uvb76_session cookie",
-        "remediation": "Replace cookie value with [REDACTED]",
-    },
-    {
-        "id": "UVB76-SECRET-0013",
-        "pattern": re.compile(r'X-Session-Token:\s*[A-Za-z0-9+/=_-]{20,}', re.IGNORECASE),
-        "explanation": "non-redacted session token header",
-        "remediation": "Replace token value with [REDACTED]",
-    },
-    {
-        "id": "UVB76-SECRET-0020",
-        "pattern": re.compile(r'"password_sha256"\s*:\s*"sha256:[a-fA-F0-9]+:[a-fA-F0-9]+"'),
-        "explanation": "non-redacted password hash value",
-        "remediation": "Replace with [REDACTED]",
-    },
-    {
-        "id": "UVB76-SECRET-0021",
-        "pattern": re.compile(r'"admin_password_hash"\s*:\s*"[^"]+"'),
-        "explanation": "non-redacted admin password hash",
-        "remediation": "Replace with [REDACTED]",
-    },
-    {
-        "id": "UVB76-SECRET-0030",
-        "pattern": re.compile(r'X-API-Key:\s*[A-Za-z0-9_-]{16,}', re.IGNORECASE),
-        "explanation": "non-redacted API key header",
-        "remediation": "Replace with [REDACTED]",
-    },
-    {
-        "id": "UVB76-SECRET-0040",
-        "pattern": re.compile(r'https?://[^:]+:[^@]+@[^\s"\'>]+'),
-        "explanation": "credential-bearing URL with embedded userinfo",
-        "remediation": "Remove userinfo or sanitize URL",
-    },
-    {
-        "id": "UVB76-SECRET-0041",
-        "pattern": re.compile(r'(?:postgres|mysql|mongodb)://[^:]+:[^@]+@'),
-        "explanation": "database DSN with embedded credentials",
-        "remediation": "Remove credentials from DSN",
-    },
-    {
-        "id": "UVB76-SECRET-0050",
-        "pattern": re.compile(r'eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'),
-        "explanation": "JWT-like token detected",
-        "remediation": "Replace with [REDACTED]",
-    },
-    {
-        "id": "UVB76-SECRET-0051",
-        "pattern": re.compile(r'(?:Bearer|Token)\s+[A-Za-z0-9_-]{32,}'),
-        "explanation": "bearer token detected",
-        "remediation": "Replace with [REDACTED]",
-    },
-]
+_registry = get_registry()
 
+# Universal rules - applied to ALL relevant tracked files
+UNIVERSAL_RULES: list[dict] = []
+for rule in get_universal_rules(_registry):
+    # Skip rules without patterns (shouldn't happen for universal rules)
+    if "pattern" not in rule:
+        continue
+    UNIVERSAL_RULES.append({
+        "id": rule["rule_id"],
+        "class": rule["class"],
+        "pattern": re.compile(rule["pattern"]),
+        "explanation": rule["safe_explanation"],
+        "remediation": rule["safe_remediation"],
+    })
+
+# Artifact context rules - applied based on artifact type/sensitivity
+ARTIFACT_CONTEXT_RULES: list[dict] = []
+for rule in get_artifact_context_rules(_registry):
+    rule_id = rule["rule_id"]
+    detector_kind = rule.get("detector_kind", "")
+
+    if detector_kind == "pattern":
+        # Line-oriented pattern detection
+        pattern = rule.get("pattern", "")
+        if pattern:
+            ARTIFACT_CONTEXT_RULES.append({
+                "id": rule_id,
+                "class": rule["class"],
+                "pattern": re.compile(pattern),
+                "explanation": rule["safe_explanation"],
+                "remediation": rule["safe_remediation"],
+                "detector_kind": detector_kind,
+            })
+
+    elif detector_kind == "header_name":
+        # Header-based pattern detection
+        header_pattern = rule.get("header_pattern", "")
+        if header_pattern:
+            ARTIFACT_CONTEXT_RULES.append({
+                "id": rule_id,
+                "class": rule["class"],
+                "pattern": re.compile(header_pattern, re.IGNORECASE),
+                "explanation": rule["safe_explanation"],
+                "remediation": rule["safe_remediation"],
+                "detector_kind": detector_kind,
+            })
+
+    elif detector_kind == "url_component":
+        # URL component detection
+        pattern = rule.get("pattern", "")
+        if pattern:
+            ARTIFACT_CONTEXT_RULES.append({
+                "id": rule_id,
+                "class": rule["class"],
+                "pattern": re.compile(pattern),
+                "explanation": rule["safe_explanation"],
+                "remediation": rule["safe_remediation"],
+                "detector_kind": detector_kind,
+            })
+
+    # field_name and structured_json detectors are handled by structured scanning
+
+# Query parameter rules loaded at module init (derived from registry)
+# These are used by structured_scanner for URL-based scanning
+QUERY_PARAM_RULES: dict[str, tuple[set[str], str, str]] = {}
+
+# Load query parameter rules from registry
+for rule in get_artifact_context_rules(_registry):
+    if rule.get("detector_kind") == "url_component":
+        query_params = rule.get("query_params", [])
+        if query_params:
+            QUERY_PARAM_RULES[rule["rule_id"]] = (
+                {p.lower() for p in query_params},
+                rule["safe_explanation"],
+                rule["safe_remediation"],
+            )
+
+
+# ============================================================================
+# Test helpers (for self-test fixtures without storing literals)
+# ============================================================================
 
 def build_test_private_key() -> str:
     """Build a test private key marker for self-test fixtures (not stored as literal)."""
-    dashes = "-----"
-    space = " "
-    begin = "BEGIN"
-    priv = "PRIVATE"
-    key = "KEY"
-    return dashes + space.join([begin, priv, key]) + dashes
+    return _PRIVATE_KEY
 
 
 def build_test_rsa_key() -> str:
     """Build a test RSA key marker for self-test fixtures (not stored as literal)."""
-    dashes = "-----"
-    space = " "
-    begin = "BEGIN"
-    rsa = "RSA"
-    priv = "PRIVATE"
-    key = "KEY"
-    return dashes + space.join([begin, rsa, priv, key]) + dashes
+    return _RSA_KEY
+
+
+def build_test_encrypted_key() -> str:
+    """Build a test encrypted private key marker for self-test fixtures."""
+    return _ENCRYPTED_KEY
+
+
+def build_test_ec_key() -> str:
+    """Build a test EC key marker for self-test fixtures."""
+    return _EC_KEY
+
+
+def build_test_openssh_key() -> str:
+    """Build a test OpenSSH key marker for self-test fixtures."""
+    return _OPENSSH_KEY
+
+
+def build_test_certificate() -> str:
+    """Build a test public certificate marker (NOT a private key)."""
+    return _build_pem_marker([_BEGIN, "CERTIFICATE"])
