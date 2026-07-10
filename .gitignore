@@ -28,3 +28,6 @@ tools/wg-netlink-lab/wg-netlink-lab
 artifacts/wg-netlink-lab/preflight.json
 uvb76/cmd/uvb76-capture-netns-lab/uvb76-capture-netns-lab
 uvb76/uvb76-memory-lab
+uvb76/uvb76-memleak-pprof-lab
+uvb76/uvb76-memleak-pprof-verify
+artifacts/uvb76-memleak-pprof-lab/
