@@ -1,0 +1,259 @@
+id,path,language,logical_loc,role,public_interface,target_go_command,status,notes
+# Shell scripts (sorted by logical LOC, descending)
+# === HIGH COMPLEXITY (>200 LOC) - migration-required ===
+S001,scripts/lab_uvb76_capture_netns_contract.sh,shell,395,lab-orchestration,lab-uvb76-capture-netns,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq + state machine
+S002,scripts/verify_uvb76_diag_packet_contract_lib.sh,shell,375,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq + trap cleanup
+S003,scripts/lab_uvb76_capture_netns.sh,shell,369,lab-orchestration,lab-uvb76-capture-netns,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq orchestration
+S004,scripts/lab_uvb76_capture_netns_cooldown_helpers.sh,shell,359,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq + timers
+S005,scripts/lab_uvb76_capture_netns_lib.sh,shell,357,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq + netns
+S006,scripts/verify_bgp_stability.sh,shell,353,lab-orchestration,,cmd/bgp-stability-lab,migration-required,Bootstrap inventory - trap cleanup
+S007,scripts/check_allocation_patterns.sh,shell,340,verifier,,cmd/check-allocation,migration-required,Bootstrap inventory - large shell script
+S008,scripts/verify_uvb76_row_normalization_tests.sh,shell,327,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq
+S009,scripts/run_frontend_tests.sh,shell,324,ci-glue,,cmd/frontend-test,migration-required,Bootstrap inventory - npm wrapper
+S010,scripts/audit_repo_health.sh,shell,320,verifier,,cmd/audit-repo-health,migration-required,Bootstrap inventory - large shell
+S011,scripts/quality_gate.sh,shell,314,verifier,,cmd/quality-gate,migration-required,Bootstrap inventory - gate orchestration
+S012,scripts/verify_uvb76_extract_network_diag_tests.sh,shell,302,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq
+S013,scripts/verify_uvb76_diag_packet_contract.sh,shell,301,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq
+S014,scripts/lab_bgp_bfd_reconnect_bgp_reset.sh,shell,291,lab-orchestration,lab-bgp-bfd-reconnect-bgp-reset,cmd/bgp-bfd-reconnect-lab,migration-required,Bootstrap inventory - jq
+S015,scripts/lab_bgp_bfd_reconnect_lib.sh,shell,290,lab-orchestration,,cmd/bgp-bfd-reconnect-lab,migration-required,Bootstrap inventory - jq + curl
+S016,scripts/lab_uvb76_capture_netns_diag.sh,shell,286,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq
+S017,scripts/lab_uvb76_capture_netns_contract_normalizers.sh,shell,284,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq
+S018,scripts/lab_uvb76_capture_netns_phase1_harden_self_test.sh,shell,260,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq
+S019,scripts/lab_bgp_bfd_reconnect.sh,shell,258,lab-orchestration,lab-bgp-bfd-reconnect,cmd/bgp-bfd-reconnect-lab,migration-required,Bootstrap inventory - jq
+S020,scripts/lab_bgp_bfd_netns_lib.sh,shell,236,lab-orchestration,lab-bgp-bfd,cmd/bgp-bfd-netns-lab,migration-required,Bootstrap inventory - large lib
+S021,scripts/verify_bgp_reconnect_artifact.sh,shell,234,lab-orchestration,,cmd/bgp-bfd-reconnect-lab,migration-required,Bootstrap inventory - jq
+S022,scripts/lab_uvb76_capture_netns_fetch_packet.sh,shell,229,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq
+S023,scripts/make_targeted_digest.sh,shell,228,verifier,,cmd/make-digest,migration-required,Bootstrap inventory - large digest
+S024,scripts/lab_bgp_bfd_netns_bfd.sh,shell,222,lab-orchestration,lab-bgp-bfd,cmd/bgp-bfd-netns-lab,migration-required,Bootstrap inventory - jq + curl
+S025,scripts/check_memory_ownership.sh,shell,219,verifier,,cmd/check-memory-ownership,migration-required,Bootstrap inventory - large shell
+S026,scripts/build_opkg_package.sh,shell,217,packaging,opkg-package,cmd/build-opkg,migration-required,Bootstrap inventory - package build
+S027,scripts/verify_bgp_stability_fixtures.sh,shell,213,lab-orchestration,,cmd/bgp-stability-lab,migration-required,Bootstrap inventory
+S028,scripts/verify_field_manual_network_diag.sh,shell,207,verifier,,cmd/verify-network-diag,migration-required,Bootstrap inventory - large verifier
+S029,scripts/check_llm_friendliness.sh,shell,207,verifier,llm-friendliness,cmd/check-llm-friendliness,migration-required,Bootstrap inventory - large check
+S030,scripts/verify_uvb76_captured_row_assertion_tests.sh,shell,206,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq
+S031,scripts/lab_uvb76_capture_netns_phase_helpers.sh,shell,200,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq
+S032,scripts/verify_plaintext_logs.sh,shell,196,verifier,verify-plaintext-logs,cmd/verify-logs,migration-required,Bootstrap inventory - large verifier
+S033,scripts/verify_split_test_inventory.sh,shell,196,verifier,,cmd/verify-split-test,migration-required,Bootstrap inventory
+S034,scripts/git_no_history_rewrite_pre_push.sh,shell,196,ci-glue,,cmd/git-safety,migration-required,Bootstrap inventory - pre-push hook
+S035,scripts/lab_bgp_bfd_netns_tovarisch_diag.sh,shell,193,lab-orchestration,,cmd/bgp-bfd-netns-lab,migration-required,Bootstrap inventory - jq
+S036,scripts/verify_github_no_force_push_ruleset.sh,shell,189,verifier,verify-github-ruleset,cmd/verify-github-ruleset,migration-required,Bootstrap inventory
+S037,scripts/verify_uvb76_capture_netns_lab.sh,shell,189,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq
+S038,scripts/lab_uvb76_capture_netns_fetch_helpers.sh,shell,187,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq
+S039,scripts/lab_uvb76_capture_netns_phase_capture_helpers.sh,shell,171,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq
+S040,scripts/lab_bgp_bfd_netns_stability.sh,shell,168,lab-orchestration,lab-bgp-bfd,cmd/bgp-bfd-netns-lab,migration-required,Bootstrap inventory - jq + curl
+S041,scripts/lab_uvb76_capture_netns_capture_poll.sh,shell,157,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq + polling
+S042,scripts/verify_git_history_safety_policy.sh,shell,137,verifier,verify-git-history-safety,cmd/verify-git-history,migration-required,Bootstrap inventory
+S043,scripts/verify_uvb76_diag_packet_contract_selftest.sh,shell,135,verifier,,cmd/verify-diag-contract,migration-required,Bootstrap inventory
+S044,scripts/lab_uvb76_capture_netns_poll.sh,shell,127,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq + polling
+S045,scripts/check_allocation_patterns_self_test.sh,shell,117,verifier,,cmd/check-allocation,migration-required,Bootstrap inventory
+S046,scripts/verify_deb_systemd_package.sh,shell,115,verifier,verify-deb-systemd,cmd/verify-deb,migration-required,Bootstrap inventory
+S047,scripts/install_git_safety_hooks.sh,shell,92,ci-glue,install-git-safety-hooks,cmd/install-git-hooks,migration-required,Bootstrap inventory
+S048,scripts/lab_uvb76_targets_crash.sh,shell,105,lab-orchestration,lab-uvb76-targets-crash,cmd/uvb76-crash-lab,migration-required,Bootstrap inventory
+S049,scripts/lab_uvb76_latency_crash.sh,shell,62,lab-orchestration,lab-uvb76-latency-crash,cmd/uvb76-crash-lab,migration-required,Bootstrap inventory
+S050,scripts/verify_www_authenticate.sh,shell,65,verifier,,cmd/verify-www-auth,migration-required,Bootstrap inventory
+S051,scripts/lab_uvb76_capture_netns_result.sh,shell,85,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq
+S052,scripts/verify_structured_logs.sh,shell,81,verifier,verify-structured-logs,cmd/verify-logs,migration-required,Bootstrap inventory
+S053,scripts/lab_uvb76_capture_netns_topology.sh,shell,80,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory
+S054,scripts/verify_uvb76_capture_helpers.sh,shell,78,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - thin wrapper
+S055,scripts/lab_uvb76_capture_netns_defect.sh,shell,75,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory
+S056,scripts/coverage_report.sh,shell,53,verifier,coverage-report,cmd/coverage-report,migration-required,Bootstrap inventory - exceeds limit
+S057,scripts/lab_bgp_bfd_netns_collect.sh,shell,46,lab-orchestration,lab-bgp-bfd,cmd/bgp-bfd-netns-lab,migration-required,Bootstrap inventory - exceeds limit
+S058,scripts/package_deb.sh,shell,44,packaging,package-deb,cmd/package-deb,migration-required,Bootstrap inventory - exceeds limit
+S059,scripts/lab_uvb76_capture_netns_phase1_harden.sh,shell,40,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - jq
+S060,scripts/lab_bgp_bfd_netns_config.sh,shell,39,lab-orchestration,lab-bgp-bfd,cmd/bgp-bfd-netns-lab,migration-required,Bootstrap inventory
+S061,scripts/check_tovarisch_serve_liveness.sh,shell,37,verifier,tovarisch-serve-liveness,cmd/check-liveness,migration-required,Bootstrap inventory - exceeds limit
+S062,scripts/install_linux_net_lab_deps.sh,shell,36,bootstrap,,cmd/install-lab-deps,migration-required,Bootstrap inventory - exceeds limit
+S063,scripts/verify_status_json.sh,shell,35,verifier,,cmd/verify-status-json,migration-required,Bootstrap inventory
+S064,scripts/verify_bfd_up_artifact.sh,shell,25,lab-orchestration,,cmd/verify-bfd-artifact,migration-required,Bootstrap inventory
+S065,scripts/verify_uvb76_capture_url_lab.sh,shell,22,lab-orchestration,lab-uvb76-capture-url,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory
+S066,scripts/lab_uvb76_tcp_diag_telemetry.sh,shell,21,lab-orchestration,lab-uvb76-tcp-diag-telemetry,cmd/uvb76-tcp-diag-lab,migration-required,Bootstrap inventory
+S067,scripts/lab_bgp_bfd_netns_consts.sh,shell,20,lab-orchestration,lab-bgp-bfd,cmd/bgp-bfd-netns-lab,migration-required,Bootstrap inventory - thin lib
+S068,scripts/lab_uvb76_capture_netns_result_helpers.sh,shell,18,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory
+S069,scripts/lab_uvb76_icmp_os_ping_soak.sh,shell,12,lab-orchestration,lab-uvb76-icmp-os-ping-soak,cmd/uvb76-icmp-lab,migration-required,Bootstrap inventory
+S070,scripts/check_final_newlines_regression.sh,shell,12,verifier,test-final-newlines-regression,cmd/check-newlines,migration-required,Bootstrap inventory - exceeds limit
+S071,scripts/lab_uvb76_capture_netns_tovarisch.sh,shell,10,lab-orchestration,lab-uvb76-capture-netns,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory
+S072,scripts/fixtures/test-bgp-reconnect-fixtures.sh,shell,5,ci-glue,,cmd/test-fixtures,migration-required,Bootstrap inventory
+S073,scripts/verify_workflow_release_safety.sh,shell,3,verifier,,cmd/verify-release,migration-required,Bootstrap inventory
+S074,scripts/verify_opkg_package.sh,shell,3,verifier,verify-opkg-package,cmd/verify-opkg,migration-required,Bootstrap inventory
+S075,scripts/lab_tovarisch_idle_memory.sh,shell,3,lab-orchestration,lab-tovarisch-idle-memory,cmd/memory-lab,migration-required,Bootstrap inventory
+S076,scripts/lab_memory_attribution_matrix.sh,shell,3,lab-orchestration,lab-memory-attribution-matrix,cmd/memory-lab,migration-required,Bootstrap inventory
+S077,scripts/coverage_gate.sh,shell,3,verifier,coverage,cmd/coverage-gate,migration-required,Bootstrap inventory
+S078,scripts/lab_uvb76_capture_netns_consts.sh,shell,0,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - constants only
+S079,scripts/lab_uvb76_capture_netns_contract_assertions.sh,shell,0,lab-orchestration,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - assertions only
+# === THIN WRAPPERS (<=50 LOC) ===
+S080,scripts/linux_smoke_test.sh,shell,126,ci-glue,,cmd/linux-smoke-test,migration-required,Bootstrap inventory - exceeds LOC limit
+# === PYTHON FILES (all migration-required) ===
+# Note: Python is prohibited in production; all files below must be migrated to Go
+P001,scripts/ar_parser.py,python,0,verifier,,cmd/ar-parser,migration-required,Bootstrap inventory - Python verifier
+P002,scripts/attribution_contract.py,python,0,verifier,,cmd/attribution-contract,migration-required,Bootstrap inventory - Python verifier
+P003,scripts/check_zig_memory_copy_safety.py,python,0,verifier,,cmd/check-zig-memory,migration-required,Bootstrap inventory - Python verifier
+P004,scripts/coverage_diagnostics.py,python,0,verifier,,cmd/coverage-diagnostics,migration-required,Bootstrap inventory - Python verifier
+P005,scripts/coverage_gate.py,python,0,verifier,,cmd/coverage-gate,migration-required,Bootstrap inventory - Python verifier
+P006,scripts/coverage_test_fallback.py,python,0,verifier,,cmd/coverage-fallback,migration-required,Bootstrap inventory - Python verifier
+P007,scripts/effect_boundary_verifier/__init__.py,python,0,verifier,,cmd/effect-boundary,migration-required,Bootstrap inventory - Python verifier
+P008,scripts/effect_boundary_verifier/classifications.py,python,0,verifier,,cmd/effect-boundary,migration-required,Bootstrap inventory - Python verifier
+P009,scripts/effect_boundary_verifier/patterns.py,python,0,verifier,,cmd/effect-boundary,migration-required,Bootstrap inventory - Python verifier
+P010,scripts/effect_boundary_verifier/scanner.py,python,0,verifier,,cmd/effect-boundary,migration-required,Bootstrap inventory - Python verifier
+P011,scripts/effect_boundary_verifier/self_test.py,python,0,verifier,,cmd/effect-boundary,migration-required,Bootstrap inventory - Python verifier
+P012,scripts/extract_kcov_line_coverage.py,python,0,verifier,,cmd/extract-kcov,migration-required,Bootstrap inventory - Python verifier
+P013,scripts/generate_opkg_release_metadata.py,python,0,packaging,,cmd/gen-opkg-metadata,migration-required,Bootstrap inventory - Python packaging
+P014,scripts/idle_staircase_analyzer.py,python,0,verifier,,cmd/idle-staircase,migration-required,Bootstrap inventory - Python verifier
+P015,scripts/idle_staircase_analyzer_cli.py,python,0,verifier,,cmd/idle-staircase,migration-required,Bootstrap inventory - Python verifier
+P016,scripts/idle_staircase_verifier/__init__.py,python,0,verifier,,cmd/idle-staircase,migration-required,Bootstrap inventory - Python verifier
+P017,scripts/idle_staircase_verifier/artifact_checks.py,python,0,verifier,,cmd/idle-staircase,migration-required,Bootstrap inventory - Python verifier
+P018,scripts/idle_staircase_verifier/correlation.py,python,0,verifier,,cmd/idle-staircase,migration-required,Bootstrap inventory - Python verifier
+P019,scripts/idle_staircase_verifier/native_event_tests.py,python,0,verifier,,cmd/idle-staircase,migration-required,Bootstrap inventory - Python verifier
+P020,scripts/idle_staircase_verifier/schema.py,python,0,verifier,,cmd/idle-staircase,migration-required,Bootstrap inventory - Python verifier
+P021,scripts/idle_staircase_verifier/self_tests.py,python,0,verifier,,cmd/idle-staircase,migration-required,Bootstrap inventory - Python verifier
+P022,scripts/idle_staircase_verifier/test_fixtures.py,python,0,verifier,,cmd/idle-staircase,migration-required,Bootstrap inventory - Python verifier
+P023,scripts/ipk_fixture_builders.py,python,0,packaging,,cmd/ipk-fixtures,migration-required,Bootstrap inventory - Python packaging
+P024,scripts/ipk_fixture_mutators.py,python,0,packaging,,cmd/ipk-fixtures,migration-required,Bootstrap inventory - Python packaging
+P025,scripts/ipk_fixtures.py,python,0,packaging,,cmd/ipk-fixtures,migration-required,Bootstrap inventory - Python packaging
+P026,scripts/ipk_tar_builder.py,python,0,packaging,,cmd/ipk-tar,migration-required,Bootstrap inventory - Python packaging
+P027,scripts/ipk_verifier.py,python,0,verifier,,cmd/ipk-verifier,migration-required,Bootstrap inventory - Python verifier
+P028,scripts/kcov_parsers.py,python,0,verifier,,cmd/kcov-parsers,migration-required,Bootstrap inventory - Python verifier
+P029,scripts/lab_memory_attribution_matrix.py,python,0,lab-orchestration,lab-memory-attribution-matrix,cmd/memory-lab,migration-required,Bootstrap inventory - Python lab
+P030,scripts/lab_runner/__init__.py,python,0,lab-orchestration,,cmd/lab-runner,migration-required,Bootstrap inventory - Python lab
+P031,scripts/lab_runner/analyzer.py,python,0,lab-orchestration,,cmd/lab-runner,migration-required,Bootstrap inventory - Python lab
+P032,scripts/lab_runner/artifacts.py,python,0,lab-orchestration,,cmd/lab-runner,migration-required,Bootstrap inventory - Python lab
+P033,scripts/lab_runner/config.py,python,0,lab-orchestration,,cmd/lab-runner,migration-required,Bootstrap inventory - Python lab
+P034,scripts/lab_runner/loop.py,python,0,lab-orchestration,,cmd/lab-runner,migration-required,Bootstrap inventory - Python lab
+P035,scripts/lab_runner/main.py,python,0,lab-orchestration,,cmd/lab-runner,migration-required,Bootstrap inventory - Python lab
+P036,scripts/lab_runner/proc.py,python,0,lab-orchestration,,cmd/lab-runner,migration-required,Bootstrap inventory - Python lab
+P037,scripts/lab_runner/self_tests.py,python,0,lab-orchestration,,cmd/lab-runner,migration-required,Bootstrap inventory - Python lab
+P038,scripts/lab_runner/tovarisch.py,python,0,lab-orchestration,,cmd/lab-runner,migration-required,Bootstrap inventory - Python lab
+P039,scripts/lab_runner/validation.py,python,0,lab-orchestration,,cmd/lab-runner,migration-required,Bootstrap inventory - Python lab
+P040,scripts/lab_tovarisch_idle_memory.py,python,0,lab-orchestration,lab-tovarisch-idle-memory,cmd/memory-lab,migration-required,Bootstrap inventory - Python lab
+P041,scripts/memory_attribution_matrix/__init__.py,python,0,lab-orchestration,,cmd/memory-matrix,migration-required,Bootstrap inventory - Python lab
+P042,scripts/memory_attribution_matrix/artifacts.py,python,0,lab-orchestration,,cmd/memory-matrix,migration-required,Bootstrap inventory - Python lab
+P043,scripts/memory_attribution_matrix/main.py,python,0,lab-orchestration,,cmd/memory-matrix,migration-required,Bootstrap inventory - Python lab
+P044,scripts/memory_attribution_matrix/parsing.py,python,0,lab-orchestration,,cmd/memory-matrix,migration-required,Bootstrap inventory - Python lab
+P045,scripts/memory_attribution_matrix/runner.py,python,0,lab-orchestration,,cmd/memory-matrix,migration-required,Bootstrap inventory - Python lab
+P046,scripts/memory_attribution_matrix/self_tests.py,python,0,lab-orchestration,,cmd/memory-matrix,migration-required,Bootstrap inventory - Python lab
+P047,scripts/memory_attribution_matrix/validation.py,python,0,lab-orchestration,,cmd/memory-matrix,migration-required,Bootstrap inventory - Python lab
+P048,scripts/memory_attribution_matrix/variants.py,python,0,lab-orchestration,,cmd/memory-matrix,migration-required,Bootstrap inventory - Python lab
+P049,scripts/memory_attribution_matrix/verdict.py,python,0,lab-orchestration,,cmd/memory-matrix,migration-required,Bootstrap inventory - Python lab
+P050,scripts/memory_attribution_matrix_verifier/__init__.py,python,0,verifier,,cmd/memory-matrix-verifier,migration-required,Bootstrap inventory - Python verifier
+P051,scripts/memory_attribution_matrix_verifier/checks.py,python,0,verifier,,cmd/memory-matrix-verifier,migration-required,Bootstrap inventory - Python verifier
+P052,scripts/memory_attribution_matrix_verifier/fixtures.py,python,0,verifier,,cmd/memory-matrix-verifier,migration-required,Bootstrap inventory - Python verifier
+P053,scripts/memory_attribution_matrix_verifier/self_tests.py,python,0,verifier,,cmd/memory-matrix-verifier,migration-required,Bootstrap inventory - Python verifier
+P054,scripts/memory_attribution_matrix_verifier/verify.py,python,0,verifier,,cmd/memory-matrix-verifier,migration-required,Bootstrap inventory - Python verifier
+P055,scripts/tovarisch_status_rss_canary.py,python,0,verifier,tovarisch-status-rss-canary,cmd/rss-canary,migration-required,Bootstrap inventory - Python verifier
+P056,scripts/tovarisch_status_rss_canary_lib.py,python,0,verifier,,cmd/rss-canary,migration-required,Bootstrap inventory - Python verifier
+P057,scripts/tovarisch_test_base_fingerprint.py,python,0,verifier,tovarisch-test-base-fingerprint,cmd/test-fingerprint,migration-required,Bootstrap inventory - Python verifier
+P058,scripts/total_parser_verifier/__init__.py,python,0,verifier,,cmd/total-parser-verifier,migration-required,Bootstrap inventory - Python verifier
+P059,scripts/total_parser_verifier/classifications.py,python,0,verifier,,cmd/total-parser-verifier,migration-required,Bootstrap inventory - Python verifier
+P060,scripts/total_parser_verifier/patterns.py,python,0,verifier,,cmd/total-parser-verifier,migration-required,Bootstrap inventory - Python verifier
+P061,scripts/total_parser_verifier/scanner.py,python,0,verifier,,cmd/total-parser-verifier,migration-required,Bootstrap inventory - Python verifier
+P062,scripts/total_parser_verifier/scanner_accepted_pattern_tests.py,python,0,verifier,,cmd/total-parser-verifier,migration-required,Bootstrap inventory - Python verifier
+P063,scripts/total_parser_verifier/scanner_second_ring_tests.py,python,0,verifier,,cmd/total-parser-verifier,migration-required,Bootstrap inventory - Python verifier
+P064,scripts/total_parser_verifier/scanner_tests.py,python,0,verifier,,cmd/total-parser-verifier,migration-required,Bootstrap inventory - Python verifier
+P065,scripts/total_parser_verifier/self_test.py,python,0,verifier,,cmd/total-parser-verifier,migration-required,Bootstrap inventory - Python verifier
+P066,scripts/uvb76_artifact_secret_hygiene/__init__.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P067,scripts/uvb76_artifact_secret_hygiene/inventory.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P068,scripts/uvb76_artifact_secret_hygiene/main.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P069,scripts/uvb76_artifact_secret_hygiene/ownership.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P070,scripts/uvb76_artifact_secret_hygiene/registry_loader.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P071,scripts/uvb76_artifact_secret_hygiene/registry_validation.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P072,scripts/uvb76_artifact_secret_hygiene/rules.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P073,scripts/uvb76_artifact_secret_hygiene/scanner.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P074,scripts/uvb76_artifact_secret_hygiene/structured_scanner.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P075,scripts/uvb76_artifact_secret_hygiene/tests.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P076,scripts/uvb76_artifact_secret_hygiene/tests/__init__.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P077,scripts/uvb76_artifact_secret_hygiene/tests/bounds_tests.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P078,scripts/uvb76_artifact_secret_hygiene/tests/go_parser_tests.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P079,scripts/uvb76_artifact_secret_hygiene/tests/malformed_fixture_tests.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P080,scripts/uvb76_artifact_secret_hygiene/tests/mutation_tests.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P081,scripts/uvb76_artifact_secret_hygiene/tests/ownership_mutation_tests.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P082,scripts/uvb76_artifact_secret_hygiene/tests/ownership_tests.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P083,scripts/uvb76_artifact_secret_hygiene/tests/positive_tests.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P084,scripts/uvb76_artifact_secret_hygiene/tests/projection_tests.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P085,scripts/uvb76_artifact_secret_hygiene/tests/registry_tests.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P086,scripts/uvb76_artifact_secret_hygiene/tests/safety_tests.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P087,scripts/uvb76_artifact_secret_hygiene/tests/self_test.py,python,0,verifier,,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P088,scripts/uvb76_capture_state_contracts/__init__.py,python,0,verifier,hulk-uvb76-capture-gate,cmd/uvb76-capture-state,migration-required,Bootstrap inventory - Python verifier
+P089,scripts/uvb76_capture_state_contracts/check_makefile.py,python,0,verifier,,cmd/uvb76-capture-state,migration-required,Bootstrap inventory - Python verifier
+P090,scripts/uvb76_capture_state_contracts/constants.py,python,0,verifier,,cmd/uvb76-capture-state,migration-required,Bootstrap inventory - Python verifier
+P091,scripts/uvb76_capture_state_contracts/inventory.py,python,0,verifier,,cmd/uvb76-capture-state,migration-required,Bootstrap inventory - Python verifier
+P092,scripts/uvb76_capture_state_contracts/json_normalize.py,python,0,verifier,,cmd/uvb76-capture-state,migration-required,Bootstrap inventory - Python verifier
+P093,scripts/uvb76_capture_state_contracts/line_limits.py,python,0,verifier,,cmd/uvb76-capture-state,migration-required,Bootstrap inventory - Python verifier
+P094,scripts/uvb76_capture_state_contracts/reporting.py,python,0,verifier,,cmd/uvb76-capture-state,migration-required,Bootstrap inventory - Python verifier
+P095,scripts/uvb76_capture_state_contracts/runner.py,python,0,verifier,,cmd/uvb76-capture-state,migration-required,Bootstrap inventory - Python verifier
+P096,scripts/uvb76_capture_state_contracts/self_tests.py,python,0,verifier,,cmd/uvb76-capture-state,migration-required,Bootstrap inventory - Python verifier
+P097,scripts/uvb76_capture_state_contracts/skip_allowlist.py,python,0,verifier,,cmd/uvb76-capture-state,migration-required,Bootstrap inventory - Python verifier
+P098,scripts/uvb76_capture_state_contracts/status_contract.py,python,0,verifier,,cmd/uvb76-capture-state,migration-required,Bootstrap inventory - Python verifier
+P099,scripts/verify_cli_boundary_bypass.py,python,0,verifier,,cmd/verify-cli-boundary,migration-required,Bootstrap inventory - Python verifier
+P100,scripts/verify_cli_composition_inventory.py,python,0,verifier,,cmd/verify-cli-composition,migration-required,Bootstrap inventory - Python verifier
+P101,scripts/verify_cold_resume_checkpoints.py,python,0,verifier,,cmd/verify-cold-resume,migration-required,Bootstrap inventory - Python verifier
+P102,scripts/verify_cold_resume_checkpoints_fixtures.py,python,0,verifier,,cmd/verify-cold-resume,migration-required,Bootstrap inventory - Python verifier
+P103,scripts/verify_effect_boundaries.py,python,0,verifier,,cmd/verify-effect-boundaries,migration-required,Bootstrap inventory - Python verifier
+P104,scripts/verify_frontend_test_hygiene.py,python,0,verifier,,cmd/verify-frontend,migration-required,Bootstrap inventory - Python verifier
+P105,scripts/verify_idle_staircase_artifact.py,python,0,verifier,verify-idle-staircase-artifact,cmd/verify-idle-staircase,migration-required,Bootstrap inventory - Python verifier
+P106,scripts/verify_idle_staircase_native_heartbeat_smoke.py,python,0,verifier,,cmd/verify-idle-staircase,migration-required,Bootstrap inventory - Python verifier
+P107,scripts/verify_linux_read_boundary_bypass.py,python,0,verifier,,cmd/verify-read-boundary,migration-required,Bootstrap inventory - Python verifier
+P108,scripts/verify_manifesto_axiom_coverage.py,python,0,verifier,,cmd/verify-manifesto,migration-required,Bootstrap inventory - Python verifier
+P109,scripts/verify_memory_attribution_matrix.py,python,0,verifier,verify-memory-attribution-matrix,cmd/verify-memory-matrix,migration-required,Bootstrap inventory - Python verifier
+P110,scripts/verify_memory_budgets.py,python,0,verifier,verify-memory-budgets,cmd/verify-memory-budgets,migration-required,Bootstrap inventory - Python verifier
+P111,scripts/verify_memory_budgets_ci.py,python,0,verifier,,cmd/verify-memory-budgets,migration-required,Bootstrap inventory - Python verifier
+P112,scripts/verify_memory_budgets_ci_tests.py,python,0,verifier,,cmd/verify-memory-budgets,migration-required,Bootstrap inventory - Python verifier
+P113,scripts/verify_memory_budgets_leak_slope_ci.py,python,0,verifier,,cmd/verify-memory-budgets,migration-required,Bootstrap inventory - Python verifier
+P114,scripts/verify_memory_budgets_leak_slope_helpers.py,python,0,verifier,,cmd/verify-memory-budgets,migration-required,Bootstrap inventory - Python verifier
+P115,scripts/verify_memory_budgets_leak_slope_long_window.py,python,0,verifier,,cmd/verify-memory-budgets,migration-required,Bootstrap inventory - Python verifier
+P116,scripts/verify_memory_budgets_leak_slope_long_window_tests.py,python,0,verifier,,cmd/verify-memory-budgets,migration-required,Bootstrap inventory - Python verifier
+P117,scripts/verify_memory_lab_artifact.py,python,0,verifier,verify-memory-lab-artifacts,cmd/verify-memory-lab,migration-required,Bootstrap inventory - Python verifier
+P118,scripts/verify_memory_lab_artifact_tests.py,python,0,verifier,,cmd/verify-memory-lab,migration-required,Bootstrap inventory - Python verifier
+P119,scripts/verify_memory_lab_config.py,python,0,verifier,verify-memory-lab-config,cmd/verify-memory-lab,migration-required,Bootstrap inventory - Python verifier
+P120,scripts/verify_memory_matrix_workflow_shape.py,python,0,verifier,,cmd/verify-memory-matrix,migration-required,Bootstrap inventory - Python verifier
+P121,scripts/verify_memory_ownership_inventory.py,python,0,verifier,,cmd/verify-memory-ownership,migration-required,Bootstrap inventory - Python verifier
+P122,scripts/verify_no_doconly_regression_tests.py,python,0,verifier,,cmd/verify-no-doconly,migration-required,Bootstrap inventory - Python verifier
+P123,scripts/verify_opkg_package.py,python,0,verifier,verify-opkg-package,cmd/verify-opkg,migration-required,Bootstrap inventory - Python verifier
+P124,scripts/verify_repo_local_memory.py,python,0,verifier,,cmd/verify-repo-memory,migration-required,Bootstrap inventory - Python verifier
+P125,scripts/verify_repo_local_memory_fixtures.py,python,0,verifier,,cmd/verify-repo-memory,migration-required,Bootstrap inventory - Python verifier
+P126,scripts/verify_shell_containment.py,python,0,verifier,,cmd/verify-shell-containment,migration-required,Bootstrap inventory - Python verifier
+P127,scripts/verify_shell_containment/__init__.py,python,0,verifier,,cmd/verify-shell-containment,migration-required,Bootstrap inventory - Python verifier
+P128,scripts/verify_shell_containment/cli.py,python,0,verifier,,cmd/verify-shell-containment,migration-required,Bootstrap inventory - Python verifier
+P129,scripts/verify_shell_containment/loader.py,python,0,verifier,,cmd/verify-shell-containment,migration-required,Bootstrap inventory - Python verifier
+P130,scripts/verify_shell_containment/model.py,python,0,verifier,,cmd/verify-shell-containment,migration-required,Bootstrap inventory - Python verifier
+P131,scripts/verify_shell_containment/rules.py,python,0,verifier,,cmd/verify-shell-containment,migration-required,Bootstrap inventory - Python verifier
+P132,scripts/verify_shell_containment/selftest.py,python,0,verifier,,cmd/verify-shell-containment,migration-required,Bootstrap inventory - Python verifier
+P133,scripts/verify_state_transition_register.py,python,0,verifier,,cmd/verify-state-transition,migration-required,Bootstrap inventory - Python verifier
+P134,scripts/verify_tovarisch_idle_heartbeat_smoke_workflow.py,python,0,verifier,,cmd/verify-idle-heartbeat,migration-required,Bootstrap inventory - Python verifier
+P135,scripts/verify_tovarisch_status_contract.py,python,0,verifier,verify-status-contract,cmd/verify-status-contract,migration-required,Bootstrap inventory - Python verifier
+P136,scripts/verify_tovarisch_status_contract_test.py,python,0,verifier,,cmd/verify-status-contract,migration-required,Bootstrap inventory - Python verifier
+P137,scripts/verify_uvb76_artifact_secret_hygiene.py,python,0,verifier,hulk-uvb76-artifact-secret-gate,cmd/uvb76-secret-hygiene,migration-required,Bootstrap inventory - Python verifier
+P138,scripts/verify_uvb76_capture_helpers.py,python,0,verifier,,cmd/uvb76-capture-helpers,migration-required,Bootstrap inventory - Python verifier
+P139,scripts/verify_uvb76_capture_network_diag_test.py,python,0,verifier,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - Python verifier
+P140,scripts/verify_uvb76_capture_packet_save_test.py,python,0,verifier,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - Python verifier
+P141,scripts/verify_uvb76_capture_row_normalization_test.py,python,0,verifier,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - Python verifier
+P142,scripts/verify_uvb76_capture_state_contracts.py,python,0,verifier,hulk-uvb76-capture-gate,cmd/uvb76-capture-state,migration-required,Bootstrap inventory - Python verifier
+P143,scripts/verify_uvb76_capture_status_test.py,python,0,verifier,,cmd/uvb76-capture-netns-lab,migration-required,Bootstrap inventory - Python verifier
+P144,scripts/verify_uvb76_latency_series_contracts.py,python,0,verifier,hulk-uvb76-latency-gate,cmd/uvb76-latency,migration-required,Bootstrap inventory - Python verifier
+P145,scripts/verify_uvb76_memory_attribution_analysis.py,python,0,verifier,,cmd/uvb76-memory,migration-required,Bootstrap inventory - Python verifier
+P146,scripts/verify_uvb76_memory_attribution_artifacts.py,python,0,verifier,verify-uvb76-memory-attribution,cmd/uvb76-memory,migration-required,Bootstrap inventory - Python verifier
+P147,scripts/verify_uvb76_memory_attribution_artifacts_selftest.py,python,0,verifier,,cmd/uvb76-memory,migration-required,Bootstrap inventory - Python verifier
+P148,scripts/verify_uvb76_reachability_contracts.py,python,0,verifier,hulk-uvb76-reachability-gate,cmd/uvb76-reachability,migration-required,Bootstrap inventory - Python verifier
+P149,scripts/verify_uvb76_reachability_contracts_selftest.py,python,0,verifier,,cmd/uvb76-reachability,migration-required,Bootstrap inventory - Python verifier
+P150,scripts/verify_uvb76_runtime_contracts.py,python,0,verifier,hulk-uvb76-gate,cmd/uvb76-runtime,migration-required,Bootstrap inventory - Python verifier
+P151,scripts/verify_uvb76_runtime_contracts_selftest.py,python,0,verifier,,cmd/uvb76-runtime,migration-required,Bootstrap inventory - Python verifier
+P152,scripts/verify_wg_netlink_lab_artifact.py,python,0,verifier,,cmd/verify-wg-netlink,migration-required,Bootstrap inventory - Python verifier
+P153,scripts/verify_workflow_release_safety.py,python,0,verifier,,cmd/verify-release,migration-required,Bootstrap inventory - Python verifier
+P154,scripts/verify_workflow_release_safety_fixtures.py,python,0,verifier,,cmd/verify-release,migration-required,Bootstrap inventory - Python verifier
+P155,scripts/verify_total_parsers.py,python,0,verifier,,cmd/verify-total-parsers,migration-required,Bootstrap inventory - Python verifier
+# === MISSING SHELL SCRIPTS ===
+S081,scripts/lab_bgp_bfd_netns.sh,shell,200,lab-orchestration,lab-bgp-bfd,cmd/bgp-bfd-netns-lab,migration-required,Bootstrap inventory - missing from initial inventory
+S082,scripts/lab_bgp_bfd_netns_diag.sh,shell,90,lab-orchestration,,cmd/bgp-bfd-netns-lab,migration-required,Bootstrap inventory - missing from initial inventory
+# === TEST FILES (Python - migration-required) ===
+T001,tests/test_tovarisch_status_rss_canary_cli.py,python,0,test,,cmd/rss-canary,migration-required,Bootstrap inventory - Python test
+T002,tests/test_tovarisch_status_rss_canary_http.py,python,0,test,,cmd/rss-canary,migration-required,Bootstrap inventory - Python test
+T003,tests/test_tovarisch_status_rss_canary_memory.py,python,0,test,,cmd/rss-canary,migration-required,Bootstrap inventory - Python test
+T004,tests/test_tovarisch_status_rss_canary_output.py,python,0,test,,cmd/rss-canary,migration-required,Bootstrap inventory - Python test
+T005,tests/test_tovarisch_status_rss_canary_run.py,python,0,test,,cmd/rss-canary,migration-required,Bootstrap inventory - Python test
+T006,tests/test_tovarisch_status_rss_canary_run_contract.py,python,0,test,,cmd/rss-canary,migration-required,Bootstrap inventory - Python test
+T007,tests/test_tovarisch_test_base_fingerprint.py,python,0,test,,cmd/test-fingerprint,migration-required,Bootstrap inventory - Python test
+T008,tests/test_verify_memory_ownership_inventory.py,python,0,test,,cmd/verify-memory-ownership,migration-required,Bootstrap inventory - Python test
+T009,tests/test_verify_no_doconly_regression_tests.py,python,0,test,,cmd/verify-no-doconly,migration-required,Bootstrap inventory - Python test
+T010,tests/test_verify_state_transition_register.py,python,0,test,,cmd/verify-state-transition,migration-required,Bootstrap inventory - Python test
+T011,tests/tovarisch_status_rss_canary_test_support.py,python,0,test,,cmd/rss-canary,migration-required,Bootstrap inventory - Python test
+# === UVB76 SCRIPTS ===
+U001,uvb76/scripts/verify_uvb76_vet.sh,shell,0,verifier,,cmd/verify-uvb76,migration-required,Bootstrap inventory - thin wrapper
+U002,uvb76/scripts/verify_web_embed.sh,shell,0,verifier,uvb76-verify-embed,cmd/verify-web-embed,migration-required,Bootstrap inventory - thin wrapper

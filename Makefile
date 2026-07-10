@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate memory-lab memory-lab-test lab-tovarisch-memory lab-uvb76-memory lab-uvb76-memory-attribution verify-uvb76-memory-attribution hulk-uvb76-gate tovarisch-test-base-fingerprint
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate memory-lab memory-lab-test lab-tovarisch-memory lab-uvb76-memory lab-uvb76-memory-attribution verify-uvb76-memory-attribution hulk-uvb76-gate tovarisch-test-base-fingerprint verify-script-doctrine
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 87
@@ -642,3 +642,16 @@ hulk-uvb76-artifact-secret-gate:
 	@echo "=== Scanning Artifact Surfaces ==="
 	@python3 scripts/verify_uvb76_artifact_secret_hygiene.py
 	@echo "=== UVB-76 Hulk Gate: Artifact Secret Hygiene PASSED ==="
+
+# === Script Doctrine Verification ===
+# ACT-UVB76-GO-TOOLING-DOCTRINE01
+# Verifies repository tooling follows Go-first doctrine:
+# - No Python files
+# - No Python invocations in Makefiles or shell
+# - Shell scripts within LOC limits
+# - All scripts in inventory
+# - No risky shell patterns
+
+verify-script-doctrine:
+	@echo "=== Script Doctrine Verification ==="
+	go run ./cmd/verify-script-doctrine --bootstrap
