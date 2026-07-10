@@ -241,7 +241,7 @@ func BuildVerdict(classification Classification, in ClassifierInput) Verdict {
 	switch classification {
 	case ClassificationGoroutineGrowth:
 		summary = "goroutine count grew materially"
-		reasons = []string{"goroutine_count_delta", formatDelta("goroutines", goroutineDelta)}
+		reasons = []string{"goroutine_count_delta", formatCountDelta("goroutines", goroutineDelta)}
 	case ClassificationGoHeapRetention:
 		summary = "suspected Go heap retention"
 		reasons = []string{
@@ -261,7 +261,7 @@ func BuildVerdict(classification Classification, in ClassifierInput) Verdict {
 		reasons = []string{
 			formatDelta("RSS", rssDelta),
 			formatDelta("heap_inuse", heapDelta),
-			formatDelta("goroutines", goroutineDelta),
+			formatCountDelta("goroutines", goroutineDelta),
 		}
 	case ClassificationInconclusive:
 		summary = "insufficient data for classification"
@@ -283,12 +283,21 @@ func BuildVerdict(classification Classification, in ClassifierInput) Verdict {
 	}
 }
 
-// formatDelta formats an int64 delta for logging.
+// formatDelta formats an int64 delta in bytes for logging.
 func formatDelta(label string, delta int64) string {
 	if delta >= 0 {
 		return label + "_increase_" + formatBytes(delta)
 	}
 	return label + "_decrease_" + formatBytes(-delta)
+}
+
+// formatCountDelta formats an int64 delta as a count (no unit suffix).
+// Goroutines are counts, not bytes, so they use this function.
+func formatCountDelta(label string, delta int64) string {
+	if delta >= 0 {
+		return label + "_delta_" + formatInt(delta)
+	}
+	return label + "_delta_" + formatInt(delta) // negative delta already formatted in formatInt
 }
 
 // formatBytes formats bytes for human-readable output.
