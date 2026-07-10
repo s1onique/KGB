@@ -1,0 +1,129 @@
+# uvb76-memleak-pprof-lab.yml — GitHub Actions workflow for UVB-76 pprof memory leak lab
+#
+# Runs localhost pprof memory leak analysis for UVB-76/tovarisch.
+# Requires Linux runner for /proc access.
+#
+# Manual trigger (workflow_dispatch) with duration input:
+#   - 1m smoke: default, fast verification
+#   - 10m full: complete leak analysis
+#
+# Scheduled weekly smoke at 1m — NOT a PR gate.
+#
+# Artifacts uploaded for review; leak classification does not fail CI; malformed/missing artifacts do fail CI.
+#
+# Reference: kgb://epics/LAB01C
+
+name: UVB-76 Memleak pprof Lab
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: "Lab duration (1m smoke or 10m full)"
+        required: true
+        default: "1m"
+        type: choice
+        options:
+          - "1m"
+          - "10m"
+  schedule:
+    # Weekly Sunday smoke at 02:17 UTC — short 1m run only
+    - cron: "17 2 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uvb76-memleak-pprof-lab-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  localhost-pprof-lab:
+    name: Localhost pprof lab
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: uvb76/go.mod
+          cache: true
+          cache-dependency-path: uvb76/go.sum
+
+      - name: Build UVB-76 binary
+        run: |
+          cd uvb76
+          make build
+
+      - name: Build memory-lab collector
+        run: |
+          cd uvb76
+          make memory-lab-build
+
+      - name: Build pprof memory lab
+        run: |
+          cd uvb76
+          make lab-uvb76-memleak-pprof-build
+
+      - name: Build pprof memory lab verifier
+        run: |
+          cd uvb76
+          make lab-uvb76-memleak-pprof-verify-build
+
+      - name: Run pprof memory leak lab
+        env:
+          DURATION: ${{ github.event.inputs.duration || '1m' }}
+          ARTIFACT_DIR: artifacts/uvb76-memleak-pprof-lab-ci
+        run: |
+          cd uvb76
+          make lab-uvb76-memleak-pprof DURATION="${DURATION}" ARTIFACT_DIR="${ARTIFACT_DIR}"
+
+      - name: Verify lab artifacts
+        env:
+          ARTIFACT_DIR: artifacts/uvb76-memleak-pprof-lab-ci
+        run: |
+          cd uvb76
+          make verify-uvb76-memleak-pprof-artifacts ARTIFACT_DIR="${ARTIFACT_DIR}"
+
+      - name: Print result summary
+        if: always()
+        env:
+          ARTIFACT_DIR: artifacts/uvb76-memleak-pprof-lab-ci
+        run: |
+          cd uvb76
+          echo "=== result.json ==="
+          cat "${ARTIFACT_DIR}/result.json" 2>/dev/null || echo "(not found)"
+          echo
+          echo "=== verdict.json ==="
+          cat "${ARTIFACT_DIR}/verdict.json" 2>/dev/null || echo "(not found)"
+
+      - name: Print heap diff inuse_space (first 30 lines)
+        if: always()
+        env:
+          ARTIFACT_DIR: artifacts/uvb76-memleak-pprof-lab-ci
+        run: |
+          cd uvb76
+          echo "=== heap-diff-inuse-space.txt (first 30 lines) ==="
+          sed -n '1,30p' "${ARTIFACT_DIR}/heap-diff-inuse-space.txt" 2>/dev/null || echo "(not found)"
+
+      - name: Print heap diff inuse_objects (first 30 lines)
+        if: always()
+        env:
+          ARTIFACT_DIR: artifacts/uvb76-memleak-pprof-lab-ci
+        run: |
+          cd uvb76
+          echo "=== heap-diff-inuse-objects.txt (first 30 lines) ==="
+          sed -n '1,30p' "${ARTIFACT_DIR}/heap-diff-inuse-objects.txt" 2>/dev/null || echo "(not found)"
+
+      - name: Upload lab artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uvb76-memleak-pprof-lab-${{ github.run_id }}
+          path: uvb76/artifacts/uvb76-memleak-pprof-lab-ci/**
+          retention-days: 7
+          if-no-files-found: ignore
