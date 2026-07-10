@@ -5,19 +5,22 @@
 // to capture heap profiles, RSS samples, and pprof diff reports.
 //
 // Artifact directory structure:
-//   - uvb76.log           - UVB-76 process output
-//   - tovarisch.log       - fake-tovarisch output (if used)
+//   - startup_evidence.json  - launch metadata (timestamp, PID, ports, durations)
+//   - exit.json             - crash evidence if target exits unexpectedly
+//   - uvb76.log             - UVB-76 process output
+//   - tovarisch.log         - fake-tovarisch output (if used)
+//   - uvb76.pid             - PID file
 //   - uvb76-lab-config.json - generated lab configuration
-//   - heap-t000.pb.gz     - baseline heap profile
-//   - heap-t600.pb.gz     - final heap profile (for 10m run)
-//   - allocs-t000.pb.gz   - baseline allocs profile
-//   - allocs-t600.pb.gz  - final allocs profile
-//   - goroutine-t000.txt  - baseline goroutine dump
-//   - goroutine-t600.txt  - final goroutine dump
-//   - rss-series.csv      - RSS/VSZ/threads/fd over time
+//   - heap-t000.pb.gz       - baseline heap profile
+//   - heap-t600.pb.gz       - final heap profile (for 10m run)
+//   - allocs-t000.pb.gz     - baseline allocs profile
+//   - allocs-t600.pb.gz     - final allocs profile
+//   - goroutine-t000.txt    - baseline goroutine dump
+//   - goroutine-t600.txt    - final goroutine dump
+//   - rss-series.csv        - RSS/VSZ/threads/fd over time
 //   - goroutine-count-series.csv - goroutine counts over time
-//   - manifest.json       - lab run metadata
-//   - verdict.json        - classification verdict
+//   - manifest.json         - lab run metadata
+//   - verdict.json          - classification verdict
 //   - heap-diff-inuse-space.txt  - pprof diff (inuse_space)
 //   - heap-diff-inuse-objects.txt - pprof diff (inuse_objects)
 //   - allocs-final-alloc-space.txt - final allocs top
@@ -83,6 +86,7 @@ func main() {
 	}
 	log.Printf("Generated lab config: %s", configFile)
 
+	// Run the lab with full lifecycle management
 	result := runLab()
 
 	// Write result
@@ -102,7 +106,51 @@ func main() {
 	log.Printf("Verdict valid: %v", result.VerdictValid)
 	log.Printf("Artifact dir: %s", artifactDir)
 
+	// Print any errors that occurred
+	if len(result.Errors) > 0 {
+		log.Printf("")
+		log.Printf("=== Errors ===")
+		for _, err := range result.Errors {
+			log.Printf("  - %s", err)
+		}
+	}
+
+	// Provide diagnostic hints based on failures
 	if !result.OK {
-		log.Fatalf("Lab failed")
+		log.Printf("")
+		log.Printf("=== Diagnostic Hints ===")
+		if !result.UVB76Started {
+			log.Printf("  - Check startup_evidence.json for launch details")
+			log.Printf("  - Check uvb76.log for stderr output")
+			log.Printf("  - Verify UVB-76 binary exists and is executable")
+		}
+		if !result.PProfReachable {
+			log.Printf("  - Check if pprof port (%s) is already in use", pprofPort)
+			log.Printf("  - Check uvb76.log for 'address already in use' errors")
+			log.Printf("  - Verify pprof is enabled in config")
+		}
+		if !result.TovarischReachable {
+			log.Printf("  - Check if tovarisch port (%s) is accessible", tovarischPort)
+			log.Printf("  - Verify tovarisch is running and /status endpoint responds")
+		}
+		if !result.CollectorSucceeded {
+			log.Printf("  - Check if UVB-76 exited during collection")
+			log.Printf("  - Check exit.json for crash evidence")
+			log.Printf("  - Verify collector binary exists")
+		}
+		if !result.PProfDiffSucceeded {
+			log.Printf("  - Check if heap profiles were captured")
+			log.Printf("  - Verify 'go tool pprof' is available")
+		}
+		if !result.ManifestValid {
+			log.Printf("  - Check manifest.json schema version")
+		}
+		if !result.VerdictValid {
+			log.Printf("  - Check verdict.json was generated")
+		}
+	}
+
+	if !result.OK {
+		os.Exit(1)
 	}
 }
