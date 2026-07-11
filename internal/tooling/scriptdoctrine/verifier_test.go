@@ -138,17 +138,21 @@ func TestVerifierDetectsStaleBaselinePath(t *testing.T) {
 	}
 }
 
+// TestVerifierFailsClosedOnReadError uses a directory at the baseline
+// path so that stat succeeds but reading fails with a non-IsNotExist
+// error. The verifier must emit exactly one internal-error diagnostic
+// for that path - not stale-bootstrap-baseline (which is for IsNotExist)
+// and not "no diagnostic".
 func TestVerifierFailsClosedOnReadError(t *testing.T) {
 	tmpDir := t.TempDir()
+	// Create a directory at the path the baseline references. Stat
+	// will report it as a directory (mode.IsRegular() == false), so the
+	// verifier emits an internal-error - not a stale-baseline.
 	badPath := "scripts/bad.sh"
 	badFull := filepath.Join(tmpDir, badPath)
-	if err := os.MkdirAll(filepath.Dir(badFull), 0755); err != nil {
+	if err := os.MkdirAll(badFull, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(badFull, []byte("echo hi\n"), 0000); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(badFull, 0644) })
 
 	verifier := NewVerifier(tmpDir, true)
 	verifier.SetBaseline(map[string]*BaselineEntry{
@@ -167,15 +171,7 @@ func TestVerifierFailsClosedOnReadError(t *testing.T) {
 		}
 	}
 	if !sawInternal {
-		anyDiag := false
-		for _, d := range diags {
-			if d.Path == badPath {
-				anyDiag = true
-			}
-		}
-		if !anyDiag {
-			t.Errorf("expected a diagnostic for unreadable baseline entry, got none (all: %v)", diags)
-		}
+		t.Errorf("expected exactly one internal-error diagnostic for %s, got: %v", badPath, diags)
 	}
 }
 
@@ -205,7 +201,7 @@ func TestVerifierDetectsExtensionlessPythonShebang(t *testing.T) {
 }
 
 // =============================================================================
-// Mutation test: one added invocation = exactly one violation
+// R6 mutation tests: one added invocation = exactly one violation
 // =============================================================================
 
 func TestMutationExactlyOneAddedInvocation(t *testing.T) {
@@ -258,6 +254,108 @@ func TestMutationExactlyOneAddedInvocation(t *testing.T) {
 				t.Errorf("diagnostic msg lacks expected numbers: %q", d.Msg)
 			}
 		}
+	}
+}
+
+// TestMutationSemicolonAddedInvocation is the R6 regression case: a
+// second invocation joined with `;` must register as a second site.
+func TestMutationSemicolonAddedInvocation(t *testing.T) {
+	tmpDir := t.TempDir()
+	scriptPath := "scripts/mut_semi.sh"
+	scriptFull := filepath.Join(tmpDir, scriptPath)
+	if err := os.MkdirAll(filepath.Dir(scriptFull), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	initial := "#!/bin/bash\nset -euo pipefail\npython3 first.py\necho done\n"
+	if err := os.WriteFile(scriptFull, []byte(initial), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	verifier := NewVerifier(tmpDir, true)
+	verifier.SetInventory(map[string]*InventoryEntry{
+		scriptPath: {
+			ID: "S001", Path: scriptPath, Language: "shell",
+			Role: "verifier", Status: "migration-required",
+		},
+	})
+	verifier.SetBaseline(map[string]*BaselineEntry{
+		scriptPath: {
+			Path:                  scriptPath,
+			BaselineLOC:           0,
+			PythonInvocationCount: 1,
+		},
+	})
+
+	mutated := "#!/bin/bash\nset -euo pipefail\npython3 first.py; python3 second.py\necho done\n"
+	if err := os.WriteFile(scriptFull, []byte(mutated), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	diags := verifier.checkBaselineEnforcement()
+	count := 0
+	for _, d := range diags {
+		if d.Check == "baseline-python-invocation-changed" && d.Path == scriptPath {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly one baseline-python-invocation-changed after ; mutation, got %d (all: %v)", count, diags)
+	}
+	for _, d := range diags {
+		if d.Check == "baseline-python-invocation-changed" && d.Path == scriptPath {
+			if !strings.Contains(d.Msg, "baseline=1") || !strings.Contains(d.Msg, "current=2") {
+				t.Errorf("diagnostic msg lacks expected numbers: %q", d.Msg)
+			}
+		}
+	}
+}
+
+// TestMutationAfterOutputCommand is the R6 regression case for `echo ok;
+// python3 added.py` - the output command must not suppress the python
+// site that follows.
+func TestMutationAfterOutputCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	scriptPath := "scripts/mut_echo.sh"
+	scriptFull := filepath.Join(tmpDir, scriptPath)
+	if err := os.MkdirAll(filepath.Dir(scriptFull), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	initial := "#!/bin/bash\nset -euo pipefail\necho hello\necho done\n"
+	if err := os.WriteFile(scriptFull, []byte(initial), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	verifier := NewVerifier(tmpDir, true)
+	verifier.SetInventory(map[string]*InventoryEntry{
+		scriptPath: {
+			ID: "S001", Path: scriptPath, Language: "shell",
+			Role: "verifier", Status: "migration-required",
+		},
+	})
+	verifier.SetBaseline(map[string]*BaselineEntry{
+		scriptPath: {
+			Path:                  scriptPath,
+			BaselineLOC:           0,
+			PythonInvocationCount: 0,
+		},
+	})
+
+	mutated := "#!/bin/bash\nset -euo pipefail\necho hello\npython3 added.py\necho done\n"
+	if err := os.WriteFile(scriptFull, []byte(mutated), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	diags := verifier.checkBaselineEnforcement()
+	count := 0
+	for _, d := range diags {
+		if d.Check == "baseline-python-invocation-changed" && d.Path == scriptPath {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly one baseline-python-invocation-changed after python added to echo file, got %d (all: %v)", count, diags)
 	}
 }
 

@@ -69,75 +69,68 @@ func CountLogicalLOC(path string) int {
 var pythonShebangRx = regexp.MustCompile(`^#!.*\b(?:python|python3|pip|pytest)\b`)
 
 // HasPythonShebang reports whether the file at path starts with a Python
-// shebang. Returns false on any read error.
-func HasPythonShebang(path string) bool {
+// shebang. The error return is mandatory: a non-nil error means the file
+// could not be read (because it does not exist, is a directory, or is
+// otherwise inaccessible) and the caller must NOT treat that as "not a
+// Python shebang". Fail-closed contract.
+func HasPythonShebang(path string) (bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return false
+		return false, err
 	}
 	defer f.Close()
 
 	buf := make([]byte, 256)
-	n, _ := f.Read(buf)
-	if n == 0 {
-		return false
+	n, err := f.Read(buf)
+	// EOF on a zero-byte read is fine - the file is empty, no shebang.
+	if err != nil && n == 0 {
+		if err == io.EOF {
+			return false, nil
+		}
+		return false, err
 	}
-	return pythonShebangRx.Match(buf[:n])
+	if n == 0 {
+		return false, nil
+	}
+	return pythonShebangRx.Match(buf[:n]), nil
 }
 
-// pureOutputCmdRx matches lines whose first command word is a known
-// non-executing output command. Such lines print/transform text and only
-// reference Python as data, not as an executable.
-var pureOutputCmdRx = regexp.MustCompile(`^(echo|printf|cat|sed|awk|grep|dd|cut|tr|head|tail)\b`)
-
 // variableAssignRx matches shell / Makefile variable assignments at line
-// start (identifier followed by =). These assign values; they do not run.
-// Lines whose value is a command substitution ($(...), ${...}, or backticks)
-// are NOT variable assignments - they execute - and must be excluded here.
+// start (identifier followed by =).
 var variableAssignRx = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*\s*=`)
 
-// hasCmdSubstitutionRx detects a command substitution anywhere in the line.
-var hasCmdSubstitutionRx = regexp.MustCompile(`\$\(|\$\{|` + "`" + `.*` + "`" + `|` + "`")
+// yamlRunKeyRx matches the leading "run:" key in YAML GitHub Actions
+// steps. The "run" keyword is not a shell command; stripping it lets the
+// rest of the line be parsed as a normal command list.
+var yamlRunKeyRx = regexp.MustCompile(`(?m)^\s*run:\s*`)
 
-// pythonInvocationLineRx matches a Python invocation in command position.
-// The leading alternation enforces a real command boundary: start of line,
-// whitespace, semicolon, logical operators, pipe, command substitution, or
-// a slash (used by absolute paths like /usr/bin/python3).
-// An optional prefix allows for /usr/bin/env, sudo, env, exec, or command.
-var pythonInvocationLineRx = regexp.MustCompile(
-	`(?:^|[/\s;&|]+|(?:\$\(|\$\{|` + "`" + `))` +
-		`(?:/usr/bin/env\s+)?` +
-		`(?:sudo\s+|env\s+|exec\s+|command\s+)?` +
-		`(?:python\d?(?:\.\d+)?|pip\d?|pytest)\b`,
-)
-
-// CountPythonInvocations returns the number of unique Python command sites in
-// data. A "command site" is one non-comment, non-output-command,
-// non-variable-assignment line that actually invokes Python. Each line
-// contributes at most one count, so multiple patterns matching the same line
-// never inflate the total.
+// CountPythonInvocations returns the number of executable Python command
+// sites in data. The metric counts command sites (not lines) - each
+// distinct command node after parsing command lists, command
+// substitutions, and pipelines counts independently.
 //
-// Line categories that contribute 0:
-//   - comment-only lines (trimmed line starts with #, after stripping any
-//     inline trailing comment that is not inside single or double quotes)
-//   - lines whose first command word is echo/printf/cat/sed/awk/grep/dd/cut/tr
-//     (Python appears only as printed data, not as an executable)
-//   - pure variable assignments (VAR=value) where Python appears only as a
-//     value, never inside a command substitution
-//   - blank lines
+// Before per-line parsing, any leading `run:` key in YAML workflow files
+// is stripped so the rest of the line is treated as a normal shell
+// command.
 //
-// The first line is treated specially: if it is a Python shebang it counts
-// as exactly one invocation. The body of the script is then assumed to be
-// Python source (not shell), so further Python token matches in subsequent
-// lines are NOT counted as invocations - they would be Python language
-// syntax, not shell commands invoking Python.
+// Comments (after stripping inline trailing comments that are not inside
+// quotes) do not count. Pure variable assignments without command
+// substitution do not count. Output commands such as `echo python3 ...`
+// do not count because Python appears as data, not as the command word.
+// `command -v python3` and `command --version` do not count because they
+// are lookups, not invocations.
 //
-// Returns -1 if data is nil.
+// Returns:
+//
+//	-1 if data is nil.
+//	N >= 0 otherwise.
 func CountPythonInvocations(data []byte) int {
 	if data == nil {
 		return -1
 	}
-	return countPythonInvocations(bytes.NewReader(data))
+	// Strip YAML run: keys so the value is treated as a shell command.
+	stripped := yamlRunKeyRx.ReplaceAll(data, nil)
+	return countPythonInvocationsFromReader(bytes.NewReader(stripped))
 }
 
 // CountPythonInvocationsFromFile is identical to CountPythonInvocations but
@@ -148,10 +141,14 @@ func CountPythonInvocationsFromFile(path string) int {
 		return -1
 	}
 	defer f.Close()
-	return countPythonInvocations(f)
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return -1
+	}
+	return CountPythonInvocations(data)
 }
 
-func countPythonInvocations(r io.Reader) int {
+func countPythonInvocationsFromReader(r io.Reader) int {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 64*1024)
 	count := 0
@@ -164,53 +161,18 @@ func countPythonInvocations(r io.Reader) int {
 			if pythonShebangRx.MatchString(line) {
 				count++
 				sawPythonShebang = true
-			} else if isExecutablePythonLine(line) {
-				count++
+				continue
 			}
-			continue
+			// Non-shebang first line: count normally and fall through.
 		}
 		// After a Python shebang we have stopped counting - the rest of
 		// the file is Python source, not shell command invocations.
 		if sawPythonShebang {
 			continue
 		}
-		if isExecutablePythonLine(line) {
-			count++
-		}
+		count += countPythonInvocationsInLine(line)
 	}
 	return count
-}
-
-// isExecutablePythonLine returns true if line contains a Python invocation
-// that would actually be executed (not a comment, output argument, or value).
-func isExecutablePythonLine(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" {
-		return false
-	}
-	// Strip an inline trailing comment (not inside quotes) so that
-	// `cmd ... # python3` does not count.
-	if idx := indexUnquotedHash(trimmed); idx >= 0 {
-		trimmed = strings.TrimSpace(trimmed[:idx])
-		if trimmed == "" {
-			return false
-		}
-	}
-	// Comment-only line.
-	if strings.HasPrefix(trimmed, "#") {
-		return false
-	}
-	// Output commands: Python mentioned only as printed data.
-	if pureOutputCmdRx.MatchString(trimmed) {
-		return false
-	}
-	// Variable assignments are values, not invocations - unless the value
-	// itself runs a command (e.g. X=$(python3 ...)).
-	if variableAssignRx.MatchString(trimmed) && !hasCmdSubstitutionRx.MatchString(trimmed) {
-		return false
-	}
-	// Otherwise: require a Python token at a real command boundary.
-	return pythonInvocationLineRx.MatchString(trimmed)
 }
 
 // indexUnquotedHash returns the index of the first '#' that is not inside
@@ -244,32 +206,92 @@ func HasPythonInvocation(data []byte) bool {
 	return CountPythonInvocations(data) > 0
 }
 
+// IsBinaryFile reports whether path is a binary file (contains null bytes
+// in the first 512 bytes). Returns the read error so callers can fail
+// closed on filesystem failures.
+func IsBinaryFile(path string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	buf := make([]byte, 512)
+	n, err := f.Read(buf)
+	if err != nil && n == 0 {
+		if err == io.EOF {
+			return false, nil
+		}
+		return false, err
+	}
+	if n == 0 {
+		return false, nil
+	}
+	for i := 0; i < n && i < 512; i++ {
+		if buf[i] == 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// IsExcludedPath reports whether path falls under a directory that the
+// script doctrine verification must skip entirely: vendor trees,
+// dependency caches, build output, git internals. These trees contain
+// files that look executable but are not first-party tooling.
+func IsExcludedPath(path string) bool {
+	excludes := []string{
+		"/vendor/",
+		"/third_party/",
+		"/node_modules/",
+		"/.zig-cache/",
+		"/zig-cache/",
+		"/zig-out/",
+		"/__pycache__/",
+		".git/hooks/",
+		".git/objects/",
+		".git/refs/",
+		"/artifacts/",
+		"/dist/",
+	}
+	for _, ex := range excludes {
+		if strings.Contains(path, ex) {
+			return true
+		}
+	}
+	return false
+}
+
 // Sanity-check the package-level invariants at startup so that a regression
-// in the python invocation regex fails loudly rather than silently undercount.
+// in the python invocation detection fails loudly rather than silently
+// undercount.
 func init() {
 	if !pythonShebangRx.MatchString("#!/usr/bin/env python3") {
 		panic("scriptdoctrine: pythonShebangRx no longer matches Python shebang")
 	}
-	if !pythonInvocationLineRx.MatchString("python3 script.py") {
-		panic("scriptdoctrine: pythonInvocationLineRx no longer matches direct python3 call")
+	if !invokesPython("python3 script.py") {
+		panic("scriptdoctrine: invokesPython no longer matches direct python3 call")
 	}
-	if !pythonInvocationLineRx.MatchString("\tpython3 script.py") {
-		panic("scriptdoctrine: pythonInvocationLineRx no longer matches tab-indented recipe")
+	if !invokesPython("\tpython3 script.py") {
+		panic("scriptdoctrine: invokesPython no longer matches tab-indented recipe")
 	}
-	if !pythonInvocationLineRx.MatchString("/usr/bin/python3 script.py") {
-		panic("scriptdoctrine: pythonInvocationLineRx no longer matches absolute path")
+	if !invokesPython("/usr/bin/python3 script.py") {
+		panic("scriptdoctrine: invokesPython no longer matches absolute path")
 	}
-	if isExecutablePythonLine("# python3 script.py") {
-		panic("scriptdoctrine: comment line counted as invocation")
+	if !invokesPython("python3 a.py; python3 b.py") {
+		panic("scriptdoctrine: invokesPython no longer matches chained commands")
 	}
-	if isExecutablePythonLine("echo \"python3 script.py\"") {
-		panic("scriptdoctrine: echo line counted as invocation")
+	if invokesPython("# python3 script.py") {
+		panic("scriptdoctrine: invokesPython counted a comment as invocation")
 	}
-	if isExecutablePythonLine("PY=python3") {
-		panic("scriptdoctrine: variable assignment counted as invocation")
+	if invokesPython("echo \"python3 script.py\"") {
+		panic("scriptdoctrine: invokesPython counted an echo argument as invocation")
 	}
-	if !isExecutablePythonLine("X=$(python3 -c 'print(1)')") {
-		panic("scriptdoctrine: command substitution not counted as invocation")
+	if invokesPython("PY=python3") {
+		panic("scriptdoctrine: invokesPython counted a variable assignment as invocation")
+	}
+	if invokesPython("command -v python3") {
+		panic("scriptdoctrine: invokesPython counted command -v as invocation")
 	}
 	// Force-import "fmt" so package compile checks remain stable when
 	// other files in this package stop using it.

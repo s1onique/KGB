@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // checkPythonFiles verifies no Python files exist (except in baseline).
@@ -17,9 +16,8 @@ func (v *Verifier) checkPythonFiles() []Diagnostic {
 			return err
 		}
 
-		// Skip vendor and third_party
-		if strings.Contains(path, "/vendor/") || strings.Contains(path, "/third_party/") || strings.Contains(path, "/__pycache__/") {
-			if info.IsDir() {
+		if IsExcludedPath(path) {
+			if info != nil && info.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
@@ -29,10 +27,10 @@ func (v *Verifier) checkPythonFiles() []Diagnostic {
 			return nil
 		}
 
-		if strings.HasSuffix(path, ".py") || strings.HasSuffix(path, ".pyw") {
+		if filepath.Ext(path) == ".py" || filepath.Ext(path) == ".pyw" {
 			rel, _ := filepath.Rel(v.RepoRoot, path)
 			if v.isLegacy(rel) {
-				return nil // Legacy violation, skip
+				return nil
 			}
 			diags = append(diags, Diagnostic{
 				Check: "python-file",
@@ -71,9 +69,8 @@ func (v *Verifier) checkPythonShebangs() []Diagnostic {
 			return err
 		}
 
-		// Skip vendor and third_party
-		if strings.Contains(path, "/vendor/") || strings.Contains(path, "/third_party/") || strings.Contains(path, "/__pycache__/") {
-			if info.IsDir() {
+		if IsExcludedPath(path) {
+			if info != nil && info.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
@@ -89,7 +86,16 @@ func (v *Verifier) checkPythonShebangs() []Diagnostic {
 		}
 
 		// Python shebang detection is independent of the executable bit.
-		if HasPythonShebang(path) {
+		hasShebang, err := HasPythonShebang(path)
+		if err != nil {
+			diags = append(diags, Diagnostic{
+				Check: "internal-error",
+				Path:  rel,
+				Msg:   fmt.Sprintf("reading file for shebang check: %v", err),
+			})
+			return nil
+		}
+		if hasShebang {
 			diags = append(diags, Diagnostic{
 				Check: "python-shebang",
 				Path:  rel,
@@ -156,7 +162,8 @@ func (v *Verifier) checkPythonInvocations() []Diagnostic {
 	v.walkGitHooks(v.RepoRoot, &diags)
 
 	// Check all shell scripts.
-	scripts := v.discoverShellScripts()
+	scripts, discoverDiags := v.discoverShellScripts()
+	diags = append(diags, discoverDiags...)
 	for _, rel := range scripts {
 		fullPath := filepath.Join(v.RepoRoot, rel)
 		data, err := os.ReadFile(fullPath)
@@ -213,13 +220,18 @@ func (v *Verifier) walkMakefiles(root string, diags *[]Diagnostic) {
 			})
 			return nil
 		}
+		if IsExcludedPath(path) {
+			if info != nil && info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if info.IsDir() {
 			return nil
 		}
 
-		// Skip non-Makefiles
 		name := info.Name()
-		if name != "Makefile" && !strings.HasSuffix(name, ".mk") {
+		if name != "Makefile" && filepath.Ext(name) != ".mk" {
 			return nil
 		}
 
@@ -274,16 +286,20 @@ func (v *Verifier) walkCIWorkflows(root string, diags *[]Diagnostic) {
 	}
 
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yml") && !strings.HasSuffix(entry.Name(), ".yaml") {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if filepath.Ext(name) != ".yml" && filepath.Ext(name) != ".yaml" {
 			continue
 		}
 
-		rel := filepath.Join(".github", "workflows", entry.Name())
+		rel := filepath.Join(".github", "workflows", name)
 		if v.isLegacy(rel) {
 			continue
 		}
 
-		fullPath := filepath.Join(workflowsDir, entry.Name())
+		fullPath := filepath.Join(workflowsDir, name)
 		data, err := os.ReadFile(fullPath)
 		if err != nil {
 			*diags = append(*diags, Diagnostic{

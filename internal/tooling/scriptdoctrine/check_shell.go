@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 )
 
 // checkShellLineCounts verifies shell scripts don't exceed LOC limit.
@@ -13,7 +12,8 @@ import (
 func (v *Verifier) checkShellLineCounts() []Diagnostic {
 	var diags []Diagnostic
 
-	scripts := v.discoverShellScripts()
+	scripts, discoverDiags := v.discoverShellScripts()
+	diags = append(diags, discoverDiags...)
 	for _, rel := range scripts {
 		fullPath := filepath.Join(v.RepoRoot, rel)
 		loc := CountLogicalLOC(fullPath)
@@ -26,18 +26,14 @@ func (v *Verifier) checkShellLineCounts() []Diagnostic {
 			continue
 		}
 
-		// Determine the max allowed LOC for this file
 		maxLOC := MaxShellLOC
 		if v.Bootstrap {
-			// In bootstrap mode, only baseline entries can exceed the default limit.
-			// Use explicit baseline LOC ceiling if available.
 			if baseline, exists := v.Baseline[rel]; exists {
 				maxLOC = baseline.BaselineLOC
 				if maxLOC == 0 {
-					continue // Any size allowed
+					continue
 				}
 			}
-			// Not in baseline = new violation, use default limit
 		}
 
 		if loc > maxLOC {
@@ -73,7 +69,6 @@ var riskyPatterns = []struct {
 func (v *Verifier) checkShellRiskyPatterns() []Diagnostic {
 	var diags []Diagnostic
 
-	// Check only wrapper scripts (not migration-required)
 	for path, entry := range v.Inventory {
 		if entry.Language != "shell" || entry.Status == "migration-required" {
 			continue
@@ -83,7 +78,6 @@ func (v *Verifier) checkShellRiskyPatterns() []Diagnostic {
 		data, err := os.ReadFile(fullPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				// Reported by checkInventoryFilesExist.
 				continue
 			}
 			diags = append(diags, Diagnostic{
@@ -111,43 +105,63 @@ func (v *Verifier) checkShellRiskyPatterns() []Diagnostic {
 }
 
 // discoverShellScripts finds all shell scripts in the repository.
-// Files with a Python shebang are excluded because they are Python
-// programs, not shell scripts.
-func (v *Verifier) discoverShellScripts() []string {
+// Returns the list of script paths plus any diagnostics that surfaced
+// during the walk - the caller MUST propagate the diagnostics, never
+// swallow them. This is the fail-closed contract: walk errors and read
+// errors are surfaced to the user.
+func (v *Verifier) discoverShellScripts() ([]string, []Diagnostic) {
 	var scripts []string
+	var diags []Diagnostic
 
-	filepath.Walk(v.RepoRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+	err := filepath.Walk(v.RepoRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			diags = append(diags, Diagnostic{
+				Check: "internal-error",
+				Path:  path,
+				Msg:   fmt.Sprintf("walking for shell scripts: %v", err),
+			})
 			return nil
 		}
-
-		// Skip vendor/third_party and other external directories
-		if strings.Contains(path, "/vendor/") || strings.Contains(path, "/third_party/") ||
-			strings.Contains(path, "/node_modules/") || strings.Contains(path, "/dist/") ||
-			strings.Contains(path, ".git/hooks/") {
+		if IsExcludedPath(path) {
+			if info != nil && info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() {
 			return nil
 		}
 
 		rel, _ := filepath.Rel(v.RepoRoot, path)
 
-		// Check by extension
-		if strings.HasSuffix(path, ".sh") || strings.HasSuffix(path, ".bash") {
+		if filepath.Ext(path) == ".sh" || filepath.Ext(path) == ".bash" {
 			scripts = append(scripts, rel)
 			return nil
 		}
 
-		// Check executable bit with shebang
 		if info.Mode()&0111 != 0 {
-			// Check for shebang
 			f, err := os.Open(path)
 			if err != nil {
+				diags = append(diags, Diagnostic{
+					Check: "internal-error",
+					Path:  rel,
+					Msg:   fmt.Sprintf("opening file for shebang sniff: %v", err),
+				})
 				return nil
 			}
 			defer f.Close()
 
 			buf := make([]byte, 128)
-			n, _ := f.Read(buf)
-			if n > 0 && strings.HasPrefix(string(buf[:n]), "#!") {
+			n, err := f.Read(buf)
+			if err != nil && n == 0 {
+				diags = append(diags, Diagnostic{
+					Check: "internal-error",
+					Path:  rel,
+					Msg:   fmt.Sprintf("reading file for shebang sniff: %v", err),
+				})
+				return nil
+			}
+			if n > 0 && string(buf[:n])[:min(n, 2)] == "#!" {
 				scripts = append(scripts, rel)
 			}
 		}
@@ -155,5 +169,20 @@ func (v *Verifier) discoverShellScripts() []string {
 		return nil
 	})
 
-	return scripts
+	if err != nil {
+		diags = append(diags, Diagnostic{
+			Check: "internal-error",
+			Path:  ".",
+			Msg:   fmt.Sprintf("walk for shell scripts: %v", err),
+		})
+	}
+
+	return scripts, diags
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
