@@ -80,5 +80,13 @@
       "shell_dynamic_step": "fail-closed with Diagnostic.Line/Column",
       "yaml_parser_error_line_recovered": true
     }
-  }
+  },
+  "r15_closure_matrix": {
+      "toplevel_comment": 0,
+      "indented_comment": 0,
+      "trailing_inline_comment": 0,
+      "escaped_hash_literal": 1,
+      "recipe_line_comment_kept": 1,
+      "recipe_prefix_double_arrow_kept": 1
+    }
 }
