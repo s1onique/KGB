@@ -89,5 +89,11 @@
     "recipe_prefix_reset_to_tab": 1,
     "continued_recipe_physical_line": 1,
     "continued_non_recipe_comment": 0
+  },
+  "r17_closure_matrix": {
+    "prefix_mid_epoch_reset": 1,
+    "blank_preserves_rule_context": 1,
+    "comment_preserves_rule_context": 1,
+    "prefix_looking_directive_outside_rule": 0
   }
 }

@@ -26,7 +26,7 @@ func TestR10Coverage_Makefile(t *testing.T) {
 		// .RECIPEPREFIX = > (single-char value, no leading
 		// space). Make's official example: the recipe line is
 		// `> python3 ...`.
-		{".RECIPEPREFIX = > with > prefix", ".RECIPEPREFIX = >\n>python3 hidden.py", 1},
+		{".RECIPEPREFIX = > with > prefix", ".RECIPEPREFIX = >\nall:\n>python3 hidden.py", 1},
 		// Same-line recipe (`target: ; cmd`). The semicolon is
 		// required; without it the line contains prerequisites,
 		// not a recipe.

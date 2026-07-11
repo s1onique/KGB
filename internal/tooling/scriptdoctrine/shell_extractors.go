@@ -122,48 +122,15 @@ func CountPythonInvocationsInMakefile(data []byte) int {
 	if data == nil {
 		return -1
 	}
-	// Expansion-time: $(shell ...) and `!=` shell assignments.
-	expansionCount, err := classifyMakeShellExpansions(data)
+	// R16/R17: the int-returning wrapper is now a thin shim over
+	// the typed detailed helper. The detailed helper walks the
+	// R16 logical-line state machine (processMakeLogicalLine)
+	// and honours mid-epoch `.RECIPEPREFIX = X` reassignments.
+	count, err := CountPythonInvocationsInMakefileDetailed(data)
 	if err != nil {
 		return -1
 	}
-	// Recipe-time: TAB-indented recipes over the masked data.
-	prefix := "\t"
-	if m := recipePrefixRx.FindSubmatch(data); m != nil {
-		prefix = string(m[1])
-	}
-	masked := maskMakeExpansionSites(data)
-	vars := extractMakeVariables(masked)
-
-	var recipes []string
-	for _, line := range strings.Split(string(masked), "\n") {
-		body, ok := stripMakePrefix(line, prefix)
-		if !ok {
-			continue
-		}
-		body, ok = stripMakeSilentPrefix(body)
-		if !ok {
-			continue
-		}
-		body = resolveMakeVars(body, vars)
-		recipes = append(recipes, body)
-	}
-
-	for _, line := range strings.Split(string(masked), "\n") {
-		if body, ok := extractSameLineRecipe(line); ok {
-			body = resolveMakeVars(body, vars)
-			recipes = append(recipes, body)
-		}
-	}
-
-	if len(recipes) == 0 {
-		return expansionCount.Count
-	}
-	recipeCount, err := countPythonSitesInProgram(sanitizeMakeVars(strings.Join(recipes, "\n")))
-	if err != nil {
-		return -1
-	}
-	return expansionCount.Count + recipeCount.Count
+	return count.Count
 }
 
 // stripMakePrefix returns the recipe body if line starts with the

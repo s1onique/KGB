@@ -8,7 +8,9 @@
 //     when the directive is empty, i.e. `.RECIPEPREFIX =` with
 //     nothing after the operator);
 //   - rule context (true after a target-definition line, false after
-//     a blank line or after a directive / assignment).
+//     a blank line was previously used, but R17 keeps inRule on
+//     blanks and comments because they are allowed among recipe
+//     lines).
 //
 // Only NON-recipe logical lines have their unescaped-`#`-through-EOL
 // bytes rewritten with spaces. Recipe lines are left intact because
@@ -19,32 +21,31 @@
 //
 // The classifier runs in priority order:
 //
-//  1. Byte-0 == active recipe prefix  ⇒ recipe line (no masking).
-//  2. Blank logical line                  ⇒ reset rule context.
-//  3. `.RECIPEPREFIX = X` directive       ⇒ update prefix, reset
-//     rule context.
-//  4. Comment-only line (first sig byte   ⇒ keep rule context, mask
-//     is unescaped `#`)                      the comment body.
-//  5. Other directive (first byte `.`)    ⇒ reset rule context, mask
-//     trailing comment.
-//  6. Assignment or non-target body       ⇒ reset rule context, mask
-//     trailing comment.
+//  1. Recipe line.        inRule AND byte-0 == active prefix.
+//  2. Blank line.         PRESERVE inRule (no reset).
+//  3. `.RECIPEPREFIX = X`  update prefix; reset rule context.
+//  4. Comment-only line.  keep rule context; mask body.
+//  5. Other directive.    reset rule context; mask.
+//  6. Assignment / target.  reset or set inRule; mask.
 //
-// Rule 1 (byte-0 prefix) is what GNU Make actually requires for a
-// line to participate in recipe context; the more nuanced case
-// (a prefix-looking top-level directive such as `include` after
-// `.RECIPEPREFIX = i`) is handled by the fact that `include` does
-// not start with the active prefix `i` in the byte-zero position.
+// R17: Rule 1 requires BOTH a recipe prefix at byte 0 AND active
+// rule context (state.inRule == true). This matches GNU Make: a
+// prefix-starting line is a recipe only when it appears after a
+// target definition and before a rule-context-reset statement
+// (assignment, new target, directive, end-of-file). Blank and
+// comment-only lines PRESERVE inRule so a recipe block can span
+// multiple physical lines interleaved with blanks and comments.
 package scriptdoctrine
 
 import "bytes"
 
 // makeLexState is the per-file mutable state used by
-// maskMakeComments. Each field's value at logical-line N reflects
-// the directives and target lines that precede it.
+// maskMakeComments and the recipe-time walker. Each field's value
+// at logical-line N reflects the directives and target lines that
+// precede it.
 type makeLexState struct {
 	prefix byte // active recipe prefix; '\t' default
-	inRule bool // inside a target's recipe block
+	inRule bool // inside a rule's recipe block
 }
 
 // newMakeLexState returns the makeLexState that matches GNU Make's
@@ -53,6 +54,21 @@ type makeLexState struct {
 func newMakeLexState() makeLexState {
 	return makeLexState{prefix: '\t', inRule: false}
 }
+
+// lineKind is the classification returned by processMakeLogicalLine.
+// The recipe-time walker uses the same kind to decide which lines
+// are recipes to count.
+type lineKind int
+
+const (
+	kindUnknown lineKind = iota
+	kindRecipe
+	kindDirective
+	kindAssignment
+	kindTarget
+	kindBlank
+	kindComment
+)
 
 // maskMakeComments is the R16 entry point. It walks each LOGICAL
 // line (joined by `\<newline>` continuations), updates the
@@ -90,55 +106,52 @@ func maskMakeComments(data []byte) []byte {
 	return out
 }
 
-// processMakeLogicalLine classifies one logical line and updates the
-// lexer state. The masker is intentionally conservative: it avoids
-// masking bytes that could belong to a recipe or to a directive
-// that is in effect for subsequent lines.
-func processMakeLogicalLine(out []byte, lineStart, eol int, state *makeLexState) {
-	// Rule 1 — recipe line (byte 0 == active prefix).
-	if lineStart < eol && out[lineStart] == state.prefix {
-		state.inRule = true
-		return
+// processMakeLogicalLine classifies one logical line and updates
+// the lexer state. It returns the classification of the line so
+// the recipe-time walker (and any future caller) can use the same
+// authoritative state transitions the masker uses.
+func processMakeLogicalLine(out []byte, lineStart, eol int, state *makeLexState) lineKind {
+	// Rule 1 — recipe line. Requires BOTH:
+	//   (a) we are currently inside a rule's recipe block
+	//       (inRule == true), AND
+	//   (b) the logical line's first byte equals the active
+	//       recipe prefix.
+	if state.inRule && lineStart < eol && out[lineStart] == state.prefix {
+		return kindRecipe
 	}
 
-	// Trim leading whitespace (spaces and tabs) so we can look
-	// at the line's first significant byte for further checks.
+	// Trim leading whitespace (spaces and tabs).
 	sigStart := lineStart
 	for sigStart < eol && (out[sigStart] == ' ' || out[sigStart] == '\t') {
 		sigStart++
 	}
 
-	// Rule 2 — blank line.
+	// Rule 2 — blank line. Preserve rule context.
 	if sigStart == eol {
-		state.inRule = false
-		return
+		return kindBlank
 	}
 
 	// Rule 3 — `.RECIPEPREFIX = X` directive.
 	if eol-sigStart >= 13 && bytes.Equal(out[sigStart:sigStart+13], []byte(".RECIPEPREFIX")) {
 		processRecpePrefix(out, sigStart+13, eol, state)
 		state.inRule = false
-		return
+		return kindDirective
 	}
 
-	// Rule 4 — comment-only line (first significant byte is
-	// unescaped `#`). The R14/R15 matrix says these counts are
-	// 0. Keep rule context so an intervening comment does not
-	// end a recipe block.
+	// Rule 4 — comment-only line. `\#` is a literal `#`.
 	first := out[sigStart]
 	if first == '\\' && sigStart+1 < eol && out[sigStart+1] == '#' {
-		// \# literal: line's first content is a literal `#`,
-		// which is NOT a comment-only marker. Fall through.
+		// Fall through.
 	} else if first == '#' {
 		maskCommentInMakeLine(out, sigStart, eol)
-		return
+		return kindComment
 	}
 
-	// Rule 5 — other directive (first byte `.`).
+	// Rule 5 — other directive.
 	if first == '.' {
 		state.inRule = false
 		maskCommentInMakeLine(out, sigStart, eol)
-		return
+		return kindDirective
 	}
 
 	// Rule 6 — assignment vs target vs other top-level.
@@ -148,13 +161,16 @@ func processMakeLogicalLine(out []byte, lineStart, eol int, state *makeLexState)
 	case assignmentLike && !targetLike:
 		state.inRule = false
 		maskCommentInMakeLine(out, sigStart, eol)
+		return kindAssignment
 	case targetLike:
 		state.inRule = true
 		maskCommentInMakeLine(out, sigStart, eol)
+		return kindTarget
 	default:
 		// Other top-level body (include / vpath / define / etc.).
 		state.inRule = false
 		maskCommentInMakeLine(out, sigStart, eol)
+		return kindUnknown
 	}
 }
 
@@ -188,8 +204,7 @@ func processRecpePrefix(out []byte, pos, eol int, state *makeLexState) {
 
 // isMakeAssignmentLine reports whether the logical line is a Make
 // variable assignment (the byte `=` appears somewhere other than
-// the trailing `:` of a target rule). Coarse heuristic; the R16
-// matrix does not pin a finer behaviour.
+// the trailing `:` of a target rule). Coarse heuristic.
 func isMakeAssignmentLine(out []byte, lineStart, eol int) bool {
 	k := lineStart
 	for k < eol {
@@ -240,6 +255,7 @@ func maskCommentInMakeLine(out []byte, lineStart, eol int) {
 	k := lineStart
 	for k < eol {
 		if k+1 < eol && out[k] == '\\' {
+			// `\#` → literal `#` (escape pair). Skip both bytes.
 			k += 2
 			continue
 		}

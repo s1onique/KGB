@@ -38,32 +38,53 @@ func CountPythonInvocationsInMakefileDetailed(data []byte) (InvocationCount, err
 	if err != nil {
 		return ZeroCount, err
 	}
-	prefix := "\t"
-	if m := recipePrefixRx.FindSubmatch(data); m != nil {
-		prefix = string(m[1])
-	}
+	// R17: the recipe-time walker reuses the R16 state machine
+	// (processMakeLogicalLine) so prefix and rule-context updates
+	// are consistent with what the comment masker sees. We walk
+	// each logical line, classify it, and add it to the recipes
+	// list only when the kind is `kindRecipe`.
 	cleaned := maskMakeComments(data)
 	masked := maskMakeExpansionSites(cleaned)
 	vars := extractMakeVariables(masked)
 
 	var recipes []string
-	for _, line := range strings.Split(string(masked), "\n") {
-		body, ok := stripMakePrefix(line, prefix)
-		if !ok {
-			continue
+	state := newMakeLexState()
+	i := 0
+	for i < len(masked) {
+		lineStart := i
+		eol := lineStart
+		for eol < len(masked) {
+			if masked[eol] == '\n' {
+				break
+			}
+			if eol+1 < len(masked) && masked[eol] == '\\' && masked[eol+1] == '\n' {
+				eol += 2
+				continue
+			}
+			eol++
 		}
-		body, ok = stripMakeSilentPrefix(body)
-		if !ok {
-			continue
-		}
-		body = resolveMakeVars(body, vars)
-		recipes = append(recipes, body)
-	}
-	for _, line := range strings.Split(string(masked), "\n") {
-		if body, ok := extractSameLineRecipe(line); ok {
+		// processMakeLogicalLine mutates state (prefix, inRule)
+		// and returns the classification of the line.
+		kind := processMakeLogicalLine(masked, lineStart, eol, &state)
+		if kind == kindRecipe {
+			// Recipe line: strip the active prefix byte and
+			// any leading silent prefixes (`@`, `-`, `+`) before
+			// running the body through the shell parser.
+			body := string(masked[lineStart+1 : eol])
+			body, _ = stripMakeSilentPrefix(body)
 			body = resolveMakeVars(body, vars)
 			recipes = append(recipes, body)
 		}
+		// Same-line recipe (`target: ; cmd` or `target: cmd`) —
+		// GNU Make accepts the recipe body on the same line as
+		// the target. processMakeLogicalLine classifies the line
+		// as a target; the trailing recipe body must be added
+		// to the recipe-time count as well.
+		if sameBody, ok := extractSameLineRecipe(string(masked[lineStart:eol])); ok {
+			sameBody = resolveMakeVars(sameBody, vars)
+			recipes = append(recipes, sameBody)
+		}
+		i = eol + 1
 	}
 	if len(recipes) == 0 {
 		return expansion, nil
