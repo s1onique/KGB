@@ -238,8 +238,14 @@ func isMakeAssignmentLine(out []byte, lineStart, eol int) bool {
 // modern rule lines routinely include prerequisites, so the rule
 // separator may be followed by `dep1 dep2 ...`. The classifier still
 // rejects lines that are assignments (an unescaped `=` somewhere
-// in the body) or that contain `:=` (which would already have been
-// consumed as part of `=` scanning).
+// in the body) or that contain assignment operators that start with
+// colons (`:=`, `::=`, `:::=`).
+//
+// R19 fix: The original R18 code only skipped `:=` (single-colon-equals).
+// GNU Make also supports `::=` (simply expanded) and `:::=` (immediately
+// expanded). These must be skipped so they are not misclassified as
+// rule separators. A genuine double-colon rule separator is `::` followed
+// by whitespace or end-of-line (not immediately `=`).
 func isMakeTargetLine(out []byte, lineStart, eol int) bool {
 	k := lineStart
 	for k < eol {
@@ -250,11 +256,28 @@ func isMakeTargetLine(out []byte, lineStart, eol int) bool {
 		isSep := false
 		switch out[k] {
 		case ':':
-			// Single `:` separator. Skip if it is part of `:=`.
+			// R19 fix: Check for assignment operators that start with
+			// colons before treating `:` as a rule separator.
+			// Assignment operators (skip these):
+			//   ::=   (simply expanded variable)
+			//   :::=  (immediately expanded variable)
+			//   :=    (already handled in R18)
+			if k+2 < eol && out[k+1] == ':' && out[k+2] == '=' {
+				// `::=` — skip all 3 bytes.
+				k += 3
+				continue
+			}
+			if k+3 < eol && out[k+1] == ':' && out[k+2] == ':' && out[k+3] == '=' {
+				// `:::=` — skip all 4 bytes.
+				k += 4
+				continue
+			}
 			if k+1 < eol && out[k+1] == '=' {
+				// `:=` — skip both bytes (already handled in R18).
 				k += 2
 				continue
 			}
+			// Genuine rule separator: `:` not followed by `=` (or `::`).
 			isSep = true
 		case '&':
 			// `&:` or `&::`.
