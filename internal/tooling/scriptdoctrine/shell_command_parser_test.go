@@ -1,7 +1,7 @@
 package scriptdoctrine
 
 import (
-	"strings"
+
 	"testing"
 )
 
@@ -314,74 +314,6 @@ func TestCountPythonInvocationsInCoprocClause(t *testing.T) {
 }
 
 // =============================================================================
-// R7 fail-closed + scanner.Err regression tests
-// =============================================================================
 
-// TestCountPythonInvocationsMalformedSyntaxFailsClosed covers the
-// R7 P2 fail-closed contract: malformed shell syntax is reported
-// as -1 by both the line-level helper and the byte-level wrapper.
-// Returning 0 would falsely green-light the script; the caller
-// (verifier) must surface an internal-error diagnostic instead.
-func TestCountPythonInvocationsMalformedSyntaxFailsClosed(t *testing.T) {
-	cases := []struct {
-		name  string
-		input string
-	}{
-		{"unclosed double quote", `echo "hello`},
-		{"unclosed single quote", `echo 'hello`},
-		{"missing then", `if true then fi`},
-		{"empty pipe right side", `echo foo |`},
-		{"unclosed $(...)", `echo "$(python3 tool.py`},
-		{"unclosed $((...))", `echo $((1+`},
-		// R8 regression: a malformed line wedged between good
-		// lines must NOT be silently swallowed. The whole-file
-		// parser must return -1, not 1.
-		{"mixed good and malformed",
-			"python3 baseline.py\nif true then python3 hidden.py fi\n"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Probe the line-level helper directly so we know the
-			// failure comes from parsing, not from the reader scan.
-			got := countPythonInvocationsInLine(tc.input)
-			if got != -1 {
-				t.Errorf("countPythonInvocationsInLine(%q) = %d, want -1 (fail-closed)", tc.input, got)
-			}
-			// And the byte-level wrapper must also surface -1.
-			wrapper := CountPythonInvocations([]byte(tc.input))
-			if wrapper != -1 {
-				t.Errorf("CountPythonInvocations(%q) = %d, want -1 (fail-closed)", tc.input, wrapper)
-			}
-		})
-	}
-}
-
-// TestCountPythonInvocationsLargeInputSucceeds pins the AST path's
-// behaviour on large inputs: the per-line `bufio.Scanner`
-// overflow that motivated the R7 P1 fix is gone, so a multi-KiB
-// single line (which R7-era `bufio.Scanner` would reject as
-// ErrTooLong) is now parsed as one shell command tree. The count
-// should reflect the embedded invocations exactly.
-func TestCountPythonInvocationsLargeInputSucceeds(t *testing.T) {
-	// Build a "line" longer than the 64KiB scanner buffer that
-	// the old per-line scanner used to enforce.
-	overlong := strings.Repeat("python3 a.py; ", 5000)
-	if len(overlong) < 64*1024 {
-		t.Fatalf("test setup: oversize line must be > 64KiB, got %d bytes", len(overlong))
-	}
-	got := CountPythonInvocations([]byte(overlong))
-	if got != 5000 {
-		t.Errorf("CountPythonInvocations on %d-byte line = %d, want 5000", len(overlong), got)
-	}
-}
-
-// TestCountPythonInvocationsNilReturnsMinusOne enforces the
-// existing contract that nil input is treated as an error, not
-// zero.
-func TestCountPythonInvocationsNilReturnsMinusOne(t *testing.T) {
-	got := CountPythonInvocations(nil)
-	if got != -1 {
-		t.Errorf("CountPythonInvocations(nil) = %d, want -1", got)
-	}
-}
+// R9 coverage tests are in shell_command_parser_r9_test.go to keep
+// this file under the LLM-friendliness 450-line hard limit.

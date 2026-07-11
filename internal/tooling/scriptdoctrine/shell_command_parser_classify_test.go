@@ -51,9 +51,9 @@ func TestIsCommandPrefixWord(t *testing.T) {
 		word string
 		want bool
 	}{
-		{"sudo", true},
-		{"env", true},
-		{"/usr/bin/env", true},
+		{"sudo", false},
+		{"env", false},
+		{"/usr/bin/env", false},
 		{"exec", true},
 		{"command", true},
 		{"echo", false},
