@@ -48,8 +48,8 @@
   "checks_total": 8,
   "checks_failed": 0,
   "checks_unavailable": 0,
-  "tests_total": 322,
-  "tests_passed": 322,
+  "tests_total": 348,
+  "tests_passed": 348,
   "r14_closure_matrix": {
     "typed_propagation": {
       "bash_c_dynamic_line_col": 3,
@@ -68,25 +68,26 @@
       "recipe_line_comment_dollar_shell": 1,
       "recipe_line_embedded_dollar_shell": 1
     },
-    "r15_closure_matrix": {
-      "toplevel_comment": 0,
-      "indented_comment": 0,
-      "trailing_inline_comment": 0,
-      "escaped_hash_literal": 1,
-      "recipe_line_comment_kept": 1,
-      "recipe_prefix_double_arrow_kept": 1
-    },
     "yaml_structural_validation": {
       "shell_dynamic_step": "fail-closed with Diagnostic.Line/Column",
       "yaml_parser_error_line_recovered": true
     }
   },
   "r15_closure_matrix": {
-      "toplevel_comment": 0,
-      "indented_comment": 0,
-      "trailing_inline_comment": 0,
-      "escaped_hash_literal": 1,
-      "recipe_line_comment_kept": 1,
-      "recipe_prefix_double_arrow_kept": 1
-    }
+    "toplevel_comment": 0,
+    "indented_comment": 0,
+    "trailing_inline_comment": 0,
+    "escaped_hash_literal": 1,
+    "recipe_line_comment_kept": 1,
+    "recipe_prefix_double_arrow_kept": 1
+  },
+  "r16_closure_matrix": {
+    "toplevel_comment": 0,
+    "recipe_prefix_chevron": 1,
+    "escaped_hash_literal": 1,
+    "recipe_prefix_change_2_epochs": 1,
+    "recipe_prefix_reset_to_tab": 1,
+    "continued_recipe_physical_line": 1,
+    "continued_non_recipe_comment": 0
+  }
 }
