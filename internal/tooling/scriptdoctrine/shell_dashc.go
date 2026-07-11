@@ -95,6 +95,10 @@ func countShellDashCScript(call *syntax.CallExpr) (int, bool, error) {
 					"malformed bash -c invocation: missing command string")
 			}
 			return classifyScriptWord(call, scriptIdx)
+		case argLit == "-O" || argLit == "+O" || argLit == "--rcfile" || argLit == "--init-file":
+			// Value-taking option; consume the next argument as
+			// the option's value (not as the `-c` payload).
+			i++
 		case strings.HasPrefix(argLit, "-") && !sawDashC:
 			// Long-form options other than `-c` are tolerated but
 			// do not trigger the `-c` analysis by themselves.

@@ -207,3 +207,27 @@ func TestR11WrappedBashDashCFailClosed(t *testing.T) {
 		})
 	}
 }
+
+// TestR13BashValueOptions covers the bash -c value-taking option
+// matrix: -O, +O, --rcfile, --init-file all consume the next
+// argument as their value, so the value is never the -c payload.
+func TestR13BashValueOptions(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+		want int
+	}{
+		{"-O extglob -c 'python3 x.py'", `bash -O extglob -c 'python3 x.py'`, 1},
+		{"+O extglob -c 'python3 x.py'", `bash +O extglob -c 'python3 x.py'`, 1},
+		{"--rcfile file -c 'python3 x.py'", `bash --rcfile file -c 'python3 x.py'`, 1},
+		{"--init-file file -c 'python3 x.py'", `bash --init-file file -c 'python3 x.py'`, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CountPythonInvocations([]byte(tc.data))
+			if got != tc.want {
+				t.Errorf("CountPythonInvocations(%q) = %d, want %d", tc.data, got, tc.want)
+			}
+		})
+	}
+}

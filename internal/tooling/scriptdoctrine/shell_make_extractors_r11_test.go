@@ -150,3 +150,31 @@ func TestR12MakeResolvedReference(t *testing.T) {
 		})
 	}
 }
+
+// TestR13MakeBracedReference pins the R13 closure that brace
+// and parenthesis Make references share the same resolver and
+// fail-closed policy.
+func TestR13MakeBracedReference(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+		want int
+	}{
+		{"unresolved ${VAR} in $(shell ...) fails closed",
+			"RESULT := $(shell ${UNKNOWN_COMMAND} x.py)\nall:\n\techo ok\n", -1},
+		{"unresolved ${VAR} in != RHS fails closed",
+			"RESULT != ${UNKNOWN_COMMAND} x.py\nall:\n\techo ok\n", -1},
+		{"resolved ${VAR} counts as one",
+			"PYTHON := python3\nRESULT := $(shell ${PYTHON} x.py)\nall:\n\techo ok\n", 1},
+		{"resolved ${VAR} in != counts as one",
+			"PYTHON := python3\nRESULT != ${PYTHON} x.py\nall:\n\techo ok\n", 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CountPythonInvocationsInMakefile([]byte(tc.data))
+			if got != tc.want {
+				t.Errorf("CountPythonInvocationsInMakefile(%q) = %d, want %d", tc.data, got, tc.want)
+			}
+		})
+	}
+}

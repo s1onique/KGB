@@ -143,7 +143,10 @@ func extractYAMLSteps(data []byte) ([]WorkflowRunStep, error) {
 		return nil, fmt.Errorf("workflow YAML: root must be a mapping (kind=%d)", document.Kind)
 	}
 
-	workflowDefaults, _ := readShellFromDefaults(document)
+	workflowDefaults, err := readShellFromDefaults(document)
+	if err != nil {
+		return nil, err
+	}
 
 	jobsNode := findMapValue(document, "jobs")
 	if jobsNode == nil {
@@ -164,7 +167,10 @@ func extractYAMLSteps(data []byte) ([]WorkflowRunStep, error) {
 		if jobVal.Kind != yaml.MappingNode {
 			return nil, fmt.Errorf("workflow YAML: job %q is not a mapping at line %d column %d", jobID, jobVal.Line, jobVal.Column)
 		}
-		jobDefaults, _ := readShellFromDefaults(jobVal)
+		jobDefaults, err := readShellFromDefaults(jobVal)
+		if err != nil {
+			return nil, err
+		}
 		stepsNode := findMapValue(jobVal, "steps")
 		if stepsNode == nil {
 			continue

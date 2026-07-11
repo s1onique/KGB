@@ -4,12 +4,10 @@ import (
 	"strings"
 )
 
-// GNU Make expansion-time execution sites (R11.4/R12).
-// Make executes `$(shell ...)` and `!=` shell-assignment RHS at
-// parse time. R10 walked only recipe lines; R11+R12 close that
-// gap. `$(shell X)` / `VAR != RHS` are scanned across the whole
-// Makefile and the recipe parser receives a masked copy so a
-// single Python invocation contributes one count.
+// GNU Make expansion-time execution sites (R11.4/R12/R13).
+// `$(shell X)` and `VAR != RHS` are scanned; the recipe parser
+// receives a masked copy so a single Python invocation counts
+// once.
 
 // shellFunctionRange represents a Make expansion-time execution
 // site found in the source bytes. Start/End are the bytes of the
@@ -24,10 +22,7 @@ type shellFunctionRange struct {
 }
 
 // shellAssignmentRange represents a Make `VAR != RHS` site.
-type shellAssignmentRange struct {
-	RHSStart, RHSEnd int
-	Line             int
-}
+type shellAssignmentRange struct{ RHSStart, RHSEnd, Line int }
 
 // findShellFunctionSites scans a Makefile for balanced
 // `$(shell ...)` expansions and returns them in source order.
@@ -399,13 +394,9 @@ func findUnbalancedMakeParens(data []byte) []int {
 	return bad
 }
 
-// countUnresolvedMakeRefsInCommand counts $(VAR) references
-// that cannot be statically resolved. `$(shell ...)` is the
-// only form that maps to another command-position search;
-// other `$(function ...)` references (call / value / origin /
-// foreach / ...) are themselves command-position references
-// because they may be substituted into the runner's argv by
-// Make, so they fail closed per the R12 closure matrix.
+// countUnresolvedMakeRefsInCommand counts `$(VAR)` and
+// `${VAR}` references that are NOT pre-recognised Make
+// function calls (`shell`). R12/R13 fail-closed gate.
 func countUnresolvedMakeRefsInCommand(s string, vars map[string]string) int {
 	unresolved := 0
 	i := 0
@@ -414,30 +405,42 @@ func countUnresolvedMakeRefsInCommand(s string, vars map[string]string) int {
 			i += 2
 			continue
 		}
-		if s[i] == '$' && i+1 < len(s) && s[i+1] == '(' {
-			depth := 1
-			j := i + 2
-			for j < len(s) && depth > 0 {
-				switch s[j] {
-				case '(':
-					depth++
-				case ')':
-					depth--
-				}
-				j++
+		if s[i] != '$' || i+1 >= len(s) {
+			i++
+			continue
+		}
+		openCh := byte(0)
+		closeCh := byte(0)
+		switch s[i+1] {
+		case '(':
+			openCh, closeCh = '(', ')'
+		case '{':
+			openCh, closeCh = '{', '}'
+		default:
+			i++
+			continue
+		}
+		depth := 1
+		j := i + 2
+		for j < len(s) && depth > 0 {
+			if s[j] == openCh {
+				depth++
+			} else if s[j] == closeCh {
+				depth--
 			}
-			if depth == 0 {
-				trimmed := strings.TrimSpace(s[i+2 : j-1])
-				if trimmed == "shell" || strings.HasPrefix(trimmed, "shell ") {
-					i = j
-					continue
-				}
-				if _, ok := vars[trimmed]; !ok {
-					unresolved++
-				}
+			j++
+		}
+		if depth == 0 {
+			trimmed := strings.TrimSpace(s[i+2 : j-1])
+			if trimmed == "shell" || strings.HasPrefix(trimmed, "shell ") {
 				i = j
 				continue
 			}
+			if _, ok := vars[trimmed]; !ok {
+				unresolved++
+			}
+			i = j
+			continue
 		}
 		i++
 	}

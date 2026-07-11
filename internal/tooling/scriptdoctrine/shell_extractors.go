@@ -221,28 +221,41 @@ func resolveMakeVars(s string, vars map[string]string) string {
 	b.Grow(len(s))
 	i := 0
 	for i < len(s) {
-		if s[i] == '$' && i+1 < len(s) && s[i+1] == '(' {
-			depth := 1
-			j := i + 2
-			for j < len(s) && depth > 0 {
-				switch s[j] {
-				case '(':
-					depth++
-				case ')':
-					depth--
-				}
-				j++
+		if s[i] != '$' || i+1 >= len(s) {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		openCh, closeCh := byte(0), byte(0)
+		switch s[i+1] {
+		case '(':
+			openCh, closeCh = '(', ')'
+		case '{':
+			openCh, closeCh = '{', '}'
+		default:
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		depth := 1
+		j := i + 2
+		for j < len(s) && depth > 0 {
+			if s[j] == openCh {
+				depth++
+			} else if s[j] == closeCh {
+				depth--
 			}
-			if depth == 0 {
-				inside := s[i+2 : j-1]
-				if v, ok := vars[inside]; ok && !strings.ContainsAny(v, " \t") {
-					b.WriteString(v)
-				} else {
-					b.WriteString("$X")
-				}
-				i = j
-				continue
+			j++
+		}
+		if depth == 0 {
+			inside := s[i+2 : j-1]
+			if v, ok := vars[inside]; ok && !strings.ContainsAny(v, " \t") {
+				b.WriteString(v)
+			} else {
+				b.WriteString("$X")
 			}
+			i = j
+			continue
 		}
 		b.WriteByte(s[i])
 		i++
