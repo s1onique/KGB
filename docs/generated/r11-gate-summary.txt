@@ -1,0 +1,17 @@
+ACT-UVB76-GO-TOOLING-DOCTRINE01-R11
+==================================
+
+Range:  ACT-UVB76-GO-TOOLING-DOCTRINE01-R11..HEAD
+working tree: clean
+git_diff_check: pass
+overall gate status: PASS
+
+Test outcome:
+  ./internal/tooling/scriptdoctrine/...        : PASS
+  go vet ./...                                  : PASS
+  gofmt -l                                     : clean
+  scripts/verify-script-doctrine (bootstrap)   : PASS (Script doctrine verification passed)
+  make gate                                     : PASS
+
+Machine-readable:
+  {"act":"ACT-UVB76-GO-TOOLING-DOCTRINE01-R11","tests":{"unit":"PASS","vet":"PASS","gofmt":"PASS","verify-script-doctrine":"PASS","gate":"PASS"},"baseline_unchanged":true,"end_to_end_mutations":{"mutation1_makefile_shell_function":"+1 baseline-python-invocation-changed","mutation2_makefile_shell_assignment":"+1 baseline-python-invocation-changed","mutation3_bash_dashc_dynamic":"+1 internal-error","mutation4_workflow_default_python":"+2 python-invocation sites","mutation5_step_shell_python_u":"+1 python-invocation site","mutation6_comment_only":"0 delta"}}

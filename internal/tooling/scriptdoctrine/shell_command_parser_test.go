@@ -1,7 +1,6 @@
 package scriptdoctrine
 
 import (
-
 	"testing"
 )
 

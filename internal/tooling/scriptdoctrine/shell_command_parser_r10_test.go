@@ -8,10 +8,15 @@ import "testing"
 // false-positive that must not regress.
 //
 // The extraction API differs by source: Makefiles use the
-// Makefile extractor, workflows use the YAML run-block extractor,
-// and shell scripts use the direct shell walker. Mixing the APIs
+// Makefile extractor, workflows use the YAML AST walker, and
+// shell scripts use the direct shell walker. Mixing the APIs
 // would produce parse errors unrelated to the underlying
 // classification logic.
+//
+// Workflow test snippets below are wrapped in a minimal
+// `jobs.<name>.steps` scaffold so the YAML AST walker recognises
+// them as run steps; the run body is the same string the line
+// parser accepted in R10.
 func TestR10Coverage_Makefile(t *testing.T) {
 	cases := []struct {
 		name string
@@ -28,10 +33,13 @@ func TestR10Coverage_Makefile(t *testing.T) {
 		{"same-line recipe (with semicolon)", "build: ; python3 tool.py", 1},
 		// Same-line recipe with prerequisites, NOT a recipe.
 		{"same-line with prereq (no semicolon)", "build: python3.py", 0},
-		// (shell ...) in a variable assignment: this is
-		// make-time execution, fail-closed.
+		// (shell ...) in a variable assignment is make-time
+		// execution: this case deliberately remains uncounted
+		// until R11.4 lands the $(shell ...) detector; we keep
+		// the expected value at 0 because the existing recipe
+		// scanner still does not see the expansion.
 		{"$(shell ...) in assignment",
-			"RESULT := $(shell python3 hidden.py)\nall:\n\techo $$RESULT", 0},
+			"RESULT := $(shell python3 hidden.py)\nall:\n\techo $$RESULT", 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,27 +83,31 @@ func TestR10Coverage_Shell(t *testing.T) {
 }
 
 func TestR10Coverage_YAMLWorkflow(t *testing.T) {
+	// Each snippet is wrapped in a minimal workflow scaffold so
+	// the R11 YAML AST walker can locate the run step.
+	wrap := func(stepRunAndShell string) string {
+		return "jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - " + stepRunAndShell + "\n"
+	}
 	cases := []struct {
-		name string
-		data string
-		want int
+		name     string
+		stepYAML string
+		want     int
 	}{
 		// Custom shell template with {0} placeholder: the
 		// command part is `python`, so 1 invocation.
-		{"shell: python {0}", "run: echo hi\nshell: python {0}", 1},
-		{"shell: /usr/bin/python3 {0}",
-			"run: echo hi\nshell: /usr/bin/python3 {0}", 1},
-		// Quoted shell template - still need to extract the
-		// command part after stripping the YAML quotes.
-		{"shell: \"python\"", "run: echo hi\nshell: \"python\"", 1},
+		{"shell: python {0}", wrap("run: echo hi\n        shell: python {0}"), 1},
+		{"shell: /usr/bin/python3 {0}", wrap("run: echo hi\n        shell: /usr/bin/python3 {0}"), 1},
+		// Quoted shell template is decoded via Node.Value,
+		// no quote-stripping required.
+		{"shell: \"python\"", wrap("run: echo hi\n        shell: \"python\""), 1},
 		// shell: bash -> no python count.
-		{"shell: bash", "run: echo hi\nshell: bash", 0},
+		{"shell: bash", wrap("run: echo hi\n        shell: bash"), 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := CountPythonInvocationsInYAMLRunBlocks([]byte(tc.data))
+			got := CountPythonInvocationsInYAMLRunBlocks([]byte(tc.stepYAML))
 			if got != tc.want {
-				t.Errorf("CountPythonInvocationsInYAMLRunBlocks(%q) = %d, want %d", tc.data, got, tc.want)
+				t.Errorf("CountPythonInvocationsInYAMLRunBlocks(%q) = %d, want %d", tc.stepYAML, got, tc.want)
 			}
 		})
 	}

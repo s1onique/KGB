@@ -11,13 +11,23 @@ import (
 	"strings"
 )
 
-// SortDiagnostics sorts violations deterministically by check type then path.
+// SortDiagnostics sorts violations deterministically by check type
+// then path then line then column. The line/column tie-breaker keeps
+// ordering stable when a single path emits multiple diagnostics
+// from different execution sites (e.g., multiple Make $(shell ...)
+// expansions in one Makefile).
 func SortDiagnostics(diags []Diagnostic) {
 	sort.Slice(diags, func(i, j int) bool {
 		if diags[i].Check != diags[j].Check {
 			return diags[i].Check < diags[j].Check
 		}
-		return diags[i].Path < diags[j].Path
+		if diags[i].Path != diags[j].Path {
+			return diags[i].Path < diags[j].Path
+		}
+		if diags[i].Line != diags[j].Line {
+			return diags[i].Line < diags[j].Line
+		}
+		return diags[i].Column < diags[j].Column
 	})
 }
 
@@ -128,11 +138,11 @@ func CountPythonInvocations(data []byte) int {
 			return 1
 		}
 	}
-	n, err := countPythonSitesInProgram(string(data))
+	count, err := countPythonSitesInProgram(string(data))
 	if err != nil {
 		return -1
 	}
-	return n
+	return count.Count
 }
 
 // CountPythonInvocationsForPath dispatches to the appropriate

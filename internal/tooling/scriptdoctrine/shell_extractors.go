@@ -47,10 +47,6 @@ func sanitizeMakeVars(s string) string {
 			if depth == 0 {
 				inside := s[i+2 : j-1]
 				// $(VAR) -> $VAR; $(call x,y) and $(shell …) -> 'X'.
-				// $(shell …) is special-cased because the inner text
-				// is executed at Make-expansion time, not recipe time,
-				// so the policy wants a clear "we cannot classify this
-				// statically" signal.
 				if strings.ContainsAny(inside, " ,$") ||
 					strings.HasPrefix(strings.TrimSpace(inside), "shell ") ||
 					strings.HasPrefix(strings.TrimSpace(inside), "shell\t") ||
@@ -96,27 +92,28 @@ func extractMakeVariables(data []byte) map[string]string {
 	return out
 }
 
-// CountPythonInvocationsInMakefile extracts the recipe lines of a
-// Makefile (and `.mk` includes) and counts python invocations over
-// the joined recipes.
+// CountPythonInvocationsInMakefile composes three classifiers:
+//  1. `$(shell ...)` Make function (expansion-time execution)
+//  2. `VAR != RHS` shell-assignment (expansion-time execution)
+//  3. TAB-indented recipes (recipe-time execution)
+//
+// The recipe classifier is fed a copy of the Makefile with
+// `$(shell ...)` and `!= RHS` bodies masked so the same Python
+// invocation cannot be counted twice. Any parse error from any
+// surface propagates as -1 (fail-closed).
 //
 // Makefiles are not shell programs: variable assignments, includes,
 // and conditionals are GNU make syntax. Recipe lines are normally
 // TAB-indented, but `.RECIPEPREFIX = <char>` lets a Makefile change
 // that character. We honour the declared prefix when present.
 //
-// We also pick up same-line recipes (`target: ; cmd`) because
-// they are valid GNU make syntax that the verifier must not
-// silently skip.
-//
 // Before parsing, the recipe text is sanitised: GNU make's
 // `$$(VAR)` literal-dollar escape is preserved, `$(VAR)` and
 // `${VAR}` expansions are rewritten as shell-compatible `$VAR`, and
-// function-call forms (`$(call ...)`, `$(shell ...)`) are replaced
-// with a single placeholder char so the parser doesn't choke on
-// the comma inside the parenthetical. The placeholder is not a
-// valid python command word, so a static analysis can never
-// silently under-count.
+// function-call forms (`$(call ...)`) are replaced with a single
+// placeholder char so the parser doesn't choke on the comma inside
+// the parenthetical. The placeholder is not a valid python command
+// word, so a static analysis can never silently under-count.
 //
 // Returns -1 if data is nil OR the resulting shell program cannot
 // be parsed (fail-closed: malformed recipes should not be silently
@@ -125,22 +122,21 @@ func CountPythonInvocationsInMakefile(data []byte) int {
 	if data == nil {
 		return -1
 	}
-	// Determine the recipe prefix. Default is TAB. .RECIPEPREFIX
-	// overrides it.
+	// Expansion-time: $(shell ...) and `!=` shell assignments.
+	expansionCount, err := classifyMakeShellExpansions(data)
+	if err != nil {
+		return -1
+	}
+	// Recipe-time: TAB-indented recipes over the masked data.
 	prefix := "\t"
 	if m := recipePrefixRx.FindSubmatch(data); m != nil {
 		prefix = string(m[1])
-		// The captured char is consumed; the actual recipe
-		// indentation in the source includes a leading space.
 	}
-	vars := extractMakeVariables(data)
+	masked := maskMakeExpansionSites(data)
+	vars := extractMakeVariables(masked)
 
 	var recipes []string
-	for _, line := range strings.Split(string(data), "\n") {
-		// Strip the recipe prefix and an optional GNU make silent
-		// prefix `@` and any leading spaces. mvdan.cc/sh rejects
-		// `@` at command position so the silent prefix must be
-		// removed before parsing.
+	for _, line := range strings.Split(string(masked), "\n") {
 		body, ok := stripMakePrefix(line, prefix)
 		if !ok {
 			continue
@@ -149,17 +145,11 @@ func CountPythonInvocationsInMakefile(data []byte) int {
 		if !ok {
 			continue
 		}
-		// Resolve simple `$(VAR)` references for variables
-		// whose value is a literal command word.
 		body = resolveMakeVars(body, vars)
 		recipes = append(recipes, body)
 	}
 
-	// Same-line recipes (`target: ; cmd`). These are recipe
-	// lines that share a logical line with the target rule.
-	// mvdan.cc/sh does not know about GNU make semantics, so
-	// we extract them ourselves.
-	for _, line := range strings.Split(string(data), "\n") {
+	for _, line := range strings.Split(string(masked), "\n") {
 		if body, ok := extractSameLineRecipe(line); ok {
 			body = resolveMakeVars(body, vars)
 			recipes = append(recipes, body)
@@ -167,13 +157,13 @@ func CountPythonInvocationsInMakefile(data []byte) int {
 	}
 
 	if len(recipes) == 0 {
-		return 0
+		return expansionCount.Count
 	}
-	n, err := countPythonSitesInProgram(sanitizeMakeVars(strings.Join(recipes, "\n")))
+	recipeCount, err := countPythonSitesInProgram(sanitizeMakeVars(strings.Join(recipes, "\n")))
 	if err != nil {
 		return -1
 	}
-	return n
+	return expansionCount.Count + recipeCount.Count
 }
 
 // stripMakePrefix returns the recipe body if line starts with the

@@ -301,7 +301,7 @@ func (v *Verifier) walkCIWorkflows(root string, diags *[]Diagnostic) {
 	}
 
 	for _, entry := range entries {
-if entry.IsDir() || strings.HasSuffix(entry.Name(), ".sample") {
+		if entry.IsDir() || strings.HasSuffix(entry.Name(), ".sample") {
 			continue
 		}
 		name := entry.Name()
@@ -359,7 +359,7 @@ func (v *Verifier) walkGitHooks(root string, diags *[]Diagnostic) {
 	}
 
 	for _, entry := range entries {
-if entry.IsDir() || strings.HasSuffix(entry.Name(), ".sample") {
+		if entry.IsDir() || strings.HasSuffix(entry.Name(), ".sample") {
 			continue
 		}
 

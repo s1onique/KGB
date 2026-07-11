@@ -8,10 +8,19 @@ import (
 )
 
 // Diagnostic represents a single doctrine violation.
+//
+// Line and Column are populated for diagnostics produced by
+// structural parsers (YAML AST, GNU Make $(shell ...) expansion-time
+// detection, bash -c payload classification). Diagnostics that do
+// not originate from a structural source leave Line and Column at
+// zero; the verifier still surfaces them, ordered by Path so
+// callers see all violations for a single source together.
 type Diagnostic struct {
-	Check string
-	Path  string
-	Msg   string
+	Check  string
+	Path   string
+	Line   int
+	Column int
+	Msg    string
 }
 
 // MaxShellLOC is the maximum allowed logical LOC for shell scripts.

@@ -8,11 +8,14 @@ import "testing"
 // positive that must not regress.
 //
 // The extraction API differs by source: Makefiles use the
-// Makefile extractor, workflows use the YAML run-block extractor,
-// and shell scripts use the direct shell walker. Mixing the APIs
+// Makefile extractor, workflows use the YAML AST walker, and
+// shell scripts use the direct shell walker. Mixing the APIs
 // would produce parse errors unrelated to the underlying
 // classification logic.
-
+//
+// Workflow test snippets below are wrapped in a minimal
+// `jobs.<name>.steps` scaffold so the R11 YAML AST walker can
+// locate the run step.
 func TestR9Coverage_Makefile(t *testing.T) {
 	cases := []struct {
 		name string
@@ -69,26 +72,32 @@ func TestR9Coverage_Shell(t *testing.T) {
 }
 
 func TestR9Coverage_YAMLWorkflow(t *testing.T) {
+	// Each snippet is wrapped in a minimal workflow scaffold so
+	// the R11 YAML AST walker can locate the run step. The run
+	// body content is what the line-based parser saw in R9.
+	wrap := func(step string) string {
+		return "jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - " + step + "\n"
+	}
 	cases := []struct {
-		name string
-		data string
-		want int
+		name     string
+		stepYAML string
+		want     int
 	}{
 		// Quoted inline scalar.
-		{"run: \"python3 x.py\"", "run: \"python3 x.py\"", 1},
-		{"run: 'python3 x.py'", "run: 'python3 x.py'", 1},
+		{"run: \"python3 x.py\"", wrap("run: \"python3 x.py\""), 1},
+		{"run: 'python3 x.py'", wrap("run: 'python3 x.py'"), 1},
 		// Plain inline scalar.
-		{"run: python3 x.py", "run: python3 x.py", 1},
+		{"run: python3 x.py", wrap("run: python3 x.py"), 1},
 		// Block-scalar run body.
-		{"- run: |\n    python3 x.py", "- run: |\n    python3 x.py", 1},
-		// shell: python3 - 1 invocation.
-		{"- run: echo hi\n  shell: python3", "- run: echo hi\n  shell: python3", 1},
+		{"- run: |\n    python3 x.py", wrap("run: |\n          python3 x.py"), 1},
+		// shell: python3 -> 1 invocation.
+		{"- run: echo hi\n  shell: python3", wrap("run: echo hi\n        shell: python3"), 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := CountPythonInvocationsInYAMLRunBlocks([]byte(tc.data))
+			got := CountPythonInvocationsInYAMLRunBlocks([]byte(tc.stepYAML))
 			if got != tc.want {
-				t.Errorf("CountPythonInvocationsInYAMLRunBlocks(%q) = %d, want %d", tc.data, got, tc.want)
+				t.Errorf("CountPythonInvocationsInYAMLRunBlocks(%q) = %d, want %d", tc.stepYAML, got, tc.want)
 			}
 		})
 	}

@@ -93,118 +93,29 @@ func CountPythonInvocationsInYAMLRunBlocks(data []byte) int {
 	if data == nil {
 		return -1
 	}
-	blocks, shells := extractYAMLRunAndShell(data)
+	steps, err := extractYAMLSteps(data)
+	if err != nil {
+		return -1
+	}
 	total := 0
-	for _, block := range blocks {
-		n, err := countPythonSitesInProgram(sanitizeGASubstitutions(stripYAMLQuotes(block)))
-		if err != nil {
+	for _, step := range steps {
+		if isPythonShell(step.StepShell, step.JobDefaults, step.WorkflowShell) {
+			total++
+			continue
+		}
+		if step.Run == "" {
+			continue
+		}
+		count, perr := countPythonSitesInProgram(sanitizeGASubstitutions(step.Run))
+		if perr != nil {
 			return -1
 		}
-		total += n
-	}
-	// For every step whose shell maps to a python interpreter,
-	// add 1 invocation to the total: the run body is passed to
-	// `python {0}` (or the equivalent) as the {0} substitution.
-	for _, shell := range shells {
-		exec := resolveShellTemplate(shell)
-		if exec == "" {
-			exec = shell
-		}
-		if isPythonCommandWord(exec) {
-			total++
-		}
+		total += count.Count
 	}
 	return total
 }
 
-// extractYAMLRunBlocks walks the input lines and returns each
-// `run:` value and each `shell:` template, supporting inline
-// scalars (`run: cmd`), literal block scalars (`run: |` followed
-// by indented lines), and folded block scalars (`run: >`). The
-// list-item prefix `- ` is tolerated.
-func extractYAMLRunBlocks(data []byte) []string {
-	blocks, _ := extractYAMLRunAndShell(data)
-	return blocks
-}
 
-// extractYAMLRunAndShell is the shared internal helper that powers
-// both extractYAMLRunBlocks and CountPythonInvocationsInYAMLRunBlocks.
-func extractYAMLRunAndShell(data []byte) (blocks []string, shells []string) {
-	lines := strings.Split(string(data), "\n")
-	var blockIndent int
-	var blockKey string // "run" or "shell"
-	var blockMarker byte
-	var blockLines []string
-
-	flushBlock := func() {
-		if blockIndent < 0 {
-			return
-		}
-		rendered := renderBlock(blockLines, blockMarker, blockIndent)
-		switch blockKey {
-		case "run":
-			if rendered != "" {
-				blocks = append(blocks, rendered)
-			}
-		case "shell":
-			if rendered != "" {
-				shells = append(shells, rendered)
-			}
-		}
-		blockIndent = -1
-		blockKey = ""
-		blockMarker = 0
-		blockLines = nil
-	}
-
-	for _, line := range lines {
-		trimmed := strings.TrimRight(line, " \t\r")
-		indent := leadingSpaces(line)
-
-		if blockIndent >= 0 {
-			if trimmed == "" {
-				blockLines = append(blockLines, "")
-				continue
-			}
-			if indent > blockIndent {
-				blockLines = append(blockLines, line)
-				continue
-			}
-			flushBlock()
-		}
-
-		key, after, ok := splitRunKeyExt(trimmed)
-		if !ok || (key != "run" && key != "shell") {
-			continue
-		}
-
-		value := strings.TrimSpace(after)
-		switch {
-		case value == "|" || value == "|-":
-			blockIndent = indent
-			blockKey = key
-			blockMarker = '|'
-			blockLines = nil
-		case value == ">" || value == ">-":
-			blockIndent = indent
-			blockKey = key
-			blockMarker = '>'
-			blockLines = nil
-		default:
-			// Inline scalar (with or without trailing content).
-			// Strip a single layer of YAML single or double
-			// quotes so `shell: "python"` is classified as
-			// `python` and not as the literal string `"python"`.
-			if key == "run" {
-				blocks = append(blocks, stripYAMLQuotes(value))
-			} else {
-				shells = append(shells, stripYAMLQuotes(value))
-			}
-		}
-	}
-	flushBlock()
-	return blocks, shells
-}
 
 // splitRunKeyExt is the same as splitRunKey but returns any key
 // (used here to recognise both `run:` and `shell:` headers).
@@ -266,8 +177,6 @@ func sanitizeGASubstitutions(s string) string {
 	}
 	return b.String()
 }
-
-
 
 // leadingSpaces returns the number of leading whitespace characters
 // in s. Tabs are counted as one whitespace unit (sufficient for the

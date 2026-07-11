@@ -6,64 +6,70 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// countPythonInvocationsInLine returns the number of executable Python
-// command sites in a single shell line.
+// ============================================================================
+// AST walker
+// ============================================================================
 //
-// The line is parsed as a complete shell program with
-// mvdan.cc/sh/v3/syntax, then walked depth-first with `syntax.Walk`
-// so every `*syntax.CallExpr` (including those reached via
-// FuncDecl bodies, TimeClause targets, CoprocClause pipes,
-// ForClause.Loop iterable expansions, and nested
-// ParamExp/ArithmExp substitutions) is classified exactly once.
+// The scriptdoctrine verifier counts executable Python command sites in
+// shell-shaped inputs. The canonical implementation walks a parsed
+// mvdan.cc/sh/v3 syntax tree and aggregates site counts into an
+// InvocationCount value (or surfaces an error when the walker meets a
+// dynamic execution surface that cannot be proven Python-free).
 //
-// Command-line prefix words (sudo, env, /usr/bin/env, exec,
-// command) are stripped before deciding whether the first remaining
-// word is a Python interpreter. The `command -flag ...` form is
-// recognised as a lookup, never as an invocation.
-//
-// Returns -1 if the line cannot be parsed - fail-closed: malformed
-// syntax might host python we cannot reliably see, so the caller
-// must surface an internal-error diagnostic rather than silently
-// treating the line as python-free.
-func countPythonInvocationsInLine(line string) int {
-	if strings.TrimSpace(line) == "" {
-		return 0
-	}
-	n, err := countPythonSitesInProgram(line)
-	if err != nil {
-		return -1
-	}
-	return n
-}
+// This file holds the AST walker plus the most commonly used
+// classification helpers (isPythonCommandWord, isCommandPrefixWord,
+// isShellInDir, literalValueOfWord). The wrapper-handling helpers
+// for sudo / env / command live in shell_wrappers.go; the bash -c
+// detection lives in shell_dashc.go so each policy concern owns a small
+// focused file.
 
 // countPythonSitesInProgram parses program as a complete shell
 // program and counts the number of executable Python command sites
-// inside it. Any parse error returns a non-nil error so the caller
-// can fail closed.
-func countPythonSitesInProgram(program string) (int, error) {
+// inside it. The structured InvocationCount return value lets
+// internal callers distinguish "matched but unknowable" (a
+// non-nil error) from "not matched" (a zero count with a nil
+// error).
+//
+// Any parse error, malformed embedded script, dynamic bash -c
+// payload, or other unclassifiable surface produces a non-nil
+// error. The public compatibility shim CountPythonInvocations
+// converts that error into -1 for callers that have not migrated
+// to the typed API.
+func countPythonSitesInProgram(program string) (InvocationCount, error) {
 	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
 	file, err := parser.Parse(strings.NewReader(program), "inline")
 	if err != nil {
-		return 0, err
+		return ZeroCount, err
 	}
 	count := 0
+	walkErr := error(nil)
 	syntax.Walk(file, func(node syntax.Node) bool {
 		call, ok := node.(*syntax.CallExpr)
 		if !ok {
 			return true
 		}
-		if v, isPython := pythonInvocationSite(call); isPython {
+		v, isPython, err := pythonInvocationSite(call)
+		if err != nil {
+			walkErr = err
+			return false
+		}
+		if isPython {
 			count += v
 		}
 		return true
 	})
-	return count, nil
+	if walkErr != nil {
+		return ZeroCount, walkErr
+	}
+	return InvocationCount{Count: count}, nil
 }
 
 // pythonInvocationSite reports whether call is a python command
-// invocation site. Returns (count, true) when the call counts as
-// one invocation, (0, false) otherwise (data reference, lookup,
-// assignment without further invocation, etc.).
+// invocation site. Returns (count, true, nil) when the call counts
+// as one invocation, (0, false, nil) otherwise (data reference,
+// lookup, assignment without further invocation, etc.), and
+// (0, true, err) when the call matched an analysis surface but the
+// surface is dynamic and cannot be classified statically.
 //
 // The classification handles several indirection wrappers that
 // otherwise look like shell command words but in fact execute
@@ -82,15 +88,18 @@ func countPythonSitesInProgram(program string) (int, error) {
 // recognised command prefixes and the wrappers above, the first
 // remaining Word's literal text is a python interpreter or a
 // recognised python tool (pip, pytest, version-suffixed python).
-func pythonInvocationSite(call *syntax.CallExpr) (int, bool) {
+func pythonInvocationSite(call *syntax.CallExpr) (int, bool, error) {
 	if call == nil || len(call.Args) == 0 {
-		return 0, false
+		return 0, false, nil
 	}
 
 	// bash -c '<script>' and sh -c '<script>'. The python
 	// invocation is in the script, not in the outer CallExpr.
-	if n, ok := countShellDashCScript(call); ok {
-		return n, true
+	if n, matched, err := countShellDashCScript(call); matched {
+		if err != nil {
+			return 0, true, err
+		}
+		return n, true, nil
 	}
 
 	// env / sudo wrappers. Skip their flags and (for env) any
@@ -103,11 +112,11 @@ func pythonInvocationSite(call *syntax.CallExpr) (int, bool) {
 	// (end-of-options).
 	args, lookup := stripCommandPrefixes(args)
 	if lookup {
-		return 0, false
+		return 0, false, nil
 	}
 
 	if len(args) == 0 {
-		return 0, false
+		return 0, false, nil
 	}
 
 	// The first remaining Word is the command. Lit() returns ""
@@ -116,64 +125,17 @@ func pythonInvocationSite(call *syntax.CallExpr) (int, bool) {
 	// mis-identify.
 	first := args[0].Lit()
 	if first == "" {
-		return 0, false
+		return 0, false, nil
 	}
 	if isPythonCommandWord(first) {
-		return 1, true
+		return 1, true, nil
 	}
-	return 0, false
-}
-
-// countShellDashCScript detects `bash -c SCRIPT` and `sh -c SCRIPT`
-// invocations, returning the python-command count inside the
-// literal script text. The script is expected to be a single
-// Word whose `Lit()` returns its unquoted content. If the script
-// is a complex expression with parameter expansions, the literal
-// value is empty and the helper returns (0, false) - the caller
-// will then fall through to the outer-classification branch which
-// is also conservative.
-func countShellDashCScript(call *syntax.CallExpr) (int, bool) {
-	if len(call.Args) < 3 {
-		return 0, false
-	}
-	first := call.Args[0].Lit()
-	if !isShellInDir(first) {
-		return 0, false
-	}
-	for i := 1; i < len(call.Args); i++ {
-		a := call.Args[i].Lit()
-		// -c is the script flag. -c and combined forms
-		// like -ec, -xc, -oerrexit, -etc are all equivalent
-		// for the shell's purpose here: the next argument is
-		// the script.
-		if a == "-c" || a == "-ec" || a == "-xc" {
-			if i+1 < len(call.Args) {
-				return countPythonInScriptWord(call.Args[i+1])
-			}
-		}
-		if strings.HasPrefix(a, "-c") && a != "-c" {
-			// -cscript (no space). The whole "-c<rest>" is
-			// the script; we have to look at the Word parts
-			// directly. Lit() drops the "-c" prefix on a
-			// SglQuoted word like -c'python3 x.py', returning
-			// the inner content. Use that.
-			rest := strings.TrimPrefix(a, "-c")
-			if rest == "" {
-				return 0, false
-			}
-			n, err := countPythonSitesInProgram(rest)
-			if err != nil {
-				return 0, false
-			}
-			return n, true
-		}
-	}
-	return 0, false
+	return 0, false, nil
 }
 
 // isShellInDir reports whether the literal word names a POSIX
 // shell. It matches `sh` and `bash` (and `/bin/sh`, `/usr/bin/sh`,
-// etc. via the path-aware isPythonCommandWord-style suffix match).
+// etc. via a path-stripping suffix match).
 func isShellInDir(word string) bool {
 	if idx := strings.LastIndex(word, "/"); idx >= 0 {
 		word = word[idx+1:]
@@ -181,220 +143,10 @@ func isShellInDir(word string) bool {
 	return word == "sh" || word == "bash"
 }
 
-// countPythonInScriptWord parses a single Word that follows
-// `bash -c` and counts python invocations inside it. Returns
-// (0, false) if the word is nil or has no literal value (e.g.
-// it embeds a parameter expansion that Lit() does not
-// reconstruct). The mvdan.cc/sh v3 Word.Lit() helper returns
-// an empty string for SglQuoted and DblQuoted wrappers; we walk
-// the parts manually to recover the inner text.
-func countPythonInScriptWord(w *syntax.Word) (int, bool) {
-	if w == nil {
-		return 0, false
-	}
-	script := literalValueOfWord(w)
-	if script == "" {
-		return 0, false
-	}
-	n, err := countPythonSitesInProgram(script)
-	if err != nil {
-		return 0, false
-	}
-	return n, true
-}
-
-// literalValueOfWord returns the literal string value of w, falling
-// back to Lit() when the word's parts do not yield a usable
-// reconstruction. mvdan.cc/sh v3 represents SglQuoted as a
-// distinct WordPart with a Value field; DblQuoted wraps a list of
-// WordParts whose Lit nodes carry the inner text. We collapse
-// those back into a single string so the script can be re-parsed
-// by the shell visitor.
-func literalValueOfWord(w *syntax.Word) string {
-	if w == nil {
-		return ""
-	}
-	if len(w.Parts) == 1 {
-		switch p := w.Parts[0].(type) {
-		case *syntax.SglQuoted:
-			return p.Value
-		case *syntax.DblQuoted:
-			return joinWordParts(p.Parts)
-		}
-	}
-	return w.Lit()
-}
-
-// joinWordParts concatenates the literal text of a slice of
-// WordParts. Returns an empty string if any part embeds a
-// parameter expansion or command substitution that we cannot
-// reconstruct statically.
-func joinWordParts(parts []syntax.WordPart) string {
-	var b strings.Builder
-	for _, p := range parts {
-		switch v := p.(type) {
-		case *syntax.Lit:
-			b.WriteString(v.Value)
-		default:
-			// Any non-Lit part (CmdSubst, ParamExp, ArithmExp, ...)
-			// would be runtime-resolved; we cannot classify
-			// the script statically. Bail by returning
-			// empty.
-			return ""
-		}
-	}
-	return b.String()
-}
-
-// stripWrapperArgs removes an `env` or `sudo` wrapper from the
-// start of args along with its options and (for env) any leading
-// NAME=VALUE assignments. Returns the slice shifted past the
-// wrapper.
-func stripWrapperArgs(args []*syntax.Word) []*syntax.Word {
-	for {
-		if len(args) == 0 {
-			return args
-		}
-		first := args[0].Lit()
-		switch first {
-		case "env", "/usr/bin/env":
-			// env [-i] [-u NAME] [-C dir] [-S] [-V]
-			//     [--split-string] [--chdir dir] [--help]
-			//     [NAME=VALUE]... [command [arg ...]]
-			// Flags that take a value: -u, --unset, -C,
-			// --chdir, -S, --split-string, -V, --version.
-			envValueFlag := func(flag string) bool {
-				switch flag {
-				case "-u", "--unset",
-					"-C", "--chdir",
-					"-S", "--split-string",
-					"-V", "--version",
-					"--default-signal", "--ignore-signal",
-					"--block-signal", "--sig-proxy",
-					"-T", "--tmpdir",
-					"--path":
-					return true
-				}
-				return false
-			}
-			args = args[1:]
-			for len(args) > 0 {
-				lit := args[0].Lit()
-				if lit == "" {
-					// Assignment like a= (Lit empty).
-					args = args[1:]
-					continue
-				}
-				if lit == "--" {
-					// End of options; what follows is the
-					// real command.
-					args = args[1:]
-					break
-				}
-				if envValueFlag(lit) {
-					args = args[1:]
-					if len(args) > 0 && !strings.HasPrefix(args[0].Lit(), "-") {
-						// The value is the next non-flag arg.
-						args = args[1:]
-					}
-					continue
-				}
-				if strings.HasPrefix(lit, "-") {
-					// -i, --help, etc.
-					args = args[1:]
-					continue
-				}
-				if strings.Contains(lit, "=") {
-					// NAME=VALUE assignment.
-					args = args[1:]
-					continue
-				}
-				// First non-flag, non-assignment: the real
-				// command.
-				break
-			}
-		case "sudo":
-			// sudo [-E] [-H] [-u user] [-g group]
-			//     [-h host] [-p prompt] [-S]
-			//     [-u user] [-g group] [-D date] ...
-			//     [-i|-s] [command [arg ...]]
-			// Flags that take a value: -u, --user, -g, --group,
-			// -h, --host, -p, --prompt, -D, --chdir, --type,
-			// -S, --stdin. We consume the flag AND its value.
-			sudoValueFlag := func(flag string) bool {
-				switch flag {
-				case "-u", "--user", "-g", "--group",
-					"-h", "--host", "-p", "--prompt",
-					"-D", "--chdir", "--type",
-					"-S", "--stdin",
-					"-A", "--askpass":
-					return true
-				}
-				return false
-			}
-			args = args[1:]
-			for len(args) > 0 {
-				lit := args[0].Lit()
-				if lit == "" {
-					args = args[1:]
-					continue
-				}
-				if strings.HasPrefix(lit, "-") {
-					wasValueFlag := sudoValueFlag(lit)
-					args = args[1:]
-					if wasValueFlag && len(args) > 0 && !strings.HasPrefix(args[0].Lit(), "-") {
-						args = args[1:]
-					}
-					continue
-				}
-				break
-			}
-		default:
-			return args
-		}
-	}
-}
-
-// stripCommandPrefixes strips recognised command prefixes
-// (command, exec) from the start of args. The second return is
-// true when the call should be classified as a lookup (e.g.
-// `command -v python3`); false when the remainder is a real
-// command.
-func stripCommandPrefixes(args []*syntax.Word) ([]*syntax.Word, bool) {
-	for len(args) > 0 {
-		lit := args[0].Lit()
-		if !isCommandPrefixWord(lit) {
-			break
-		}
-		if lit == "command" && len(args) >= 2 {
-			arg := args[1].Lit()
-			// `command -v` and `command -V` are lookups; the
-			// same goes for `--help`. `command --` is the
-			// end-of-options marker: drop BOTH the marker
-			// and the `command` so the remainder is treated
-			// as a real command.
-			if arg == "-v" || arg == "-V" || arg == "--help" {
-				return nil, true
-			}
-			if arg == "--" {
-				// Drop both `command` and `--`.
-				return args[2:], false
-			}
-			// Any other -<letter> option is a builtin flag
-			// (e.g. `-p` for command path lookup).
-			if strings.HasPrefix(arg, "-") {
-				return nil, true
-			}
-		}
-		args = args[1:]
-	}
-	return args, false
-}
-
 // isCommandPrefixWord reports whether word, as the literal first token
 // of a command, is a recognised command-line prefix that we strip
 // before checking for python. Empty words (i.e. expanded) are not
-// prefixes.
+// prefixes. Referenced from shell_wrappers.go via stripCommandPrefixes.
 func isCommandPrefixWord(word string) bool {
 	switch word {
 	case "command", "exec":
@@ -417,7 +169,6 @@ func isPythonCommandWord(word string) bool {
 	case "python", "pip", "pytest":
 		return true
 	}
-	// python3, python3.10, pip3, pip3.10 …
 	if strings.HasPrefix(word, "python") && len(word) > len("python") {
 		rest := word[len("python"):]
 		if rest[0] >= '0' && rest[0] <= '9' {
