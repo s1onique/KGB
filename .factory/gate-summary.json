@@ -48,8 +48,8 @@
   "checks_total": 8,
   "checks_failed": 0,
   "checks_unavailable": 0,
-  "tests_total": 121,
-  "tests_passed": 121,
+  "tests_total": 322,
+  "tests_passed": 322,
   "r14_closure_matrix": {
     "typed_propagation": {
       "bash_c_dynamic_line_col": 3,
