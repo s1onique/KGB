@@ -42,7 +42,7 @@
     {
       "name": "git_diff_check",
       "status": "pass",
-      "evidence": "git diff --check (TODO will verify)"
+      "evidence": "git diff --check"
     }
   ],
   "checks_total": 8,
@@ -67,6 +67,14 @@
       "toplevel_comment_dollar_shell": 0,
       "recipe_line_comment_dollar_shell": 1,
       "recipe_line_embedded_dollar_shell": 1
+    },
+    "r15_closure_matrix": {
+      "toplevel_comment": 0,
+      "indented_comment": 0,
+      "trailing_inline_comment": 0,
+      "escaped_hash_literal": 1,
+      "recipe_line_comment_kept": 1,
+      "recipe_prefix_double_arrow_kept": 1
     },
     "yaml_structural_validation": {
       "shell_dynamic_step": "fail-closed with Diagnostic.Line/Column",

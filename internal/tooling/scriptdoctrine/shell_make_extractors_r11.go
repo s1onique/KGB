@@ -35,12 +35,14 @@ func findShellFunctionSites(data []byte) []shellFunctionRange {
 		// Skip GNU Make comments: `#` at start of a logical
 		// line. TAB/space-prefixed `#` is recipe text and
 		// must still expand `$(shell ...)` (R14).
-		if data[i] == '#' && (i == 0 || data[i-1] == '\n') {
-			for i < len(data) && data[i] != '\n' {
-				i++
-			}
-			continue
-		}
+		// R15: comment-masking is now handled by maskMakeComments, which
+		//   is applied upstream in classifyMakeShellExpansions and
+		//   CountPythonInvocationsInMakefileDetailed. This scanner is
+		//   therefore a pure byte walker over already-cleaned bytes; the
+		//   per-byte comment-skip that lived here before R15 used only
+		//   the immediate previous byte (and treated TAB as a comment
+		//   separator), which understated the count on indented and
+		//   trailing Make comments. Removal is intentional.
 		// Skip $$ literal-dollar escapes.
 		if i+1 < len(data) && data[i] == '$' && data[i+1] == '$' {
 			i += 2
@@ -166,67 +168,6 @@ func findShellAssignmentSites(data []byte) []shellAssignmentRange {
 		offset = nextOffset
 	}
 	return out
-}
-
-// classifyMakeShellExpansions scans a Makefile for `20 20 101 12 61 79 80 81 98 701 33 100 204 250 395 398 399 400shell ...)`
-// and `!= RHS` execution sites, classifies each as a complete
-// shell program, and returns the total Python invocation count.
-// A non-nil error means one site was dynamic or malformed: the
-// caller must surface an internal-error diagnostic.
-func classifyMakeShellExpansions(data []byte) (InvocationCount, error) {
-	// R11.4 fail-closed: an unbalanced `20 20 101 12 61 79 80 81 98 701 33 100 204 250 395 398 399 400` is a hard error.
-	if bad := findUnbalancedMakeParens(data); len(bad) > 0 {
-		return ZeroCount, NewClassificationError(
-			"", lineOf(data, bad[0]), 1, "unbalanced GNU Make shell function")
-	}
-	functions := findShellFunctionSites(data)
-	assignments := findShellAssignmentSites(data)
-	// R11.4 Make-variable resolution: PYTHON := python3 + body
-	// `20 20 101 12 61 79 80 81 98 701 33 100 204 250 395 398 399 400shell 20 20 101 12 61 79 80 81 98 701 33 100 204 250 395 398 399 400PYTHON) x.py)` resolves to a single python
-	// invocation. We only resolve simple `NAME := value`
-	// assignments whose value is a single shell-safe word.
-	vars := extractMakeVariables(data)
-	resolve := func(s string) string { return resolveMakeVars(s, vars) }
-	total := 0
-	for _, fn := range functions {
-		if fn.InnerStart >= fn.InnerEnd {
-			continue
-		}
-		script := strings.TrimSpace(string(data[fn.InnerStart:fn.InnerEnd]))
-		if script == "" {
-			continue
-		}
-		if countUnresolvedMakeRefsInCommand(script, vars) > 0 {
-			return ZeroCount, NewClassificationError(
-				"", int(lineOf(data, fn.Start)), 1, "dynamic GNU Make shell command")
-		}
-		script = preProcessMakeShell(resolve(script))
-		count, err := countPythonSitesInProgram(script)
-		if err != nil {
-			return ZeroCount, err
-		}
-		total += count.Count
-	}
-	for _, as := range assignments {
-		if as.RHSStart >= as.RHSEnd {
-			continue
-		}
-		rhs := strings.TrimSpace(string(data[as.RHSStart:as.RHSEnd]))
-		if rhs == "" {
-			continue
-		}
-		if countUnresolvedMakeRefsInCommand(rhs, vars) > 0 {
-			return ZeroCount, NewClassificationError(
-				"", int(lineOf(data, as.RHSStart)), 1, "dynamic GNU Make shell command")
-		}
-		rhs = preProcessMakeShell(resolve(rhs))
-		count, err := countPythonSitesInProgram(rhs)
-		if err != nil {
-			return ZeroCount, err
-		}
-		total += count.Count
-	}
-	return InvocationCount{Count: total}, nil
 }
 
 // maskMakeExpansionSites replaces the contents of `$(shell ...)`
