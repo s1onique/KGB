@@ -284,41 +284,8 @@ func TestCountPythonInvocationsIgnoresCommentsAndOutputCommands(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// Parser unit tests
-// =============================================================================
-
-func TestSplitShellList(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want []string
-	}{
-		{"single command", "echo hi", []string{"echo hi"}},
-		{"two commands via ;", "echo a; echo b", []string{"echo a", "echo b"}},
-		{"two commands via &&", "true && python3 a.py", []string{"true", "python3 a.py"}},
-		{"two commands via ||", "false || python3 a.py", []string{"false", "python3 a.py"}},
-		{"pipe", "echo data | python3 -", []string{"echo data", "python3 -"}},
-		{"quoted semicolon", `echo "a;b"`, []string{`echo "a;b"`}},
-		// Note: the paren grouping test does not invoke the substitution
-		// extraction; it only verifies that the splitter treats the
-		// entire parenthesised region as one operand. The substitution
-		// content is counted by countInCommandList via
-		// extractAndCountSubstitutions, separately.
-		{"paren grouping not split", "echo $(python3 -c 'print(1)')", []string{"echo $(python3 -c 'print(1)')"}},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := splitShellList(tc.in)
-			if len(got) != len(tc.want) {
-				t.Fatalf("splitShellList(%q) = %v (len %d), want %v (len %d)", tc.in, got, len(got), tc.want, len(tc.want))
-			}
-			for i := range got {
-				if got[i] != tc.want[i] {
-					t.Errorf("splitShellList[%d] = %q, want %q", i, got[i], tc.want[i])
-				}
-			}
-		})
-	}
-}
+// The R7 AST-visitor test cases (compound commands, assignment and
+// redirection prefixes, quoting / heredocs / inline comments, malformed
+// syntax, scanner.Err, classification helpers) live in
+// shell_command_parser_test.go to keep this file below the LLM-
+// friendliness hard limit.

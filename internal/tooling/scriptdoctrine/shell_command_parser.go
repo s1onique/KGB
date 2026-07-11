@@ -2,253 +2,239 @@ package scriptdoctrine
 
 import (
 	"strings"
+
+	"mvdan.cc/sh/v3/syntax"
 )
 
 // countPythonInvocationsInLine returns the number of executable Python
 // command sites in a single shell line.
 //
-// A "command site" is one top-level command after splitting the line by
-// command-list separators (;, &&, ||, |, &). The metric counts Python
-// invocations that would actually run, not Python mentioned in arguments,
-// documentation, or lookups.
+// A "command site" is one node in the parsed shell program that would
+// invoke a command. Lines are parsed with mvdan.cc/sh/v3/syntax so the
+// full bash grammar is honoured: simple CallExpr, branches of pipe /
+// boolean BinaryCmd, body statements inside compound commands
+// (if/while/for/case/subshell/block), and command substitutions inside
+// any Word (e.g. printf '%s' "$(python3 -c 'print(1)')").
 //
-// Recursion handles command substitution $() and backticks, so a python
-// invocation inside printf '%s' "$(python3 ...)" still counts.
+// Command-line prefix words (sudo, env, /usr/bin/env, exec, command)
+// are stripped before deciding whether the first remaining word is a
+// Python interpreter. The `command -flag ...` form is recognised as a
+// lookup, never as an invocation.
+//
+// Returns -1 if the line cannot be parsed - fail-closed: malformed
+// syntax might contain python that we cannot reliably see, so the
+// caller must surface an internal-error diagnostic rather than
+// silently treating the count as zero.
 func countPythonInvocationsInLine(line string) int {
-	return countInCommandList(line)
+	n, err := countPythonSitesInLine(line)
+	if err != nil {
+		return -1
+	}
+	return n
 }
 
-func countInCommandList(s string) int {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0
+func countPythonSitesInLine(line string) (int, error) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return 0, nil
 	}
 
-	// Recurse into command substitution first; extracted text is parsed
-	// independently and counted here.
-	remaining, subCount := extractAndCountSubstitutions(s)
-	total := subCount
-
-	for _, piece := range splitShellList(remaining) {
-		piece = strings.TrimSpace(piece)
-		if piece == "" {
-			continue
-		}
-		// Pure variable assignment lines never run (unless they contain
-		// a substitution, which we already counted above).
-		if isPureAssignment(piece) {
-			continue
-		}
-		if invokesPython(piece) {
-			total++
-		}
+	// LangBash is the zero value of LangVariant. We deliberately do NOT
+	// pass RecoverErrors - the parser must surface syntax errors so the
+	// caller can fail closed.
+	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
+	file, err := parser.Parse(strings.NewReader(line), "inline")
+	if err != nil {
+		return 0, err
 	}
-	return total
+
+	w := &pythonWalker{}
+	for _, stmt := range file.Stmts {
+		w.walkStmt(stmt)
+	}
+	return w.count, nil
 }
 
-// extractAndCountSubstitutions removes every $(...) and backtick span
-// from s, recursively counts invocations inside each span, and returns
-// the stripped string plus the recursive total.
-func extractAndCountSubstitutions(s string) (string, int) {
-	total := 0
+// pythonWalker counts python invocations in a parsed shell program.
+//
+// The walker is deliberately conservative: when a Word contains any
+// expansion (e.g. cmd "$(...)" where the first part is a Lit and the
+// second is a CmdSubst) Word.Lit() returns "". In that case we cannot
+// identify the literal command name, so we skip counting it instead
+// of guessing - but we still recurse into the substitution, which is
+// where embedded python lives.
+type pythonWalker struct{ count int }
 
-	// $( ... ) substitutions (with nested paren handling).
-	for {
-		start := strings.Index(s, "$(")
-		if start < 0 {
+func (w *pythonWalker) walkStmt(stmt *syntax.Stmt) {
+	if stmt == nil {
+		return
+	}
+	// Heredocs and file-name redirections can themselves embed
+	// $(...) and backtick substitutions, so we walk them.
+	for _, r := range stmt.Redirs {
+		w.walkRedirect(r)
+	}
+	w.walkCommand(stmt.Cmd)
+}
+
+func (w *pythonWalker) walkRedirect(r *syntax.Redirect) {
+	if r == nil {
+		return
+	}
+	if r.Word != nil {
+		w.walkWord(r.Word)
+	}
+	if r.Hdoc != nil {
+		// Heredoc bodies are unexpanded Words on the AST; $() inside
+		// still produces CmdSubst parts and must be scanned.
+		w.walkWord(r.Hdoc)
+	}
+}
+
+func (w *pythonWalker) walkCommand(cmd syntax.Command) {
+	if cmd == nil {
+		return
+	}
+	switch c := cmd.(type) {
+	case *syntax.CallExpr:
+		w.walkCall(c)
+	case *syntax.BinaryCmd:
+		// &&, ||, |, |&
+		w.walkStmt(c.X)
+		w.walkStmt(c.Y)
+	case *syntax.IfClause:
+		for _, s := range c.Cond {
+			w.walkStmt(s)
+		}
+		for _, s := range c.Then {
+			w.walkStmt(s)
+		}
+		if c.Else != nil {
+			w.walkCommand(c.Else)
+		}
+	case *syntax.WhileClause:
+		for _, s := range c.Cond {
+			w.walkStmt(s)
+		}
+		for _, s := range c.Do {
+			w.walkStmt(s)
+		}
+	case *syntax.ForClause:
+		// Loop variable and iterable cannot invoke commands.
+		for _, s := range c.Do {
+			w.walkStmt(s)
+		}
+	case *syntax.CaseClause:
+		for _, item := range c.Items {
+			for _, s := range item.Stmts {
+				w.walkStmt(s)
+			}
+		}
+	case *syntax.Subshell:
+		for _, s := range c.Stmts {
+			w.walkStmt(s)
+		}
+	case *syntax.Block:
+		for _, s := range c.Stmts {
+			w.walkStmt(s)
+		}
+		// DeclClause / FuncDecl / ArithmCmd / ParenArithm /
+		// BinaryArithm / LetClause do not invoke external commands
+		// that we care about.
+	}
+}
+
+func (w *pythonWalker) walkCall(call *syntax.CallExpr) {
+	if call == nil {
+		return
+	}
+
+	// Prefix assignments live on the CallExpr even when Args is empty
+	// (e.g. `X=`python3 ...`` - bare assignment with a substitution
+	// value). Their Value word can still embed $(...) or backtick
+	// invocations, so walk it before deciding the call is a no-op.
+	for _, as := range call.Assigns {
+		if as != nil && as.Value != nil {
+			w.walkWord(as.Value)
+		}
+	}
+
+	if len(call.Args) == 0 {
+		// Pure assignment (x=1 y=2 …) - not an invocation.
+		return
+	}
+
+	// Strip recognised command prefixes. `command -flag ...` is a
+	// lookup and does not count.
+	args := call.Args
+	for len(args) > 0 {
+		lit := args[0].Lit()
+		if !isCommandPrefixWord(lit) {
 			break
 		}
-		end, ok := findMatchingParen(s, start+2)
-		if !ok {
-			// Unbalanced - stop trying; the surrounding parser will
-			// surface a more useful diagnostic on the file level.
-			break
+		if lit == "command" && len(args) >= 2 && strings.HasPrefix(args[1].Lit(), "-") {
+			return
 		}
-		inner := s[start+2 : end]
-		total += countInCommandList(inner)
-		// Replace the substitution with a single space so downstream
-		// splitter doesn't see unbalanced parens.
-		s = s[:start] + " " + s[end+1:]
+		args = args[1:]
+	}
+	if len(args) == 0 {
+		return
 	}
 
-	// ` ... ` backtick substitutions.
-	for {
-		start := strings.Index(s, "`")
-		if start < 0 {
-			break
+	// The first remaining Word is the command. Lit() returns "" when
+	// the word embeds any expansion; bail rather than mis-identify
+	// the command name.
+	first := args[0].Lit()
+	if first == "" {
+		// But the word's substitutions may still host python.
+		for _, a := range args {
+			w.walkWord(a)
 		}
-		end := -1
-		for i := start + 1; i < len(s); i++ {
-			if s[i] == '`' {
-				end = i
-				break
-			}
-		}
-		if end < 0 {
-			break
-		}
-		inner := s[start+1 : end]
-		total += countInCommandList(inner)
-		s = s[:start] + " " + s[end+1:]
+		return
+	}
+	if isPythonCommandWord(first) {
+		w.count++
 	}
 
-	return s, total
+	// Walk the rest of the words for embedded $(...) and backticks.
+	for _, a := range args[1:] {
+		w.walkWord(a)
+	}
 }
 
-// findMatchingParen returns the index of the ')' matching the '(' at
-// openIdx-1 (one position before the open paren content).
-func findMatchingParen(s string, openIdx int) (int, bool) {
-	depth := 1
-	for i := openIdx; i < len(s); i++ {
-		switch s[i] {
-		case '(':
-			depth++
-		case ')':
-			depth--
-			if depth == 0 {
-				return i, true
+func (w *pythonWalker) walkWord(word *syntax.Word) {
+	if word == nil {
+		return
+	}
+	for _, part := range word.Parts {
+		switch p := part.(type) {
+		case *syntax.CmdSubst:
+			for _, s := range p.Stmts {
+				w.walkStmt(s)
+			}
+		case *syntax.DblQuoted:
+			for _, inner := range p.Parts {
+				if cs, ok := inner.(*syntax.CmdSubst); ok {
+					for _, s := range cs.Stmts {
+						w.walkStmt(s)
+					}
+				}
+			}
+		case *syntax.ProcSubst:
+			// Process substitutions <(cmd) and >(cmd) run the
+			// inner statements; treat the same as a subshell.
+			for _, s := range p.Stmts {
+				w.walkStmt(s)
 			}
 		}
 	}
-	return -1, false
 }
 
-// splitShellList splits a shell line by the top-level command-list
-// separators (;, &&, ||, |, &) while respecting single/double quotes and
-// paren / brace nesting. The result is the list of individual command
-// operands, in order, without their separators. Each piece is trimmed of
-// leading and trailing whitespace.
-func splitShellList(s string) []string {
-	var pieces []string
-	var current strings.Builder
-	inSingle := false
-	inDouble := false
-	parenDepth := 0
-	braceDepth := 0
-
-	flush := func() {
-		pieces = append(pieces, strings.TrimSpace(current.String()))
-		current.Reset()
-	}
-
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-
-		// Quote handling.
-		if !inDouble && c == '\'' {
-			inSingle = !inSingle
-			current.WriteByte(c)
-			continue
-		}
-		if !inSingle && c == '"' {
-			inDouble = !inDouble
-			current.WriteByte(c)
-			continue
-		}
-		if inSingle || inDouble {
-			current.WriteByte(c)
-			continue
-		}
-
-		// Nesting depth.
-		if c == '(' {
-			parenDepth++
-			current.WriteByte(c)
-			continue
-		}
-		if c == ')' {
-			if parenDepth > 0 {
-				parenDepth--
-			}
-			current.WriteByte(c)
-			continue
-		}
-		if c == '{' {
-			braceDepth++
-			current.WriteByte(c)
-			continue
-		}
-		if c == '}' {
-			if braceDepth > 0 {
-				braceDepth--
-			}
-			current.WriteByte(c)
-			continue
-		}
-
-		// Top-level separators only.
-		if parenDepth > 0 || braceDepth > 0 {
-			current.WriteByte(c)
-			continue
-		}
-
-		switch c {
-		case ';':
-			flush()
-		case '&':
-			if i+1 < len(s) && s[i+1] == '&' {
-				flush()
-				i++ // consume second '&'
-			} else {
-				flush() // single '&' is backgrounding
-			}
-		case '|':
-			if i+1 < len(s) && s[i+1] == '|' {
-				flush()
-				i++ // consume second '|'
-			} else {
-				flush() // single '|' is a pipe
-			}
-		default:
-			current.WriteByte(c)
-		}
-	}
-
-	if current.Len() > 0 {
-		flush()
-	}
-	return pieces
-}
-
-// isPureAssignment reports whether the line is a plain variable assignment
-// without any command substitution that would execute code.
-func isPureAssignment(s string) bool {
-	if !variableAssignRx.MatchString(s) {
-		return false
-	}
-	return !strings.Contains(s, "$(") && !strings.Contains(s, "`")
-}
-
-// invokesPython reports whether the given (single) command operand runs
-// Python. Lookups like `command -v python3` and `command --version` are
-// NOT counted - they only inspect, they do not run.
-func invokesPython(cmd string) bool {
-	fields := shellFields(cmd)
-	if len(fields) == 0 {
-		return false
-	}
-
-	i := 0
-	// Strip optional prefix commands.
-	for i < len(fields) && isCommandPrefix(fields[i]) {
-		// `command -flag ...` is a lookup, not an invocation. The
-		// remainder of the line is arguments to the lookup, not a
-		// separate command.
-		if fields[i] == "command" && i+1 < len(fields) && strings.HasPrefix(fields[i+1], "-") {
-			return false
-		}
-		i++
-	}
-
-	if i >= len(fields) {
-		return false
-	}
-	return isPythonCommandWord(fields[i])
-}
-
-// isCommandPrefix reports whether the given word is one of the recognized
-// command prefixes (sudo, env, /usr/bin/env, exec, command).
-func isCommandPrefix(word string) bool {
+// isCommandPrefixWord reports whether word, as the literal first token
+// of a command, is a recognised command-line prefix that we strip
+// before checking for python. Empty words (i.e. expanded) are not
+// prefixes.
+func isCommandPrefixWord(word string) bool {
 	switch word {
 	case "sudo", "env", "/usr/bin/env", "exec", "command":
 		return true
@@ -256,15 +242,13 @@ func isCommandPrefix(word string) bool {
 	return false
 }
 
-// isPythonCommandWord reports whether word, after stripping any leading
-// path and trailing .py extension, is a Python interpreter or Python
-// tool name.
+// isPythonCommandWord reports whether word, after stripping any
+// leading path and a trailing .py extension, is a python interpreter or
+// a recognised python tool name (pip, pytest).
 func isPythonCommandWord(word string) bool {
-	// Strip leading path.
 	if idx := strings.LastIndex(word, "/"); idx >= 0 {
 		word = word[idx+1:]
 	}
-	// Strip trailing ".py" extension (rare but legal: `python3.py`).
 	if strings.HasSuffix(word, ".py") {
 		word = strings.TrimSuffix(word, ".py")
 	}
@@ -272,11 +256,10 @@ func isPythonCommandWord(word string) bool {
 	case "python", "pip", "pytest":
 		return true
 	}
-	// python3, python3.10, pip3, etc.
+	// python3, python3.10, pip3, pip3.10 …
 	if strings.HasPrefix(word, "python") && len(word) > len("python") {
 		rest := word[len("python"):]
 		if rest[0] >= '0' && rest[0] <= '9' {
-			// Optional .N.M version suffix.
 			for _, r := range rest {
 				if r != '.' && (r < '0' || r > '9') {
 					return false
@@ -297,43 +280,4 @@ func isPythonCommandWord(word string) bool {
 		}
 	}
 	return false
-}
-
-// shellFields tokenizes a shell command into whitespace-separated words
-// while respecting single and double quotes and backslash escapes.
-func shellFields(s string) []string {
-	var fields []string
-	var current strings.Builder
-	inSingle := false
-	inDouble := false
-	hasContent := false
-
-	flush := func() {
-		if hasContent {
-			fields = append(fields, current.String())
-			current.Reset()
-			hasContent = false
-		}
-	}
-
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c == '\\' && i+1 < len(s):
-			current.WriteByte(s[i+1])
-			hasContent = true
-			i++
-		case c == '\'' && !inDouble:
-			inSingle = !inSingle
-		case c == '"' && !inSingle:
-			inDouble = !inDouble
-		case !inSingle && !inDouble && (c == ' ' || c == '\t' || c == '\n'):
-			flush()
-		default:
-			current.WriteByte(c)
-			hasContent = true
-		}
-	}
-	flush()
-	return fields
 }

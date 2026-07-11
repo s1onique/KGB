@@ -211,7 +211,7 @@ func scanPython(path string, data []byte) (bool, int) {
 }
 
 func (v *Verifier) walkMakefiles(root string, diags *[]Diagnostic) {
-	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	walkErr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			*diags = append(*diags, Diagnostic{
 				Check: "internal-error",
@@ -268,6 +268,16 @@ func (v *Verifier) walkMakefiles(root string, diags *[]Diagnostic) {
 
 		return nil
 	})
+	// Fail closed: a top-level walk error (e.g. permission denied on the
+	// repo root) must surface as an internal-error diagnostic, not be
+	// silently swallowed.
+	if walkErr != nil {
+		*diags = append(*diags, Diagnostic{
+			Check: "internal-error",
+			Path:  ".",
+			Msg:   fmt.Sprintf("walk for Makefiles: %v", walkErr),
+		})
+	}
 }
 
 func (v *Verifier) walkCIWorkflows(root string, diags *[]Diagnostic) {

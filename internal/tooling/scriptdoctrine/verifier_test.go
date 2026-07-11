@@ -1,7 +1,6 @@
 package scriptdoctrine
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -401,19 +400,43 @@ func TestMutationCommentsDoNotCount(t *testing.T) {
 }
 
 // =============================================================================
-// Smoke helper
+// R7: walk-error capture tests (P1 fix)
 // =============================================================================
 
-func TestPrintAllDiagnostics_SkipUnlessRequested(t *testing.T) {
-	if os.Getenv("VERBOSE_DOCTRINE") == "" {
-		t.Skip("set VERBOSE_DOCTRINE=1 to print diagnostics")
+// TestWalkMakefilesCapturesTopLevelWalkError pins the R7 P1 fix:
+// the error returned by filepath.Walk in walkMakefiles must be
+// surfaced as an internal-error diagnostic, not silently dropped.
+// Before the fix, a permission-denied or missing-root walk would
+// return no diagnostics at all and the verifier would falsely
+// green-light the repo.
+//
+// The closure-level diagnostic uses the phrase "walking for
+// Makefiles" (in-progress); the top-level catch uses "walk for
+// Makefiles" (finished). Either is acceptable evidence that the
+// walk error is no longer swallowed.
+func TestWalkMakefilesCapturesTopLevelWalkError(t *testing.T) {
+	// A non-existent root forces filepath.Walk to return the lstat
+	// error wrapping into its own return value (the closure gets
+	// called once with the error, then walk itself returns the same
+	// error after the closure finishes).
+	missingRoot := filepath.Join(t.TempDir(), "does", "not", "exist")
+	verifier := NewVerifier(missingRoot, true)
+	var diags []Diagnostic
+	verifier.walkMakefiles(missingRoot, &diags)
+
+	found := false
+	for _, d := range diags {
+		if d.Check != "internal-error" {
+			continue
+		}
+		if strings.Contains(d.Msg, "walk for Makefiles") ||
+			strings.Contains(d.Msg, "walking for Makefiles") {
+			found = true
+			break
+		}
 	}
-	tmpDir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	verifier := NewVerifier(tmpDir, true)
-	for _, d := range verifier.Verify() {
-		fmt.Printf("[%s] %s: %s\n", d.Check, d.Path, d.Msg)
+	if !found {
+		t.Errorf("expected internal-error diagnostic mentioning 'walk for Makefiles', got: %v", diags)
 	}
 }
+
