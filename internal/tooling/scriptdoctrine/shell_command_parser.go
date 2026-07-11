@@ -103,7 +103,13 @@ func pythonInvocationSite(call *syntax.CallExpr) (int, bool, error) {
 	}
 
 	// env / sudo wrappers. Skip their flags and (for env) any
-	// NAME=VALUE assignments before the real command.
+	// NAME=VALUE assignments before the real command. After the
+	// wrappers are stripped, the residual command may itself be a
+	// bash -c invocation (R11.2 + R11.3 closure matrix); a wrapper
+	// around `bash -c 'python3 x.py'` MUST still classify as one
+	// python invocation. Strip prefixes AFTER wrappers so the
+	// `command --` end-of-options marker can be disambiguated on
+	// the residual command (e.g. `env FOO=bar command -v python3`).
 	args := stripWrapperArgs(call.Args)
 
 	// Recognised command prefixes (command, exec, plus the
@@ -117,6 +123,17 @@ func pythonInvocationSite(call *syntax.CallExpr) (int, bool, error) {
 
 	if len(args) == 0 {
 		return 0, false, nil
+	}
+
+	// Re-check for `bash -c`/`sh -c` after wrappers and prefixes
+	// have been normalised. `sudo bash -c 'python3 x.py'` would have
+	// failed the direct check above because args[0] was `sudo`;
+	// the residual first arg is now `bash` or `sh`.
+	if n, matched, err := countShellDashCScriptWrapped(args); matched {
+		if err != nil {
+			return 0, true, err
+		}
+		return n, true, nil
 	}
 
 	// The first remaining Word is the command. Lit() returns ""

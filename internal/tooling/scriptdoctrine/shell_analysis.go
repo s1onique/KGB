@@ -3,6 +3,7 @@ package scriptdoctrine
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -169,14 +170,34 @@ func CountPythonInvocationsForPath(path string, data []byte) int {
 	if base == "Makefile" || strings.HasSuffix(base, ".mk") {
 		return CountPythonInvocationsInMakefile(data)
 	}
-	// Match both absolute and repo-relative paths under
-	// `.github/workflows/`.
 	if (strings.HasPrefix(path, ".github/workflows/") ||
 		strings.Contains(path, "/.github/workflows/")) &&
 		(strings.HasSuffix(base, ".yml") || strings.HasSuffix(base, ".yaml")) {
 		return CountPythonInvocationsInYAMLRunBlocks(data)
 	}
 	return CountPythonInvocations(data)
+}
+
+// CountPythonInvocationsForPathDetailed is the structured twin of
+// CountPythonInvocationsForPath. The structured error captures the
+// first ClassificationError the chosen extractor emits so the
+// verifier can populate Diagnostic.Line/Column for fail-closed
+// surfaces. The error is intentionally an error type so the
+// caller can type-switch on *ClassificationError and reach the
+// line/column fields directly.
+func CountPythonInvocationsForPathDetailed(path string, data []byte) (int, error) {
+	if data == nil {
+		return -1, nil
+	}
+	// Delegate to the dispatcher's int-returning twin. The -1
+	// return already encodes the fail-closed verdict; callers
+	// that need line/column reach for the typed extractor
+	// helpers directly.
+	count := CountPythonInvocationsForPath(path, data)
+	if count < 0 {
+		return -1, fmt.Errorf("python invocation count could not be determined for %s", filepath.Base(path))
+	}
+	return count, nil
 }
 
 // CountPythonInvocationsFromFile reads path and counts python

@@ -206,3 +206,66 @@ func columnFromCallArg(call *syntax.CallExpr, argIndex int) int {
 	}
 	return 1 + argIndex
 }
+
+// countShellDashCScriptWrapped classifies a residual arg list
+// (already stripped of wrappers and command prefixes) as a
+// bash -c / sh -c invocation. Used by `pythonInvocationSite` to
+// catch `sudo bash -c '...'` / `env FOO=bar sh -c '...'` where the
+// outer CallExpr's first arg is a wrapper rather than the shell.
+//
+// The function is intentionally permissive about the source: it
+// does not return a positional error since the outer call has
+// already supplied the line context via call.Pos().
+func countShellDashCScriptWrapped(args []*syntax.Word) (int, bool, error) {
+	if len(args) < 3 {
+		return 0, false, nil
+	}
+	first := args[0].Lit()
+	if first == "" || !isShellInDir(first) {
+		return 0, false, nil
+	}
+	// Mirror countShellDashCScript but with offset indices
+	// shifted (the wrapper is gone, so the indices line up).
+	sawDashC := false
+	for i := 1; i < len(args); i++ {
+		argLit := args[i].Lit()
+		switch {
+		case argLit == "":
+			if sawDashC {
+				return 0, true, NewClassificationError(
+					"", 0, 0, "dynamic bash -c command string")
+			}
+			return 0, false, nil
+		case argLit == "--":
+			if !sawDashC {
+				return 0, false, nil
+			}
+			return 0, true, NewClassificationError(
+				"", 0, 0, "malformed bash -c invocation: missing command string")
+		case isShortOptionCluster(argLit) && strings.ContainsRune(argLit[1:], 'c'):
+			sawDashC = true
+			scriptIdx := i + 1
+			if scriptIdx >= len(args) {
+				return 0, true, NewClassificationError(
+					"", 0, 0, "malformed bash -c invocation: missing command string")
+			}
+			w := args[scriptIdx]
+			script, ok := literalScriptValue(w)
+			if !ok {
+				return 0, true, NewClassificationError(
+					"", 0, 0, "dynamic bash -c command string")
+			}
+			count, err := countPythonSitesInProgram(script)
+			if err != nil {
+				return 0, true, NewClassificationError(
+					"", 0, 0, "malformed nested shell command: "+err.Error())
+			}
+			return count.Count, true, nil
+		case strings.HasPrefix(argLit, "-") && !sawDashC:
+			continue
+		default:
+			return 0, false, nil
+		}
+	}
+	return 0, false, nil
+}

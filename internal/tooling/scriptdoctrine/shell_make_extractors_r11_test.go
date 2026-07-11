@@ -75,3 +75,78 @@ func TestR11MakeCountingInvariant(t *testing.T) {
 		t.Errorf("CountPythonInvocationsInMakefile(%q) = %d, want 1", data, got)
 	}
 }
+
+// TestR12MakeCommentExclusion pins the R12 closure that Make
+// comment text never contributes to a python invocation count.
+// The scanner must skip lines whose first non-whitespace byte is
+// `#` (GNU Make's comment prefix) so comments like `# RESULT
+// := $(shell python3 x.py)` do not surface as a python site.
+func TestR12MakeCommentExclusion(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+		want int
+	}{
+		{"assignment in comment is ignored",
+			"# RESULT := $(shell python3 hidden.py)\nall:\n\techo ok\n", 0},
+		{"!= in comment is ignored",
+			"# RESULT != python3 hidden.py\nall:\n\techo ok\n", 0},
+		{"recipe line is not a comment",
+			"all:\n\tpython3 tool.py\n", 1},
+		{"real assignment still counts",
+			"RESULT := $(shell python3 x.py)\nall:\n\techo ok\n", 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CountPythonInvocationsInMakefile([]byte(tc.data))
+			if got != tc.want {
+				t.Errorf("CountPythonInvocationsInMakefile(%q) = %d, want %d", tc.data, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestR12MakeUnresolvedReference pins the R12 fail-closed gate
+// for `$(shell X)` where X contains an unresolved `$(VAR)` in
+// command position. The Make `$(PYTHON)` indirection works only
+// when the variable is statically resolvable; otherwise the
+// verifier surfaces a hard error.
+func TestR12MakeUnresolvedReference(t *testing.T) {
+	cases := []string{
+		"RESULT := $(shell $(UNKNOWN_COMMAND) x.py)\nall:\n\techo ok\n",
+		"RESULT != $(UNKNOWN_COMMAND) x.py\nall:\n\techo ok\n",
+		"RESULT := $(shell $(call choose-python) x.py)\nall:\n\techo ok\n",
+	}
+	for _, data := range cases {
+		t.Run(data, func(t *testing.T) {
+			got := CountPythonInvocationsInMakefile([]byte(data))
+			if got != -1 {
+				t.Errorf("CountPythonInvocationsInMakefile(%q) = %d, want -1 (fail-closed)", data, got)
+			}
+		})
+	}
+}
+
+// TestR12MakeResolvedReference is the positive counterpart: a
+// `$(PYTHON)` reference that the resolver already knows about
+// counts as one python invocation per $(shell X) site.
+func TestR12MakeResolvedReference(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+		want int
+	}{
+		{"$(PYTHON) := python3 then $(shell $(PYTHON) x.py)",
+			"PYTHON := python3\nRESULT := $(shell $(PYTHON) x.py)\nall:\n\techo ok\n", 1},
+		{"$(PYTHON) := python3 then $(PYTHON) hidden.py",
+			"PYTHON := python3\nRESULT != $(PYTHON) hidden.py\nall:\n\techo ok\n", 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CountPythonInvocationsInMakefile([]byte(tc.data))
+			if got != tc.want {
+				t.Errorf("CountPythonInvocationsInMakefile(%q) = %d, want %d", tc.data, got, tc.want)
+			}
+		})
+	}
+}

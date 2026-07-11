@@ -160,3 +160,50 @@ func TestR11ClassificationError(t *testing.T) {
 		t.Errorf("error msg %q missing reason", msg)
 	}
 }
+
+// TestR11WrappedBashDashC is the R12 closure matrix for the
+// `sudo bash -c 'python3 x.py'` family. Each row exercises a
+// wrapper around an otherwise-classified `bash -c` invocation
+// and asserts the residual python count is exactly one.
+func TestR11WrappedBashDashC(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+		want int
+	}{
+		{"sudo bash -c 'python3 x.py'", `sudo bash -c 'python3 x.py'`, 1},
+		{"env FOO=bar sh -c 'python3 x.py'", `env FOO=bar sh -c 'python3 x.py'`, 1},
+		{"exec bash -c 'python3 x.py'", `exec bash -c 'python3 x.py'`, 1},
+		{"command bash -c 'python3 x.py'", `command bash -c 'python3 x.py'`, 1},
+		{"command -- bash -c 'python3 x.py'", `command -- bash -c 'python3 x.py'`, 1},
+		{"env FOO=bar exec bash -c 'python3 x.py'", `env FOO=bar exec bash -c 'python3 x.py'`, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CountPythonInvocations([]byte(tc.data))
+			if got != tc.want {
+				t.Errorf("CountPythonInvocations(%q) = %d, want %d", tc.data, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestR11WrappedBashDashCFailClosed documents the dynamic
+// payload contract for the wrapped surface: `sudo bash -c
+// "$COMMAND"` must surface an internal error rather than
+// silently green-light the file.
+func TestR11WrappedBashDashCFailClosed(t *testing.T) {
+	cases := []string{
+		`sudo bash -c "$COMMAND"`,
+		`env FOO=bar sh -c "$COMMAND"`,
+		`command bash -c "${COMMAND}"`,
+	}
+	for _, data := range cases {
+		t.Run(data, func(t *testing.T) {
+			got := CountPythonInvocations([]byte(data))
+			if got != -1 {
+				t.Errorf("CountPythonInvocations(%q) = %d, want -1", data, got)
+			}
+		})
+	}
+}

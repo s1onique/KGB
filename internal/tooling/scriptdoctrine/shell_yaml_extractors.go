@@ -99,6 +99,15 @@ func CountPythonInvocationsInYAMLRunBlocks(data []byte) int {
 	}
 	total := 0
 	for _, step := range steps {
+		// R12 fail-closed: a dynamic GitHub Actions shell
+		// substitution (`shell: ${{ matrix.shell }}`) cannot
+		// be statically resolved to a python interpreter (or
+		// any other executable), so the verifier must
+		// surface this as a hard error rather than
+		// silently green-light the file.
+		if isDynamicShell(step.StepShell, step.JobDefaults, step.WorkflowShell) {
+			return -1
+		}
 		if isPythonShell(step.StepShell, step.JobDefaults, step.WorkflowShell) {
 			total++
 			continue

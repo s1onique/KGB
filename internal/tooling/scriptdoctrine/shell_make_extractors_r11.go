@@ -4,34 +4,12 @@ import (
 	"strings"
 )
 
-// GNU Make expansion-time execution sites (R11.4).
-//
-// GNU Make executes a Makefile's `$(shell ...)` function and
-// `!=` shell-assignment right-hand sides at parse time, before
-// any recipe runs. A Python invocation that escapes into a
-// `$(shell python3 x.py)` or a `RESULT != python3 x.py` line
-// therefore runs even if no recipe ever fires. R10 only walked
-// the TAB-indented recipe lines, so these expansion-time sites
-// were silently undercounted.
-//
-// R11.4 closes the gap by scanning the whole Makefile for both
-// forms and aggregating the counts. The scanning preserves
-// existing Make semantics:
-//
-//   - Make expansions are recognised with balanced parentheses;
-//     nested `$(call foo, $(bar))` does NOT swallow the trailing
-//     `)` because the depth counter increments on `(`.
-//   - `$$` is Make's literal-dollar escape and is treated as a
-//     single `$`.
-//   - The `VAR != RHS` form is recognised per-line: the assignment
-//     operator must appear outside of any `$(...)` expansion and
-//     on a top-level (non-continuation, non-recipe) line.
-//
-// Each lexical site is counted once even when both the recipe
-// parser and the expansion-time scanner look at the same Makefile:
-// the recipe parser masks `$(shell ...)` and `!=` RHS bodies to a
-// single-character placeholder before shell-parsing, so a single
-// Python invocation can only contribute one count.
+// GNU Make expansion-time execution sites (R11.4/R12).
+// Make executes `$(shell ...)` and `!=` shell-assignment RHS at
+// parse time. R10 walked only recipe lines; R11+R12 close that
+// gap. `$(shell X)` / `VAR != RHS` are scanned across the whole
+// Makefile and the recipe parser receives a masked copy so a
+// single Python invocation contributes one count.
 
 // shellFunctionRange represents a Make expansion-time execution
 // site found in the source bytes. Start/End are the bytes of the
@@ -59,6 +37,16 @@ func findShellFunctionSites(data []byte) []shellFunctionRange {
 	var out []shellFunctionRange
 	i := 0
 	for i < len(data) {
+		// Skip Make comment lines. GNU make uses `#` to
+		// begin a comment that runs to end-of-line; the
+		// `#` must be at the start of a logical line. A
+		// TAB-indented recipe line is NOT a comment.
+		if data[i] == '#' && (i == 0 || data[i-1] == '\n' || data[i-1] == '\t' || data[i-1] == ' ') {
+			for i < len(data) && data[i] != '\n' {
+				i++
+			}
+			continue
+		}
 		// Skip $$ literal-dollar escapes.
 		if i+1 < len(data) && data[i] == '$' && data[i+1] == '$' {
 			i += 2
@@ -143,6 +131,10 @@ func findShellAssignmentSites(data []byte) []shellAssignmentRange {
 		}
 		if len(line) > 0 && line[0] != '\t' {
 			trimmed := strings.TrimLeft(string(line), " \t")
+			if trimmed == "" || trimmed[0] == '#' {
+				offset = nextOffset
+				continue
+			}
 			if trimmed != "" {
 				k := 0
 				for k < len(trimmed) {
@@ -210,6 +202,10 @@ func classifyMakeShellExpansions(data []byte) (InvocationCount, error) {
 		if script == "" {
 			continue
 		}
+		if countUnresolvedMakeRefsInCommand(script, vars) > 0 {
+			return ZeroCount, NewClassificationError(
+				"", int(lineOf(data, fn.Start)), 1, "dynamic GNU Make shell command")
+		}
 		script = preProcessMakeShell(resolve(script))
 		count, err := countPythonSitesInProgram(script)
 		if err != nil {
@@ -224,6 +220,10 @@ func classifyMakeShellExpansions(data []byte) (InvocationCount, error) {
 		rhs := strings.TrimSpace(string(data[as.RHSStart:as.RHSEnd]))
 		if rhs == "" {
 			continue
+		}
+		if countUnresolvedMakeRefsInCommand(rhs, vars) > 0 {
+			return ZeroCount, NewClassificationError(
+				"", int(lineOf(data, as.RHSStart)), 1, "dynamic GNU Make shell command")
 		}
 		rhs = preProcessMakeShell(resolve(rhs))
 		count, err := countPythonSitesInProgram(rhs)
@@ -397,4 +397,49 @@ func findUnbalancedMakeParens(data []byte) []int {
 		i++
 	}
 	return bad
+}
+
+// countUnresolvedMakeRefsInCommand counts $(VAR) references
+// that cannot be statically resolved. `$(shell ...)` is the
+// only form that maps to another command-position search;
+// other `$(function ...)` references (call / value / origin /
+// foreach / ...) are themselves command-position references
+// because they may be substituted into the runner's argv by
+// Make, so they fail closed per the R12 closure matrix.
+func countUnresolvedMakeRefsInCommand(s string, vars map[string]string) int {
+	unresolved := 0
+	i := 0
+	for i < len(s) {
+		if i+1 < len(s) && s[i] == '$' && s[i+1] == '$' {
+			i += 2
+			continue
+		}
+		if s[i] == '$' && i+1 < len(s) && s[i+1] == '(' {
+			depth := 1
+			j := i + 2
+			for j < len(s) && depth > 0 {
+				switch s[j] {
+				case '(':
+					depth++
+				case ')':
+					depth--
+				}
+				j++
+			}
+			if depth == 0 {
+				trimmed := strings.TrimSpace(s[i+2 : j-1])
+				if trimmed == "shell" || strings.HasPrefix(trimmed, "shell ") {
+					i = j
+					continue
+				}
+				if _, ok := vars[trimmed]; !ok {
+					unresolved++
+				}
+				i = j
+				continue
+			}
+		}
+		i++
+	}
+	return unresolved
 }

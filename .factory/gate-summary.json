@@ -1,0 +1,47 @@
+{
+  "act": "ACT-UVB76-GO-TOOLING-DOCTRINE01-R12",
+  "range": "ACT-UVB76-GO-TOOLING-DOCTRINE01-R12..HEAD",
+  "working_tree": "clean",
+  "git_diff_check": "pass",
+  "overall_status": "PASS",
+  "checks": {
+    "go_build": "PASS",
+    "go_test_internal": "PASS",
+    "go_test_all": "PASS",
+    "go_vet": "PASS",
+    "gofmt": "pass",
+    "verify_script_doctrine_bootstrap": "PASS",
+    "make_gate": "PASS",
+    "git_status_clean": true
+  },
+  "tests_total": 110,
+  "tests_passed": 110,
+  "r12_closure_matrix": {
+    "wrapping_bash_c": {
+      "sudo_bash_c_python3_xpy": 1,
+      "env_FOO_bar_sh_c_python3_xpy": 1,
+      "exec_bash_c_python3_xpy": 1,
+      "command_bash_c_python3_xpy": 1,
+      "command_dash_dash_bash_c_python3_xpy": 1,
+      "env_FOO_bar_exec_bash_c_python3_xpy": 1
+    },
+    "dynamic_workflow_shells": "fail-closed via isDynamicShell -> -1 from CountPythonInvocationsInYAMLRunBlocks",
+    "yaml_structural_validation": {
+      "jobs_not_mapping": "error",
+      "job_not_mapping": "error",
+      "steps_not_sequence": "error",
+      "step_not_mapping": "error",
+      "defaults_run_shell_non_scalar": "error"
+    },
+    "make_comments_excluded": {
+      "_RESULT_assignment_in_comment": 0,
+      "_RESULT_!=_in_comment": 0
+    },
+    "make_unresolved_references": {
+      "_shell_UNKNOWN_COMMAND_xpy": "fail-closed (-1)",
+      "_UNKNOWN_COMMAND_xpy_assignment": "fail-closed (-1)",
+      "_shell_call_choose-python_xpy": "fail-closed (-1)"
+    }
+  },
+  "machine_readable": true
+}

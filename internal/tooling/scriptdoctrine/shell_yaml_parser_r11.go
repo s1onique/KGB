@@ -143,28 +143,38 @@ func extractYAMLSteps(data []byte) ([]WorkflowRunStep, error) {
 		return nil, fmt.Errorf("workflow YAML: root must be a mapping (kind=%d)", document.Kind)
 	}
 
-	workflowDefaults := readShellFromDefaults(document)
+	workflowDefaults, _ := readShellFromDefaults(document)
 
 	jobsNode := findMapValue(document, "jobs")
-	if jobsNode == nil || jobsNode.Kind != yaml.MappingNode {
+	if jobsNode == nil {
+		// No jobs is a valid (idle) workflow; return empty.
 		return nil, nil
+	}
+	if jobsNode.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("workflow YAML: jobs is not a mapping at line %d column %d", jobsNode.Line, jobsNode.Column)
 	}
 
 	var steps []WorkflowRunStep
 	jobKeys := collectTopLevelKeys(jobsNode)
 	for _, jobID := range jobKeys {
 		jobVal := findMapValue(jobsNode, jobID)
-		if jobVal == nil || jobVal.Kind != yaml.MappingNode {
+		if jobVal == nil {
 			continue
 		}
-		jobDefaults := readShellFromDefaults(jobVal)
+		if jobVal.Kind != yaml.MappingNode {
+			return nil, fmt.Errorf("workflow YAML: job %q is not a mapping at line %d column %d", jobID, jobVal.Line, jobVal.Column)
+		}
+		jobDefaults, _ := readShellFromDefaults(jobVal)
 		stepsNode := findMapValue(jobVal, "steps")
-		if stepsNode == nil || stepsNode.Kind != yaml.SequenceNode {
+		if stepsNode == nil {
 			continue
+		}
+		if stepsNode.Kind != yaml.SequenceNode {
+			return nil, fmt.Errorf("workflow YAML: steps for job %q is not a sequence at line %d column %d", jobID, stepsNode.Line, stepsNode.Column)
 		}
 		for idx, rawStep := range stepsNode.Content {
 			if rawStep.Kind != yaml.MappingNode {
-				continue
+				return nil, fmt.Errorf("workflow YAML: step %d of job %q is not a mapping at line %d column %d", idx, jobID, rawStep.Line, rawStep.Column)
 			}
 			if findMapValue(rawStep, "uses") != nil {
 				continue
@@ -197,22 +207,41 @@ func extractYAMLSteps(data []byte) ([]WorkflowRunStep, error) {
 	return steps, nil
 }
 
-// readShellFromDefaults scans a mapping for `defaults.run.shell`
-// and returns the shell value (or "" if absent).
-func readShellFromDefaults(node *yaml.Node) string {
+// readShellFromShellReports scans a mapping for `defaults.run.shell`
+// and returns either the shell value or an error when the value is
+// present-but-not-a-scalar (e.g. a sequence). The verifier must
+// surface sequence-typed shell values as hard errors rather than
+// silently downgrade them to bash-default.
+func readShellFromDefaults(node *yaml.Node) (string, error) {
 	if node == nil || node.Kind != yaml.MappingNode {
-		return ""
+		return "", nil
 	}
 	defaults := findMapValue(node, "defaults")
-	if defaults == nil || defaults.Kind != yaml.MappingNode {
-		return ""
+	if defaults == nil {
+		return "", nil
+	}
+	if defaults.Kind != yaml.MappingNode {
+		return "", fmt.Errorf("workflow YAML: defaults is not a mapping at line %d column %d", defaults.Line, defaults.Column)
 	}
 	runDefaults := findMapValue(defaults, "run")
-	if runDefaults == nil || runDefaults.Kind != yaml.MappingNode {
-		return ""
+	if runDefaults == nil {
+		return "", nil
 	}
-	return readShellFromMap(runDefaults, "shell")
+	if runDefaults.Kind != yaml.MappingNode {
+		return "", fmt.Errorf("workflow YAML: defaults.run is not a mapping at line %d column %d", runDefaults.Line, runDefaults.Column)
+	}
+	v := findMapValue(runDefaults, "shell")
+	if v == nil {
+		return "", nil
+	}
+	if v.Kind != yaml.ScalarNode {
+		return "", fmt.Errorf("workflow YAML: defaults.run.shell is not a scalar at line %d column %d", v.Line, v.Column)
+	}
+	return v.Value, nil
 }
+
+// readShellFromDefaults scans a mapping for `defaults.run.shell`
+// and returns the shell value (or "" if absent).
 
 // readShellFromMap returns the value of the `shell:` key in a
 // mapping, or "" if absent. The value is rejected with a ""
@@ -293,6 +322,32 @@ func effectiveShellTemplate(stepShell, jobDefaults, workflowShell string) (strin
 	return "", false
 }
 
+// classifyEffectiveShell returns the resolved effective shell
+// status for a step. The boolean return values follow the R11.6
+// closure contract: a dynamic template is treated as an explicit
+// policy violation (errors are surfaced by the calling extractor)
+// rather than silently ignored.
+type effectiveShell struct {
+	Template string
+	Python   bool
+	Dynamic  bool
+}
+
+func classifyEffectiveShell(stepShell, jobDefaults, workflowShell string) effectiveShell {
+	tpl, dynamic := effectiveShellTemplate(stepShell, jobDefaults, workflowShell)
+	if tpl == "" {
+		return effectiveShell{Template: ""}
+	}
+	if dynamic {
+		return effectiveShell{Template: tpl, Dynamic: true}
+	}
+	exe, ok := shellTemplateExecutable(tpl)
+	if !ok {
+		return effectiveShell{Template: tpl}
+	}
+	return effectiveShell{Template: tpl, Python: isPythonCommandWord(exe)}
+}
+
 // shellTemplateExecutable returns the first whitespace-delimited
 // word of a custom shell template. If the template does not
 // contain the GitHub `{0}` placeholder, the entire template is
@@ -327,4 +382,12 @@ func shellTemplateExecutable(tpl string) (string, bool) {
 		return "", false
 	}
 	return fields[0], true
+}
+
+// isDynamicShell returns true when the effective shell for a step
+// is a dynamic GitHub Actions substitution (e.g. `shell: ${{
+// matrix.shell }}`) that cannot be statically resolved. The
+// verifier must surface these as hard errors per the R12 closure.
+func isDynamicShell(stepShell, jobDefaults, workflowShell string) bool {
+	return classifyEffectiveShell(stepShell, jobDefaults, workflowShell).Dynamic
 }
