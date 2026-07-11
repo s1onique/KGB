@@ -147,8 +147,18 @@ func processMakeLogicalLine(out []byte, lineStart, eol int, state *makeLexState)
 		return kindComment
 	}
 
-	// Rule 5 — other directive.
+	// Rule 5 — top-level target OR directive.
 	if first == '.' {
+		// Dot-prefixed lines can be EITHER directives (`.PHONY`,
+		// `.EXPORT_ALL_VARIABLES`) OR target rules (`.PHONY: all`
+		// is itself a target; `.hidden: source` is a normal target
+		// whose name starts with a dot). Distinguish via
+		// isMakeTargetLine. R18 fix.
+		if isMakeTargetLine(out, lineStart, eol) {
+			state.inRule = true
+			maskCommentInMakeLine(out, sigStart, eol)
+			return kindTarget
+		}
 		state.inRule = false
 		maskCommentInMakeLine(out, sigStart, eol)
 		return kindDirective
@@ -220,31 +230,59 @@ func isMakeAssignmentLine(out []byte, lineStart, eol int) bool {
 	return false
 }
 
-// isMakeTargetLine reports whether the logical line looks like a
-// target rule: the last non-whitespace byte is `:` (without an
-// immediate trailing `=`, which would mark `:=`) AND there is no
-// `=` in the body that would have made it an assignment.
+// isMakeTargetLine reports whether the logical line is a Make
+// rule of the form `targets: prereqs` (single-colon), `targets:: prereqs`
+// (double-colon), `targets &: prereqs` or `targets &:: prereqs`.
+//
+// The R18 change lifts the original R14 "ends in `:`" heuristic:
+// modern rule lines routinely include prerequisites, so the rule
+// separator may be followed by `dep1 dep2 ...`. The classifier still
+// rejects lines that are assignments (an unescaped `=` somewhere
+// in the body) or that contain `:=` (which would already have been
+// consumed as part of `=` scanning).
 func isMakeTargetLine(out []byte, lineStart, eol int) bool {
-	k := eol - 1
-	for k >= lineStart && (out[k] == ' ' || out[k] == '\t') {
-		k--
-	}
-	if k < lineStart || out[k] != ':' {
-		return false
-	}
-	if k+1 < eol && out[k+1] == '=' {
-		return false
-	}
-	for j := lineStart; j < k; j++ {
-		if j+1 < eol && out[j] == '\\' {
-			j++
+	k := lineStart
+	for k < eol {
+		if k+1 < eol && out[k] == '\\' {
+			k += 2
 			continue
 		}
-		if out[j] == '=' {
-			return false
+		isSep := false
+		switch out[k] {
+		case ':':
+			// Single `:` separator. Skip if it is part of `:=`.
+			if k+1 < eol && out[k+1] == '=' {
+				k += 2
+				continue
+			}
+			isSep = true
+		case '&':
+			// `&:` or `&::`.
+			if k+1 < eol && out[k+1] == ':' {
+				isSep = true
+			}
 		}
+		if isSep {
+			// A rule separator BEFORE any unescaped `=` means
+			// the line is a target (not an assignment).
+			isAssign := false
+			for j := lineStart; j < k; j++ {
+				if j+1 < eol && out[j] == '\\' {
+					j++
+					continue
+				}
+				if out[j] == '=' {
+					isAssign = true
+					break
+				}
+			}
+			if !isAssign {
+				return true
+			}
+		}
+		k++
 	}
-	return true
+	return false
 }
 
 // maskCommentInMakeLine rewrites bytes from the first unescaped
