@@ -254,6 +254,11 @@ T008,tests/test_verify_memory_ownership_inventory.py,python,0,test,,cmd/verify-m
 T009,tests/test_verify_no_doconly_regression_tests.py,python,0,test,,cmd/verify-no-doconly,migration-required,Bootstrap inventory - Python test
 T010,tests/test_verify_state_transition_register.py,python,0,test,,cmd/verify-state-transition,migration-required,Bootstrap inventory - Python test
 T011,tests/tovarisch_status_rss_canary_test_support.py,python,0,test,,cmd/rss-canary,migration-required,Bootstrap inventory - Python test
+# === PACKAGING SCRIPTS ===
+PKG001,packaging/debian/postinst,shell,0,packaging,,cmd/pkg-install,migration-required,Bootstrap inventory - Debian postinst
+PKG002,packaging/debian/postrm,shell,0,packaging,,cmd/pkg-remove,migration-required,Bootstrap inventory - Debian postrm
+PKG003,packaging/debian/prerm,shell,0,packaging,,cmd/pkg-remove,migration-required,Bootstrap inventory - Debian prerm
+PKG004,packaging/entware/S76uvb76,shell,0,packaging,,cmd/pkg-install,migration-required,Bootstrap inventory - Entware init script
 # === UVB76 SCRIPTS ===
 U001,uvb76/scripts/verify_uvb76_vet.sh,shell,0,verifier,,cmd/verify-uvb76,migration-required,Bootstrap inventory - thin wrapper
 U002,uvb76/scripts/verify_web_embed.sh,shell,0,verifier,uvb76-verify-embed,cmd/verify-web-embed,migration-required,Bootstrap inventory - thin wrapper

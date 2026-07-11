@@ -32,7 +32,7 @@ coverage-report:
 
 # === Combined Gate (local default) ===
 
-gate:
+gate: verify-script-doctrine
 	./scripts/quality_gate.sh
 
 # === Individual Targets ===
