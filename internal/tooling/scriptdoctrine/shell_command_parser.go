@@ -129,7 +129,7 @@ func pythonInvocationSite(call *syntax.CallExpr) (int, bool, error) {
 	// have been normalised. `sudo bash -c 'python3 x.py'` would have
 	// failed the direct check above because args[0] was `sudo`;
 	// the residual first arg is now `bash` or `sh`.
-	if n, matched, err := countShellDashCScriptWrapped(args); matched {
+	if n, matched, err := countShellDashCScriptWrapped(call, args); matched {
 		if err != nil {
 			return 0, true, err
 		}

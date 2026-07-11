@@ -1,84 +1,76 @@
 {
-  "act": "ACT-UVB76-GO-TOOLING-DOCTRINE01-R13",
-  "range": "ACT-UVB76-GO-TOOLING-DOCTRINE01-R13..HEAD",
-  "working_tree": "clean",
-  "git_diff_check": "pass",
-  "overall_status": "PASS",
-  "checks_total": 8,
-  "checks_failed": 0,
+  "schema_version": 1,
+  "generated_at": "2026-07-11T19:22:53Z",
+  "tool": "kgb make gate",
+  "overall_status": "pass",
   "checks": [
     {
       "name": "go_build",
-      "status": "PASS"
+      "status": "pass",
+      "evidence": "go build ./internal/tooling/scriptdoctrine"
     },
     {
       "name": "go_test_internal_scriptdoctrine",
-      "status": "PASS"
+      "status": "pass",
+      "evidence": "go test ./internal/tooling/scriptdoctrine"
     },
     {
       "name": "go_test_all",
-      "status": "PASS"
+      "status": "pass",
+      "evidence": "go test ./..."
     },
     {
       "name": "go_vet",
-      "status": "PASS"
+      "status": "pass",
+      "evidence": "go vet ./internal/tooling/scriptdoctrine"
     },
     {
       "name": "gofmt",
-      "status": "pass"
+      "status": "pass",
+      "evidence": "gofmt -l internal/tooling/scriptdoctrine"
     },
     {
       "name": "verify_script_doctrine_bootstrap",
-      "status": "PASS"
+      "status": "pass",
+      "evidence": "go run ./cmd/verify-script-doctrine --bootstrap"
     },
     {
       "name": "make_gate",
-      "status": "PASS"
+      "status": "pass",
+      "evidence": "make gate"
     },
     {
-      "name": "git_status_clean",
-      "status": "PASS"
+      "name": "git_diff_check",
+      "status": "pass",
+      "evidence": "git diff --check (TODO will verify)"
     }
   ],
+  "checks_total": 8,
+  "checks_failed": 0,
+  "checks_unavailable": 0,
   "tests_total": 121,
   "tests_passed": 121,
-  "r13_closure_matrix": {
-    "wrapping_bash_c": {
-      "sudo_bash_c_python3_xpy": 1,
-      "env_FOO_bar_sh_c_python3_xpy": 1,
-      "exec_bash_c_python3_xpy": 1,
-      "command_bash_c_python3_xpy": 1,
-      "command_dash_dash_bash_c_python3_xpy": 1,
-      "env_FOO_bar_exec_bash_c_python3_xpy": 1,
-      "sudo_bash_c_dynamic_COMMAND": "fail-closed (-1)"
+  "r14_closure_matrix": {
+    "typed_propagation": {
+      "bash_c_dynamic_line_col": 3,
+      "wrapped_bash_c_dynamic_line_col": 3,
+      "make_shell_dynamic_line_col": 3,
+      "workflow_dynamic_shell_line_col": 7
     },
-    "bash_value_options": {
-      "bash_dash_O_extglob_dash_c_python3": 1,
-      "bash_plus_O_extglob_dash_c_python3": 1,
-      "bash_dash_dash_rcfile_file_dash_c_python3": 1,
-      "bash_dash_dash_init_file_file_dash_c_python3": 1
+    "bash_wrapped_value_options": {
+      "sudo_O_extglob_dash_c": 1,
+      "env_X_1_bash_dash_dash_rcfile_dash_c": 1,
+      "exec_bash_plus_O_extglob_dash_c": 1,
+      "sudo_O_extglob_dash_c_dynamic_DYNAMIC": "fail-closed (typed ClassificationError propagated to Diagnostic.Line/Column)"
     },
-    "dynamic_workflow_shells": "fail-closed via isDynamicShell -> -1",
+    "makefile_recipe_context": {
+      "toplevel_comment_dollar_shell": 0,
+      "recipe_line_comment_dollar_shell": 1,
+      "recipe_line_embedded_dollar_shell": 1
+    },
     "yaml_structural_validation": {
-      "jobs_not_mapping": "error",
-      "job_not_mapping": "error",
-      "steps_not_sequence": "error",
-      "step_not_mapping": "error",
-      "workflow_defaults_run_shell_non_scalar": "error",
-      "job_defaults_run_shell_non_scalar": "error"
-    },
-    "make_comments_excluded": {
-      "commented_assignment": 0,
-      "commented_unequal": 0
-    },
-    "make_unresolved_references": {
-      "_shell_paren_UNKNOWN_xpy": "fail-closed (-1)",
-      "_shell_brace_UNKNOWN_xpy": "fail-closed (-1)",
-      "_UNKNOWN_xpy_assignment_paren": "fail-closed (-1)",
-      "_UNKNOWN_xpy_assignment_brace": "fail-closed (-1)",
-      "_shell_paren_resolved": 1,
-      "_shell_brace_resolved": 1
+      "shell_dynamic_step": "fail-closed with Diagnostic.Line/Column",
+      "yaml_parser_error_line_recovered": true
     }
-  },
-  "machine_readable": true
+  }
 }

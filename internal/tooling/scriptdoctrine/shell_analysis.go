@@ -3,13 +3,15 @@ package scriptdoctrine
 import (
 	"bufio"
 	"bytes"
-	"fmt"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"mvdan.cc/sh/v3/syntax"
 )
 
 // SortDiagnostics sorts violations deterministically by check type
@@ -179,25 +181,81 @@ func CountPythonInvocationsForPath(path string, data []byte) int {
 }
 
 // CountPythonInvocationsForPathDetailed is the structured twin of
-// CountPythonInvocationsForPath. The structured error captures the
-// first ClassificationError the chosen extractor emits so the
-// verifier can populate Diagnostic.Line/Column for fail-closed
-// surfaces. The error is intentionally an error type so the
-// caller can type-switch on *ClassificationError and reach the
-// line/column fields directly.
-func CountPythonInvocationsForPathDetailed(path string, data []byte) (int, error) {
+// CountPythonInvocationsForPath. It dispatches to the extractor
+// that matches path and returns the structured InvocationCount plus
+// an error.
+//
+// The error preserves the original *ClassificationError type so the
+// verifier can call errors.As and reach the line/column fields
+// directly. Bare extractor failures (mvdan.cc/sh parse errors,
+// malformed YAML) are wrapped as *ClassificationError anchored at
+// the parser's reported position; non-positioned failures use
+// (line=0, column=0) so the caller can still distinguish
+// "fail-closed with line/column" from "fail-closed without".
+//
+// Returning (ZeroCount, nil) for nil data is intentional: missing
+// data is a programming error at the call site (the verifier layer
+// reads from disk), not a classification problem to surface.
+func CountPythonInvocationsForPathDetailed(path string, data []byte) (InvocationCount, error) {
 	if data == nil {
-		return -1, nil
+		return ZeroCount, nil
 	}
-	// Delegate to the dispatcher's int-returning twin. The -1
-	// return already encodes the fail-closed verdict; callers
-	// that need line/column reach for the typed extractor
-	// helpers directly.
-	count := CountPythonInvocationsForPath(path, data)
-	if count < 0 {
-		return -1, fmt.Errorf("python invocation count could not be determined for %s", filepath.Base(path))
+	base := filepath.Base(path)
+	switch {
+	case base == "Makefile" || strings.HasSuffix(base, ".mk"):
+		return CountPythonInvocationsInMakefileDetailed(data)
+	case isWorkflowYAMLPath(path):
+		return classifyYAMLPythonRunBlocks(data)
+	}
+	count, err := countPythonSitesInProgram(string(data))
+	if err != nil {
+		// If the underlying walker already produced a typed
+		// *ClassificationError (bash -c dynamic payload, etc.),
+		// propagate it as-is so the verifier's errors.As can
+		// recover the original line/column. We only wrap bare
+		// mvdan.cc/sh parse failures (no caller context).
+		var ce *ClassificationError
+		if errors.As(err, &ce) {
+			return ZeroCount, err
+		}
+		return ZeroCount, wrapShellParseError(filepath.Base(path), err)
 	}
 	return count, nil
+}
+
+// isWorkflowYAMLPath reports whether path lives under
+// .github/workflows/ and ends in .yml/.yaml. The check tolerates
+// both repo-relative ("workflows/foo.yml") and absolute
+// ("/repo/.github/workflows/foo.yml") forms.
+func isWorkflowYAMLPath(path string) bool {
+	if !(strings.HasPrefix(path, ".github/workflows/") ||
+		strings.Contains(path, "/.github/workflows/")) {
+		return false
+	}
+	base := filepath.Base(path)
+	return strings.HasSuffix(base, ".yml") || strings.HasSuffix(base, ".yaml")
+}
+
+// wrapShellParseError converts an mvdan.cc/sh parse error into a
+// *ClassificationError carrying the parser's reported Line/Column.
+// When the underlying error is not a *syntax.ParseError the wrapper
+// falls back to (line=0, column=0) so callers can still detect
+// "fail-closed" via errors.As(err, &*ClassificationError) without
+// relying on line/column being populated.
+func wrapShellParseError(path string, err error) error {
+	var pe *syntax.ParseError
+	if errors.As(err, &pe) {
+		return NewClassificationError(
+			path,
+			int(pe.Pos.Line()),
+			int(pe.Pos.Col()),
+			"malformed shell program: "+err.Error(),
+		)
+	}
+	return NewClassificationError(
+		path, 0, 0,
+		"shell classification failed: "+err.Error(),
+	)
 }
 
 // CountPythonInvocationsFromFile reads path and counts python

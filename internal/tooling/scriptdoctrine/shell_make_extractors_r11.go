@@ -32,11 +32,10 @@ func findShellFunctionSites(data []byte) []shellFunctionRange {
 	var out []shellFunctionRange
 	i := 0
 	for i < len(data) {
-		// Skip Make comment lines. GNU make uses `#` to
-		// begin a comment that runs to end-of-line; the
-		// `#` must be at the start of a logical line. A
-		// TAB-indented recipe line is NOT a comment.
-		if data[i] == '#' && (i == 0 || data[i-1] == '\n' || data[i-1] == '\t' || data[i-1] == ' ') {
+		// Skip GNU Make comments: `#` at start of a logical
+		// line. TAB/space-prefixed `#` is recipe text and
+		// must still expand `$(shell ...)` (R14).
+		if data[i] == '#' && (i == 0 || data[i-1] == '\n') {
 			for i < len(data) && data[i] != '\n' {
 				i++
 			}

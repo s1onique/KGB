@@ -3,6 +3,7 @@ package scriptdoctrine
 import (
 	"bytes"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -122,6 +123,62 @@ func CountPythonInvocationsInYAMLRunBlocks(data []byte) int {
 		total += count.Count
 	}
 	return total
+}
+
+
+// yamlLineColumnRx extracts the trailing "line N column M" pair from
+// any error message produced by extractYAMLSteps. The regex is
+// intentionally permissive: it matches both "line N column M" and
+// "line N" so messages without a column component still surface a
+// line number. classifyYAMLPythonRunBlocks uses this to recover
+// line/column when wrapping a generic extractYAMLSteps error.
+var yamlLineColumnRx = regexp.MustCompile(`line (\d+)(?: column (\d+))?`)
+
+// classifyYAMLPythonRunBlocks is the typed twin of
+// CountPythonInvocationsInYAMLRunBlocks. It returns the structured
+// InvocationCount plus an error that, on a fail-closed surface,
+// carries the original *ClassificationError so the verifier can call
+// errors.As and populate Diagnostic.Line/Column/Msg.
+//
+// The error path preserves the AST node position: dynamic shell
+// templates use step.Line/step.Column; malformed YAML extracts from
+// the upstream error message via yamlLineColumnRx.
+func classifyYAMLPythonRunBlocks(data []byte) (InvocationCount, error) {
+	if data == nil {
+		return ZeroCount, nil
+	}
+	steps, err := extractYAMLSteps(data)
+	if err != nil {
+		line, col := 0, 0
+		if m := yamlLineColumnRx.FindStringSubmatch(err.Error()); len(m) >= 2 {
+			line, _ = strconv.Atoi(m[1])
+			if len(m) >= 3 && m[2] != "" {
+				col, _ = strconv.Atoi(m[2])
+			}
+		}
+		return ZeroCount, NewClassificationError("", line, col, "workflow YAML: "+err.Error())
+	}
+	total := 0
+	for _, step := range steps {
+		if isDynamicShell(step.StepShell, step.JobDefaults, step.WorkflowShell) {
+			return ZeroCount, NewClassificationError(
+				"", step.Line, step.Column, "dynamic workflow shell")
+		}
+		if isPythonShell(step.StepShell, step.JobDefaults, step.WorkflowShell) {
+			total++
+			continue
+		}
+		if step.Run == "" {
+			continue
+		}
+		count, perr := countPythonSitesInProgram(sanitizeGASubstitutions(step.Run))
+		if perr != nil {
+			return ZeroCount, NewClassificationError(
+				"", step.Line, step.Column, "malformed workflow run block: "+perr.Error())
+		}
+		total += count.Count
+	}
+	return InvocationCount{Count: total}, nil
 }
 
 

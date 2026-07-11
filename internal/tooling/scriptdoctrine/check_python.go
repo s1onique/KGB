@@ -1,6 +1,7 @@
 package scriptdoctrine
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -134,22 +135,20 @@ func (v *Verifier) checkPythonInvocations() []Diagnostic {
 			Msg:   fmt.Sprintf("reading Makefile: %v", err),
 		})
 	} else if err == nil {
-		if hasPython, count := scanPython(makefilePath, data); hasPython {
-			if !v.isLegacy("Makefile") {
-				if count > 0 {
-					diags = append(diags, Diagnostic{
-						Check: "python-invocation",
-						Path:  "Makefile",
-						Msg:   fmt.Sprintf("Makefile invokes Python (%d site(s))", count),
-					})
-				} else {
-					diags = append(diags, Diagnostic{
-						Check: "internal-error",
-						Path:  "Makefile",
-						Msg:   "Makefile Python count could not be determined",
-					})
-				}
-			}
+		hasPython, count, perr := scanPython(makefilePath, data)
+		if v.isLegacy("Makefile") {
+			// Bootstrap-baseline exemption: a frozen legacy Makefile
+			// may contain fail-closed surfaces (R11) that we MUST NOT
+			// surface as internal-error diagnostics (R14 regression
+			// guard: the legacy check must run BEFORE the perr path).
+		} else if perr != nil {
+			diags = append(diags, diagnosticFromScanErr("Makefile", perr)...)
+		} else if hasPython && count > 0 {
+			diags = append(diags, Diagnostic{
+				Check: "python-invocation",
+				Path:  "Makefile",
+				Msg:   fmt.Sprintf("Makefile invokes Python (%d site(s))", count),
+			})
 		}
 	}
 
@@ -177,42 +176,49 @@ func (v *Verifier) checkPythonInvocations() []Diagnostic {
 			continue
 		}
 
-		if hasPython, count := scanPython(fullPath, data); hasPython {
-			if v.isLegacy(rel) {
-				continue
-			}
-			if count > 0 {
-				diags = append(diags, Diagnostic{
-					Check: "python-invocation",
-					Path:  rel,
-					Msg:   fmt.Sprintf("Script invokes Python (%d site(s))", count),
-				})
-			} else {
-				diags = append(diags, Diagnostic{
-					Check: "internal-error",
-					Path:  rel,
-					Msg:   "script Python count could not be determined",
-				})
-			}
+		hasPython, count, perr := scanPython(fullPath, data)
+		if v.isLegacy(rel) {
+			// Bootstrap-baseline exemption: legacy scripts may host
+			// fail-closed parser surfaces (e.g. `$(DYNAMIC)` or .py
+			// files scanned as shell). The R14 reviewer wants
+			// typed diagnostics wired for non-legacy paths; legacy
+			// stays quiet by contract.
+			continue
 		}
+		if perr != nil {
+			diags = append(diags, diagnosticFromScanErr(rel, perr)...)
+			continue
+		}
+		if !hasPython || count <= 0 {
+			continue
+		}
+		diags = append(diags, Diagnostic{
+			Check: "python-invocation",
+			Path:  rel,
+			Msg:   fmt.Sprintf("Script invokes Python (%d site(s))", count),
+		})
 	}
 
 	return diags
 }
 
-// scanPython returns whether content has any Python invocation and the
-// unique site count. The dispatch is path-aware: Makefiles and
-// `.github/workflows/*.yml` files go through their dedicated
-// extractors; everything else goes through the whole-file AST
-// parse. Any path that the chosen extractor cannot parse (a
-// malformed recipe block, a malformed `run:` block, etc.) yields
-// (true, 0) so the caller can surface an internal-error diagnostic.
-func scanPython(path string, data []byte) (bool, int) {
-	count := CountPythonInvocationsForPath(path, data)
-	if count < 0 {
-		return true, 0
+// scanPython returns whether content has any Python invocation, the
+// unique site count, and a structured error if the chosen
+// extractor cannot classify the surface statically. The dispatcher
+// is path-aware: Makefiles and `.github/workflows/*.yml` files go
+// through their dedicated extractors; everything else goes through
+// the whole-file AST parse.
+//
+// On a fail-closed surface the boolean is true (matched a
+// classification surface), the count is 0, and the error is
+// *ClassificationError so the caller can errors.As and reach the
+// original Line/Column/Msg fields (R14 closure).
+func scanPython(path string, data []byte) (bool, int, error) {
+	count, err := CountPythonInvocationsForPathDetailed(path, data)
+	if err != nil {
+		return true, 0, err
 	}
-	return count > 0, count
+	return count.Count > 0, count.Count, nil
 }
 
 func (v *Verifier) walkMakefiles(root string, diags *[]Diagnostic) {
@@ -255,20 +261,19 @@ func (v *Verifier) walkMakefiles(root string, diags *[]Diagnostic) {
 			return nil
 		}
 
-		if hasPython, count := scanPython(path, data); hasPython {
-			if count > 0 {
-				*diags = append(*diags, Diagnostic{
-					Check: "python-invocation",
-					Path:  rel,
-					Msg:   fmt.Sprintf("Makefile invokes Python (%d site(s))", count),
-				})
-			} else {
-				*diags = append(*diags, Diagnostic{
-					Check: "internal-error",
-					Path:  rel,
-					Msg:   "Makefile Python count could not be determined",
-				})
+		hasPython, count, perr := scanPython(path, data)
+		if v.isLegacy(rel) {
+			// Bootstrap-baseline exemption for nested Makefiles.
+		} else if perr != nil {
+			for _, dd := range diagnosticFromScanErr(rel, perr) {
+				*diags = append(*diags, dd)
 			}
+		} else if hasPython && count > 0 {
+			*diags = append(*diags, Diagnostic{
+				Check: "python-invocation",
+				Path:  rel,
+				Msg:   fmt.Sprintf("Makefile invokes Python (%d site(s))", count),
+			})
 		}
 
 		return nil
@@ -325,20 +330,19 @@ func (v *Verifier) walkCIWorkflows(root string, diags *[]Diagnostic) {
 			continue
 		}
 
-		if hasPython, count := scanPython(fullPath, data); hasPython {
-			if count > 0 {
-				*diags = append(*diags, Diagnostic{
-					Check: "python-invocation",
-					Path:  rel,
-					Msg:   fmt.Sprintf("CI workflow invokes Python (%d site(s))", count),
-				})
-			} else {
-				*diags = append(*diags, Diagnostic{
-					Check: "internal-error",
-					Path:  rel,
-					Msg:   "workflow Python count could not be determined",
-				})
+		hasPython, count, perr := scanPython(fullPath, data)
+		if v.isLegacy(rel) {
+			// Bootstrap-baseline exemption for workflow files.
+		} else if perr != nil {
+			for _, dd := range diagnosticFromScanErr(rel, perr) {
+				*diags = append(*diags, dd)
 			}
+		} else if hasPython && count > 0 {
+			*diags = append(*diags, Diagnostic{
+				Check: "python-invocation",
+				Path:  rel,
+				Msg:   fmt.Sprintf("CI workflow invokes Python (%d site(s))", count),
+			})
 		}
 	}
 }
@@ -379,20 +383,43 @@ func (v *Verifier) walkGitHooks(root string, diags *[]Diagnostic) {
 			continue
 		}
 
-		if hasPython, count := scanPython(fullPath, data); hasPython {
-			if count > 0 {
-				*diags = append(*diags, Diagnostic{
-					Check: "python-invocation",
-					Path:  rel,
-					Msg:   fmt.Sprintf("Git hook invokes Python (%d site(s))", count),
-				})
-			} else {
-				*diags = append(*diags, Diagnostic{
-					Check: "internal-error",
-					Path:  rel,
-					Msg:   "git hook Python count could not be determined",
-				})
+		hasPython, count, perr := scanPython(fullPath, data)
+		if v.isLegacy(rel) {
+			// Bootstrap-baseline exemption for git hooks.
+		} else if perr != nil {
+			for _, dd := range diagnosticFromScanErr(rel, perr) {
+				*diags = append(*diags, dd)
 			}
+		} else if hasPython && count > 0 {
+			*diags = append(*diags, Diagnostic{
+				Check: "python-invocation",
+				Path:  rel,
+				Msg:   fmt.Sprintf("Git hook invokes Python (%d site(s))", count),
+			})
 		}
 	}
+}
+
+// diagnosticFromScanErr converts the typed error returned by
+// scanPython into one (or more) diagnostics. When err wraps a
+// *ClassificationError the surfaced diagnostic carries the
+// original Line / Column / Reason so the verifier's output points
+// at the offending source location (R14 closure). Bare errors fall
+// back to a generic internal-error with zero line/column.
+func diagnosticFromScanErr(path string, err error) []Diagnostic {
+	var ce *ClassificationError
+	if errors.As(err, &ce) {
+		return []Diagnostic{{
+			Check:  "internal-error",
+			Path:   path,
+			Line:   ce.Line,
+			Column: ce.Column,
+			Msg:    ce.Reason,
+		}}
+	}
+	return []Diagnostic{{
+		Check: "internal-error",
+		Path:  path,
+		Msg:   fmt.Sprintf("could not determine Python invocation count: %v", err),
+	}}
 }

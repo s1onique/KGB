@@ -31,6 +31,29 @@ import (
 // closed: a dynamic payload means we cannot prove the body is
 // python-free, so the verifier surfaces a ClassificationError.
 
+
+// shellValueOption reports whether the literal flag is a bash option
+// that consumes the FOLLOWING argument as its value. Value-taking
+// options never produce a `-c` payload from the value they consume,
+// so the option-aware dispatcher must skip the next argument after
+// seeing one of these flags.
+//
+// Recognised value options:
+//   -O, +O        : bash shopt toggle (e.g. `bash -O extglob -c SCRIPT`)
+//   --rcfile FILE : file to read on startup
+//   --init-file FILE: synonym for --rcfile
+//
+// Sharing this table between countShellDashCScript and
+// countShellDashCScriptWrapped keeps the wrapped sudo/env/exec path
+// from regressing whenever a new value option is added (R14 closure).
+func shellValueOption(lit string) bool {
+	switch lit {
+	case "-O", "+O", "--rcfile", "--init-file":
+		return true
+	}
+	return false
+}
+
 // countShellDashCScript detects bash/sh -c invocations and
 // classifies the command string. Three return-value semantics:
 //
@@ -95,9 +118,11 @@ func countShellDashCScript(call *syntax.CallExpr) (int, bool, error) {
 					"malformed bash -c invocation: missing command string")
 			}
 			return classifyScriptWord(call, scriptIdx)
-		case argLit == "-O" || argLit == "+O" || argLit == "--rcfile" || argLit == "--init-file":
+		case shellValueOption(argLit):
 			// Value-taking option; consume the next argument as
-			// the option's value (not as the `-c` payload).
+			// the option's value (not as the `-c` payload). The
+			// shared helper keeps this list in sync with the
+			// wrapped (sudo/env/exec) dispatcher below.
 			i++
 		case strings.HasPrefix(argLit, "-") && !sawDashC:
 			// Long-form options other than `-c` are tolerated but
@@ -208,7 +233,7 @@ func columnFromCallArg(call *syntax.CallExpr, argIndex int) int {
 	if call == nil || argIndex <= 0 {
 		return 1
 	}
-	return 1 + argIndex
+	return int(call.Pos().Col()) + argIndex
 }
 
 // countShellDashCScriptWrapped classifies a residual arg list
@@ -220,7 +245,7 @@ func columnFromCallArg(call *syntax.CallExpr, argIndex int) int {
 // The function is intentionally permissive about the source: it
 // does not return a positional error since the outer call has
 // already supplied the line context via call.Pos().
-func countShellDashCScriptWrapped(args []*syntax.Word) (int, bool, error) {
+func countShellDashCScriptWrapped(call *syntax.CallExpr, args []*syntax.Word) (int, bool, error) {
 	if len(args) < 3 {
 		return 0, false, nil
 	}
@@ -230,6 +255,15 @@ func countShellDashCScriptWrapped(args []*syntax.Word) (int, bool, error) {
 	}
 	// Mirror countShellDashCScript but with offset indices
 	// shifted (the wrapper is gone, so the indices line up).
+	// Every fail-closed path uses the OUTER call's Pos() as the
+	// line source plus a column derived from the arg index, so
+	// the verifier's Diagnostic carries a real source location
+	// (R14 closure: no more (line=0, column=0) on wrapped
+	// failures).
+	baseLine := 0
+	if call != nil {
+		baseLine = int(call.Pos().Line())
+	}
 	sawDashC := false
 	for i := 1; i < len(args); i++ {
 		argLit := args[i].Lit()
@@ -237,7 +271,8 @@ func countShellDashCScriptWrapped(args []*syntax.Word) (int, bool, error) {
 		case argLit == "":
 			if sawDashC {
 				return 0, true, NewClassificationError(
-					"", 0, 0, "dynamic bash -c command string")
+					"", baseLine, columnFromCallArg(call, i),
+					"dynamic bash -c command string")
 			}
 			return 0, false, nil
 		case argLit == "--":
@@ -245,26 +280,39 @@ func countShellDashCScriptWrapped(args []*syntax.Word) (int, bool, error) {
 				return 0, false, nil
 			}
 			return 0, true, NewClassificationError(
-				"", 0, 0, "malformed bash -c invocation: missing command string")
+				"", baseLine, columnFromCallArg(call, i),
+				"malformed bash -c invocation: missing command string")
 		case isShortOptionCluster(argLit) && strings.ContainsRune(argLit[1:], 'c'):
 			sawDashC = true
 			scriptIdx := i + 1
 			if scriptIdx >= len(args) {
 				return 0, true, NewClassificationError(
-					"", 0, 0, "malformed bash -c invocation: missing command string")
+					"", baseLine, columnFromCallArg(call, i),
+					"malformed bash -c invocation: missing command string")
 			}
 			w := args[scriptIdx]
 			script, ok := literalScriptValue(w)
 			if !ok {
 				return 0, true, NewClassificationError(
-					"", 0, 0, "dynamic bash -c command string")
+					"", baseLine, columnFromCallArg(call, scriptIdx),
+					"dynamic bash -c command string")
 			}
 			count, err := countPythonSitesInProgram(script)
 			if err != nil {
 				return 0, true, NewClassificationError(
-					"", 0, 0, "malformed nested shell command: "+err.Error())
+					"", baseLine, columnFromCallArg(call, scriptIdx),
+					"malformed nested shell command: "+err.Error())
 			}
 			return count.Count, true, nil
+		case shellValueOption(argLit):
+			// R14 closure: value-taking options consume the next
+			// argument as their value, so the wrapped path must
+			// skip the value too. Without this, `sudo bash -O
+			// extglob -c 'python3 x.py'` returns zero because
+			// `extglob` was misread as the script path; with this
+			// branch the value (`extglob`) is consumed and `-c`
+			// is the next opportunity to set sawDashC.
+			i++
 		case strings.HasPrefix(argLit, "-") && !sawDashC:
 			continue
 		default:

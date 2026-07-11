@@ -1,6 +1,7 @@
 package scriptdoctrine
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -208,15 +209,27 @@ func (v *Verifier) checkBaselineEnforcement() []Diagnostic {
 			continue
 		}
 
-		actualCount := CountPythonInvocationsForPath(path, data)
-		if actualCount < 0 {
-			diags = append(diags, Diagnostic{
-				Check: "internal-error",
-				Path:  path,
-				Msg:   "could not determine Python invocation count for baseline entry",
-			})
+		count, err := CountPythonInvocationsForPathDetailed(path, data)
+		if err != nil {
+			var ce *ClassificationError
+			if errors.As(err, &ce) {
+				diags = append(diags, Diagnostic{
+					Check:  "internal-error",
+					Path:   path,
+					Line:   ce.Line,
+					Column: ce.Column,
+					Msg:    ce.Reason,
+				})
+			} else {
+				diags = append(diags, Diagnostic{
+					Check: "internal-error",
+					Path:  path,
+					Msg:   fmt.Sprintf("could not determine Python invocation count for baseline entry: %v", err),
+				})
+			}
 			continue
 		}
+		actualCount := count.Count
 		if actualCount != baseline.PythonInvocationCount {
 			diags = append(diags, Diagnostic{
 				Check: "baseline-python-invocation-changed",
