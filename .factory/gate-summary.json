@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-07-11T20:43:43Z",
+  "generated_at": "2026-07-11T21:25:54Z",
   "tool": "kgb make gate",
   "overall_status": "pass",
   "checks": [
@@ -48,8 +48,8 @@
   "checks_total": 8,
   "checks_failed": 0,
   "checks_unavailable": 0,
-  "tests_total": 364,
-  "tests_passed": 364,
+  "tests_total": 372,
+  "tests_passed": 372,
   "r14_closure_matrix": {
     "typed_propagation": {
       "bash_c_dynamic_line_col": 3,
@@ -103,5 +103,12 @@
     "phony_target": 1,
     "pattern_rule": 1,
     "double_colon_rule": 1
+  },
+  "r19_closure_matrix": {
+    "var_simply_expanded_prefix_transition": 1,
+    "var_immediately_expanded_prefix_transition": 1,
+    "target_specific_simply_expanded_recipe": 1,
+    "target_specific_immediately_expanded_recipe": 1,
+    "double_colon_rule_unchanged": 1
   }
 }
