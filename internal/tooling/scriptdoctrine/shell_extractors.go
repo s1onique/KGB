@@ -129,7 +129,7 @@ func CountPythonInvocationsInMakefile(data []byte) int {
 	// overrides it.
 	prefix := "\t"
 	if m := recipePrefixRx.FindSubmatch(data); m != nil {
-		prefix = " " + string(m[1])
+		prefix = string(m[1])
 		// The captured char is consumed; the actual recipe
 		// indentation in the source includes a leading space.
 	}
@@ -202,7 +202,7 @@ func stripMakeSilentPrefix(body string) (string, bool) {
 }
 
 // sameLineRecipeRx matches `target: ; cmd` and `target: cmd` forms.
-var sameLineRecipeRx = regexp.MustCompile(`^[^:=#\t]+:[ \t]+([^;]+(?:;[^;]+)*)$`)
+var sameLineRecipeRx = regexp.MustCompile(`^[^:=#\t]+:[ \t]+;([ \t]*[^;].*)$`)
 
 // extractSameLineRecipe parses a Makefile line that has recipe
 // content on the same line as a target definition. Returns the

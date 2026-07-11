@@ -106,7 +106,11 @@ func CountPythonInvocationsInYAMLRunBlocks(data []byte) int {
 	// add 1 invocation to the total: the run body is passed to
 	// `python {0}` (or the equivalent) as the {0} substitution.
 	for _, shell := range shells {
-		if isPythonCommandWord(shell) {
+		exec := resolveShellTemplate(shell)
+		if exec == "" {
+			exec = shell
+		}
+		if isPythonCommandWord(exec) {
 			total++
 		}
 	}
@@ -188,10 +192,13 @@ func extractYAMLRunAndShell(data []byte) (blocks []string, shells []string) {
 			blockLines = nil
 		default:
 			// Inline scalar (with or without trailing content).
+			// Strip a single layer of YAML single or double
+			// quotes so `shell: "python"` is classified as
+			// `python` and not as the literal string `"python"`.
 			if key == "run" {
-				blocks = append(blocks, value)
+				blocks = append(blocks, stripYAMLQuotes(value))
 			} else {
-				shells = append(shells, value)
+				shells = append(shells, stripYAMLQuotes(value))
 			}
 		}
 	}

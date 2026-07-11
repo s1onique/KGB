@@ -142,8 +142,14 @@ func countShellDashCScript(call *syntax.CallExpr) (int, bool) {
 	}
 	for i := 1; i < len(call.Args); i++ {
 		a := call.Args[i].Lit()
-		if a == "-c" && i+1 < len(call.Args) {
-			return countPythonInScriptWord(call.Args[i+1])
+		// -c is the script flag. -c and combined forms
+		// like -ec, -xc, -oerrexit, -etc are all equivalent
+		// for the shell's purpose here: the next argument is
+		// the script.
+		if a == "-c" || a == "-ec" || a == "-xc" {
+			if i+1 < len(call.Args) {
+				return countPythonInScriptWord(call.Args[i+1])
+			}
 		}
 		if strings.HasPrefix(a, "-c") && a != "-c" {
 			// -cscript (no space). The whole "-c<rest>" is
@@ -252,7 +258,25 @@ func stripWrapperArgs(args []*syntax.Word) []*syntax.Word {
 		first := args[0].Lit()
 		switch first {
 		case "env", "/usr/bin/env":
-			// env [-i] [-u] [-C dir] [-] [NAME=VALUE]... command
+			// env [-i] [-u NAME] [-C dir] [-S] [-V]
+			//     [--split-string] [--chdir dir] [--help]
+			//     [NAME=VALUE]... [command [arg ...]]
+			// Flags that take a value: -u, --unset, -C,
+			// --chdir, -S, --split-string, -V, --version.
+			envValueFlag := func(flag string) bool {
+				switch flag {
+				case "-u", "--unset",
+					"-C", "--chdir",
+					"-S", "--split-string",
+					"-V", "--version",
+					"--default-signal", "--ignore-signal",
+					"--block-signal", "--sig-proxy",
+					"-T", "--tmpdir",
+					"--path":
+					return true
+				}
+				return false
+			}
 			args = args[1:]
 			for len(args) > 0 {
 				lit := args[0].Lit()
@@ -267,17 +291,16 @@ func stripWrapperArgs(args []*syntax.Word) []*syntax.Word {
 					args = args[1:]
 					break
 				}
-				if lit == "-C" || lit == "--chdir" {
-					// Takes a value; consume the next arg
-					// if present.
+				if envValueFlag(lit) {
 					args = args[1:]
-					if len(args) > 0 {
+					if len(args) > 0 && !strings.HasPrefix(args[0].Lit(), "-") {
+						// The value is the next non-flag arg.
 						args = args[1:]
 					}
 					continue
 				}
 				if strings.HasPrefix(lit, "-") {
-					// -i, -u, --help, etc.
+					// -i, --help, etc.
 					args = args[1:]
 					continue
 				}
@@ -291,8 +314,24 @@ func stripWrapperArgs(args []*syntax.Word) []*syntax.Word {
 				break
 			}
 		case "sudo":
-			// sudo [-E] [-H] [-u user] [-g group] ...
+			// sudo [-E] [-H] [-u user] [-g group]
+			//     [-h host] [-p prompt] [-S]
+			//     [-u user] [-g group] [-D date] ...
 			//     [-i|-s] [command [arg ...]]
+			// Flags that take a value: -u, --user, -g, --group,
+			// -h, --host, -p, --prompt, -D, --chdir, --type,
+			// -S, --stdin. We consume the flag AND its value.
+			sudoValueFlag := func(flag string) bool {
+				switch flag {
+				case "-u", "--user", "-g", "--group",
+					"-h", "--host", "-p", "--prompt",
+					"-D", "--chdir", "--type",
+					"-S", "--stdin",
+					"-A", "--askpass":
+					return true
+				}
+				return false
+			}
 			args = args[1:]
 			for len(args) > 0 {
 				lit := args[0].Lit()
@@ -301,20 +340,11 @@ func stripWrapperArgs(args []*syntax.Word) []*syntax.Word {
 					continue
 				}
 				if strings.HasPrefix(lit, "-") {
-					// -E, -u user (next arg is value), -g group ...
+					wasValueFlag := sudoValueFlag(lit)
 					args = args[1:]
-					// Some flags like -u take a value; the
-					// simplest correct policy is to skip the
-					// next arg too if the current one looks
-					// like a value flag and the next arg is
-					// not another flag. This is a heuristic;
-					// it errs on the side of over-skipping,
-					// which is safe (we just don't classify).
-					// Actually a more conservative policy is to
-					// only skip one when the previous flag is
-					// known to take a value; for now skip
-					// unconditionally and rely on the next
-					// "real" token being recognisable.
+					if wasValueFlag && len(args) > 0 && !strings.HasPrefix(args[0].Lit(), "-") {
+						args = args[1:]
+					}
 					continue
 				}
 				break
@@ -340,14 +370,19 @@ func stripCommandPrefixes(args []*syntax.Word) ([]*syntax.Word, bool) {
 			arg := args[1].Lit()
 			// `command -v` and `command -V` are lookups; the
 			// same goes for `--help`. `command --` is the
-			// end-of-options marker: the rest of the line
-			// is a real command, not a flag.
+			// end-of-options marker: drop BOTH the marker
+			// and the `command` so the remainder is treated
+			// as a real command.
 			if arg == "-v" || arg == "-V" || arg == "--help" {
 				return nil, true
 			}
+			if arg == "--" {
+				// Drop both `command` and `--`.
+				return args[2:], false
+			}
 			// Any other -<letter> option is a builtin flag
 			// (e.g. `-p` for command path lookup).
-			if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
+			if strings.HasPrefix(arg, "-") {
 				return nil, true
 			}
 		}
