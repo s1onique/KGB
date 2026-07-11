@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // checkPythonFiles verifies no Python files exist (except in baseline).
@@ -200,10 +201,14 @@ func (v *Verifier) checkPythonInvocations() []Diagnostic {
 }
 
 // scanPython returns whether content has any Python invocation and the
-// unique site count. Errors during count yield (true, 0) so the caller
-// can surface an internal-error diagnostic.
+// unique site count. The dispatch is path-aware: Makefiles and
+// `.github/workflows/*.yml` files go through their dedicated
+// extractors; everything else goes through the whole-file AST
+// parse. Any path that the chosen extractor cannot parse (a
+// malformed recipe block, a malformed `run:` block, etc.) yields
+// (true, 0) so the caller can surface an internal-error diagnostic.
 func scanPython(path string, data []byte) (bool, int) {
-	count := CountPythonInvocations(data)
+	count := CountPythonInvocationsForPath(path, data)
 	if count < 0 {
 		return true, 0
 	}
@@ -296,7 +301,7 @@ func (v *Verifier) walkCIWorkflows(root string, diags *[]Diagnostic) {
 	}
 
 	for _, entry := range entries {
-		if entry.IsDir() {
+if entry.IsDir() || strings.HasSuffix(entry.Name(), ".sample") {
 			continue
 		}
 		name := entry.Name()
@@ -354,7 +359,7 @@ func (v *Verifier) walkGitHooks(root string, diags *[]Diagnostic) {
 	}
 
 	for _, entry := range entries {
-		if entry.IsDir() {
+if entry.IsDir() || strings.HasSuffix(entry.Name(), ".sample") {
 			continue
 		}
 

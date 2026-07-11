@@ -439,4 +439,3 @@ func TestWalkMakefilesCapturesTopLevelWalkError(t *testing.T) {
 		t.Errorf("expected internal-error diagnostic mentioning 'walk for Makefiles', got: %v", diags)
 	}
 }
-

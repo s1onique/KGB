@@ -5,11 +5,10 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
-
-	"mvdan.cc/sh/v3/syntax"
 )
 
 // SortDiagnostics sorts violations deterministically by check type then path.
@@ -96,103 +95,83 @@ func HasPythonShebang(path string) (bool, error) {
 	return pythonShebangRx.Match(buf[:n]), nil
 }
 
-// variableAssignRx matches shell / Makefile variable assignments at line
-// start (identifier followed by =).
-var variableAssignRx = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*\s*=`)
-
-// yamlRunKeyRx matches the leading "run:" key in YAML GitHub Actions
-// steps. The "run" keyword is not a shell command; stripping it lets the
-// rest of the line be parsed as a normal command list.
-var yamlRunKeyRx = regexp.MustCompile(`(?m)^\s*run:\s*`)
-
-// CountPythonInvocations returns the number of executable Python command
-// sites in data.
+// CountPythonInvocations parses the byte slice as a single complete
+// shell program with mvdan.cc/sh/v3/syntax and counts the python
+// command sites inside it.
 //
-// The byte slice is first parsed as a single shell program with
-// mvdan.cc/sh/v3/syntax - this is what lets heredocs, multi-line
-// for/while bodies, and pipelines with continuation lines survive a
-// single CountPythonInvocations call. If the mvdan.cc/sh parser
-// rejects the input as malformed shell (which happens for the
-// non-shell structure inside Makefiles and YAML files), the
-// implementation falls back to the per-line scanner used by R5/R6
-// to keep the legacy contract intact. Real shell scripts whose only
-// structural oddity is a heredoc, multi-line compound command, or
-// other R7-recognised construct still succeed on the AST path.
+// Returns -1 if data is nil OR the program cannot be parsed. The
+// fail-closed contract is intentional: malformed shell might host
+// a python invocation that we cannot see, and the caller must
+// surface an internal-error diagnostic rather than silently green-
+// light the script.
 //
-// Before parsing, any leading `run:` key in YAML workflow files
-// is stripped so the rest of the line is treated as a normal shell
-// command.
+// A leading `#!python3` shebang counts as one invocation and the
+// rest of the file is treated as Python source (zero further
+// invocations).
 //
-// A shebang `#!python3` on the very first line is counted as a
-// python invocation; the rest of the file after a python shebang is
-// treated as Python source (not shell) and contributes zero
-// additional invocations. Other shebangs (bash, sh, etc.) are
-// ignored and parsing falls through to the rest of the file.
-//
-// Output commands such as `echo python3 ...` never count because
-// Python appears as data, not the command word. Lookups such as
+// Output commands such as `echo python3 ...` never count (Python
+// appears as data, not as the command word). Lookups such as
 // `command -v python3` and `command --version python3` never count.
 // Pure variable assignments without command substitution never
 // count.
-//
-// Returns:
-//
-//	-1 if data is nil OR both the AST and per-line paths fail. The
-//	  caller MUST surface an internal-error diagnostic rather than
-//	  treating the script as python-free.
-//	N >= 0 otherwise.
 func CountPythonInvocations(data []byte) int {
 	if data == nil {
 		return -1
 	}
-	stripped := yamlRunKeyRx.ReplaceAll(data, nil)
-
-	// Honour a leading python shebang - that single invocation is
-	// the only thing the script ever runs (the rest is python
-	// source). Looking at the bytes avoids constructing a parser
-	// just to ignore its output.
-	if bytes.HasPrefix(stripped, []byte("#!")) {
-		firstLine := stripped
-		if nl := bytes.IndexByte(stripped, '\n'); nl >= 0 {
-			firstLine = stripped[:nl]
+	// Honour a leading python shebang.
+	if bytes.HasPrefix(data, []byte("#!")) {
+		firstLine := data
+		if nl := bytes.IndexByte(data, '\n'); nl >= 0 {
+			firstLine = data[:nl]
 		}
 		if pythonShebangRx.Match(firstLine) {
 			return 1
 		}
 	}
-
-	// First attempt: full AST parse. This is the R7-correct path
-	// for genuine shell scripts and exercises the new
-	// heredoc/compound/prefix visitor.
-	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
-	file, err := parser.Parse(bytes.NewReader(stripped), "inline")
-	if err == nil {
-		w := &pythonWalker{}
-		for _, stmt := range file.Stmts {
-			w.walkStmt(stmt)
-		}
-		return w.count
+	n, err := countPythonSitesInProgram(string(data))
+	if err != nil {
+		return -1
 	}
-
-	// Fall back to per-line scanning. This preserves the
-	// R5/R6 behaviour for files whose surrounding structure
-	// (Makefile variables, YAML `key: value`, GitHub Actions
-	// `${{ }}` interpolation) makes the byte slice unparseable
-	// as a single shell program. Heredocs spanning multiple
-	// lines will be missed on this path; documented as a known
-	// trade-off in docs/acts/ACT-UVB76-GO-TOOLING-DOCTRINE01-R7.md.
-	//
-	// We trust the per-line count unconditionally on this path:
-	// the failure of the AST already tells us the file is not a
-	// pure shell program, so escalating 0 -> -1 would only
-	// produce spurious internal-error diagnostics for files
-	// (e.g. Makefiles) that are not shell at all.
-	return countPythonInvocationsFromReader(bytes.NewReader(stripped))
+	return n
 }
 
-// CountPythonInvocationsFromFile is identical to CountPythonInvocations but
-// reads from a file path. Returns -1 on any open error or scan error
-// (fail-closed).
+// CountPythonInvocationsForPath dispatches to the appropriate
+// extractor based on the file's path:
+//
+//   - `Makefile` or `*.mk` -> CountPythonInvocationsInMakefile
+//     (TAB-indented recipes only, then shell parse)
+//   - `.github/workflows/*.yml`/`*.yaml` -> CountPythonInvocationsInYAMLRunBlocks
+//     (each `run:` value is shell-parsed independently)
+//   - anything else -> CountPythonInvocations
+//     (whole-file shell parse)
+//
+// The path may be either absolute or repository-relative; the
+// extractor selection matches on the suffix of `.github/workflows/`
+// and the file extension so both forms work.
+//
+// Returns -1 if data is nil OR the chosen extractor reports a
+// parse error (fail-closed per extractor).
+func CountPythonInvocationsForPath(path string, data []byte) int {
+	if data == nil {
+		return -1
+	}
+	base := filepath.Base(path)
+	if base == "Makefile" || strings.HasSuffix(base, ".mk") {
+		return CountPythonInvocationsInMakefile(data)
+	}
+	// Match both absolute and repo-relative paths under
+	// `.github/workflows/`.
+	if (strings.HasPrefix(path, ".github/workflows/") ||
+		strings.Contains(path, "/.github/workflows/")) &&
+		(strings.HasSuffix(base, ".yml") || strings.HasSuffix(base, ".yaml")) {
+		return CountPythonInvocationsInYAMLRunBlocks(data)
+	}
+	return CountPythonInvocations(data)
+}
+
+// CountPythonInvocationsFromFile reads path and counts python
+// invocations using the extractor that matches its path.
+// Returns -1 on any open or read error, or on parse failure.
 func CountPythonInvocationsFromFile(path string) int {
 	f, err := os.Open(path)
 	if err != nil {
@@ -203,86 +182,7 @@ func CountPythonInvocationsFromFile(path string) int {
 	if err != nil {
 		return -1
 	}
-	return CountPythonInvocations(data)
-}
-
-// countPythonInvocationsFromReader is the per-line variant kept for
-// callers (and tests) that need to attribute invocations to a
-// specific source line.
-//
-// Behaviour:
-//   - scanner.Err() is honoured; -1 is returned on any IO or
-//     buffer-oversize failure.
-//   - A leading `#!python...` shebang counts as one invocation and
-//     the rest of the file is treated as python source (zero
-//     further invocations).
-//   - GitHub-Actions-style `${{ ... }}` substitutions inside lines
-//     are replaced with a placeholder so the per-line parser can
-//     still produce a valid parse tree. The placeholder is not a
-//     Python command word, so it cannot inflate the count.
-//   - A line that the per-line parser cannot parse (returns -1) is
-//     skipped rather than accumulated as a negative value. This
-//     keeps the legacy R6 contract intact for the Makefile/YAML
-//     surface where some lines are noise that the full-file parser
-//     correctly rejects.
-//   - If every non-blank, non-shebang line in the input was
-//     rejected by the per-line parser, the input is treated as
-//     completely unparseable shell and the function returns -1
-//     (fail-closed). This distinguishes a Makefile whose recipe
-//     lines all parse cleanly (return 0) from a shell file whose
-//     every line is malformed (return -1).
-//
-// Returns the sum of python invocations across all parseable lines,
-// or -1 if the underlying scanner failed OR every line was
-// unparseable.
-func countPythonInvocationsFromReader(r io.Reader) int {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 64*1024), 64*1024)
-	count := 0
-	firstLine := true
-	sawPythonShebang := false
-	candidateLines := 0
-	parseableLines := 0
-	for scanner.Scan() {
-		line := scanner.Text()
-		if firstLine {
-			firstLine = false
-			if pythonShebangRx.MatchString(line) {
-				count++
-				sawPythonShebang = true
-				continue
-			}
-			// Non-shebang first line: count normally and fall through.
-		}
-		// After a Python shebang we have stopped counting - the rest of
-		// the file is Python source, not shell command invocations.
-		if sawPythonShebang {
-			continue
-		}
-		candidateLines++
-		n := countPythonInvocationsInLine(line)
-		if n < 0 {
-			// Single-line parse failure: skip rather than accumulate
-			// a negative value. See the function comment above.
-			continue
-		}
-		parseableLines++
-		count += n
-	}
-	// Fail closed on scanner errors (e.g. line too long for buffer, IO
-	// failure). Returning the partial count would silently under-report
-	// when malformed or oversized input truncates the scan; -1 lets the
-	// caller emit an internal-error diagnostic instead.
-	if err := scanner.Err(); err != nil {
-		return -1
-	}
-	// Fail closed when every candidate line was rejected by the
-	// per-line parser - this is the malformed-shell signal that we
-	// cannot verify as "no python here".
-	if candidateLines > 0 && parseableLines == 0 {
-		return -1
-	}
-	return count
+	return CountPythonInvocationsForPath(path, data)
 }
 
 // HasPythonInvocation reports whether file content contains at least one

@@ -9,163 +9,77 @@ import (
 // countPythonInvocationsInLine returns the number of executable Python
 // command sites in a single shell line.
 //
-// A "command site" is one node in the parsed shell program that would
-// invoke a command. Lines are parsed with mvdan.cc/sh/v3/syntax so the
-// full bash grammar is honoured: simple CallExpr, branches of pipe /
-// boolean BinaryCmd, body statements inside compound commands
-// (if/while/for/case/subshell/block), and command substitutions inside
-// any Word (e.g. printf '%s' "$(python3 -c 'print(1)')").
+// The line is parsed as a complete shell program with
+// mvdan.cc/sh/v3/syntax, then walked depth-first with `syntax.Walk`
+// so every `*syntax.CallExpr` (including those reached via
+// FuncDecl bodies, TimeClause targets, CoprocClause pipes,
+// ForClause.Loop iterable expansions, ParamExp / ArithmExp
+// substitutions, heredoc bodies, and process / command
+// substitutions) is classified exactly once.
 //
-// Command-line prefix words (sudo, env, /usr/bin/env, exec, command)
-// are stripped before deciding whether the first remaining word is a
-// Python interpreter. The `command -flag ...` form is recognised as a
-// lookup, never as an invocation.
+// Command-line prefix words (sudo, env, /usr/bin/env, exec,
+// command) are stripped before deciding whether the first remaining
+// word is a Python interpreter. The `command -flag ...` form is
+// recognised as a lookup, never as an invocation.
 //
 // Returns -1 if the line cannot be parsed - fail-closed: malformed
-// syntax might contain python that we cannot reliably see, so the
-// caller must surface an internal-error diagnostic rather than
-// silently treating the count as zero.
+// syntax might host python we cannot reliably see, so the caller
+// must surface an internal-error diagnostic rather than silently
+// treating the line as python-free.
 func countPythonInvocationsInLine(line string) int {
-	n, err := countPythonSitesInLine(line)
+	if strings.TrimSpace(line) == "" {
+		return 0
+	}
+	n, err := countPythonSitesInProgram(line)
 	if err != nil {
 		return -1
 	}
 	return n
 }
 
-func countPythonSitesInLine(line string) (int, error) {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" {
-		return 0, nil
-	}
-
-	// LangBash is the zero value of LangVariant. We deliberately do NOT
-	// pass RecoverErrors - the parser must surface syntax errors so the
-	// caller can fail closed.
+// countPythonSitesInProgram parses program as a complete shell
+// program and counts the number of executable Python command sites
+// inside it. Any parse error returns a non-nil error so the caller
+// can fail closed.
+func countPythonSitesInProgram(program string) (int, error) {
 	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
-	file, err := parser.Parse(strings.NewReader(line), "inline")
+	file, err := parser.Parse(strings.NewReader(program), "inline")
 	if err != nil {
 		return 0, err
 	}
-
-	w := &pythonWalker{}
-	for _, stmt := range file.Stmts {
-		w.walkStmt(stmt)
-	}
-	return w.count, nil
+	count := 0
+	syntax.Walk(file, func(node syntax.Node) bool {
+		call, ok := node.(*syntax.CallExpr)
+		if !ok {
+			return true
+		}
+		if v, isPython := pythonInvocationSite(call); isPython {
+			count += v
+		}
+		return true
+	})
+	return count, nil
 }
 
-// pythonWalker counts python invocations in a parsed shell program.
+// pythonInvocationSite reports whether call is a python command
+// invocation site. Returns (count, true) when the call counts as
+// one invocation, (0, false) otherwise (data reference, lookup,
+// assignment without further invocation, etc.).
 //
-// The walker is deliberately conservative: when a Word contains any
-// expansion (e.g. cmd "$(...)" where the first part is a Lit and the
-// second is a CmdSubst) Word.Lit() returns "". In that case we cannot
-// identify the literal command name, so we skip counting it instead
-// of guessing - but we still recurse into the substitution, which is
-// where embedded python lives.
-type pythonWalker struct{ count int }
-
-func (w *pythonWalker) walkStmt(stmt *syntax.Stmt) {
-	if stmt == nil {
-		return
-	}
-	// Heredocs and file-name redirections can themselves embed
-	// $(...) and backtick substitutions, so we walk them.
-	for _, r := range stmt.Redirs {
-		w.walkRedirect(r)
-	}
-	w.walkCommand(stmt.Cmd)
-}
-
-func (w *pythonWalker) walkRedirect(r *syntax.Redirect) {
-	if r == nil {
-		return
-	}
-	if r.Word != nil {
-		w.walkWord(r.Word)
-	}
-	if r.Hdoc != nil {
-		// Heredoc bodies are unexpanded Words on the AST; $() inside
-		// still produces CmdSubst parts and must be scanned.
-		w.walkWord(r.Hdoc)
-	}
-}
-
-func (w *pythonWalker) walkCommand(cmd syntax.Command) {
-	if cmd == nil {
-		return
-	}
-	switch c := cmd.(type) {
-	case *syntax.CallExpr:
-		w.walkCall(c)
-	case *syntax.BinaryCmd:
-		// &&, ||, |, |&
-		w.walkStmt(c.X)
-		w.walkStmt(c.Y)
-	case *syntax.IfClause:
-		for _, s := range c.Cond {
-			w.walkStmt(s)
-		}
-		for _, s := range c.Then {
-			w.walkStmt(s)
-		}
-		if c.Else != nil {
-			w.walkCommand(c.Else)
-		}
-	case *syntax.WhileClause:
-		for _, s := range c.Cond {
-			w.walkStmt(s)
-		}
-		for _, s := range c.Do {
-			w.walkStmt(s)
-		}
-	case *syntax.ForClause:
-		// Loop variable and iterable cannot invoke commands.
-		for _, s := range c.Do {
-			w.walkStmt(s)
-		}
-	case *syntax.CaseClause:
-		for _, item := range c.Items {
-			for _, s := range item.Stmts {
-				w.walkStmt(s)
-			}
-		}
-	case *syntax.Subshell:
-		for _, s := range c.Stmts {
-			w.walkStmt(s)
-		}
-	case *syntax.Block:
-		for _, s := range c.Stmts {
-			w.walkStmt(s)
-		}
-		// DeclClause / FuncDecl / ArithmCmd / ParenArithm /
-		// BinaryArithm / LetClause do not invoke external commands
-		// that we care about.
-	}
-}
-
-func (w *pythonWalker) walkCall(call *syntax.CallExpr) {
-	if call == nil {
-		return
+// A CallExpr is an invocation site iff, after stripping the
+// recognised command prefixes (sudo, env, /usr/bin/env, exec,
+// command) the first remaining Word's literal text is a python
+// interpreter or a recognised python tool (pip, pytest,
+// version-suffixed python).
+//
+// `command -flag ...` is recognised as a lookup and never counts,
+// even though it is a CallExpr.
+func pythonInvocationSite(call *syntax.CallExpr) (int, bool) {
+	if call == nil || len(call.Args) == 0 {
+		return 0, false
 	}
 
-	// Prefix assignments live on the CallExpr even when Args is empty
-	// (e.g. `X=`python3 ...`` - bare assignment with a substitution
-	// value). Their Value word can still embed $(...) or backtick
-	// invocations, so walk it before deciding the call is a no-op.
-	for _, as := range call.Assigns {
-		if as != nil && as.Value != nil {
-			w.walkWord(as.Value)
-		}
-	}
-
-	if len(call.Args) == 0 {
-		// Pure assignment (x=1 y=2 …) - not an invocation.
-		return
-	}
-
-	// Strip recognised command prefixes. `command -flag ...` is a
-	// lookup and does not count.
+	// Strip recognised command prefixes.
 	args := call.Args
 	for len(args) > 0 {
 		lit := args[0].Lit()
@@ -173,61 +87,25 @@ func (w *pythonWalker) walkCall(call *syntax.CallExpr) {
 			break
 		}
 		if lit == "command" && len(args) >= 2 && strings.HasPrefix(args[1].Lit(), "-") {
-			return
+			return 0, false
 		}
 		args = args[1:]
 	}
 	if len(args) == 0 {
-		return
+		return 0, false
 	}
 
 	// The first remaining Word is the command. Lit() returns "" when
-	// the word embeds any expansion; bail rather than mis-identify
-	// the command name.
+	// the word embeds any expansion; we cannot identify the literal
+	// command name in that case so we bail rather than mis-identify.
 	first := args[0].Lit()
 	if first == "" {
-		// But the word's substitutions may still host python.
-		for _, a := range args {
-			w.walkWord(a)
-		}
-		return
+		return 0, false
 	}
 	if isPythonCommandWord(first) {
-		w.count++
+		return 1, true
 	}
-
-	// Walk the rest of the words for embedded $(...) and backticks.
-	for _, a := range args[1:] {
-		w.walkWord(a)
-	}
-}
-
-func (w *pythonWalker) walkWord(word *syntax.Word) {
-	if word == nil {
-		return
-	}
-	for _, part := range word.Parts {
-		switch p := part.(type) {
-		case *syntax.CmdSubst:
-			for _, s := range p.Stmts {
-				w.walkStmt(s)
-			}
-		case *syntax.DblQuoted:
-			for _, inner := range p.Parts {
-				if cs, ok := inner.(*syntax.CmdSubst); ok {
-					for _, s := range cs.Stmts {
-						w.walkStmt(s)
-					}
-				}
-			}
-		case *syntax.ProcSubst:
-			// Process substitutions <(cmd) and >(cmd) run the
-			// inner statements; treat the same as a subshell.
-			for _, s := range p.Stmts {
-				w.walkStmt(s)
-			}
-		}
-	}
+	return 0, false
 }
 
 // isCommandPrefixWord reports whether word, as the literal first token

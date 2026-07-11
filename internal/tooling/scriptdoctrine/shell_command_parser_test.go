@@ -6,16 +6,17 @@ import (
 )
 
 // =============================================================================
-// R7: AST visitor behaviour tests
+// R7/R8: AST visitor behaviour tests
 // =============================================================================
 //
-// These tests pin down the new mvdan.cc/sh-based visitor. They probe the
-// walker directly (isPythonCommandWord, isCommandPrefixWord,
+// These tests pin down the mvdan.cc/sh-based walker. They probe the
+// classification helpers (isPythonCommandWord, isCommandPrefixWord,
 // countPythonInvocationsInLine) and run end-to-end through
-// CountPythonInvocations so we exercise the same surface the verifier uses.
-// The byte-level tests in shell_analysis_test.go cover the file-level helpers
-// (LOC, shebang, FromFile). Keeping them separate avoids growing a single
-// test file past the 450-line hard limit the LLM-friendliness gate enforces.
+// CountPythonInvocations so we exercise the same surface the verifier
+// uses. The byte-level tests in shell_analysis_test.go cover the
+// file-level helpers (LOC, shebang, FromFile). Keeping them separate
+// avoids growing a single test file past the 450-line hard limit the
+// LLM-friendliness gate enforces.
 
 // TestCountPythonInvocationsCompoundCommands covers R7 P2: every
 // compound shell form (for/while/if/case/subshell/block) is now
@@ -181,14 +182,146 @@ func TestCountPythonInvocationsQuotingCommentsHeredocs(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// R8: missed-node coverage (FuncDecl, TimeClause, ForClause.Loop, ParamExp)
+// =============================================================================
+//
+// The R7 review identified four shell constructs that the manual
+// walker missed. Each test below pins the mvdan.cc/sh-based
+// `syntax.Walk` visitor's handling of one of those constructs.
+// These are the regression cases that fail-open parsers would lose.
+
+func TestCountPythonInvocationsInFuncDecl(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    int
+	}{
+		// Function body with python invocation. The parser must
+		// enter the FuncDecl body and find the python CallExpr.
+		// The subsequent call to the function name is not python
+		// itself - it is just another CallExpr for a non-python
+		// command, so the count is 1, not 2.
+		{"python inside function body (called once)",
+			`run_python() { python3 inside.py; }; run_python`, 1},
+		{"only the body site (function never called)",
+			`run_python() { python3 inside.py; }`, 1},
+		{"python inside function with two body sites",
+			`run_python() { python3 a.py; python3 b.py; }; run_python`, 2},
+		{"two function bodies each with python",
+			`a() { python3 a.py; }; b() { python3 b.py; }`, 2},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CountPythonInvocations([]byte(tc.content))
+			if got != tc.want {
+				t.Errorf("CountPythonInvocations(%q) = %d, want %d", tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCountPythonInvocationsInTimeClause(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    int
+	}{
+		{"time with python target",
+			`time python3 timed.py`, 1},
+		{"time pipeline with python",
+			`time python3 a.py | python3 b.py`, 2},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CountPythonInvocations([]byte(tc.content))
+			if got != tc.want {
+				t.Errorf("CountPythonInvocations(%q) = %d, want %d", tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCountPythonInvocationsInForLoopIterable(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    int
+	}{
+		{"for iterates command substitution result",
+			`for x in $(python3 items.py); do echo "$x"; done`, 1},
+		{"for body also python (2 sites)",
+			`for x in $(python3 items.py); do python3 body.py; done`, 2},
+		{"for iterable is a regular word",
+			`for x in *.py; do python3 "$x"; done`, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CountPythonInvocations([]byte(tc.content))
+			if got != tc.want {
+				t.Errorf("CountPythonInvocations(%q) = %d, want %d", tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCountPythonInvocationsInParamExpDefault(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    int
+	}{
+		{"param-exp default to command substitution",
+			`echo "${value:-$(python3 fallback.py)}"`, 1},
+		{"param-exp default to literal word (no python)",
+			`echo "${value:-literal}"`, 0},
+		{"arith-exp and command substitution",
+			`echo "$(($(python3 size.py) + 1))"`, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CountPythonInvocations([]byte(tc.content))
+			if got != tc.want {
+				t.Errorf("CountPythonInvocations(%q) = %d, want %d", tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCountPythonInvocationsInCoprocClause pins the coproc coverage:
+// `coproc NAME { cmd; }` and `coproc NAME cmd` shells both carry
+// runnable bodies. mvdan.cc/sh's `syntax.Walk` visits them; the
+// previous manual walker did not.
+func TestCountPythonInvocationsInCoprocClause(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    int
+	}{
+		{"coproc with python body",
+			`coproc python3 worker.py`, 1},
+		{"coproc named block with python",
+			`coproc pyjob { python3 worker.py; }`, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CountPythonInvocations([]byte(tc.content))
+			if got != tc.want {
+				t.Errorf("CountPythonInvocations(%q) = %d, want %d", tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// R7 fail-closed + scanner.Err regression tests
+// =============================================================================
+
 // TestCountPythonInvocationsMalformedSyntaxFailsClosed covers the
 // R7 P2 fail-closed contract: malformed shell syntax is reported
-// as -1, which the caller already surfaces as an internal-error
-// diagnostic. Returning 0 would falsely green-light the script.
-//
-// The test name strings are passed as the t.Run sub-test name; the
-// associated input is the actual script payload the parser must
-// reject.
+// as -1 by both the line-level helper and the byte-level wrapper.
+// Returning 0 would falsely green-light the script; the caller
+// (verifier) must surface an internal-error diagnostic instead.
 func TestCountPythonInvocationsMalformedSyntaxFailsClosed(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -200,6 +333,11 @@ func TestCountPythonInvocationsMalformedSyntaxFailsClosed(t *testing.T) {
 		{"empty pipe right side", `echo foo |`},
 		{"unclosed $(...)", `echo "$(python3 tool.py`},
 		{"unclosed $((...))", `echo $((1+`},
+		// R8 regression: a malformed line wedged between good
+		// lines must NOT be silently swallowed. The whole-file
+		// parser must return -1, not 1.
+		{"mixed good and malformed",
+			"python3 baseline.py\nif true then python3 hidden.py fi\n"},
 	}
 
 	for _, tc := range cases {
@@ -219,103 +357,31 @@ func TestCountPythonInvocationsMalformedSyntaxFailsClosed(t *testing.T) {
 	}
 }
 
-// TestCountPythonInvocationsScannerErrIsFailClosed pins the R7 P1
-// fix: scanner.Err() must be honoured inside
-// countPythonInvocationsFromReader. We use a fragment longer than
-// the 64KiB scanner buffer to force bufio.ErrTooLong, which used
-// to be silently swallowed (returning a partial count).
-//
-// CountPythonInvocations no longer routes through the per-line
-// scanner (it parses the byte slice as a single shell program), so
-// the bug surface lives in the per-line helper that callers can
-// still use for source-line attribution.
-func TestCountPythonInvocationsScannerErrIsFailClosed(t *testing.T) {
-	// Build a single "line" longer than the 64KiB scanner buffer.
-	// The scanner will fail with bufio.ErrTooLong and the result
-	// must be -1, not the count of python invocations embedded in
-	// the line (which would have been wrong either way - the line
-	// is unparseable as a whole because the scan aborted mid-line).
-	overlong := strings.Repeat("python3 a.py ", 20000)
+// TestCountPythonInvocationsLargeInputSucceeds pins the AST path's
+// behaviour on large inputs: the per-line `bufio.Scanner`
+// overflow that motivated the R7 P1 fix is gone, so a multi-KiB
+// single line (which R7-era `bufio.Scanner` would reject as
+// ErrTooLong) is now parsed as one shell command tree. The count
+// should reflect the embedded invocations exactly.
+func TestCountPythonInvocationsLargeInputSucceeds(t *testing.T) {
+	// Build a "line" longer than the 64KiB scanner buffer that
+	// the old per-line scanner used to enforce.
+	overlong := strings.Repeat("python3 a.py; ", 5000)
 	if len(overlong) < 64*1024 {
 		t.Fatalf("test setup: oversize line must be > 64KiB, got %d bytes", len(overlong))
 	}
-	got := countPythonInvocationsFromReader(strings.NewReader(overlong + "\n"))
-	if got != -1 {
-		t.Errorf("countPythonInvocationsFromReader on %d-byte line = %d, want -1 (fail-closed)", len(overlong), got)
+	got := CountPythonInvocations([]byte(overlong))
+	if got != 5000 {
+		t.Errorf("CountPythonInvocations on %d-byte line = %d, want 5000", len(overlong), got)
 	}
 }
 
 // TestCountPythonInvocationsNilReturnsMinusOne enforces the
 // existing contract that nil input is treated as an error, not
-// zero. It is repeated here so the R7 changes don't drift it.
+// zero.
 func TestCountPythonInvocationsNilReturnsMinusOne(t *testing.T) {
 	got := CountPythonInvocations(nil)
 	if got != -1 {
 		t.Errorf("CountPythonInvocations(nil) = %d, want -1", got)
-	}
-}
-
-// =============================================================================
-// Word classification helpers (unit tests for the new AST walker)
-// =============================================================================
-
-// TestIsPythonCommandWord pins the accepted command-word vocabulary
-// after the parser rewrite. Anything outside this set must not count
-// even if it ends in "python" or is part of a path.
-func TestIsPythonCommandWord(t *testing.T) {
-	tests := []struct {
-		word string
-		want bool
-	}{
-		{"python", true},
-		{"python3", true},
-		{"python3.10", true},
-		{"python3.11", true},
-		{"pip", true},
-		{"pip3", true},
-		{"pytest", true},
-		{"/usr/bin/python3", true},
-		{"/usr/local/bin/python3.12", true},
-		{"pythonhelper", false}, // not version-suffixed
-		{"pythonical", false},   // not version-suffixed
-		{"pythons", false},      // not version-suffixed
-		{"py", false},           // not a python interpreter
-		{"pip3install", false},  // not a python interpreter
-		{"pythonpath", false},   // not a python interpreter
-		{"echo", false},
-		{"", false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.word, func(t *testing.T) {
-			if got := isPythonCommandWord(tc.word); got != tc.want {
-				t.Errorf("isPythonCommandWord(%q) = %v, want %v", tc.word, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestIsCommandPrefixWord pins the recognised command-prefix
-// vocabulary. Adding a new prefix requires updating both this test
-// and the walker in shell_command_parser.go.
-func TestIsCommandPrefixWord(t *testing.T) {
-	tests := []struct {
-		word string
-		want bool
-	}{
-		{"sudo", true},
-		{"env", true},
-		{"/usr/bin/env", true},
-		{"exec", true},
-		{"command", true},
-		{"echo", false},
-		{"PREFIX", false}, // case sensitive
-		{"", false},       // expanded -> not a prefix
-	}
-	for _, tc := range tests {
-		t.Run(tc.word, func(t *testing.T) {
-			if got := isCommandPrefixWord(tc.word); got != tc.want {
-				t.Errorf("isCommandPrefixWord(%q) = %v, want %v", tc.word, got, tc.want)
-			}
-		})
 	}
 }

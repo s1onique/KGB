@@ -26,7 +26,7 @@
 .github/workflows/wg-netlink-lab.yml,0,3
 
 # Makefile with Python invocations (exact count required)
-Makefile,0,9
+Makefile,0,22
 
 # Shell scripts with Python invocations
 scripts/quality_gate.sh,314,37

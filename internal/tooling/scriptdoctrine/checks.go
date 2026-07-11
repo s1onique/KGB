@@ -199,7 +199,7 @@ func (v *Verifier) checkBaselineEnforcement() []Diagnostic {
 			continue
 		}
 
-		actualCount := CountPythonInvocations(data)
+		actualCount := CountPythonInvocationsForPath(path, data)
 		if actualCount < 0 {
 			diags = append(diags, Diagnostic{
 				Check: "internal-error",
