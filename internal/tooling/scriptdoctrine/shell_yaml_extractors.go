@@ -125,7 +125,6 @@ func CountPythonInvocationsInYAMLRunBlocks(data []byte) int {
 	return total
 }
 
-
 // yamlLineColumnRx extracts the trailing "line N column M" pair from
 // any error message produced by extractYAMLSteps. The regex is
 // intentionally permissive: it matches both "line N column M" and
@@ -180,8 +179,6 @@ func classifyYAMLPythonRunBlocks(data []byte) (InvocationCount, error) {
 	}
 	return InvocationCount{Count: total}, nil
 }
-
-
 
 // splitRunKeyExt is the same as splitRunKey but returns any key
 // (used here to recognise both `run:` and `shell:` headers).

@@ -31,7 +31,6 @@ import (
 // closed: a dynamic payload means we cannot prove the body is
 // python-free, so the verifier surfaces a ClassificationError.
 
-
 // shellValueOption reports whether the literal flag is a bash option
 // that consumes the FOLLOWING argument as its value. Value-taking
 // options never produce a `-c` payload from the value they consume,
@@ -39,9 +38,10 @@ import (
 // seeing one of these flags.
 //
 // Recognised value options:
-//   -O, +O        : bash shopt toggle (e.g. `bash -O extglob -c SCRIPT`)
-//   --rcfile FILE : file to read on startup
-//   --init-file FILE: synonym for --rcfile
+//
+//	-O, +O        : bash shopt toggle (e.g. `bash -O extglob -c SCRIPT`)
+//	--rcfile FILE : file to read on startup
+//	--init-file FILE: synonym for --rcfile
 //
 // Sharing this table between countShellDashCScript and
 // countShellDashCScriptWrapped keeps the wrapped sudo/env/exec path
