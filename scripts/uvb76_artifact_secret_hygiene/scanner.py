@@ -189,7 +189,7 @@ def scan_file_for_secrets(path: str, artifact_surface: bool = False) -> list[Sec
                 break
 
         # Skip artifact context rules for universal-only surfaces
-        if matched_surface and matched_surface.rule_set == RuleSet.UNIVERSAL:
+        if matched_surface and matched_surface.rule_set == RuleSet.UNIVERSAL.value:
             pass  # Don't apply context rules to universal-only surfaces
         else:
             for rule in ARTIFACT_CONTEXT_RULES:

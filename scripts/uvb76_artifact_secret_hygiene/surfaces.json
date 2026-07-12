@@ -1,0 +1,495 @@
+{
+  "$schema": "uvb76-surfaces-v2",
+  "description": "Canonical artifact surface catalog for UVB-76 producer enforcement. Single source of truth used to derive Python inventory and Go producer packages. enforcement_state is migrated (production serializer), legacy_bypass (raw os.* writes still present, awaiting migration), or not_applicable (static / prospective / detection_only surfaces).",
+  "format_version": "1.1.0",
+  "metrics_assertions": {
+    "expected_total_surfaces": 23,
+    "expected_active_surfaces": 12,
+    "expected_migrated_active_surfaces": 1,
+    "expected_legacy_bypass_active_surfaces": 11
+  },
+  "surfaces": [
+    {
+      "id": "hygiene-redact-go",
+      "path": "uvb76/internal/redact/redact.go",
+      "producer": "hygiene",
+      "committed_allowed": true,
+      "sensitivity": "low",
+      "sanitizer": "none",
+      "status": "static",
+      "persistence_policy": "static_scanned",
+      "binary_policy": "not_applicable",
+      "output_format": "text",
+      "owner": "uvb76-team",
+      "justification": "Go redaction implementation; patterns are built from runtime fragments.",
+      "writer_files": [],
+      "writer_symbols": [],
+      "test_files": [
+        "uvb76/internal/redact/redact_json_test.go"
+      ],
+      "enforcement_state": "not_applicable"
+    },
+    {
+      "id": "hygiene-verifier",
+      "path": "scripts/verify_uvb76_artifact_secret_hygiene.py",
+      "producer": "hygiene",
+      "committed_allowed": true,
+      "sensitivity": "low",
+      "sanitizer": "none",
+      "status": "static",
+      "persistence_policy": "static_scanned",
+      "binary_policy": "not_applicable",
+      "output_format": "text",
+      "owner": "uvb76-team",
+      "justification": "Verifier entry script; not an artifact producer.",
+      "writer_files": [],
+      "writer_symbols": [],
+      "test_files": [],
+      "enforcement_state": "not_applicable"
+    },
+    {
+      "id": "hygiene-registry",
+      "path": "scripts/uvb76_artifact_secret_hygiene/registry.json",
+      "producer": "hygiene",
+      "committed_allowed": true,
+      "sensitivity": "low",
+      "sanitizer": "none",
+      "status": "static",
+      "persistence_policy": "static_scanned",
+      "binary_policy": "not_applicable",
+      "output_format": "json",
+      "owner": "uvb76-team",
+      "justification": "Canonical rule registry; contains pattern literals as data.",
+      "writer_files": [],
+      "writer_symbols": [],
+      "test_files": [],
+      "enforcement_state": "not_applicable"
+    },
+    {
+      "id": "hygiene-rules",
+      "path": "scripts/uvb76_artifact_secret_hygiene/rules.py",
+      "producer": "hygiene",
+      "committed_allowed": true,
+      "sensitivity": "low",
+      "sanitizer": "none",
+      "status": "static",
+      "persistence_policy": "static_scanned",
+      "binary_policy": "not_applicable",
+      "output_format": "text",
+      "owner": "uvb76-team",
+      "justification": "Python rules derived from registry at module import.",
+      "writer_files": [],
+      "writer_symbols": [],
+      "test_files": [],
+      "enforcement_state": "not_applicable"
+    },
+    {
+      "id": "hygiene-registry-loader",
+      "path": "scripts/uvb76_artifact_secret_hygiene/registry_loader.py",
+      "producer": "hygiene",
+      "committed_allowed": true,
+      "sensitivity": "low",
+      "sanitizer": "none",
+      "status": "static",
+      "persistence_policy": "static_scanned",
+      "binary_policy": "not_applicable",
+      "output_format": "text",
+      "owner": "uvb76-team",
+      "justification": "Registry loading and validation logic.",
+      "writer_files": [],
+      "writer_symbols": [],
+      "test_files": [],
+      "enforcement_state": "not_applicable"
+    },
+    {
+      "id": "hygiene-structured-scanner",
+      "path": "scripts/uvb76_artifact_secret_hygiene/structured_scanner.py",
+      "producer": "hygiene",
+      "committed_allowed": true,
+      "sensitivity": "low",
+      "sanitizer": "none",
+      "status": "static",
+      "persistence_policy": "static_scanned",
+      "binary_policy": "not_applicable",
+      "output_format": "text",
+      "owner": "uvb76-team",
+      "justification": "Structured JSON scanning logic.",
+      "writer_files": [],
+      "writer_symbols": [],
+      "test_files": [],
+      "enforcement_state": "not_applicable"
+    },
+    {
+      "id": "config-example",
+      "path": "uvb76/uvb76.example.json",
+      "producer": "config",
+      "committed_allowed": true,
+      "sensitivity": "high",
+      "sanitizer": "redact_config",
+      "status": "static",
+      "persistence_policy": "static_scanned",
+      "binary_policy": "not_applicable",
+      "output_format": "config",
+      "owner": "uvb76-team",
+      "justification": "Committed config example; sanitized by maintainers before commit.",
+      "writer_files": [],
+      "writer_symbols": [],
+      "test_files": [],
+      "enforcement_state": "not_applicable"
+    },
+    {
+      "id": "capture-netns-lab-artifacts",
+      "path": "uvb76/cmd/uvb76-capture-netns-lab/**/*.json",
+      "producer": "uvb76-capture-netns-lab",
+      "committed_allowed": true,
+      "sensitivity": "high",
+      "sanitizer": "redact_json",
+      "status": "active",
+      "persistence_policy": "atomic_redacted_json",
+      "binary_policy": "not_applicable",
+      "output_format": "json",
+      "owner": "uvb76-team",
+      "justification": "Phase artifacts and packet dumps written by capture-netns lab must be sanitized via structured redaction before persistence.",
+      "writer_files": [
+        "uvb76/cmd/uvb76-capture-netns-lab/internal/lab/artifacts.go",
+        "uvb76/cmd/uvb76-capture-netns-lab/internal/lab/orchestrator.go",
+        "uvb76/cmd/uvb76-capture-netns-lab/internal/lab/spikes.go",
+        "uvb76/cmd/uvb76-capture-netns-lab/internal/lab/phases.go",
+        "uvb76/cmd/uvb76-capture-netns-lab/internal/lab/configs.go",
+        "uvb76/cmd/uvb76-capture-netns-lab/internal/lab/services.go",
+        "uvb76/cmd/uvb76-capture-netns-lab/internal/lab/process_runner.go"
+      ],
+      "writer_symbols": [],
+      "test_files": [
+        "uvb76/cmd/uvb76-capture-netns-lab/internal/lab/artifacts_test.go"
+      ],
+      "enforcement_state": "legacy_bypass"
+    },
+    {
+      "id": "latency-crash-lab-artifacts",
+      "path": "uvb76/cmd/uvb76-latency-crash-lab/**/*.json",
+      "producer": "uvb76-latency-crash-lab",
+      "committed_allowed": true,
+      "sensitivity": "high",
+      "sanitizer": "redact_json",
+      "status": "active",
+      "persistence_policy": "atomic_redacted_json",
+      "binary_policy": "not_applicable",
+      "output_format": "json",
+      "owner": "uvb76-team",
+      "justification": "Latency samples, summary, series, spikes, and result files written by latency-crash lab must sanitize URLs/headers before persistence.",
+      "writer_files": [
+        "uvb76/cmd/uvb76-latency-crash-lab/internal/workload/workload.go",
+        "uvb76/cmd/uvb76-latency-crash-lab/main.go"
+      ],
+      "writer_symbols": [],
+      "test_files": [
+        "uvb76/cmd/uvb76-latency-crash-lab/internal/workload/workload_test.go"
+      ],
+      "enforcement_state": "legacy_bypass"
+    },
+    {
+      "id": "targets-crash-lab-artifacts",
+      "path": "uvb76/cmd/uvb76-targets-crash-lab/**/*.json",
+      "producer": "uvb76-targets-crash-lab",
+      "committed_allowed": true,
+      "sensitivity": "high",
+      "sanitizer": "redact_json",
+      "status": "active",
+      "persistence_policy": "atomic_redacted_json",
+      "binary_policy": "not_applicable",
+      "output_format": "json",
+      "owner": "uvb76-team",
+      "justification": "Configuration snapshots, crash evidence, and response samples written by targets-crash lab must sanitize credentials before persistence.",
+      "writer_files": [
+        "uvb76/cmd/uvb76-targets-crash-lab/internal/workload/workload.go",
+        "uvb76/cmd/uvb76-targets-crash-lab/main.go"
+      ],
+      "writer_symbols": [],
+      "test_files": [
+        "uvb76/cmd/uvb76-targets-crash-lab/internal/workload/workload_test.go"
+      ],
+      "enforcement_state": "legacy_bypass"
+    },
+    {
+      "id": "memory-lab-artifacts",
+      "path": "uvb76/cmd/uvb76-memory-lab/**/*.json",
+      "producer": "uvb76-memory-lab",
+      "committed_allowed": true,
+      "sensitivity": "high",
+      "sanitizer": "redact_json",
+      "status": "active",
+      "persistence_policy": "atomic_redacted_json",
+      "binary_policy": "not_applicable",
+      "output_format": "json",
+      "owner": "uvb76-team",
+      "justification": "Memory snapshot, verdict, and classifier output must sanitize pprof paths and process metadata before persistence.",
+      "writer_files": [
+        "uvb76/cmd/uvb76-memory-lab/internal/collector/collector.go",
+        "uvb76/cmd/uvb76-memory-lab/internal/fetcher/pprof.go"
+      ],
+      "writer_symbols": [],
+      "test_files": [
+        "uvb76/cmd/uvb76-memory-lab/internal/collector/collector_test.go"
+      ],
+      "enforcement_state": "legacy_bypass"
+    },
+    {
+      "id": "memory-lab-csv-evidence",
+      "path": "uvb76/cmd/uvb76-memory-lab/**/*.csv",
+      "producer": "uvb76-memory-lab",
+      "committed_allowed": true,
+      "sensitivity": "medium",
+      "sanitizer": "redact_text",
+      "status": "active",
+      "persistence_policy": "atomic_redacted_text",
+      "binary_policy": "not_applicable",
+      "output_format": "csv",
+      "owner": "uvb76-team",
+      "justification": "Memory lab CSV evidence (RSS/grpc timings) is text-only and sanitized via text redactor; CSV escape does not embed credentials.",
+      "writer_files": [
+        "uvb76/cmd/uvb76-memory-lab/internal/collector/collector.go"
+      ],
+      "writer_symbols": [],
+      "test_files": [],
+      "enforcement_state": "legacy_bypass"
+    },
+    {
+      "id": "memleak-pprof-lab-artifacts",
+      "path": "uvb76/cmd/uvb76-memleak-pprof-lab/**/*.json",
+      "producer": "uvb76-memleak-pprof-lab",
+      "committed_allowed": true,
+      "sensitivity": "high",
+      "sanitizer": "redact_json",
+      "status": "active",
+      "persistence_policy": "atomic_redacted_json",
+      "binary_policy": "not_applicable",
+      "output_format": "json",
+      "owner": "uvb76-team",
+      "justification": "Memleak evidence JSON output must sanitize process metadata before persistence.",
+      "writer_files": [
+        "uvb76/cmd/uvb76-memleak-pprof-lab/evidence.go",
+        "uvb76/cmd/uvb76-memleak-pprof-lab/main.go"
+      ],
+      "writer_symbols": [],
+      "test_files": [
+        "uvb76/cmd/uvb76-memleak-pprof-lab/verify/result_test.go"
+      ],
+      "enforcement_state": "legacy_bypass"
+    },
+    {
+      "id": "memleak-pprof-binary",
+      "path": "uvb76/cmd/uvb76-memleak-pprof-lab/**/*.pb.gz",
+      "producer": "uvb76-memleak-pprof-lab",
+      "committed_allowed": false,
+      "sensitivity": "high",
+      "sanitizer": "repository_detection_only",
+      "status": "active",
+      "persistence_policy": "reject_binary",
+      "binary_policy": "exact_hash_fixture",
+      "output_format": "binary_profile",
+      "owner": "uvb76-team",
+      "justification": "pprof binary profile output is rejected from committed storage by policy; only exact hash fixtures are allowlisted.",
+      "writer_files": [
+        "uvb76/cmd/uvb76-memleak-pprof-lab/internal/pprofdiff/pprofdiff.go"
+      ],
+      "writer_symbols": [],
+      "test_files": [],
+      "enforcement_state": "legacy_bypass"
+    },
+    {
+      "id": "icmp-ping-soak-artifacts",
+      "path": "uvb76/cmd/uvb76-icmp-os-ping-soak/**/*",
+      "producer": "uvb76-icmp-os-ping-soak",
+      "committed_allowed": true,
+      "sensitivity": "high",
+      "sanitizer": "redact_json",
+      "status": "active",
+      "persistence_policy": "atomic_redacted_json",
+      "binary_policy": "not_applicable",
+      "output_format": "mixed",
+      "owner": "uvb76-team",
+      "justification": "ICMP ping lab emits result.json + memstats.json (JSON surfaces) and goroutines.txt (text surface). WriteArtifacts is the sole entry point in types.go and calls artifactio.WriteRedacted* for every output, so the surface is one mixed-output producer with a single writer symbol and explicit per-output serializer tests.",
+      "writer_files": [
+        "uvb76/cmd/uvb76-icmp-os-ping-soak/types.go"
+      ],
+      "writer_symbols": [
+        "WriteArtifacts"
+      ],
+      "test_files": [
+        "uvb76/cmd/uvb76-icmp-os-ping-soak/types_test.go"
+      ],
+      "enforcement_state": "migrated",
+      "ownership_scope": "symbol"
+    },
+    {
+      "id": "tcp-diag-telemetry-lab-artifacts",
+      "path": "uvb76/cmd/uvb76-tcp-diag-telemetry-lab/**/*.json",
+      "producer": "uvb76-tcp-diag-telemetry-lab",
+      "committed_allowed": true,
+      "sensitivity": "high",
+      "sanitizer": "redact_json",
+      "status": "active",
+      "persistence_policy": "atomic_redacted_json",
+      "binary_policy": "not_applicable",
+      "output_format": "json",
+      "owner": "uvb76-team",
+      "justification": "Captured-diagnostic-packet.json and similar JSON artifacts must be sanitized via typed header/URL redaction before persistence.",
+      "writer_files": [
+        "uvb76/cmd/uvb76-tcp-diag-telemetry-lab/internal/runner/runner.go",
+        "uvb76/cmd/uvb76-tcp-diag-telemetry-lab/internal/artifact/artifact.go"
+      ],
+      "writer_symbols": [],
+      "test_files": [
+        "uvb76/cmd/uvb76-tcp-diag-telemetry-lab/internal/verifier/verifier_test.go"
+      ],
+      "enforcement_state": "legacy_bypass"
+    },
+    {
+      "id": "fuzz-corpus",
+      "path": "uvb76/state/testdata/fuzz/**/*",
+      "producer": "fuzzing",
+      "committed_allowed": true,
+      "sensitivity": "high",
+      "sanitizer": "repository_detection_only",
+      "status": "detection_only",
+      "persistence_policy": "exact_hash_fixture",
+      "binary_policy": "exact_hash_fixture",
+      "output_format": "binary_profile",
+      "owner": "uvb76-team",
+      "justification": "Fuzz corpus bytes must be preserved exactly for regression value. Active redaction is not appropriate; detection-only scanning is enforced.",
+      "writer_files": [],
+      "writer_symbols": [],
+      "test_files": [],
+      "enforcement_state": "not_applicable"
+    },
+    {
+      "id": "packaging-entware-config",
+      "path": "packaging/entware/uvb76.json.example",
+      "producer": "packaging",
+      "committed_allowed": true,
+      "sensitivity": "high",
+      "sanitizer": "redact_config",
+      "status": "static",
+      "persistence_policy": "static_scanned",
+      "binary_policy": "not_applicable",
+      "output_format": "config",
+      "owner": "uvb76-team",
+      "justification": "Committed example; sanitized by maintainers at packaging time. Password hashes must use [REDACTED]; public certificate metadata is allowed.",
+      "writer_files": [],
+      "writer_symbols": [],
+      "test_files": [],
+      "enforcement_state": "not_applicable"
+    },
+    {
+      "id": "packaging-debian-config",
+      "path": "packaging/debian/**/*",
+      "producer": "packaging",
+      "committed_allowed": true,
+      "sensitivity": "medium",
+      "sanitizer": "redact_config",
+      "status": "static",
+      "persistence_policy": "static_scanned",
+      "binary_policy": "text_only_within_mixed_root",
+      "output_format": "mixed",
+      "owner": "uvb76-team",
+      "justification": "Committed packaging scripts and configuration. Maintainers must redact any committed password hashes or private key fragments.",
+      "writer_files": [],
+      "writer_symbols": [],
+      "test_files": [],
+      "enforcement_state": "not_applicable"
+    },
+    {
+      "id": "diag-capture-packets",
+      "path": "artifacts/**/*-packet.json",
+      "producer": "diag/capture",
+      "committed_allowed": false,
+      "sensitivity": "high",
+      "sanitizer": "redact_json",
+      "status": "prospective",
+      "persistence_policy": "prospective_no_writer",
+      "binary_policy": "not_applicable",
+      "output_format": "json",
+      "owner": "uvb76-team",
+      "justification": "Inventory reservation for future committed capture-packet.json artifacts. Production writer is the capture-netns lab; no committed writer here.",
+      "writer_files": [],
+      "writer_symbols": [],
+      "test_files": [],
+      "enforcement_state": "not_applicable"
+    },
+    {
+      "id": "memory-lab-evidence",
+      "path": "artifacts/memory-labs/**/*.json",
+      "producer": "memory-lab",
+      "committed_allowed": true,
+      "sensitivity": "high",
+      "sanitizer": "redact_json",
+      "status": "active",
+      "persistence_policy": "atomic_redacted_json",
+      "binary_policy": "not_applicable",
+      "output_format": "json",
+      "owner": "uvb76-team",
+      "justification": "Committed memory-lab evidence under artifacts/memory-labs. Memory snapshots and classifier output must pass the safe boundary.",
+      "writer_files": [
+        "uvb76/cmd/uvb76-memory-lab/internal/collector/collector.go"
+      ],
+      "writer_symbols": [],
+      "test_files": [
+        "uvb76/cmd/uvb76-memory-lab/internal/collector/collector_test.go"
+      ],
+      "enforcement_state": "legacy_bypass"
+    },
+    {
+      "id": "wg-netlink-lab-evidence",
+      "path": "artifacts/wg-netlink-lab/**/*",
+      "producer": "wg-netlink-lab",
+      "committed_allowed": true,
+      "sensitivity": "medium",
+      "sanitizer": "redact_text",
+      "status": "active",
+      "persistence_policy": "atomic_redacted_text",
+      "binary_policy": "text_only_within_mixed_root",
+      "output_format": "text",
+      "owner": "uvb76-team",
+      "justification": "WireGuard netlink lab mixed evidence. Text-only members of the mixed root are persisted; any binary member requires explicit policy and ownership.",
+      "writer_files": [
+        "tools/wg-netlink-lab/main.go",
+        "tools/wg-netlink-lab/proof.go",
+        "tools/wg-netlink-lab/setup.go",
+        "tools/wg-netlink-lab/teardown.go",
+        "tools/wg-netlink-lab/preflight.go"
+      ],
+      "writer_symbols": [],
+      "test_files": [],
+      "enforcement_state": "legacy_bypass"
+    },
+    {
+      "id": "memory-attribution-matrix",
+      "path": "scripts/memory_attribution_matrix/**/*",
+      "producer": "memory-attribution-matrix",
+      "committed_allowed": true,
+      "sensitivity": "high",
+      "sanitizer": "redact_json",
+      "status": "active",
+      "persistence_policy": "atomic_redacted_json",
+      "binary_policy": "not_applicable",
+      "output_format": "json",
+      "owner": "uvb76-team",
+      "justification": "Python-generated JSON artifacts must pass the Python safe-writer boundary derived from the canonical registry.",
+      "writer_files": [
+        "scripts/memory_attribution_matrix/artifacts.py",
+        "scripts/lab_memory_attribution_matrix.py"
+      ],
+      "writer_symbols": [],
+      "test_files": [
+        "scripts/memory_attribution_matrix_verifier/self_tests.py"
+      ],
+      "enforcement_state": "legacy_bypass"
+    }
+  ],
+  "enforcement_states": [
+    "migrated",
+    "legacy_bypass",
+    "not_applicable"
+  ]
+}

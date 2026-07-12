@@ -20,7 +20,18 @@ from ..ownership import (
     OWNERSHIP_ENTRIES,
     OwnershipEntry,
 )
+import json
+import os
+import tempfile
+from dataclasses import replace
+
 from ..registry_loader import get_registry
+from ..inventory import (
+    CANONICAL_SURFACE_FIELDS,
+    get_canonical_catalog,
+    projection_drift_errors,
+    validate_canonical_catalog,
+)
 
 
 def test_valid_entries_projection_succeeds() -> tuple[bool, str]:
@@ -135,6 +146,76 @@ def test_no_silent_overwrite() -> tuple[bool, str]:
         return True, "No silent overwrite: validation error raised"
 
 
+def test_surface_catalog_full_field_projection() -> tuple[bool, str]:
+    catalog = get_canonical_catalog()
+    errors = validate_canonical_catalog(catalog)
+    errors.extend(projection_drift_errors(catalog))
+    if errors:
+        return False, f"canonical projection errors: {errors}"
+    icmp = next(
+        (surface for surface in catalog if surface.id == "icmp-ping-soak-artifacts"),
+        None,
+    )
+    if icmp is None:
+        return False, "ICMP surface missing"
+    if icmp.enforcement_state != "migrated":
+        return False, f"enforcement_state dropped: {icmp.enforcement_state!r}"
+    if icmp.ownership_scope != "symbol":
+        return False, f"ownership_scope dropped: {icmp.ownership_scope!r}"
+    if tuple(icmp.canonical_dict()) != CANONICAL_SURFACE_FIELDS:
+        return False, "projected fields differ from canonical field set"
+    return True, "all canonical fields and ownership metadata projected"
+
+
+def test_surface_catalog_field_mutation_detected() -> tuple[bool, str]:
+    catalog = get_canonical_catalog()
+    mutated = [
+        replace(surface, ownership_scope="dedicated_file")
+        if surface.id == "icmp-ping-soak-artifacts"
+        else surface
+        for surface in catalog
+    ]
+    errors = projection_drift_errors(mutated)
+    if any("icmp-ping-soak-artifacts.ownership_scope" in error for error in errors):
+        return True, "ownership_scope projection mutation detected"
+    return False, f"ownership_scope mutation escaped parity check: {errors}"
+
+
+def test_surface_catalog_unknown_field_detected() -> tuple[bool, str]:
+    catalog_path = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "surfaces.json"
+    )
+    with open(catalog_path, "r", encoding="utf-8") as catalog_file:
+        raw = json.load(catalog_file)
+    raw["surfaces"][0]["shadow_field"] = "unprojected"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as fixture:
+        json.dump(raw, fixture)
+        fixture_path = fixture.name
+    try:
+        catalog = get_canonical_catalog(fixture_path)
+        errors = projection_drift_errors(catalog, fixture_path)
+    finally:
+        os.unlink(fixture_path)
+    if any("unknown canonical fields" in error for error in errors):
+        return True, "unknown canonical field rejected"
+    return False, f"unknown field escaped projection check: {errors}"
+
+
+def test_inventory_has_single_editable_catalog() -> tuple[bool, str]:
+    package_dir = os.path.dirname(os.path.dirname(__file__))
+    inventory_path = os.path.join(package_dir, "inventory.py")
+    with open(inventory_path, "r", encoding="utf-8") as inventory_file:
+        inventory_source = inventory_file.read()
+    projection = "ARTIFACT_INVENTORY: list[SurfaceRecord] = get_canonical_catalog()"
+    if inventory_source.count(projection) != 1:
+        return False, "inventory does not contain exactly one canonical projection"
+    forbidden = ("ARTIFACT_INVENTORY = [", "ArtifactSurface(")
+    present = [token for token in forbidden if token in inventory_source]
+    if present:
+        return False, f"hand-authored inventory definitions remain: {present}"
+    return True, "surfaces.json is the sole editable catalog source"
+
+
 def run_all_tests() -> list[tuple[str, bool, str]]:
     """Run all projection tests and return results."""
     tests = [
@@ -146,6 +227,10 @@ def run_all_tests() -> list[tuple[str, bool, str]]:
         test_exact_assignment_count,
         test_exact_unique_rule_count,
         test_no_silent_overwrite,
+        test_surface_catalog_full_field_projection,
+        test_surface_catalog_field_mutation_detected,
+        test_surface_catalog_unknown_field_detected,
+        test_inventory_has_single_editable_catalog,
     ]
 
     results = []

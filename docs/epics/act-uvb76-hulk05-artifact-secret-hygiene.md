@@ -93,7 +93,7 @@ UVB-76 generates and stores diagnostic artifacts (captured packets, memory evide
 
 | Sub-task | Focus | Status |
 |----------|-------|--------|
-| R4-1 | Artifact producer validation | NEXT |
+| R4-1 | Artifact producer validation and migration | IN PROGRESS |
 
 ---
 
@@ -452,3 +452,103 @@ def validate_ownership(
 - `uvb76/internal/redact/redact.go` — Go redaction boundary
 - `docs/doctrine/privacy.md` — Privacy doctrine
 - `docs/doctrine/kgb.md` — KGB architecture doctrine
+
+---
+
+## R4 Status: OPEN — Hardened Candidate, Producer Migrations Remaining
+
+R4R1A-R2 is a staged candidate, not a closed ACT. The framework and the first
+ICMP producer migration are implemented, but the aggregate gate remains red
+while legacy producer families still bypass `artifactio`.
+
+### R4 Sub-tasks
+
+| Sub-task | Focus | Status |
+|----------|-------|--------|
+| R4-1 | Producer contracts model (Go) | COMPLETE |
+| R4-2 | Path matcher + validator (Go) | COMPLETE |
+| R4-3 | `artifactio` boundary package (Go) | COMPLETE |
+| R4-4 | Go AST bypass verifier | COMPLETE |
+| R4-5 | Producer contract CLI | COMPLETE |
+| R4-6 | All ACTIVE writers migrated to `artifactio` | PARTIAL (ICMP only) |
+| R4-7 | Serializer-level test for every ACTIVE producer | PARTIAL (ICMP only) |
+| R4-8 | R4 gate wired into the aggregate `gate` graph | COMPLETE |
+| R4-9 | Makefile composition self-test | COMPLETE |
+| R4-10 | `ValidateCatalog` invoked by the real gate | COMPLETE |
+| R4-11 | `surfaces.json` is the sole editable catalog | COMPLETE |
+| R4-12 | ICMP mixed-output `WriteArtifacts` serializer | COMPLETE |
+| R4-13 | Symbol-scoped bypass detector | COMPLETE |
+| R4-14 | Focused AST fixtures and ICMP detector mutation proof | COMPLETE |
+
+### Implemented boundaries
+
+- `uvb76/internal/artifactio/` sanitizes in memory and publishes through a
+  same-directory temporary file. Publication order is write → sync → close →
+  chmod → **verify temporary-file mode** → rename. Deterministic package-local
+  seams prove chmod failure, pre-rename verification failure, and rename
+  failure all preserve the prior destination and remove temporary files.
+- `scripts/uvb76_artifact_secret_hygiene/surfaces.json` is the sole editable
+  surface catalog. Python projects every canonical field, including
+  `enforcement_state` and `ownership_scope`, and mutation tests compare the
+  complete projection. Go parses and validates the same fields.
+- `uvb76/internal/producer/` contains the canonical validator and AST bypass
+  detector. The detector implementation is split by responsibility so every
+  production Go file remains within the 450-line hard limit.
+- `uvb76/cmd/uvb76-artifact-writer-verify/main.go` runs canonical validation
+  and the real bypass scan.
+- `uvb76/cmd/uvb76-makefile-composition-check/main.go` proves producer-before-
+  secret ordering and proves `make -n gate` reaches both HULK05 targets.
+
+### ICMP production-path proof
+
+The ICMP OS ping soak uses `WriteArtifacts` in
+`uvb76/cmd/uvb76-icmp-os-ping-soak/types.go` for `result.json`,
+`memstats.json`, and `goroutines.txt`. Its serializer test is
+`uvb76/cmd/uvb76-icmp-os-ping-soak/types_test.go`.
+
+The test calls the production serializer with unique password, API-key,
+session-token, and Bearer sentinels. It requires all exact values to be absent
+from `result.json`, requires typed redaction markers to remain, validates every
+artifact, checks mode and temporary-file cleanup, invokes the production bypass
+detector over the canonical ICMP writer, and mutates a fixture with
+`os.WriteFile` to prove that detector would fail.
+
+### Remaining migration backlog
+
+The following canonical ACTIVE families still declare
+`enforcement_state=legacy_bypass` and keep the producer/aggregate gate red:
+
+- capture-netns lab artifacts
+- latency-crash lab artifacts
+- targets-crash lab artifacts
+- memory-lab JSON and CSV evidence
+- memleak pprof JSON and binary output
+- TCP diagnostic telemetry artifacts
+- WireGuard netlink evidence
+- memory attribution matrix artifacts
+
+Counts are intentionally not copied into this document. The canonical scan is
+the authority, and each migration ACT must include a detector mutation proof
+before a finding reduction is trusted.
+
+### R4R1A-R2 resolver state
+
+```text
+R4R1A-R2 staged candidate                 YES
+Atomic pre-rename verification            IMPLEMENTED
+Atomic failure-injection proof             IMPLEMENTED
+Aggregate gate reachability proof          IMPLEMENTED
+Single full-field catalog projection       IMPLEMENTED
+ICMP non-vacuous sanitation proof          IMPLEMENTED
+ICMP real zero-bypass proof                IMPLEMENTED
+Go 1.21 restoration                        PRESENT
+LLM-friendly hard limit                    SATISFIED FOR PRODUCTION GO FILES
+R4R1A-R2 closure                           OPEN (legacy producers remain)
+```
+
+### Next exact step
+
+Migrate one `legacy_bypass` producer family through `artifactio`, add its real
+serializer test and detector mutation proof, then rerun the producer and
+aggregate gates. Do not mark R4 complete until the canonical scan reports no
+legacy bypasses and `make gate` passes.

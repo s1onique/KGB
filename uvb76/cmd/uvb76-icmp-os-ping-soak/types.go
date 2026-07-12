@@ -3,9 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/s1onique/KGB/uvb76/internal/artifactio"
 )
 
 // Result captures the lab outcome for machine-readable output.
@@ -79,7 +80,7 @@ func WriteArtifacts(artifactDir string, result Result, memBefore, memAfter MemSt
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(artifactDir, "result.json"), resultBytes, 0644); err != nil {
+	if err := artifactio.WriteRedactedJSONBytes("icmp-ping-soak-artifacts", filepath.Join(artifactDir, "result.json"), resultBytes, artifactio.DefaultRuntimePolicy()); err != nil {
 		return err
 	}
 
@@ -88,13 +89,13 @@ func WriteArtifacts(artifactDir string, result Result, memBefore, memAfter MemSt
 		"after":  memAfter,
 	}
 	memstatsBytes, _ := json.MarshalIndent(memstats, "", "  ")
-	if err := os.WriteFile(filepath.Join(artifactDir, "memstats.json"), memstatsBytes, 0644); err != nil {
+	if err := artifactio.WriteRedactedJSONBytes("icmp-ping-soak-artifacts", filepath.Join(artifactDir, "memstats.json"), memstatsBytes, artifactio.DefaultRuntimePolicy()); err != nil {
 		return err
 	}
 
 	goroutinesContent := fmt.Sprintf("before: %d\nafter: %d\nleaked: %v\n",
 		goroutinesBefore, goroutinesAfter, result.GoroutineLeaked)
-	if err := os.WriteFile(filepath.Join(artifactDir, "goroutines.txt"), []byte(goroutinesContent), 0644); err != nil {
+	if err := artifactio.WriteRedactedText("icmp-ping-soak-artifacts", filepath.Join(artifactDir, "goroutines.txt"), goroutinesContent, artifactio.DefaultTextPolicy()); err != nil {
 		return err
 	}
 

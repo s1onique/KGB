@@ -32,38 +32,38 @@ const Redacted = "[REDACTED]"
 //
 // Universal scope rules (applied to all files):
 const (
-	RulePrivateKeyPEM         = "UVB76-SECRET-0001" // private_key_pem
+	RulePrivateKeyPEM          = "UVB76-SECRET-0001" // private_key_pem
 	RuleEncryptedPrivateKeyPEM = "UVB76-SECRET-0002" // encrypted_private_key_pem
-	RuleRSAPrivateKeyPEM     = "UVB76-SECRET-0003" // rsa_private_key_pem
-	RuleECPrivateKeyPEM       = "UVB76-SECRET-0004" // ec_private_key_pem
-	RuleOpenSSHPrivateKeyPEM  = "UVB76-SECRET-0005" // openssh_private_key_pem
+	RuleRSAPrivateKeyPEM       = "UVB76-SECRET-0003" // rsa_private_key_pem
+	RuleECPrivateKeyPEM        = "UVB76-SECRET-0004" // ec_private_key_pem
+	RuleOpenSSHPrivateKeyPEM   = "UVB76-SECRET-0005" // openssh_private_key_pem
 )
 
 // Artifact context scope rules (applied based on artifact type):
 const (
 	// Header-based rules
-	RuleAuthorizationBearer   = "UVB76-SECRET-0010" // authorization_bearer
-	RuleAuthorizationBasic   = "UVB76-SECRET-0011" // authorization_basic
-	RuleProxyAuthorization   = "UVB76-SECRET-0012" // proxy_authorization
-	RuleAPIKeyHeader         = "UVB76-SECRET-0013" // api_key_header
-	RuleSessionTokenHeader   = "UVB76-SECRET-0020" // session_token_header
+	RuleAuthorizationBearer = "UVB76-SECRET-0010" // authorization_bearer
+	RuleAuthorizationBasic  = "UVB76-SECRET-0011" // authorization_basic
+	RuleProxyAuthorization  = "UVB76-SECRET-0012" // proxy_authorization
+	RuleAPIKeyHeader        = "UVB76-SECRET-0013" // api_key_header
+	RuleSessionTokenHeader  = "UVB76-SECRET-0020" // session_token_header
 
 	// Cookie rules
-	RuleCookieCredential      = "UVB76-SECRET-0030" // cookie_credential
-	RuleSetCookieCredential  = "UVB76-SECRET-0031" // set_cookie_credential
+	RuleCookieCredential    = "UVB76-SECRET-0030" // cookie_credential
+	RuleSetCookieCredential = "UVB76-SECRET-0031" // set_cookie_credential
 	RuleUVB76SessionCookie  = "UVB76-SECRET-0032" // uvb76_session_cookie
 
 	// Field-based rules
-	RulePasswordField         = "UVB76-SECRET-0040" // password_field
-	RulePasswordHashField    = "UVB76-SECRET-0041" // password_hash_field
-	RuleGenericTokenField     = "UVB76-SECRET-0050" // generic_token_field
-	RuleClientKeyData        = "UVB76-SECRET-0060" // client_key_data
-	RulePrivateKeyData       = "UVB76-SECRET-0061" // private_key_data
+	RulePasswordField     = "UVB76-SECRET-0040" // password_field
+	RulePasswordHashField = "UVB76-SECRET-0041" // password_hash_field
+	RuleGenericTokenField = "UVB76-SECRET-0050" // generic_token_field
+	RuleClientKeyData     = "UVB76-SECRET-0060" // client_key_data
+	RulePrivateKeyData    = "UVB76-SECRET-0061" // private_key_data
 
 	// URL rules
 	RuleCredentialBearingHTTPURL = "UVB76-SECRET-0070" // credential_bearing_http_url
-	RuleCredentialBearingDSN    = "UVB76-SECRET-0071" // credential_bearing_database_dsn
-	RuleSensitiveQueryParam     = "UVB76-SECRET-0072" // sensitive_url_query_parameter
+	RuleCredentialBearingDSN     = "UVB76-SECRET-0071" // credential_bearing_database_dsn
+	RuleSensitiveQueryParam      = "UVB76-SECRET-0072" // sensitive_url_query_parameter
 
 	// Token rules
 	RuleJWTLikeToken       = "UVB76-SECRET-0080" // jwt_like_token
@@ -105,11 +105,11 @@ func init() {
 // Sensitive header names (case-insensitive matching).
 var sensitiveHeaders = map[string]bool{
 	"authorization":       true,
-	"proxy-authorization":  true,
-	"x-api-key":            true,
-	"x-session-token":      true,
-	"cookie":               true,
-	"set-cookie":           true,
+	"proxy-authorization": true,
+	"x-api-key":           true,
+	"x-session-token":     true,
+	"cookie":              true,
+	"set-cookie":          true,
 }
 
 // Sensitive field names (context-aware).
@@ -126,21 +126,21 @@ var sensitiveFields = map[string]bool{
 	"password_sha256":     true,
 	"password-hash":       true,
 	// generic_token_field rule (UVB76-SECRET-0050)
-	"api_key":        true,
-	"api_token":      true,
-	"access_token":   true,
-	"refresh_token":  true,
-	"session_token":  true,
-	"session_id":     true,
-	"csrf_token":     true,
-	"bearer_token":   true,
-	"secret":         true,
-	"client_secret":  true,
-	"session_key":    true,
+	"api_key":       true,
+	"api_token":     true,
+	"access_token":  true,
+	"refresh_token": true,
+	"session_token": true,
+	"session_id":    true,
+	"csrf_token":    true,
+	"bearer_token":  true,
+	"secret":        true,
+	"client_secret": true,
+	"session_key":   true,
 	// client_key_data rule (UVB76-SECRET-0060)
 	"client_key_data": true,
 	// private_key_data rule (UVB76-SECRET-0061)
-	"private_key":    true,
+	"private_key":      true,
 	"private_key_data": true,
 }
 
@@ -383,16 +383,18 @@ func redactValue(v interface{}) interface{} {
 		}
 		return result
 	case string:
-		// First: redact private key PEM markers
+		// First: redact private key PEM markers.
 		for _, pattern := range privateKeyPEMPatterns {
 			if pattern.MatchString(val) {
 				return Redacted
 			}
 		}
-		// Second: detect and redact URLs
+		// Second: sanitize embedded JSON and typed header lines carried in
+		// free-form string fields.
+		val = redactStructuredString(val)
+		// Third: detect and redact URLs.
 		if isURLCandidate(val) {
-			redacted := RedactURL(val)
-			return redacted
+			return RedactURL(val)
 		}
 		return val
 	default:

@@ -100,14 +100,15 @@ uvb76/diag/route_lookup.go  # 2-line context deadline check for test determinism
 # - positive_tests.py: 30+ test functions for query param detection, JWT,
 #   cookies, etc. All tests import from rules/scanner modules; splitting would
 #   require cross-module imports reducing test isolation.
-# - inventory.py: Defines 21 artifact surfaces with validation functions.
-#   Splitting would require circular imports between surface definitions and
-#   validation logic.
 #
 # These exemptions are justified because the files are cohesive single-responsibility
 # modules with comprehensive test coverage. The line count is a natural consequence
 # of thorough testing, not poor organization.
 scripts/uvb76_artifact_secret_hygiene/tests/go_parser_tests.py  # Test infrastructure with embedded Go AST parser; circular dependency if split
 scripts/uvb76_artifact_secret_hygiene/tests/positive_tests.py  # 30+ cohesive test functions; splitting reduces test isolation
-scripts/uvb76_artifact_secret_hygiene/inventory.py  # Surface definitions + validation; circular imports if split
 scripts/uvb76_artifact_secret_hygiene/tests/self_test.py  # Self-test runner aggregating the complete artifact-hygiene contract suite
+
+# =============================================================================
+# HULK05 R4 framework — thin loader and serializer tests live below the
+# 450-line hard limit; no exemption needed.
+# =============================================================================

@@ -1,26 +1,24 @@
-"""
-Artifact Surface Inventory for UVB-76 Artifact Secret Hygiene.
+"""Canonical artifact surface inventory and compatibility scanner views.
 
-This module defines the inventory of all UVB-76 artifact surfaces that must
-be scanned for prohibited secret classes.
-
-Each entry contains:
-- stable artifact identifier
-- path or path glob
-- artifact format
-- producer or owning component
-- whether committed artifacts are permitted
-- expected sensitivity
-- required sanitizer
-- scanner rule set
-- retention or generation purpose
+``surfaces.json`` is the sole editable catalog.  This module loads every
+canonical field into immutable records; no hand-authored Python mirror exists.
 """
 
 import hashlib
+import json
 import os
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
+
+
+CATALOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "surfaces.json")
+CANONICAL_SURFACE_FIELDS = (
+    "id", "path", "producer", "committed_allowed", "sensitivity", "sanitizer",
+    "status", "persistence_policy", "binary_policy", "output_format", "owner",
+    "justification", "enforcement_state", "ownership_scope", "writer_files",
+    "writer_symbols", "test_files", "malformed_fixtures",
+)
 
 
 class ArtifactFormat(Enum):
@@ -28,8 +26,10 @@ class ArtifactFormat(Enum):
     TEXT = "text"
     LOG = "log"
     BINARY = "binary"
+    BINARY_PROFILE = "binary_profile"
     CONFIG = "config"
     CERT = "certificate"
+    CSV = "csv"
     FUZZ = "fuzz"
     MIXED = "mixed"
 
@@ -49,432 +49,311 @@ class RuleSet(Enum):
 
 class Sanitizer(Enum):
     REDACT_JSON = "redact_json"
+    REDACT_TEXT = "redact_text"
     REDACT_HEADERS = "redact_headers"
     REDACT_URL = "redact_url"
     REDACT_CONFIG = "redact_config"
+    REPOSITORY_DETECTION_ONLY = "repository_detection_only"
     NONE = "none"
 
 
-@dataclass
-class ArtifactSurface:
-    """Represents a tracked artifact surface with its scanning configuration."""
+@dataclass(frozen=True)
+class MalformedFixture:
+    path: str
+    fingerprint: str
+    justification: str
+    owner: str
+
+    def canonical_dict(self) -> dict[str, object]:
+        return {
+            "path": self.path,
+            "fingerprint": self.fingerprint,
+            "justification": self.justification,
+            "owner": self.owner,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceRecord:
     id: str
     path: str
-    format: ArtifactFormat
     producer: str
     committed_allowed: bool
-    sensitivity: ArtifactSensitivity
-    sanitizer: Sanitizer
-    rule_set: RuleSet
-    purpose: str
-    malformed_fixtures: list[MalformedFixture] = field(default_factory=list)
+    sensitivity: str
+    sanitizer: str
+    status: str
+    persistence_policy: str
+    binary_policy: str
+    output_format: str
+    owner: str
+    justification: str
+    enforcement_state: str
+    ownership_scope: str = ""
+    writer_files: tuple[str, ...] = field(default_factory=tuple)
+    writer_symbols: tuple[str, ...] = field(default_factory=tuple)
+    test_files: tuple[str, ...] = field(default_factory=tuple)
+    malformed_fixtures: tuple[MalformedFixture, ...] = field(default_factory=tuple)
+
+    @property
+    def format(self) -> str:
+        return self.output_format
+
+    @property
+    def purpose(self) -> str:
+        return self.justification
+
+    @property
+    def rule_set(self) -> str:
+        if self.enforcement_state == "not_applicable":
+            return RuleSet.UNIVERSAL.value
+        return RuleSet.ARTIFACT_CONTEXT.value
+
+    def canonical_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "path": self.path,
+            "producer": self.producer,
+            "committed_allowed": self.committed_allowed,
+            "sensitivity": self.sensitivity,
+            "sanitizer": self.sanitizer,
+            "status": self.status,
+            "persistence_policy": self.persistence_policy,
+            "binary_policy": self.binary_policy,
+            "output_format": self.output_format,
+            "owner": self.owner,
+            "justification": self.justification,
+            "enforcement_state": self.enforcement_state,
+            "ownership_scope": self.ownership_scope,
+            "writer_files": list(self.writer_files),
+            "writer_symbols": list(self.writer_symbols),
+            "test_files": list(self.test_files),
+            "malformed_fixtures": [item.canonical_dict() for item in self.malformed_fixtures],
+        }
 
 
-@dataclass
-class MalformedFixture:
-    """Represents an intentionally malformed test fixture.
+# Compatibility name retained without creating a second projection type.
+ArtifactSurface = SurfaceRecord
 
-    Uses exact paths and SHA-256 fingerprints for validation.
-    """
-    path: str  # Exact repository-relative path
-    fingerprint: str  # SHA-256 of current file bytes (hex-encoded)
-    justification: str  # Why this fixture is intentionally malformed
-    owner: str  # Team or person responsible
+
+def _load_fixture(raw: object, surface_id: str) -> MalformedFixture:
+    if not isinstance(raw, dict):
+        raise ValueError(f"surface {surface_id}: malformed fixture must be an object")
+    return MalformedFixture(
+        path=str(raw["path"]), fingerprint=str(raw["fingerprint"]),
+        justification=str(raw["justification"]), owner=str(raw["owner"]),
+    )
+
+
+def _load_surface(raw: object) -> SurfaceRecord:
+    if not isinstance(raw, dict):
+        raise ValueError("surface entry must be an object")
+    allowed = raw["committed_allowed"]
+    if not isinstance(allowed, bool):
+        raise ValueError(f"surface {raw.get('id', '<unknown>')}: committed_allowed must be bool")
+    surface_id = str(raw["id"])
+    return SurfaceRecord(
+        id=surface_id, path=str(raw["path"]), producer=str(raw["producer"]),
+        committed_allowed=allowed, sensitivity=str(raw["sensitivity"]),
+        sanitizer=str(raw["sanitizer"]), status=str(raw["status"]),
+        persistence_policy=str(raw["persistence_policy"]),
+        binary_policy=str(raw["binary_policy"]), output_format=str(raw["output_format"]),
+        owner=str(raw["owner"]), justification=str(raw["justification"]),
+        enforcement_state=str(raw["enforcement_state"]),
+        ownership_scope=str(raw.get("ownership_scope", "")),
+        writer_files=tuple(str(value) for value in raw["writer_files"]),
+        writer_symbols=tuple(str(value) for value in raw["writer_symbols"]),
+        test_files=tuple(str(value) for value in raw["test_files"]),
+        malformed_fixtures=tuple(
+            _load_fixture(value, surface_id)
+            for value in raw.get("malformed_fixtures", [])
+        ),
+    )
+
+
+def load_canonical_catalog(path: str = CATALOG_PATH) -> list[SurfaceRecord]:
+    with open(path, "r", encoding="utf-8") as catalog_file:
+        data = json.load(catalog_file)
+    surfaces = data.get("surfaces")
+    if not isinstance(surfaces, list):
+        raise ValueError("canonical catalog must contain a surfaces array")
+    return [_load_surface(surface) for surface in surfaces]
+
+
+def get_canonical_catalog(path: Optional[str] = None) -> list[SurfaceRecord]:
+    return load_canonical_catalog(path or CATALOG_PATH)
+
+
+def _normalized_raw_surface(raw: dict[str, object]) -> dict[str, object]:
+    normalized = dict(raw)
+    normalized.setdefault("ownership_scope", "")
+    normalized.setdefault("malformed_fixtures", [])
+    return {name: normalized.get(name) for name in CANONICAL_SURFACE_FIELDS}
+
+
+def projection_drift_errors(
+    catalog: list[SurfaceRecord], path: str = CATALOG_PATH,
+) -> list[str]:
+    with open(path, "r", encoding="utf-8") as catalog_file:
+        raw_surfaces = json.load(catalog_file).get("surfaces", [])
+    errors: list[str] = []
+    raw_by_id: dict[str, dict[str, object]] = {}
+    for raw in raw_surfaces:
+        if not isinstance(raw, dict):
+            errors.append("surface entry is not an object")
+            continue
+        unknown = sorted(set(raw) - set(CANONICAL_SURFACE_FIELDS))
+        if unknown:
+            errors.append(f"surface {raw.get('id', '<unknown>')}: unknown canonical fields {unknown}")
+        surface_id = str(raw.get("id", ""))
+        if surface_id in raw_by_id:
+            errors.append(f"duplicate surface: {surface_id}")
+        raw_by_id[surface_id] = raw
+    projected = {surface.id: surface for surface in catalog}
+    for surface_id in sorted(set(raw_by_id) | set(projected)):
+        if surface_id not in projected:
+            errors.append(f"missing projected surface: {surface_id}")
+            continue
+        if surface_id not in raw_by_id:
+            errors.append(f"unknown projected surface: {surface_id}")
+            continue
+        expected = _normalized_raw_surface(raw_by_id[surface_id])
+        actual = projected[surface_id].canonical_dict()
+        for name in CANONICAL_SURFACE_FIELDS:
+            if actual[name] != expected[name]:
+                errors.append(
+                    f"projection drift: {surface_id}.{name} "
+                    f"projected={actual[name]!r} canonical={expected[name]!r}"
+                )
+    return errors
+
+
+def validate_canonical_catalog(catalog: list[SurfaceRecord]) -> list[str]:
+    errors: list[str] = []
+    seen: set[str] = set()
+    statuses = {"active", "static", "prospective", "external", "detection_only"}
+    sensitivities = {"low", "medium", "high"}
+    binary_policies = {
+        "reject", "public_certificate_only", "public_key_only", "exact_hash_fixture",
+        "archive_member_scan", "text_only_within_mixed_root", "not_applicable",
+    }
+    persistence_policies = {
+        "atomic_redacted_json", "atomic_redacted_text", "atomic_redacted_config",
+        "static_scanned", "reject_binary", "allow_public_certificate",
+        "allow_public_key", "exact_hash_fixture", "external_validated",
+        "prospective_no_writer",
+    }
+    for surface in catalog:
+        if not surface.id:
+            errors.append("missing surface: empty id")
+        if surface.id in seen:
+            errors.append(f"duplicate surface: {surface.id}")
+        seen.add(surface.id)
+        if not surface.path:
+            errors.append(f"missing surface: empty path ({surface.id})")
+        if not surface.producer:
+            errors.append(f"missing surface: empty producer ({surface.id})")
+        if surface.status not in statuses:
+            errors.append(f"unknown surface status: {surface.id} status={surface.status!r}")
+        if surface.sensitivity not in sensitivities:
+            errors.append(f"sensitivity mismatch: {surface.id} sensitivity={surface.sensitivity!r}")
+        if surface.binary_policy not in binary_policies:
+            errors.append(f"policy mismatch: {surface.id} binary_policy={surface.binary_policy!r}")
+        if surface.persistence_policy not in persistence_policies:
+            errors.append(
+                f"policy mismatch: {surface.id} persistence_policy={surface.persistence_policy!r}"
+            )
+        if surface.enforcement_state not in {"migrated", "legacy_bypass", "not_applicable"}:
+            errors.append(f"enforcement state mismatch: {surface.id}")
+        if surface.ownership_scope not in {"", "symbol", "dedicated_file"}:
+            errors.append(f"ownership scope mismatch: {surface.id}")
+        if surface.enforcement_state == "migrated":
+            if surface.status != "active":
+                errors.append(f"status mismatch: {surface.id} migrated surface must be active")
+            if surface.ownership_scope not in {"symbol", "dedicated_file"}:
+                errors.append(f"ownership scope mismatch: {surface.id} migrated surface requires scope")
+        elif surface.ownership_scope:
+            errors.append(f"ownership scope mismatch: {surface.id} non-migrated surface declares scope")
+        if surface.status != "active" and surface.enforcement_state != "not_applicable":
+            errors.append(f"enforcement state mismatch: {surface.id} non-active surface")
+        if surface.status == "active" and surface.sensitivity == "high" and surface.sanitizer == "none":
+            errors.append(f"sanitizer mismatch: {surface.id} ACTIVE high sensitivity")
+        if surface.status == "prospective" and surface.persistence_policy != "prospective_no_writer":
+            errors.append(f"policy mismatch: {surface.id} PROSPECTIVE policy")
+        if surface.status == "static" and surface.writer_files:
+            errors.append(f"unknown surface: {surface.id} STATIC cannot claim writer_files")
+        if surface.status == "active" and surface.binary_policy != "exact_hash_fixture" and not surface.writer_files:
+            errors.append(f"status mismatch: {surface.id} ACTIVE requires writer_files")
+    return errors
+
+
+ARTIFACT_INVENTORY: list[SurfaceRecord] = get_canonical_catalog()
 
 
 def compute_file_sha256(file_path: str) -> str:
-    """Compute SHA-256 hash of a file's contents."""
-    sha256 = hashlib.sha256()
+    digest = hashlib.sha256()
     try:
-        with open(file_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(65536), b''):
-                sha256.update(chunk)
-        return sha256.hexdigest()
+        with open(file_path, "rb") as fixture_file:
+            for chunk in iter(lambda: fixture_file.read(65536), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
     except (OSError, IOError):
         return ""
 
 
-def validate_malformed_fixture(
-    fixture: MalformedFixture,
-    repo_root: str,
-) -> tuple[bool, str]:
-    """
-    Validate a malformed fixture against actual file state.
-
-    Returns (is_valid, error_message).
-
-    Validation checks:
-    - Exact normalized repository-relative path
-    - SHA-256 of current file bytes matches declared fingerprint
-    - Non-empty justification
-    - Non-empty owner
-    """
-    # Check non-empty justification
+def validate_malformed_fixture(fixture: MalformedFixture, repo_root: str) -> tuple[bool, str]:
     if not fixture.justification or not fixture.justification.strip():
         return False, f"Malformed fixture {fixture.path}: empty justification"
-
-    # Check non-empty owner
     if not fixture.owner or not fixture.owner.strip():
         return False, f"Malformed fixture {fixture.path}: empty owner"
-
-    # Check non-empty fingerprint
     if not fixture.fingerprint or not fixture.fingerprint.strip():
         return False, f"Malformed fixture {fixture.path}: empty fingerprint"
-
-    # Check exact path is not a directory or glob
-    if '*' in fixture.path or '?' in fixture.path:
+    if "*" in fixture.path or "?" in fixture.path:
         return False, f"Malformed fixture {fixture.path}: path cannot be glob pattern"
-
-    # Compute actual file fingerprint
     abs_path = os.path.join(repo_root, fixture.path)
-
     if not os.path.exists(abs_path):
         return False, f"Malformed fixture {fixture.path}: file does not exist"
-
     if os.path.isdir(abs_path):
         return False, f"Malformed fixture {fixture.path}: path is a directory"
-
-    actual_fingerprint = compute_file_sha256(abs_path)
-
-    if not actual_fingerprint:
+    actual = compute_file_sha256(abs_path)
+    if not actual:
         return False, f"Malformed fixture {fixture.path}: cannot compute file fingerprint"
-
-    # Compare fingerprints (case-insensitive hex comparison)
-    if actual_fingerprint.lower() != fixture.fingerprint.lower():
+    if actual.lower() != fixture.fingerprint.lower():
         return False, f"Malformed fixture {fixture.path}: stale fingerprint (file changed)"
-
     return True, ""
 
 
-def is_malformed_fixture_exempt(
-    path: str,
-    repo_root: str,
-) -> tuple[bool, str]:
-    """
-    Check if a path is exempt as a known malformed fixture.
-
-    Returns (is_exempt, error_message).
-
-    Exemption is only granted if:
-    - Path exactly matches a declared malformed fixture
-    - File SHA-256 matches declared fingerprint
-    - Justification and owner are non-empty
-    """
+def is_malformed_fixture_exempt(path: str, repo_root: str) -> tuple[bool, str]:
+    normalized = os.path.normpath(path)
     for surface in ARTIFACT_INVENTORY:
         for fixture in surface.malformed_fixtures:
-            # Normalize path comparison
-            normalized_fixture = os.path.normpath(fixture.path)
-            normalized_path = os.path.normpath(path)
-
-            if normalized_fixture == normalized_path:
-                # Found matching fixture - validate fingerprint
-                is_valid, error = validate_malformed_fixture(fixture, repo_root)
-                if is_valid:
-                    return True, ""
-                else:
-                    return False, error
-
+            if os.path.normpath(fixture.path) == normalized:
+                return validate_malformed_fixture(fixture, repo_root)
     return False, ""
 
 
-# Hygiene Infrastructure - patterns are built at runtime from fragments,
-# so these files can be scanned. They are LOW sensitivity so they don't
-# require sanitizer but are covered by universal rules.
-ARTIFACT_INVENTORY: list[ArtifactSurface] = [
-    ArtifactSurface(
-        id="hygiene-redact-go",
-        path="uvb76/internal/redact/redact.go",
-        format=ArtifactFormat.TEXT,
-        producer="hygiene",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.LOW,
-        sanitizer=Sanitizer.NONE,
-        rule_set=RuleSet.UNIVERSAL,
-        purpose="Hygiene infrastructure - patterns built from fragments at runtime",
-    ),
-    ArtifactSurface(
-        id="hygiene-verifier",
-        path="scripts/verify_uvb76_artifact_secret_hygiene.py",
-        format=ArtifactFormat.TEXT,
-        producer="hygiene",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.LOW,
-        sanitizer=Sanitizer.NONE,
-        rule_set=RuleSet.UNIVERSAL,
-        purpose="Hygiene infrastructure - patterns built from fragments at runtime",
-    ),
-    ArtifactSurface(
-        id="hygiene-registry",
-        path="scripts/uvb76_artifact_secret_hygiene/registry.json",
-        format=ArtifactFormat.JSON,
-        producer="hygiene",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.LOW,
-        sanitizer=Sanitizer.NONE,
-        rule_set=RuleSet.UNIVERSAL,
-        purpose="Hygiene infrastructure - registry contains pattern literals as data, not secrets",
-    ),
-    ArtifactSurface(
-        id="hygiene-rules",
-        path="scripts/uvb76_artifact_secret_hygiene/rules.py",
-        format=ArtifactFormat.TEXT,
-        producer="hygiene",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.LOW,
-        sanitizer=Sanitizer.NONE,
-        rule_set=RuleSet.UNIVERSAL,
-        purpose="Hygiene infrastructure - patterns derived from registry at runtime",
-    ),
-    ArtifactSurface(
-        id="hygiene-registry-loader",
-        path="scripts/uvb76_artifact_secret_hygiene/registry_loader.py",
-        format=ArtifactFormat.TEXT,
-        producer="hygiene",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.LOW,
-        sanitizer=Sanitizer.NONE,
-        rule_set=RuleSet.UNIVERSAL,
-        purpose="Hygiene infrastructure - registry loading and validation",
-    ),
-    ArtifactSurface(
-        id="hygiene-structured-scanner",
-        path="scripts/uvb76_artifact_secret_hygiene/structured_scanner.py",
-        format=ArtifactFormat.TEXT,
-        producer="hygiene",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.LOW,
-        sanitizer=Sanitizer.NONE,
-        rule_set=RuleSet.UNIVERSAL,
-        purpose="Hygiene infrastructure - structured JSON scanning",
-    ),
-    ArtifactSurface(
-        id="config-example",
-        path="uvb76/uvb76.example.json",
-        format=ArtifactFormat.JSON,
-        producer="config",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.HIGH,
-        sanitizer=Sanitizer.REDACT_CONFIG,
-        rule_set=RuleSet.ARTIFACT_CONTEXT,
-        purpose="Configuration example showing config schema",
-    ),
-    ArtifactSurface(
-        id="capture-netns-lab-artifacts",
-        path="uvb76/cmd/uvb76-capture-netns-lab/**/*.json",
-        format=ArtifactFormat.JSON,
-        producer="uvb76-capture-netns-lab",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.HIGH,
-        sanitizer=Sanitizer.REDACT_JSON,
-        rule_set=RuleSet.ARTIFACT_CONTEXT,
-        purpose="Diagnostic capture netns lab evidence",
-    ),
-    ArtifactSurface(
-        id="latency-crash-lab-artifacts",
-        path="uvb76/cmd/uvb76-latency-crash-lab/**/*.json",
-        format=ArtifactFormat.JSON,
-        producer="uvb76-latency-crash-lab",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.HIGH,
-        sanitizer=Sanitizer.REDACT_JSON,
-        rule_set=RuleSet.ARTIFACT_CONTEXT,
-        purpose="Latency crash lab evidence",
-    ),
-    ArtifactSurface(
-        id="targets-crash-lab-artifacts",
-        path="uvb76/cmd/uvb76-targets-crash-lab/**/*.json",
-        format=ArtifactFormat.JSON,
-        producer="uvb76-targets-crash-lab",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.HIGH,
-        sanitizer=Sanitizer.REDACT_JSON,
-        rule_set=RuleSet.ARTIFACT_CONTEXT,
-        purpose="Targets crash lab evidence",
-    ),
-    ArtifactSurface(
-        id="memory-lab-artifacts",
-        path="uvb76/cmd/uvb76-memory-lab/**/*.json",
-        format=ArtifactFormat.JSON,
-        producer="uvb76-memory-lab",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.HIGH,
-        sanitizer=Sanitizer.REDACT_JSON,
-        rule_set=RuleSet.ARTIFACT_CONTEXT,
-        purpose="Memory lab evidence",
-    ),
-    ArtifactSurface(
-        id="memleak-pprof-lab-artifacts",
-        path="uvb76/cmd/uvb76-memleak-pprof-lab/**/*.json",
-        format=ArtifactFormat.JSON,
-        producer="uvb76-memleak-pprof-lab",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.HIGH,
-        sanitizer=Sanitizer.REDACT_JSON,
-        rule_set=RuleSet.ARTIFACT_CONTEXT,
-        purpose="Memory leak pprof lab evidence",
-    ),
-    ArtifactSurface(
-        id="icmp-ping-soak-artifacts",
-        path="uvb76/cmd/uvb76-icmp-os-ping-soak/**/*.json",
-        format=ArtifactFormat.JSON,
-        producer="uvb76-icmp-os-ping-soak",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.HIGH,
-        sanitizer=Sanitizer.REDACT_JSON,
-        rule_set=RuleSet.ARTIFACT_CONTEXT,
-        purpose="ICMP ping soak lab evidence",
-    ),
-    ArtifactSurface(
-        id="tcp-diag-telemetry-lab-artifacts",
-        path="uvb76/cmd/uvb76-tcp-diag-telemetry-lab/**/*.json",
-        format=ArtifactFormat.JSON,
-        producer="uvb76-tcp-diag-telemetry-lab",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.HIGH,
-        sanitizer=Sanitizer.REDACT_JSON,
-        rule_set=RuleSet.ARTIFACT_CONTEXT,
-        purpose="TCP diagnostic telemetry lab evidence",
-        # Exact malformed fixture - only this specific file is exempt
-        malformed_fixtures=[
-            MalformedFixture(
-                path="uvb76/cmd/uvb76-tcp-diag-telemetry-lab/internal/verifier/testdata/fail_malformed_json/captured-diagnostic-packet.json",
-                fingerprint="638d7f2fba1b155f9715957a70fba13f4025da6bf886f72e18d37d209fe8e2e2",
-                justification="Intentional malformed packet for testing parser resilience",
-                owner="uvb76-team",
-            ),
-        ],
-    ),
-    ArtifactSurface(
-        id="fuzz-corpus",
-        path="uvb76/state/testdata/fuzz/**/*",
-        format=ArtifactFormat.FUZZ,
-        producer="fuzzing",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.HIGH,
-        sanitizer=Sanitizer.REDACT_JSON,
-        rule_set=RuleSet.UNIVERSAL,
-        purpose="Fuzz corpus for capture evidence projection",
-    ),
-    ArtifactSurface(
-        id="packaging-entware-config",
-        path="packaging/entware/uvb76.json.example",
-        format=ArtifactFormat.CONFIG,
-        producer="packaging",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.HIGH,
-        sanitizer=Sanitizer.REDACT_CONFIG,
-        rule_set=RuleSet.ARTIFACT_CONTEXT,
-        purpose="Entware/AsusWRT-Merlin package configuration example",
-    ),
-    ArtifactSurface(
-        id="packaging-debian-config",
-        path="packaging/debian/**/*",
-        format=ArtifactFormat.MIXED,
-        producer="packaging",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.MEDIUM,
-        sanitizer=Sanitizer.REDACT_CONFIG,
-        rule_set=RuleSet.ARTIFACT_CONTEXT,
-        purpose="Debian packaging files",
-    ),
-    ArtifactSurface(
-        id="diag-capture-packets",
-        path="artifacts/**/*-packet.json",
-        format=ArtifactFormat.JSON,
-        producer="diag/capture",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.HIGH,
-        sanitizer=Sanitizer.REDACT_JSON,
-        rule_set=RuleSet.UNIVERSAL,
-        purpose="Captured diagnostic packets",
-    ),
-    ArtifactSurface(
-        id="memory-lab-evidence",
-        path="artifacts/memory-labs/**/*.json",
-        format=ArtifactFormat.JSON,
-        producer="memory-lab",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.HIGH,
-        sanitizer=Sanitizer.REDACT_JSON,
-        rule_set=RuleSet.ARTIFACT_CONTEXT,
-        purpose="Memory lab evidence artifacts",
-    ),
-    ArtifactSurface(
-        id="wg-netlink-lab-evidence",
-        path="artifacts/wg-netlink-lab/**/*",
-        format=ArtifactFormat.MIXED,
-        producer="wg-netlink-lab",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.MEDIUM,
-        sanitizer=Sanitizer.NONE,
-        rule_set=RuleSet.UNIVERSAL,
-        purpose="WireGuard netlink lab evidence",
-    ),
-    ArtifactSurface(
-        id="memory-attribution-matrix",
-        path="scripts/memory_attribution_matrix/**/*",
-        format=ArtifactFormat.JSON,
-        producer="memory-attribution-matrix",
-        committed_allowed=True,
-        sensitivity=ArtifactSensitivity.HIGH,
-        sanitizer=Sanitizer.REDACT_JSON,
-        rule_set=RuleSet.ARTIFACT_CONTEXT,
-        purpose="Memory attribution matrix artifacts",
-    ),
-]
+def get_artifact_by_id(artifact_id: str) -> Optional[SurfaceRecord]:
+    return next((surface for surface in ARTIFACT_INVENTORY if surface.id == artifact_id), None)
 
 
-def get_artifact_by_id(artifact_id: str) -> Optional[ArtifactSurface]:
-    for surface in ARTIFACT_INVENTORY:
-        if surface.id == artifact_id:
-            return surface
-    return None
+def get_artifacts_by_producer(producer: str) -> list[SurfaceRecord]:
+    return [surface for surface in ARTIFACT_INVENTORY if surface.producer == producer]
 
 
-def get_artifacts_by_producer(producer: str) -> list[ArtifactSurface]:
-    return [s for s in ARTIFACT_INVENTORY if s.producer == producer]
-
-
-def get_artifacts_by_sensitivity(sensitivity: ArtifactSensitivity) -> list[ArtifactSurface]:
-    return [s for s in ARTIFACT_INVENTORY if s.sensitivity == sensitivity]
+def get_artifacts_by_sensitivity(sensitivity: ArtifactSensitivity | str) -> list[SurfaceRecord]:
+    value = sensitivity.value if isinstance(sensitivity, ArtifactSensitivity) else sensitivity
+    return [surface for surface in ARTIFACT_INVENTORY if surface.sensitivity == value]
 
 
 def validate_inventory() -> list[str]:
-    errors = []
-    seen_ids = set()
-
+    errors = validate_canonical_catalog(ARTIFACT_INVENTORY)
+    errors.extend(projection_drift_errors(ARTIFACT_INVENTORY))
     for surface in ARTIFACT_INVENTORY:
-        if surface.id in seen_ids:
-            errors.append(f"Duplicate artifact ID: {surface.id}")
-        seen_ids.add(surface.id)
-
-        if not surface.id:
-            errors.append("Artifact surface has empty id")
-        if not surface.path:
-            errors.append(f"Artifact surface {surface.id} has empty path")
-        if not surface.producer:
-            errors.append(f"Artifact surface {surface.id} has empty producer")
-        if not surface.purpose:
-            errors.append(f"Artifact surface {surface.id} has empty purpose")
-
-        if surface.sensitivity == ArtifactSensitivity.HIGH:
-            if surface.sanitizer == Sanitizer.NONE:
-                errors.append(
-                    f"Artifact surface {surface.id} has HIGH sensitivity but no sanitizer"
-                )
-
-        if surface.rule_set == RuleSet.NONE and surface.sensitivity != ArtifactSensitivity.LOW:
-            errors.append(f"Artifact surface {surface.id} requires a rule set")
-
-        # Validate malformed fixtures
         for fixture in surface.malformed_fixtures:
-            if not fixture.path:
-                errors.append(f"Artifact surface {surface.id} has malformed fixture with empty path")
-            if not fixture.fingerprint:
-                errors.append(f"Artifact surface {surface.id} fixture {fixture.path} missing fingerprint")
-            if not fixture.justification:
-                errors.append(f"Artifact surface {surface.id} fixture {fixture.path} missing justification")
-            if not fixture.owner:
-                errors.append(f"Artifact surface {surface.id} fixture {fixture.path} missing owner")
-
+            if not all((fixture.path, fixture.fingerprint, fixture.justification, fixture.owner)):
+                errors.append(f"Artifact surface {surface.id} has incomplete malformed fixture")
     return errors
+
+
+def verify_canonical_catalog_parity(repo_root: str = "") -> list[str]:
+    del repo_root
+    return projection_drift_errors(ARTIFACT_INVENTORY)

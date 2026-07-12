@@ -120,6 +120,10 @@ from .projection_tests import (
     test_exact_assignment_count,
     test_exact_unique_rule_count,
     test_no_silent_overwrite,
+    test_surface_catalog_full_field_projection,
+    test_surface_catalog_field_mutation_detected,
+    test_surface_catalog_unknown_field_detected,
+    test_inventory_has_single_editable_catalog,
 )
 
 from .bounds_tests import (
@@ -304,6 +308,25 @@ def run_self_tests() -> tuple[list[str], dict[str, bool], int, int]:
     ]
 
     for name, test_fn in projection_tests:
+        total += 1
+        ok, msg = test_fn()
+        results[name] = ok
+        if ok:
+            passed += 1
+        else:
+            errors.append(f"{name}: {msg}")
+
+    # =========================================================================
+    # Canonical surface catalog projection tests
+    # =========================================================================
+    surface_catalog_tests = [
+        ("surface_catalog_full_field_projection", test_surface_catalog_full_field_projection),
+        ("surface_catalog_field_mutation_detected", test_surface_catalog_field_mutation_detected),
+        ("surface_catalog_unknown_field_detected", test_surface_catalog_unknown_field_detected),
+        ("inventory_has_single_editable_catalog", test_inventory_has_single_editable_catalog),
+    ]
+
+    for name, test_fn in surface_catalog_tests:
         total += 1
         ok, msg = test_fn()
         results[name] = ok

@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate memory-lab memory-lab-test lab-tovarisch-memory lab-uvb76-memory lab-uvb76-memory-attribution verify-uvb76-memory-attribution hulk-uvb76-gate tovarisch-test-base-fingerprint verify-script-doctrine
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate memory-lab memory-lab-test lab-tovarisch-memory lab-uvb76-memory lab-uvb76-memory-attribution verify-uvb76-memory-attribution hulk-uvb76-gate tovarisch-test-base-fingerprint verify-script-doctrine hulk-uvb76-artifact-secret-gate hulk-uvb76-artifact-producer-gate hulk-uvb76-capture-gate hulk-uvb76-latency-gate hulk-uvb76-reachability-gate
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 87
@@ -32,7 +32,7 @@ coverage-report:
 
 # === Combined Gate (local default) ===
 
-gate: verify-script-doctrine
+gate: verify-script-doctrine hulk-uvb76-artifact-secret-gate
 	./scripts/quality_gate.sh
 
 # === Individual Targets ===
@@ -626,19 +626,25 @@ hulk-uvb76-reachability-gate:
 	@echo "=== UVB-76 Hulk Gate: Verifier Self-Test ==="
 	@python3 scripts/verify_uvb76_reachability_contracts.py --self-test
 
-# === UVB-76 Artifact Secret Hygiene Hulk Gate ===
+# === UVB-76 Artifact Secret Hygiene Hulk Gate (R4 composition) ===
 # ACT-UVB76-HULK05-ARTIFACT-SECRET-HYGIENE
 # Repository-wide deterministic artifact-secret-hygiene contract.
 # Verifies tracked artifacts do not contain prohibited secret classes.
 # Implements two-tier scanning: universal critical rules + artifact-context rules.
 # Diagnostics never expose detected values.
-hulk-uvb76-artifact-secret-gate:
-	@echo "=== UVB-76 Hulk Gate: Artifact Secret Hygiene ==="
+#
+# R4 wiring: this rule MUST depend on hulk-uvb76-artifact-producer-gate so that
+# ValidateCatalog runs from the real gate before this scanner runs.
+# Composition is asserted by uvb76/cmd/uvb76-makefile-composition-check.
+hulk-uvb76-artifact-secret-gate: hulk-uvb76-artifact-producer-gate
+	@echo "=== UVB-76 Hulk Gate: Artifact Secret Hygiene (R4 composition) ==="
 	@echo "=== Verifier Self-Test ==="
 	@python3 scripts/verify_uvb76_artifact_secret_hygiene.py --self-test
 	@echo "=== Go Redaction Tests ==="
 	@cd uvb76 && go test ./internal/redact -v
 	@cd uvb76 && go test ./internal/redact -race
+	@echo "=== Makefile Composition Self-Test ==="
+	@cd uvb76 && go run ./cmd/uvb76-makefile-composition-check -makefile ../Makefile -repo ..
 	@echo "=== Scanning Artifact Surfaces ==="
 	@python3 scripts/verify_uvb76_artifact_secret_hygiene.py
 	@echo "=== UVB-76 Hulk Gate: Artifact Secret Hygiene PASSED ==="
@@ -655,3 +661,25 @@ hulk-uvb76-artifact-secret-gate:
 verify-script-doctrine:
 	@echo "=== Script Doctrine Verification ==="
 	go run ./cmd/verify-script-doctrine --bootstrap
+
+
+# === UVB-76 Artifact Producer Enforcement Hulk Gate ===
+# ACT-UVB76-HULK05R4-ARTIFACT-PRODUCER-ENFORCEMENT
+# Enforces executable producer contracts: every registered active producer
+# must sanitize before persistence, must pass typed Go AST bypass
+# detection, and must have a real serializer-level test.
+hulk-uvb76-artifact-producer-gate:
+	@echo "=== UVB-76 Hulk Gate: Artifact Producer Enforcement ==="
+	@echo "=== Canonical catalog metrics ==="
+	@cd uvb76 && go run ./cmd/uvb76-artifact-writer-verify -self-test
+	@echo "=== Artifactio boundary tests ==="
+	@cd uvb76 && go test -count=1 ./internal/artifactio
+	@cd uvb76 && go test -count=1 -race ./internal/artifactio
+	@echo "=== Producer contract tests (no global mutation) ==="
+	@cd uvb76 && go test -count=50 ./internal/producer
+	@cd uvb76 && go test -race ./internal/producer
+	@echo "=== Producer registry self-test ==="
+	@cd uvb76 && go run ./cmd/uvb76-artifact-writer-verify -self-test
+	@echo "=== Go AST writer-bypass verifier ==="
+	@cd uvb76 && go run ./cmd/uvb76-artifact-writer-verify
+	@echo "=== UVB-76 Hulk Gate: Artifact Producer Enforcement PASSED ==="
