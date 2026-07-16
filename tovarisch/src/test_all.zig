@@ -193,6 +193,15 @@ test { std.testing.refAllDecls(@import("bfd_serve_config_tests.zig")); }
 // CLI tests
 test { std.testing.refAllDecls(@import("cli/args_explicit_listen_tests.zig")); }
 
+// ============================================================================
+// Bounded Memory / Reconnect Tests (ACT-TOVARISCH-BOUNDED-MEMORY-INSTRUMENTATION01)
+// ============================================================================
+const _runtime_allocation_tracker = @import("runtime/allocation_tracker.zig");
+const _bgp_reconnect_stress_tests = @import("bgp/reconnect_stress_tests.zig");
+
+test { std.testing.refAllDecls(@import("runtime/allocation_tracker.zig")); }
+test { std.testing.refAllDecls(@import("bgp/reconnect_stress_tests.zig")); }
+
 // VPN masquerade tests (ACT: Add config-controlled VPN masquerade rule with rule watcher)
 test { std.testing.refAllDecls(@import("net/iptables.zig")); }
 test { std.testing.refAllDecls(@import("status_vpn_masquerade.zig")); }

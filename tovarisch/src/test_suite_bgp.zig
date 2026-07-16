@@ -57,6 +57,9 @@ const _bgp_transition_totality_tests = @import("bgp/transition_totality_tests.zi
 const _bgp_reconnect_hold_timer_tests = @import("bgp/reconnect_hold_timer_tests.zig");
 const _bgp_reconnect_recovery_tests = @import("bgp/reconnect_recovery_tests.zig");
 
+// Bounded memory reconnect tests (ACT-TOVARISCH-BOUNDED-MEMORY-INSTRUMENTATION01)
+const _bgp_reconnect_stress_tests = @import("bgp/reconnect_stress_tests.zig");
+
 // BGP export delta tests (ACT: Apply BGP export deltas after watched prefix reload)
 const _bgp_export_delta = @import("bgp/export_delta.zig");
 const _bgp_session_delta = @import("bgp/session_delta.zig");
@@ -118,3 +121,6 @@ test { std.testing.refAllDecls(@import("bgp/export_delta_workflow_tests.zig")); 
 test { std.testing.refAllDecls(@import("bgp/export_reload_apply.zig")); }
 test { std.testing.refAllDecls(@import("bgp/export_reload_apply_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/export_reload_apply_integration_tests.zig")); }
+
+// Bounded memory reconnect tests (ACT-TOVARISCH-BOUNDED-MEMORY-INSTRUMENTATION01)
+test { std.testing.refAllDecls(@import("bgp/reconnect_stress_tests.zig")); }
