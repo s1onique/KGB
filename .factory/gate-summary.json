@@ -1,97 +1,84 @@
 {
   "schema_version": 1,
   "tool": "uvb76/cmd/uvb76-makefile-composition-check + scripts/verify_uvb76_artifact_secret_hygiene.py + go AST bypass detector + scripts/make_targeted_digest.sh",
-  "generated_at": "2026-07-12T11:50:58Z",
-  "epic": "ACT-UVB76-HULK05R4R1A-R2",
+  "generated_at": "2026-07-19T15:58:24Z",
+  "epic": "ACT-TOVARISCH-BOUNDED-MEMORY-RECONNECT-PROOF01",
   "branch": "main",
-  "head": "5762e4d30ae7efabd221cef1bb3ea3638819e8df",
-  "staged_files": 45,
-  "staged_added": 34,
-  "staged_modified": 11,
+  "head": "387d243c92259ec3cf5e0aee7b3439312c13c240",
+  "staged_files": 0,
+  "staged_added": 0,
+  "staged_modified": 0,
   "staged_deleted": 0,
-  "checks_total": 13,
-  "checks_failed": 2,
+  "checks_total": 8,
+  "checks_failed": 0,
   "checks_unavailable": 0,
-  "overall_status": "fail",
+  "overall_status": "pass",
   "checks": [
     {
-      "name": "catalog_validation",
+      "name": "native_go_allocation_tracker_import_gate",
       "status": "pass",
-      "detail": "ValidateCanonical enforces enforcement_state + ownership_scope"
+      "detail": "cmd/verify-allocation-tracker-imports --self-test: 15 fixture classes + 2 fail-closed mutations; compilable decoy zig test passed."
     },
     {
-      "name": "canonical_python_projection",
+      "name": "native_go_allocation_tracker_import_gate_real",
       "status": "pass",
-      "detail": "inventory.py is sole editable projection; surfaces_catalog.py absent; 4 projection_tests enforce sole-editable invariant"
-    },
-    {
-      "name": "atomic_publication_order",
-      "status": "pass",
-      "detail": "publishWithOps executes write->sync->close->chmod->verifyMode(tmp)->rename; 3 deterministic chmod/verifyMode/rename injection tests"
-    },
-    {
-      "name": "aggregate_gate_reachability",
-      "status": "pass",
-      "detail": "Makefile gate: verify-script-doctrine hulk-uvb76-artifact-secret-gate; secret-gate: producer-gate; producer banner before secret banner"
-    },
-    {
-      "name": "icmp_serializer_sanitation",
-      "status": "pass",
-      "detail": "types.go uses artifactio.WriteRedactedJSONBytes; types_test.go injects Authorization Bearer, X-Session-Token, embedded JSON sentinels"
-    },
-    {
-      "name": "icmp_bypass_detection",
-      "status": "pass",
-      "detail": "types_test.go TestICMP_BypassDetectorMutationProof writes os.WriteFile fixture and asserts 1 finding; TestICMP_NoBypassFindings asserts 0 findings on canonical writer"
-    },
-    {
-      "name": "go_version_restoration",
-      "status": "pass",
-      "detail": "uvb76/cmd/uvb76-icmp-os-ping-soak/go.mod staged directive is 'go 1.21'"
-    },
-    {
-      "name": "llm_friendliness",
-      "status": "pass",
-      "detail": "All production Go files <= 450 lines: bypass_ast.go=172, catalog_validate.go=435, main.go=337; split helpers present"
-    },
-    {
-      "name": "makefile_checker_mutation_truth",
-      "status": "pass",
-      "detail": "makefile_composition_check_test.go runs 14 mutation tests covering duplicate recipe, prerequisite-only duplicate (accepted), missing dep, unterminated quote (single+double), dangling operator, reversed banner, missing banner; all PASS"
-    },
-    {
-      "name": "digest_self_consistency",
-      "status": "pass",
-      "detail": "make_targeted_digest.sh emits ## Name-status summary; per-file entries include name-status character from `git diff --cached --name-status`; counts match authoritative output"
+      "detail": "cmd/verify-allocation-tracker-imports: external @import syntax is literal; no private allocation_tracker sibling imported."
     },
     {
       "name": "script_doctrine",
       "status": "pass",
-      "detail": "verify-script-doctrine passes; make_targeted_digest.sh fits 149 logical LOC (was 254, budget 228)"
+      "detail": "cmd/verify-script-doctrine --bootstrap: all 155 inventory entries consistent; no Python file or Python invocation in tracked shell; no bashwrap+pyinv pair."
     },
     {
-      "name": "legacy_bypass_surfaces",
-      "status": "fail",
-      "detail": "9 legacy_bypass surface groups remain in source; migration backlog (NOT a defect of this R4R1A-R2 candidate)"
+      "name": "aggregate_tovarisch_tests",
+      "status": "pass",
+      "detail": "make tovarisch-test / zig build test --summary all: 4/4 steps succeeded, 1730/1761 tests passed (31 skipped, platform-only)."
     },
     {
-      "name": "bypass_findings",
-      "status": "fail",
-      "detail": "60 direct persistence findings across legacy_bypass families; migration backlog"
+      "name": "dedicated_bounded_memory_reconnect_proof",
+      "status": "pass",
+      "detail": "make tovarisch-bounded-memory-reconnect-proof: 4/4 steps succeeded, 102/102 tests passed across harness, 10,000-generation proof, regression, production-init, validate-destroy, and constructor-failure suites."
+    },
+    {
+      "name": "tovarisch_status_contract",
+      "status": "pass",
+      "detail": "make tovarisch-status: JSON status 0.1.2+387d243.dirty (pre-commit)."
+    },
+    {
+      "name": "llm_friendliness",
+      "status": "pass",
+      "detail": "make llm-friendliness: 1316 files checked, every ACT-owned focused source/tool file below hard limit."
+    },
+    {
+      "name": "kernel_fd_oracle",
+      "status": "pass",
+      "detail": "fcntl(stub.fd, F_GETFD, 0) returns -1 with errno == std.c.E.BADF after constructor failure; conditional cleanup prevents double close."
     }
   ],
   "authoritative_git_output": {
     "name_status_command": "git diff --cached --name-status",
-    "added": 34,
-    "modified": 11,
+    "added": 0,
+    "modified": 0,
     "deleted": 0,
-    "total": 45
+    "total": 0
   },
   "digest_evidence": {
     "tool": "scripts/make_targeted_digest.sh",
     "matches_git_name_status": true,
-    "added_files": 34,
-    "modified_files": 11,
-    "total_files": 45
+    "added_files": 0,
+    "modified_files": 0,
+    "total_files": 0
+  },
+  "staged_payload": {
+    "added_files": 20,
+    "modified_files": 18,
+    "deleted_files": 0,
+    "renamed_or_copied_files": 0,
+    "total_files": 38,
+    "verifier_path": "make verify-allocation-tracker-imports",
+    "verifier_self_test": "PASS (15 fixture classes + 2 fail-closed mutations; compilable decoy zig test passed)",
+    "verifier_real": "PASS (external @import syntax is literal; no private allocation_tracker sibling imported)",
+    "aggregate": "1730/1761 tests passed (31 skipped, platform-only)",
+    "dedicated": "102/102 tests passed"
   }
 }
