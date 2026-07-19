@@ -196,7 +196,9 @@ cd tovarisch && zig build test --summary all
 make tovarisch-bounded-memory-reconnect-proof
   Build Summary: 4/4 steps succeeded; 102/102 tests passed
 make tovarisch-status
-  status JSON; version 0.1.2+1466cd6 (post gate-summary refresh); status warn
+  status contract: PASS; exact version is commit-derived
+  (observed version at each evidence subject: 0.1.2+<commit-SHA>);
+  status JSON: status warn
 make llm-friendliness
   [gate] LLM-friendliness: checked 1316 files
   [gate] LLM-friendliness: PASS
@@ -233,9 +235,14 @@ clock control, and mutation injection.
   privileged network-namespace lab was added to this ACT.
 - No protocol, telemetry, privacy, or user-observation surface changed.
 - No remote push or Git-history rewrite is part of publication.
-  The branch `main` is currently 2 commits ahead of `origin/main`; no
-  `git push` is performed by this ACT. Publication is local-only until a
-  human runs the push.
+  This ACT performs no `git push`, no `--force`, and no refspec
+  rewrite. A human operator is expected to inspect the recorded commit
+  SHAs in the gate summary and the appendix, then push the branch at
+  their discretion. This ACT is intentionally publish-on-demand, not
+  publish-on-commit. Local-publication subjects are recorded by stable
+  SHA in the appendix and the gate summary; do not read this ACT as
+  claiming a `current HEAD` or `ahead-of-origin` count, since those
+  change when another commit is added.
 
 
 ## Doctrine / ADR / cold resume

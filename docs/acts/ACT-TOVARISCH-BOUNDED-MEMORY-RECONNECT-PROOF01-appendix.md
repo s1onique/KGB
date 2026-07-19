@@ -290,9 +290,36 @@ was empty at commit time because nothing was uncommitted).
 
 ### Publication is local-only
 
-The branch `main` is currently ahead of `origin/main` by two commits
-(`387d243` and `1466cd6`). This ACT applies no `git push`, no
-`--force`, no refspec rewrite, and no remote publication workflow.
+This ACT performs no `git push`, no `--force`, and no refspec rewrite.
 A human operator is expected to inspect the recorded commit SHAs in the
-gate summary and the appendix, then push the branch at their discretion.
-This ACT is intentionally publish-on-demand, not publish-on-commit.
+gate summary, then push the branch at their discretion. This ACT is
+intentionally publish-on-demand, not publish-on-commit; do not read it
+as claiming any `current HEAD` or `ahead-of-origin` count, since both
+change each time another commit is added.
+
+### Local publication subjects (stable SHA vocabulary)
+
+The gate summary records each publication subject by SHA so the
+evidence remains stable across subsequent commits:
+
+- `implementation_commit`: `387d243c92259ec3cf5e0aee7b3439312c13c240`
+  (38 files: 18 modified + 20 added)
+- `gate_summary_refresh_commit`: `1466cd6d6a4422f35f976d44c76cab07b9aac83d`
+  (1 file: `.factory/gate-summary.json`)
+- `documentation_correction_commit`: `bb19d86c6897b0034ebedbfbe31a18dd1115e1ad`
+  (1 added range digest + 3 modified ACT docs and gate summary, all
+  documentation/evidence-only)
+
+The branch's remote-facing state is intentionally not asserted in any
+tracked document; it is rebuilt on demand by
+`git rev-list origin/main..HEAD` whenever a human needs the count.
+
+### Status-version transcript is commit-derived
+
+The `tovarisch-status` JSON carries a version of the form
+`0.1.2+<commit-SHA>`. This ACT does not pin a "current final version"
+because that string changes with every committed change, including
+each documentation/evidence correction commit. The status contract
+itself is PASS at every recorded evidence subject; the exact SHA is
+discoverable on demand via `git log -1 --format=%H` after the subject
+is named.
