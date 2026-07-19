@@ -202,14 +202,21 @@ doctrine logical-LOC ceiling. `docs/tooling/zig-0.16-observations.md` remains at
 400-line hard limit; the new focused import observation is split into
 `zig-0.16-import-observations.md`.
 
-## Complete publication workset (34 files)
+## Complete publication workset (38 files at `387d243`; 39 unique for `f91243f..1466cd6`)
 
-### Modified tracked files (14)
+The implementation commit `387d243` touches exactly **38 files** (18 modified +
+20 added). A follow-up gate-summary refresh commit `1466cd6` modifies a
+single file, `.factory/gate-summary.json`. Over the range
+`f91243f..1466cd6` (i.e. `HEAD~2..HEAD` at the start of this correction
+pass) there are **39 unique files** changed when `1466cd6`'s single-file
+diff is unioned with `387d243`'s 38.
 
-- `.factory/gate-summary.json`
+### Modified tracked files at `387d243` (18)
+
 - `Makefile`
 - `docs/memory/bounded-memory-reconnect-ownership.md`
 - `docs/tooling/zig-0.16-observations.md`
+- `scripts/make_targeted_digest.sh`
 - `scripts/quality_gate.sh`
 - `tovarisch/build.zig`
 - `tovarisch/src/bgp/bgp_reconnect_regression_tests.zig`
@@ -219,9 +226,13 @@ doctrine logical-LOC ceiling. `docs/tooling/zig-0.16-observations.md` remains at
 - `tovarisch/src/bgp/serve_integration.zig`
 - `tovarisch/src/runtime/allocation_tracker.zig`
 - `tovarisch/src/test_all.zig`
+- `tovarisch/src/test_suite_base.zig`
 - `tovarisch/src/test_suite_bgp_integration.zig`
+- `uvb76/cmd/uvb76-artifact-writer-verify/main.go`
+- `uvb76/cmd/uvb76-makefile-composition-check/main.go`
+- `uvb76/cmd/uvb76-makefile-composition-check/makefile_composition_check_test.go`
 
-### Added files (20)
+### Added files at `387d243` (20)
 
 - `docs/acts/ACT-TOVARISCH-BOUNDED-MEMORY-RECONNECT-PROOF01.md`
 - `docs/acts/ACT-TOVARISCH-BOUNDED-MEMORY-RECONNECT-PROOF01-appendix.md`
@@ -243,3 +254,45 @@ doctrine logical-LOC ceiling. `docs/tooling/zig-0.16-observations.md` remains at
 - `tovarisch/src/runtime/allocation_tracker_internal.zig`
 - `tovarisch/src/runtime/allocation_tracker_snapshots.zig`
 - `tovarisch/src/runtime/allocation_tracker_tracking_allocator.zig`
+
+Note: the staged-index at this correction is zero. Nothing in the
+implementation commits or this correction pass is held in the working
+index; all 38 implementation files plus the 1 gate-summary refresh file
+are already committed. The fresh gate evidence therefore binds to the
+*implementation payload* (the committed implementation), not to a
+staged payload.
+
+### Gate-summary refresh commit `1466cd6` (1 file)
+
+- `.factory/gate-summary.json`
+
+This commit refreshes the canonical staged-evidence JSON so the recorded
+counts, the implementation commit SHA, and the focused-gate
+transcripts match the final tree. It does not change any source/test
+file or any checked-in doc.
+
+### Range digest (`f91243f..1466cd6`)
+
+A range digest is regenerated for the full implementation range
+covering both `387d243` and `1466cd6`. It is labelled as such
+(`ACT-TOVARISCH-BOUNDED-MEMORY-RECONNECT-PROOF01-range-digest.txt`)
+and is produced from the parent of `387d243` (`f91243f`) through
+`1466cd6` via:
+
+```text
+./scripts/make_targeted_digest.sh --range f91243f..1466cd6 \
+  --output docs/acts/ACT-TOVARISCH-BOUNDED-MEMORY-RECONNECT-PROOF01-range-digest.txt
+```
+
+The digest captures exactly the 39 unique files in the range; the
+earlier `make digest --dirty` artifact remains in `digest.txt` (and
+was empty at commit time because nothing was uncommitted).
+
+### Publication is local-only
+
+The branch `main` is currently ahead of `origin/main` by two commits
+(`387d243` and `1466cd6`). This ACT applies no `git push`, no
+`--force`, no refspec rewrite, and no remote publication workflow.
+A human operator is expected to inspect the recorded commit SHAs in the
+gate summary and the appendix, then push the branch at their discretion.
+This ACT is intentionally publish-on-demand, not publish-on-commit.

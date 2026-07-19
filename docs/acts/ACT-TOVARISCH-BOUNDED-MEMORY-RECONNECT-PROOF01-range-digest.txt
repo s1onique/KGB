@@ -1,0 +1,106 @@
+# Targeted range digest (compact, no full diffs)
+
+Label: ACT-TOVARISCH-BOUNDED-MEMORY-RECONNECT-PROOF01-range-digest
+Generated at: 2026-07-19T18:34:49Z
+Repo: /Volumes/UserData/Users/chistyakov/Projects/SPbNIX/KGB
+Mode: range (compact: name-status + changed files + diff stat, no per-file content)
+Range: f91243f..1466cd6 (parent of 387d243 .. HEAD pre-correction)
+Implementation commit: 387d243 (38 files: 18M + 20A)
+Gate-summary refresh commit: 1466cd6 (1 file: .factory/gate-summary.json)
+Unique files in range: 39
+
+## Name-status summary (range)
+added_files=20
+modified_files=19
+deleted_files=0
+renamed_or_copied_files=0
+total_files=39
+
+## Changed files (39 total)
+A	cmd/verify-allocation-tracker-imports/main.go
+A	docs/acts/ACT-TOVARISCH-BOUNDED-MEMORY-RECONNECT-PROOF01-appendix.md
+A	docs/acts/ACT-TOVARISCH-BOUNDED-MEMORY-RECONNECT-PROOF01.md
+A	docs/tooling/zig-0.16-import-observations.md
+A	internal/tooling/allocationtrackerimports/scanner.go
+A	internal/tooling/allocationtrackerimports/selftest.go
+A	tovarisch/src/bgp/reconnect_ownership.zig
+A	tovarisch/src/bgp/reconnect_proof_constructor_failure_tests.zig
+A	tovarisch/src/bgp/reconnect_proof_harness.zig
+A	tovarisch/src/bgp/reconnect_proof_production_init_tests.zig
+A	tovarisch/src/bgp/reconnect_proof_regression.zig
+A	tovarisch/src/bgp/reconnect_proof_tests.zig
+A	tovarisch/src/bgp/reconnect_proof_validate_destroy_tests.zig
+A	tovarisch/src/bgp/serve_bundle_constructor.zig
+A	tovarisch/src/reconnect_proof_tests.zig
+A	tovarisch/src/runtime/allocation_tracker_connector_probe.zig
+A	tovarisch/src/runtime/allocation_tracker_destroy.zig
+A	tovarisch/src/runtime/allocation_tracker_internal.zig
+A	tovarisch/src/runtime/allocation_tracker_snapshots.zig
+A	tovarisch/src/runtime/allocation_tracker_tracking_allocator.zig
+M	.factory/gate-summary.json
+M	Makefile
+M	docs/memory/bounded-memory-reconnect-ownership.md
+M	docs/tooling/zig-0.16-observations.md
+M	scripts/make_targeted_digest.sh
+M	scripts/quality_gate.sh
+M	tovarisch/build.zig
+M	tovarisch/src/bgp/bgp_reconnect_regression_tests.zig
+M	tovarisch/src/bgp/passive_listener_integration_tests.zig
+M	tovarisch/src/bgp/reconnect_stress_tests.zig
+M	tovarisch/src/bgp/runtime.zig
+M	tovarisch/src/bgp/serve_integration.zig
+M	tovarisch/src/runtime/allocation_tracker.zig
+M	tovarisch/src/test_all.zig
+M	tovarisch/src/test_suite_base.zig
+M	tovarisch/src/test_suite_bgp_integration.zig
+M	uvb76/cmd/uvb76-artifact-writer-verify/main.go
+M	uvb76/cmd/uvb76-makefile-composition-check/main.go
+M	uvb76/cmd/uvb76-makefile-composition-check/makefile_composition_check_test.go
+
+## Diff stat (range)
+ .factory/gate-summary.json                         |  97 ++-
+ Makefile                                           |  10 +-
+ cmd/verify-allocation-tracker-imports/main.go      |  43 ++
+ ...CH-BOUNDED-MEMORY-RECONNECT-PROOF01-appendix.md | 245 +++++++
+ ...T-TOVARISCH-BOUNDED-MEMORY-RECONNECT-PROOF01.md | 235 +++++++
+ docs/memory/bounded-memory-reconnect-ownership.md  | 293 +++++---
+ docs/tooling/zig-0.16-import-observations.md       |  22 +
+ docs/tooling/zig-0.16-observations.md              |   4 +-
+ .../tooling/allocationtrackerimports/scanner.go    | 282 ++++++++
+ .../tooling/allocationtrackerimports/selftest.go   | 392 +++++++++++
+ scripts/make_targeted_digest.sh                    |   2 +-
+ scripts/quality_gate.sh                            |   5 +
+ tovarisch/build.zig                                |  18 +
+ .../src/bgp/bgp_reconnect_regression_tests.zig     |   8 +-
+ .../src/bgp/passive_listener_integration_tests.zig |  21 +-
+ tovarisch/src/bgp/reconnect_ownership.zig          | 447 +++++++++++++
+ .../reconnect_proof_constructor_failure_tests.zig  | 371 +++++++++++
+ tovarisch/src/bgp/reconnect_proof_harness.zig      | 215 ++++++
+ .../bgp/reconnect_proof_production_init_tests.zig  | 170 +++++
+ tovarisch/src/bgp/reconnect_proof_regression.zig   | 274 ++++++++
+ tovarisch/src/bgp/reconnect_proof_tests.zig        | 367 ++++++++++
+ .../bgp/reconnect_proof_validate_destroy_tests.zig | 286 ++++++++
+ tovarisch/src/bgp/reconnect_stress_tests.zig       |  69 +-
+ tovarisch/src/bgp/runtime.zig                      |   5 +-
+ tovarisch/src/bgp/serve_bundle_constructor.zig     | 174 +++++
+ tovarisch/src/bgp/serve_integration.zig            | 273 ++++----
+ tovarisch/src/reconnect_proof_tests.zig            |  22 +
+ tovarisch/src/runtime/allocation_tracker.zig       | 738 ++++-----------------
+ .../runtime/allocation_tracker_connector_probe.zig |  64 ++
+ .../src/runtime/allocation_tracker_destroy.zig     | 138 ++++
+ .../src/runtime/allocation_tracker_internal.zig    | 441 ++++++++++++
+ .../src/runtime/allocation_tracker_snapshots.zig   | 200 ++++++
+ .../allocation_tracker_tracking_allocator.zig      | 139 ++++
+ tovarisch/src/test_all.zig                         |  37 ++
+ tovarisch/src/test_suite_base.zig                  |   5 +-
+ tovarisch/src/test_suite_bgp_integration.zig       |  11 +
+ uvb76/cmd/uvb76-artifact-writer-verify/main.go     |   2 +-
+ uvb76/cmd/uvb76-makefile-composition-check/main.go |   2 +-
+ .../makefile_composition_check_test.go             |   2 +-
+ 39 files changed, 5210 insertions(+), 919 deletions(-)
+
+## How to regenerate the full diffs
+./scripts/make_targeted_digest.sh --range f91243f..1466cd6 --output <path>
+Note: this compact digest intentionally omits per-file unified diffs to
+keep the committed evidence bounded. The full-diff artifact can be
+regenerated locally from the recorded range on demand.

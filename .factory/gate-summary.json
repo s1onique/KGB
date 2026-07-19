@@ -1,18 +1,33 @@
 {
   "schema_version": 1,
   "tool": "uvb76/cmd/uvb76-makefile-composition-check + scripts/verify_uvb76_artifact_secret_hygiene.py + go AST bypass detector + scripts/make_targeted_digest.sh",
-  "generated_at": "2026-07-19T15:58:24Z",
+  "generated_at": "2026-07-19T18:33:30Z",
   "epic": "ACT-TOVARISCH-BOUNDED-MEMORY-RECONNECT-PROOF01",
   "branch": "main",
   "head": "387d243c92259ec3cf5e0aee7b3439312c13c240",
-  "staged_files": 0,
-  "staged_added": 0,
-  "staged_modified": 0,
-  "staged_deleted": 0,
+  "publication_status": "local_only",
+  "publication_note": "Branch main is ahead of origin/main by 2 commits (387d243, 1466cd6). No git push, force-push, or remote refspec rewrite is part of this ACT; a human operator is expected to push the branch at their discretion. This ACT is intentionally publish-on-demand, not publish-on-commit.",
+  "range": {
+    "from": "f91243f363d19b8acd2200ded6db79c036de6c7b",
+    "to": "1466cd6d6a4422f35f976d44c76cab07b9aac83d",
+    "unique_files_changed": 39,
+    "implementation_commit_files": 38,
+    "gate_summary_refresh_commit_files": 1,
+    "digest_artifact": "docs/acts/ACT-TOVARISCH-BOUNDED-MEMORY-RECONNECT-PROOF01-range-digest.txt"
+  },
+  "staged_index": {
+    "staged_files": 0,
+    "staged_added": 0,
+    "staged_modified": 0,
+    "staged_deleted": 0,
+    "note": "Working-tree index is empty at this correction. The implementation files have already been committed in 387d243 and the gate-summary refresh in 1466cd6. This ACT therefore binds to the implementation payload, not to a staged payload."
+  },
   "checks_total": 8,
   "checks_failed": 0,
-  "checks_unavailable": 0,
-  "overall_status": "pass",
+  "checks_unavailable": 1,
+  "checks_pre_existing_failure": 1,
+  "overall_status": "pass_with_preexisting_caveat",
+  "overall_status_note": "Eight ACT-scoped checks pass (allocation-tracker-imports self-test, allocation-tracker-imports real scan, script-doctrine, aggregate tovarisch tests, dedicated bounded-memory-reconnect proof, tovarisch status contract, llm-friendliness, kernel FD oracle). make gate itself fails a pre-existing, unrelated check (hulk-uvb76-artifact-producer-gate, 60 direct-persistence bypasses in tools/wg-netlink-lab/*.go and uvb76/cmd/uvb76-{capture-netns,latency-crash,memleak-pprof,memory,targets-crash,tcp-diag-telemetry}-lab/, none of which intersect this ACT's workset). The pre-existing failure is recorded as a caveat, classified FAIL_PREEXISTING, and does not change the ACT verdict.",
   "checks": [
     {
       "name": "native_go_allocation_tracker_import_gate",
@@ -42,7 +57,7 @@
     {
       "name": "tovarisch_status_contract",
       "status": "pass",
-      "detail": "make tovarisch-status: JSON status 0.1.2+387d243.dirty (pre-commit)."
+      "detail": "make tovarisch-status: JSON status 0.1.2+1466cd6 (post gate-summary refresh; not .dirty)."
     },
     {
       "name": "llm_friendliness",
@@ -53,6 +68,11 @@
       "name": "kernel_fd_oracle",
       "status": "pass",
       "detail": "fcntl(stub.fd, F_GETFD, 0) returns -1 with errno == std.c.E.BADF after constructor failure; conditional cleanup prevents double close."
+    },
+    {
+      "name": "make_gate_full_preexisting_failure",
+      "status": "fail_preexisting",
+      "detail": "make gate fails the hulk-uvb76-artifact-producer-gate step (60 direct-persistence bypasses in tools/wg-netlink-lab/*.go and uvb76/cmd/uvb76-{capture-netns,latency-crash,memleak-pprof,memory,targets-crash,tcp-diag-telemetry}-lab/). None of the flagged paths intersect this ACT's workset; the failure is pre-existing and outside the ACT's scope. Classified FAIL_PREEXISTING and recorded as a caveat, not as a verdict-changing finding."
     }
   ],
   "authoritative_git_output": {
@@ -60,25 +80,34 @@
     "added": 0,
     "modified": 0,
     "deleted": 0,
-    "total": 0
+    "total": 0,
+    "note": "The staged index is empty at this correction. The fresh gate evidence therefore binds to the implementation payload below, not to the staged index."
   },
   "digest_evidence": {
     "tool": "scripts/make_targeted_digest.sh",
+    "mode": "range",
+    "range": "f91243f..1466cd6",
+    "range_digest_artifact": "docs/acts/ACT-TOVARISCH-BOUNDED-MEMORY-RECONNECT-PROOF01-range-digest.txt",
     "matches_git_name_status": true,
     "added_files": 0,
     "modified_files": 0,
-    "total_files": 0
+    "total_files": 0,
+    "note": "Per-file name-status and diff-cached counters are zero because the working index is empty. The range digest itself captures all 39 unique files across the implementation commits; see the range_digest_artifact field."
   },
-  "staged_payload": {
+  "implementation_payload": {
+    "implementation_commit": "387d243c92259ec3cf5e0aee7b3439312c13c240",
+    "gate_summary_refresh_commit": "1466cd6d6a4422f35f976d44c76cab07b9aac83d",
     "added_files": 20,
     "modified_files": 18,
     "deleted_files": 0,
     "renamed_or_copied_files": 0,
-    "total_files": 38,
+    "implementation_total_files": 38,
+    "range_unique_total_files": 39,
     "verifier_path": "make verify-allocation-tracker-imports",
     "verifier_self_test": "PASS (15 fixture classes + 2 fail-closed mutations; compilable decoy zig test passed)",
     "verifier_real": "PASS (external @import syntax is literal; no private allocation_tracker sibling imported)",
     "aggregate": "1730/1761 tests passed (31 skipped, platform-only)",
-    "dedicated": "102/102 tests passed"
+    "dedicated": "102/102 tests passed",
+    "range_digest_artifact": "docs/acts/ACT-TOVARISCH-BOUNDED-MEMORY-RECONNECT-PROOF01-range-digest.txt"
   }
 }

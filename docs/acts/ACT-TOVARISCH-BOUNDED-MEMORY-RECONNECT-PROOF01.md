@@ -196,13 +196,22 @@ cd tovarisch && zig build test --summary all
 make tovarisch-bounded-memory-reconnect-proof
   Build Summary: 4/4 steps succeeded; 102/102 tests passed
 make tovarisch-status
-  status JSON; version 0.1.2+f91243f.dirty; status warn
+  status JSON; version 0.1.2+1466cd6 (post gate-summary refresh); status warn
 make llm-friendliness
   [gate] LLM-friendliness: checked 1316 files
   [gate] LLM-friendliness: PASS
+# Focused commands above all PASS. `make gate` itself fails the
+# unrelated `hulk-uvb76-artifact-producer-gate` step on 60 pre-existing
+# direct-persistence calls in `tools/wg-netlink-lab/*.go` and
+# `uvb76/cmd/uvb76-{capture-netns,latency-crash,memleak-pprof,memory,targets-crash,tcp-diag-telemetry}-lab/...`.
+# That surface is outside this ACT's scope (no tovarisch, runtime, or
+# bounded-memory-reconnect files appear in the finding); it is therefore
+# classified FAIL_PREEXISTING and does not change this ACT's verdict.
 make gate
-  [gate] PASS
+  FAIL_PREEXISTING (60 artifact-producer bypasses in wg-netlink-lab and
+  uvb76-*-lab, all outside this ACT's workset; focused gates all PASS)
 ```
+
 
 ## Production path exercised
 
@@ -224,6 +233,10 @@ clock control, and mutation injection.
   privileged network-namespace lab was added to this ACT.
 - No protocol, telemetry, privacy, or user-observation surface changed.
 - No remote push or Git-history rewrite is part of publication.
+  The branch `main` is currently 2 commits ahead of `origin/main`; no
+  `git push` is performed by this ACT. Publication is local-only until a
+  human runs the push.
+
 
 ## Doctrine / ADR / cold resume
 
