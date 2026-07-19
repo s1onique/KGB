@@ -5,8 +5,11 @@
 
 const std = @import("std");
 
-// Core modules
+// Core modules (allocation_tracker surface belongs to this suite for the
+// bounded-memory proof: Bounded Memory / Reconnect Tests block).
 const _config = @import("config.zig");
+const _runtime_allocation_tracker = @import("runtime/allocation_tracker.zig");
+test { std.testing.refAllDecls(@import("runtime/allocation_tracker.zig")); }
 const _config_server_tests = @import("config_server_tests.zig");
 const _config_vpn_masquerade_tests = @import("config_vpn_masquerade_tests.zig");
 const _logging = @import("logging.zig");

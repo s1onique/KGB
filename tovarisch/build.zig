@@ -293,6 +293,24 @@ pub fn build(b: *std.Build) void {
     const test_bgp_integration_step = b.step("test-bgp-integration", "Run BGP integration tests (config, serve, status)");
     test_bgp_integration_step.dependOn(&b.addRunArtifact(bgp_integration_tests).step);
 
+    // Dedicated ACT-TOVARISCH-BOUNDED-MEMORY-RECONNECT-PROOF01 gate. This is
+    // a separate executable test artifact so the 10,000-generation proof cannot
+    // disappear behind an unrelated aggregate test filter.
+    const reconnect_proof_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/reconnect_proof_tests.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    reconnect_proof_tests.root_module.addOptions("build_options", build_options);
+    const reconnect_proof_step = b.step(
+        "bounded-memory-reconnect-proof",
+        "Execute the production 10,000-generation failed reconnect proof",
+    );
+    reconnect_proof_step.dependOn(&b.addRunArtifact(reconnect_proof_tests).step);
+
     const test_bgp_split_step = b.step("test-bgp-split", "Run all BGP sub-suite tests");
     test_bgp_split_step.dependOn(test_bgp_protocol_step);
     test_bgp_split_step.dependOn(test_bgp_session_step);

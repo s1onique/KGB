@@ -5,6 +5,24 @@
 // tests are included in the test binary.
 //
 // Pattern: import every module with tests, then refAllDecls to force linking.
+//
+// NOTE on allocation_tracker siblings: the bounded-memory instrumentation
+// lives across six sibling files in `runtime/` (one facade + five private):
+//
+//   * `allocation_tracker.zig`                      — PUBLIC surface.
+//   * `allocation_tracker_internal.zig`             — implementation (private).
+//   * `allocation_tracker_destroy.zig`              — destroy-time contract (private).
+//   * `allocation_tracker_tracking_allocator.zig`   — producer-side (private).
+//   * `allocation_tracker_snapshots.zig`            — read-only accessors (private).
+//   * `allocation_tracker_connector_probe.zig`      — connector oracle (private).
+//
+// The test aggregator MUST NOT import the private siblings directly;
+// `make verify-allocation-tracker-imports` rejects any such import outside
+// the `runtime/` package. Test discovery happens through
+// `allocation_tracker.zig` (re-exports + refAllDecls of the public
+// surface) plus the dedicated reconnect proof harness
+// (`bgp/reconnect_proof_tests.zig`).
+
 const std = @import("std");
 
 // Import all source modules to ensure they are compiled and their tests discovered
@@ -196,11 +214,30 @@ test { std.testing.refAllDecls(@import("cli/args_explicit_listen_tests.zig")); }
 // ============================================================================
 // Bounded Memory / Reconnect Tests (ACT-TOVARISCH-BOUNDED-MEMORY-INSTRUMENTATION01)
 // ============================================================================
+// Only the PUBLIC `allocation_tracker.zig` is imported here. The FIVE
+// private siblings (`allocation_tracker_internal.zig`,
+// `allocation_tracker_destroy.zig`,
+// `allocation_tracker_tracking_allocator.zig`,
+// `allocation_tracker_snapshots.zig`,
+// `allocation_tracker_connector_probe.zig`) are pulled in transitively
+// through `runtime/allocation_tracker.zig` so the compiler still sees
+// them, but the test aggregator does NOT name them directly. This is
+// enforced by `make verify-allocation-tracker-imports`.
 const _runtime_allocation_tracker = @import("runtime/allocation_tracker.zig");
 const _bgp_reconnect_stress_tests = @import("bgp/reconnect_stress_tests.zig");
+const _bgp_reconnect_proof_tests = @import("bgp/reconnect_proof_tests.zig");
+const _bgp_reconnect_production_init_tests = @import("bgp/reconnect_proof_production_init_tests.zig");
+const _bgp_reconnect_ownership = @import("bgp/reconnect_ownership.zig");
+const _bgp_reconnect_proof_validate_destroy_tests = @import("bgp/reconnect_proof_validate_destroy_tests.zig");
+const _bgp_reconnect_proof_constructor_failure_tests = @import("bgp/reconnect_proof_constructor_failure_tests.zig");
 
 test { std.testing.refAllDecls(@import("runtime/allocation_tracker.zig")); }
 test { std.testing.refAllDecls(@import("bgp/reconnect_stress_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/reconnect_proof_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/reconnect_proof_production_init_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/reconnect_ownership.zig")); }
+test { std.testing.refAllDecls(@import("bgp/reconnect_proof_validate_destroy_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/reconnect_proof_constructor_failure_tests.zig")); }
 
 // VPN masquerade tests (ACT: Add config-controlled VPN masquerade rule with rule watcher)
 test { std.testing.refAllDecls(@import("net/iptables.zig")); }

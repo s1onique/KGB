@@ -152,6 +152,7 @@ required=(
   tests/test_tovarisch_status_rss_canary_cli.py
   tests/test_tovarisch_status_rss_canary_run.py
   tests/test_tovarisch_status_rss_canary_run_contract.py
+  cmd/verify-allocation-tracker-imports/main.go
 )
 
 for path in "${required[@]}"; do
@@ -361,6 +362,10 @@ grep -q '`--help`' docs/coverage/tovarisch-coverage.md
 grep -q '`--version`' docs/coverage/tovarisch-coverage.md
 grep -q '`check`' docs/coverage/tovarisch-coverage.md
 grep -q '`status --json`' docs/coverage/tovarisch-coverage.md
+
+go run ./cmd/verify-allocation-tracker-imports --self-test
+echo "[gate] checking allocation_tracker encapsulation"
+go run ./cmd/verify-allocation-tracker-imports
 
 if [[ "$HYGIENE_ONLY" -eq 1 ]]; then
   echo ""

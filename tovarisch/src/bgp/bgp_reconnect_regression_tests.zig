@@ -226,12 +226,14 @@ test "bundle tracks reconnect_count field" {
     try std.testing.expectEqual(@as(u64, 0), bundle.reconnect_count);
     try std.testing.expectEqual(@as(clock.MonoTime, 0), bundle.last_reconnect_time);
 
-    // Verify the reconnect_count field exists and can be incremented
-    bundle.reconnect_count += 1;
+    // Verify the reconnect_count field exists and can be incremented.
+    // Use checked addition so this counter mirrors the production path
+    // (`doReconnectWithClock`) and cannot silently overflow.
+    bundle.reconnect_count = std.math.add(u64, bundle.reconnect_count, 1) catch @panic("reconnect count overflow");
     try std.testing.expectEqual(@as(u64, 1), bundle.reconnect_count);
 
     // Simulate multiple reconnect attempts
-    bundle.reconnect_count += 1;
+    bundle.reconnect_count = std.math.add(u64, bundle.reconnect_count, 1) catch @panic("reconnect count overflow");
     bundle.last_reconnect_time = 5000;
     try std.testing.expectEqual(@as(u64, 2), bundle.reconnect_count);
     try std.testing.expectEqual(@as(clock.MonoTime, 5000), bundle.last_reconnect_time);

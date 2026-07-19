@@ -26,6 +26,12 @@ const _session_config_builder = @import("bgp/session_config_builder.zig");
 
 // BGP reconnect regression tests (ACT: BGP post-glitch reconnect/reset diagnostics)
 const _bgp_reconnect_regression_tests = @import("bgp/bgp_reconnect_regression_tests.zig");
+// Bounded-memory reconnect production proof
+const _bgp_reconnect_proof_tests = @import("bgp/reconnect_proof_tests.zig");
+const _bgp_reconnect_production_init_tests = @import("bgp/reconnect_proof_production_init_tests.zig");
+const _bgp_reconnect_ownership = @import("bgp/reconnect_ownership.zig");
+const _bgp_reconnect_proof_validate_destroy_tests = @import("bgp/reconnect_proof_validate_destroy_tests.zig");
+const _bgp_reconnect_proof_constructor_failure_tests = @import("bgp/reconnect_proof_constructor_failure_tests.zig");
 
 // Prefix file watcher tests (ACT: inotify watcher for BGP prefix files)
 const _prefix_watch_tests = @import("bgp/prefix_watch_tests.zig");
@@ -42,3 +48,8 @@ test { std.testing.refAllDecls(@import("bgp/same_as_regression_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/session_config_builder.zig")); }
 test { std.testing.refAllDecls(@import("bgp/prefix_watch_tests.zig")); }
 test { std.testing.refAllDecls(@import("bgp/bgp_reconnect_regression_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/reconnect_proof_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/reconnect_proof_production_init_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/reconnect_ownership.zig")); }
+test { std.testing.refAllDecls(@import("bgp/reconnect_proof_validate_destroy_tests.zig")); }
+test { std.testing.refAllDecls(@import("bgp/reconnect_proof_constructor_failure_tests.zig")); }

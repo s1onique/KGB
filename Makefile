@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate memory-lab memory-lab-test lab-tovarisch-memory lab-uvb76-memory lab-uvb76-memory-attribution verify-uvb76-memory-attribution hulk-uvb76-gate tovarisch-test-base-fingerprint verify-script-doctrine hulk-uvb76-artifact-secret-gate hulk-uvb76-artifact-producer-gate hulk-uvb76-capture-gate hulk-uvb76-latency-gate hulk-uvb76-reachability-gate
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-bounded-memory-reconnect-proof tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate memory-lab memory-lab-test lab-tovarisch-memory lab-uvb76-memory lab-uvb76-memory-attribution verify-uvb76-memory-attribution hulk-uvb76-gate tovarisch-test-base-fingerprint verify-script-doctrine hulk-uvb76-artifact-secret-gate hulk-uvb76-artifact-producer-gate hulk-uvb76-capture-gate hulk-uvb76-latency-gate hulk-uvb76-reachability-gate
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 87
@@ -40,6 +40,11 @@ gate: verify-script-doctrine hulk-uvb76-artifact-secret-gate
 llm-friendliness:
 	./scripts/check_llm_friendliness.sh
 
+.PHONY: verify-allocation-tracker-imports
+verify-allocation-tracker-imports:
+	go run ./cmd/verify-allocation-tracker-imports --self-test
+	go run ./cmd/verify-allocation-tracker-imports
+
 digest:
 	./scripts/make_targeted_digest.sh --dirty --output digest.txt
 
@@ -48,6 +53,9 @@ tovarisch-build:
 
 tovarisch-test:
 	cd tovarisch && zig build test
+
+tovarisch-bounded-memory-reconnect-proof:
+	cd tovarisch && zig build bounded-memory-reconnect-proof --summary all
 
 # === BGP Sub-Suite Targets (for CI isolation) ===
 

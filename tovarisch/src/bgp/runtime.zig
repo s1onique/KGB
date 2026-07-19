@@ -110,7 +110,7 @@ pub fn bgpRuntimeThread(bundle: *serve_integration.BgpServeBundle) void {
         if (bundle.state == .reconnect_wait) {
             if (serve_integration.isReconnectReady(bundle, clock_interface)) {
                 // Deadline elapsed, attempt reconnect
-                serve_integration.doReconnect(bundle) catch |reconnect_err| {
+                serve_integration.runReconnectAttempt(bundle, clock_interface) catch |reconnect_err| {
                     // Reconnect failed, schedule next attempt with backoff
                     var log_buf = logging.BufferedWriter.init();
                     logging.emit(.bgp_error, &log_buf, &.{
@@ -334,8 +334,7 @@ pub fn bgpRuntimeThread(bundle: *serve_integration.BgpServeBundle) void {
 /// 3. "unknown error" fallback
 fn getConcreteErrorMessage(bundle: *serve_integration.BgpServeBundle) []const u8 {
     return bundle.last_error orelse
-        if (bundle.sess.status.last_error) |session_err| session_err.message else
-        "unknown error";
+        if (bundle.sess.status.last_error) |session_err| session_err.message else "unknown error";
 }
 
 /// Start the BGP runtime thread for a configured bundle.

@@ -123,11 +123,12 @@ test "passive listener accepts connection from allowed_peer_address" {
     const client_fd = connectAsClient(allowed_peer, result.port) catch return error.SkipZigTest;
     defer _ = std.c.close(client_fd);
 
-    // Wait for listener thread to accept (poll for pending connection)
+    // Wait for listener thread to accept (poll for pending connection).
+    // Use checked addition so this counter cannot silently wrap.
     var attempts: u32 = 0;
     while (!passive_listener.hasPendingConnection(&result.listener) and attempts < 50) {
         sleepMs(50);
-        attempts += 1;
+        attempts = std.math.add(u32, attempts, 1) catch @panic("attempts overflow");
     }
 
     // Verify pending accept was published
@@ -191,11 +192,11 @@ test "passive listener closes duplicate pending accepted connection" {
     const client_fd1 = connectAsClient(peer1, result.port) catch return error.SkipZigTest;
     defer _ = std.c.close(client_fd1);
 
-    // Wait for first accept
+    // Wait for first accept (checked addition).
     var attempts: u32 = 0;
     while (!passive_listener.hasPendingConnection(&result.listener) and attempts < 50) {
         sleepMs(50);
-        attempts += 1;
+        attempts = std.math.add(u32, attempts, 1) catch @panic("attempts overflow");
     }
     try testing.expectEqual(true, passive_listener.hasPendingConnection(&result.listener));
 
@@ -247,11 +248,11 @@ test "passive listener close() closes pending accepted_fd without pick up" {
     const client_fd = connectAsClient(peer, result.port) catch return error.SkipZigTest;
     defer _ = std.c.close(client_fd);
 
-    // Wait for listener to accept
+    // Wait for listener to accept (checked addition).
     var attempts: u32 = 0;
     while (!passive_listener.hasPendingConnection(&result.listener) and attempts < 50) {
         sleepMs(50);
-        attempts += 1;
+        attempts = std.math.add(u32, attempts, 1) catch @panic("attempts overflow");
     }
     try testing.expectEqual(true, passive_listener.hasPendingConnection(&result.listener));
 
@@ -285,11 +286,11 @@ test "duplicate passive socket close does not affect active transport" {
     const peer = [_]u8{ 127, 0, 0, 1 };
     const client_fd1 = connectAsClient(peer, result.port) catch return error.SkipZigTest;
 
-    // Wait for accept
+    // Wait for accept (checked addition).
     var attempts: u32 = 0;
     while (!passive_listener.hasPendingConnection(&result.listener) and attempts < 50) {
         sleepMs(50);
-        attempts += 1;
+        attempts = std.math.add(u32, attempts, 1) catch @panic("attempts overflow");
     }
     try testing.expectEqual(true, passive_listener.hasPendingConnection(&result.listener));
 
@@ -301,11 +302,11 @@ test "duplicate passive socket close does not affect active transport" {
     // Connect second client while first is still active (simulating duplicate passive socket)
     const client_fd2 = connectAsClient(peer, result.port) catch return error.SkipZigTest;
 
-    // Wait for second accept
+    // Wait for second accept (checked addition).
     attempts = 0;
     while (!passive_listener.hasPendingConnection(&result.listener) and attempts < 50) {
         sleepMs(50);
-        attempts += 1;
+        attempts = std.math.add(u32, attempts, 1) catch @panic("attempts overflow");
     }
     try testing.expectEqual(true, passive_listener.hasPendingConnection(&result.listener));
 

@@ -1,24 +1,17 @@
-// bgp/serve_integration.zig — BGP runtime integration for serve command
-//
-// Loads config from file and creates BGP runtime for the daemon.
-// Keeps config memory alive for daemon lifetime to avoid dangling slices.
+// bgp/serve_integration.zig — daemon's BGP config wrapper, status
+// accessors, and lifecycle re-exports. The canonical constructor
+// lives in `serve_bundle_constructor.zig` (FA-3 final split). This
+// module creates the TCP transport and BGP session at load time;
+// reconnect/backoff lifecycle is handled by the runtime thread.
 //
 // KEY CONSTRAINT: When BGP is disabled, ZERO sockets are created.
 //
-// This module creates the TCP transport and BGP session at load time,
-// enabling the session state machine to run during serve.
-// Reconnect/backoff lifecycle is handled by the runtime thread.
-//
 // Thread Safety Model:
-// - cleanup_requested: atomic u8 with release/acquire ordering
-// - runtime_thread: joined on cleanup (not detached)
-// - Bundle state (state, backoff_ms, last_error): written by runtime thread only
-// - Status reads: best-effort snapshot during HTTP requests
-//
-// NOTE: /status reads bundle state without mutex protection. This is acceptable
-// because: (1) runtime thread is joined on cleanup before bundle destruction,
-// (2) status reads during normal operation may see stale but not corrupt data,
-// (3) heavyweight mutex is deferred to future ACT per tiny-leafs doctrine.
+// - cleanup_requested: atomic u8 with release/acquire ordering;
+//   runtime thread is joined on cleanup before bundle destruction.
+// - Bundle state (state, backoff_ms, last_error): written by runtime
+//   thread only. Status reads are best-effort snapshots; no mutex
+//   (deferred to a future ACT per tiny-leafs doctrine).
 //
 // References: RFC 4271 (BGP-4)
 
@@ -34,6 +27,8 @@ const passive_listener = @import("passive_listener.zig");
 const passive_listener_integration = @import("passive_listener_integration.zig");
 const clock = @import("clock.zig");
 const reconnect = @import("reconnect_lifecycle.zig");
+const reconnect_ownership = @import("reconnect_ownership.zig");
+const allocation_tracker = @import("../runtime/allocation_tracker.zig");
 const prefix_file_loader = @import("prefix_file_loader.zig");
 const prefix_file = @import("prefix_file.zig");
 const session_config_builder = @import("session_config_builder.zig");
@@ -41,6 +36,7 @@ const update_diagnostics = @import("update_diagnostics.zig");
 const export_reload_apply = @import("export_reload_apply.zig");
 const prefix_watch = @import("prefix_watch.zig");
 const serve_export_integration = @import("serve_export_integration.zig");
+const serve_bundle_constructor = @import("serve_bundle_constructor.zig");
 
 // Runtime state for BGP session including reconnect lifecycle.
 pub const BgpRuntimeState = enum {
@@ -64,6 +60,12 @@ pub const LoadFailure = struct {
     message: []const u8,
 };
 
+pub const ReconnectConnector = reconnect_ownership.ReconnectConnector;
+pub const ReconnectFaultPlan = reconnect_ownership.ReconnectFaultPlan;
+pub const ProductionConnectorCtx = reconnect_ownership.ProductionConnectorCtx;
+pub const installMemoryState = reconnect_ownership.installMemoryState;
+pub const destroyMemoryState = reconnect_ownership.destroyMemoryState;
+
 // Serve bundle: owns config memory, BGP runtime, passive listener.
 pub const BgpServeBundle = struct {
     const Self = @This();
@@ -86,6 +88,29 @@ pub const BgpServeBundle = struct {
     // Reconnect state
     backoff_ms: u64 = 0,
     reconnect_deadline: clock.MonoTime = 0,
+    reconnect_timer_active: bool = false,
+    reconnect_clock: clock.Clock = clock.RealClock,
+    socket_owned: bool = false,
+    allocator: std.mem.Allocator = std.heap.page_allocator,
+    /// Production connector context. Holds the in-flight TCP transport
+    /// between `acquire` and `finish`. Lives on the bundle so the
+    /// connector's `ctx: ?*anyopaque` points at heap-stable memory.
+    production_connector_ctx: reconnect_ownership.ProductionConnectorCtx = .{},
+    /// Production connector seam. Initialised to the real default
+    /// (`realAcquire` / `realFinish`) so an ordinary production bundle
+    /// never panics on its first reconnect attempt.
+    reconnect_connector: reconnect_ownership.ReconnectConnector = reconnect_ownership.ReconnectConnector{
+        .ctx = null,
+        .acquireFn = reconnect_ownership.realAcquire,
+        .finishFn = reconnect_ownership.realFinish,
+    },
+    /// Authoritative handle-accounting state.
+    reconnect_memory_state: ?*allocation_tracker.ReconnectMemoryState = null,
+    /// The connector handle most recently adopted into
+    /// `reconnect_memory_state`. Held until `closeForReconnect` calls
+    /// `allocation_tracker.releaseHandle`. Null between generations.
+    active_connector_handle: ?allocation_tracker.ReconnectHandle = null,
+    reconnect_faults: ?*reconnect_ownership.ReconnectFaultPlan = null,
     // Reconnect statistics for status reporting and diagnostics
     reconnect_count: u64 = 0, // Total reconnect attempts since startup
     last_reconnect_time: clock.MonoTime = 0, // Monotonic ms of last reconnect attempt
@@ -108,6 +133,22 @@ pub const BgpServeBundle = struct {
 };
 
 // Config Loading
+//
+// ACT-TOVARISCH-BOUNDED-MEMORY-RECONNECT-PROOF01-FA-3 production wiring:
+// this wrapper now DELEGATES to the canonical `initBgpServeBundle`
+// helper after parsing the file-system inputs. The previous design had
+// two parallel constructors (the wrapper + the helper) that could
+// drift apart; the production daemon and the lifecycle regression
+// tests now exercise the same code path.
+//
+// Ownership rules (FA-3 re-verdict P0):
+//   * `raw`, `tcp`, and `owned_prefixes` are TRANSFERRED to
+//     `initBgpServeBundle`. After this function hands them off, the
+//     wrapper MUST NOT touch any of them — the constructor is the
+//     sole owner and releases them on every failure branch.
+//   * The `.failed` branch is a thin wrapper: we do not close
+//     `tcp`, free `owned_prefixes`, or `raw.deinit(...)` here.
+//     Doing so would double-free / double-close the kernel fd.
 pub fn loadConfigAndBgp(
     config_path: ?[]const u8,
     stderr: anytype,
@@ -231,51 +272,36 @@ pub fn loadConfigAndBgp(
         return .{ .failed = .{ .message = "BGP connect failed" } };
     };
 
-    const bundle = std.heap.page_allocator.create(BgpServeBundle) catch {
-        stderr.writeAll("error: out of memory creating BGP bundle\n") catch {};
+    // FA-3 production-load ownership transfer: `prefixes.items` is a
+    // VIEW into the ArrayList's internal storage; passing it directly
+    // would dangle as soon as the constructor releases the list. The
+    // ownership-transfer operation `toOwnedSlice(allocator)` returns
+    // a slice the caller can free independently of the (now-empty)
+    // ArrayList. The constructor takes ownership of the returned
+    // slice via its `prefixes: []types.Ipv4Prefix` parameter.
+    //
+    // `toOwnedSlice` may fail (out of memory); the wrapper still owns
+    // `tcp` and `raw` at this point so we close / deinit them
+    // ourselves before returning.
+    const owned_prefixes = prefixes.toOwnedSlice(allocator) catch {
+        stderr.writeAll("error: out of memory transferring prefixes\n") catch {};
         tcp.close();
-        prefixes.deinit(allocator);
         raw.deinit(std.heap.page_allocator);
-        return .{ .failed = .{ .message = "out of memory creating BGP bundle" } };
+        return .{ .failed = .{ .message = "out of memory transferring prefixes" } };
     };
 
-    bundle.* = BgpServeBundle{
-        .raw = raw,
-        .bgp_config = bgp_cfg,
-        .session_config = session_config,
-        .state = .not_configured,
-        .last_error = null,
-        .prefixes = prefixes.items,
-        .tcp = undefined,
-        .trans = undefined,
-        .sess = undefined,
-        .export_state = .{},
-    };
-    bundle.tcp = tcp;
-    bundle.trans = bundle.tcp.toTransport();
-    bundle.export_state.init(allocator);
-    export_reload_apply.initExportedPrefixes(&bundle.export_state, prefixes.items);
-
-    const sess = session.init(session_config, &bundle.trans) catch |e| {
-        stderr.print("error: failed to create BGP session: {s}\n", .{@errorName(e)}) catch {};
-        bundle.tcp.close();
-        prefixes.deinit(allocator);
-        raw.deinit(std.heap.page_allocator);
-        std.heap.page_allocator.destroy(bundle);
-        return .{ .failed = .{ .message = "failed to create BGP session" } };
-    };
-    bundle.sess = sess;
-    bundle.state = .configured;
-
-    // Create passive listener for inbound BGP connections when local_address is configured.
-    // The passive listener binds to the configured local_address on port 179 and accepts
-    // incoming BGP peer connections alongside the active outbound session.
-    passive_listener_integration.createPassiveListener(bundle, stderr);
-
-    // Initialize prefix file watcher for watched reload (Linux inotify on Linux, fake elsewhere)
-    _ = serve_export_integration.initPrefixWatcher(bundle, stderr, allocator);
-
-    return .{ .configured = bundle };
+    // After this point: `prefixes` is empty; `owned_prefixes`, `tcp`,
+    // and `raw` are transferred to the constructor and we MUST NOT
+    // touch them. The constructor owns every failure-path release.
+    return initBgpServeBundle(
+        raw,
+        bgp_cfg,
+        session_config,
+        &tcp,
+        owned_prefixes,
+        stderr,
+        allocator,
+    );
 }
 
 // Cleanup
@@ -299,8 +325,20 @@ pub fn cleanupBgpBundle(bundle: *BgpServeBundle, allocator: std.mem.Allocator) v
     // Clean up export state (frees daemon-owned prefix memory)
     bundle.export_state.deinit();
 
-    // Now safe to clean up resources
-    bundle.tcp.close();
+    // Tear down per-generation resources FIRST while the tracker
+    // state still exists so it can record the final release,
+    // socket close, and timer cancel.
+    closeForReconnect(bundle);
+
+    // Destroy the oracle LAST, after every tracked handle, socket,
+    // timer, and classified allocation has been released. The
+    // fail-loud helper panics if the state is still dirty at this
+    // point, surfacing ownership drift as a crash instead of a
+    // silent release through a corrupted oracle.
+    destroyMemoryState(bundle, allocator);
+
+    // Now safe to free the input prefixes and raw config; the bundle
+    // struct itself is released last.
     allocator.free(bundle.prefixes);
     bundle.raw.deinit(std.heap.page_allocator);
     std.heap.page_allocator.destroy(bundle);
@@ -356,89 +394,19 @@ fn copyErrorToBundle(bundle: *BgpServeBundle, message: []const u8) []const u8 {
 }
 
 // Reconnect/Backoff Lifecycle
-pub fn computeNextBackoff(current_ms: u64, max_delay_ms: u64) u64 {
-    return reconnect.computeNextBackoff(current_ms, max_delay_ms);
-}
+pub const computeNextBackoff = reconnect.computeNextBackoff;
 
-pub fn scheduleReconnect(
-    bundle: *BgpServeBundle,
-    clock_interface: clock.Clock,
-    max_delay_ms: u64,
-) void {
-    // Compute next backoff delay
-    bundle.backoff_ms = reconnect.computeNextBackoff(bundle.backoff_ms, max_delay_ms);
+pub const scheduleReconnect = reconnect_ownership.scheduleReconnect;
 
-    // Set deadline
-    const now = clock_interface.getMonoTimeMs();
-    bundle.reconnect_deadline = now + bundle.backoff_ms;
-    bundle.state = .reconnect_wait;
-}
+pub const isReconnectReady = reconnect_ownership.isReconnectReady;
 
-pub fn isReconnectReady(bundle: *BgpServeBundle, clock_interface: clock.Clock) bool {
-    if (bundle.state != .reconnect_wait) {
-        return false;
-    }
-    const now = clock_interface.getMonoTimeMs();
-    return now >= bundle.reconnect_deadline;
-}
+pub const resetBackoff = reconnect_ownership.resetBackoff;
 
-pub fn resetBackoff(bundle: *BgpServeBundle) void {
-    reconnect.resetBackoff(&bundle.backoff_ms, &bundle.reconnect_deadline);
-}
+pub const closeForReconnect = reconnect_ownership.closeForReconnect;
 
-pub fn closeForReconnect(bundle: *BgpServeBundle) void {
-    bundle.tcp.close();
-    bundle.sess.status.state = .idle;
-    bundle.sess.recv_len = 0;
-    bundle.sess.send_pos = 0;
-    bundle.sess.peer_open = null;
-    bundle.sess.negotiated_hold_time = 0;
-    bundle.sess.keepalive_interval_ms = 0;
-    bundle.sess.hold_timer_deadline = 0;
-    bundle.sess.pending_keepalive = false;
-    bundle.sess.pending_keepalive_ms = 0;
-    bundle.sess.export_batch_index = 0;
-    bundle.sess.export_complete = false;
-    bundle.sess.nlri_sent_count = 0;
-    bundle.sess.status.last_error = null;
-    bundle.sess.status.last_notification_code = null;
-    bundle.sess.status.last_notification_subcode = null;
-}
+pub const reconnectTransport = reconnect_ownership.reconnectTransport;
 
-pub fn reconnectTransport(bundle: *BgpServeBundle) !void {
-    const tcp_config = tcp_transport.TcpTransportConfig{
-        .peer_address = bundle.session_config.peer_address,
-        .peer_port = bundle.session_config.peer_port,
-        .local_address = bundle.session_config.local_address,
-        .connect_timeout_ms = bundle.session_config.connect_timeout_ms,
-    };
-
-    bundle.tcp = try tcp_transport.TcpTransport.connect(tcp_config);
-    bundle.trans = bundle.tcp.toTransport();
-    bundle.sess.trans = &bundle.trans;
-}
-
-pub fn doReconnect(bundle: *BgpServeBundle) !void {
-    closeForReconnect(bundle);
-
-    // Track reconnect attempt for diagnostics
-    bundle.reconnect_count += 1;
-    const clock_interface = clock.RealClock;
-    bundle.last_reconnect_time = clock_interface.getMonoTimeMs();
-
-    reconnectTransport(bundle) catch |reconnect_err| {
-        // Capture the socket error for status reporting
-        bundle.last_socket_error = copyErrorToBundle(bundle, @errorName(reconnect_err));
-        bundle.last_error = bundle.last_socket_error;
-        return reconnect_err;
-    };
-
-    // Clear socket error on successful reconnect
-    bundle.last_socket_error = null;
-    resetBackoff(bundle);
-    bundle.state = .configured;
-    bundle.last_error = null;
-}
+pub const doReconnect = reconnect_ownership.doReconnect;
 
 pub fn isCleanupRequested(bundle: *BgpServeBundle) bool {
     return @atomicLoad(u8, &bundle.cleanup_requested, .acquire) != 0;
@@ -448,3 +416,34 @@ pub fn isCleanupRequested(bundle: *BgpServeBundle) bool {
 pub const DEFAULT_RECONNECT_INITIAL_MS = reconnect.DEFAULT_RECONNECT_INITIAL_MS;
 pub const DEFAULT_RECONNECT_MAX_MS = reconnect.DEFAULT_RECONNECT_MAX_MS;
 pub const DEFAULT_RECONNECT_MULTIPLIER = reconnect.DEFAULT_RECONNECT_MULTIPLIER;
+
+/// Drive one reconnect attempt via the orchestrator. Added so the
+/// `runtime.zig` worker thread can call the canonical constructor
+/// boundary without duplicating the reconnect logic.
+pub fn doReconnectWithClock(bundle: *BgpServeBundle, clock_interface: clock.Clock) !void {
+    return reconnect_ownership.doReconnectWithClock(bundle, clock_interface);
+}
+
+/// Drive one reconnect attempt, used by the runtime worker thread.
+/// Thin alias for `doReconnectWithClock` so the runtime can pin the
+/// clock at the call site (matching `reconnect_ownership`).
+pub fn runReconnectAttempt(bundle: *BgpServeBundle, clock_interface: clock.Clock) !void {
+    return reconnect_ownership.runReconnectAttempt(bundle, clock_interface);
+}
+
+/// `initBgpServeBundle` and `releaseBundleOnFailure` moved to
+/// `serve_bundle_constructor.zig` (FA-3 final file split). The
+/// canonical constructor now lives in its own small module; this
+/// file keeps the daemon's configuration wrapper, status
+/// accessors, and lifecycle re-exports.
+///
+/// `initBgpServeBundle` is re-exported below so existing call
+/// sites (`serve_integration.initBgpServeBundle`) continue to
+/// resolve after the split.
+pub const initBgpServeBundle = serve_bundle_constructor.initBgpServeBundle;
+
+/// Cancel a pending reconnect timer. Routes to the canonical
+/// lifecycle helper.
+pub fn cancelReconnectTimer(bundle: *BgpServeBundle) void {
+    reconnect_ownership.cancelReconnectTimer(bundle);
+}

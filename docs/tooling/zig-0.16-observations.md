@@ -1,5 +1,7 @@
 # Zig 0.16 Observations
 
+Import-operand notes: [`zig-0.16-import-observations.md`](./zig-0.16-import-observations.md).
+
 ---
 
 ## 2026-06-24 — Timekeeping notes moved
@@ -315,8 +317,6 @@ defer _ = std.c.closedir(dir);
 - **Symptom:** `std.fs.cwd()` does not exist in Zig 0.16; `std.Io.Dir.cwd()` requires an `Io` context.
 - **Working fix:** `state_dir` check is a placeholder returning `warn` until `Io.Dir` API is fully understood.
 - **Files affected:** `tovarisch/src/status.zig`
-
----
 
 ---
 
