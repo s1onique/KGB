@@ -1,6 +1,6 @@
 # ACT: KGB Artifact Writer Architecture Baseline - CORRECTION01
 
-**Status:** PARTIAL — implementation complete; Go 1.25.12 verification pending
+**Status:** PARTIAL — scanner unification required
 **ACT ID:** ACT-KGB-ARTIFACT-WRITER-ARCHITECTURE-BASELINE01
 **Correction:** ACT-KGB-ARTIFACT-WRITER-ARCHITECTURE-BASELINE01-CORRECTION01
 **Date:** 2026-07-20
@@ -184,6 +184,76 @@ The following hardening items were identified but deferred to allow this correct
 ## Blocker for ACT-UVB76-RETAINED-ARTIFACT-MIGRATION-WAVE01
 
 Do not start migration ACT until CORRECTION01 passes Go 1.25.12 verification.
+
+## 🔴 SCANNER UNIFICATION BLOCKER (P0)
+
+The current implementation has two materially different scanners:
+
+| Scanner | Finding Count | Notes |
+|---------|---------------|-------|
+| `uvb76/internal/producer.BypassDetector` | 60 | Used by `uvb76-artifact-writer-verify` |
+| `cmd/artifact-writer-scanner` | 87 | Used by `ratchet-verifier` (includes unknown surfaces and cmd tools) |
+
+### Architecture Constraint
+
+Go's `internal` visibility rule prevents `cmd/artifact-writer-scanner` from importing `uvb76/internal/producer`.
+
+Correct unification path:
+```
+uvb76/internal/producer          (detector logic)
+        ↑
+uvb76/cmd/uvb76-artifact-writer-scan  (new scanner command inside uvb76 module)
+        ↑ binary/report contract
+cmd/ratchet-verifier              (invokes scanner, compares to baseline)
+```
+
+### Required Actions
+
+1. **Create scanner command inside `uvb76` module** — `uvb76/cmd/uvb76-artifact-writer-scan` that directly invokes `producer.BypassDetector`
+2. **Remove duplicate detection logic** — Retire the independent `cmd/artifact-writer-scanner` implementation
+3. **Bind findings to surfaces** — Every finding must bind to exactly one active catalog surface:
+   - `finding ∈ exactly 1 surface` → include in ratchet comparison
+   - `finding ∉ any surface` → `UNBOUND_FINDING`, fail gate (NEVER silently filter)
+   - `finding ∈ multiple surfaces` → `AMBIGUOUS_SURFACE_BINDING`, fail gate
+4. **Add scanner self-exclusion** — Scanner report artifacts are excluded from scanning
+5. **Prove determinism** — Repeated scanner runs produce byte-identical output
+6. **Regenerate baseline** — From unified scanner output
+7. **Wire ratchet gate** — After scanner unification is complete
+
+### Required Invariant
+
+```
+authoritative_count = count emitted by the unified scanner
+  after console exclusions, surface binding, and scanner self-exclusions
+
+authoritative semantic findings and multiplicities
+    == ratchet observed findings and multiplicities    (PASS)
+    == approved baseline findings and multiplicities   (PASS)
+```
+
+Do NOT hard-code `60` into acceptance criteria — the count depends on the unified scanner's analysis.
+
+### Malformed JSON Fixture
+
+The `testdata/fail_malformed_json/` directory intentionally contains malformed JSON for negative testing. The file must remain malformed; the secret-hygiene scanner must correctly classify this as a test fixture.
+
+## Recommended Successor ACT
+
+```
+ACT-KGB-ARTIFACT-WRITER-SCANNER-AUTHORITY-CONVERGENCE01
+```
+
+Implementation sequence:
+1. Add parity tests comparing internal detector and new scanner command against same fixtures
+2. Create `uvb76/cmd/uvb76-artifact-writer-scan`
+3. Remove duplicate detection from `cmd/artifact-writer-scanner`
+4. Bind every finding to exactly one active catalog surface
+5. Fail on unbound, ambiguous, parse, and scan errors
+6. Add exact scanner-report self-exclusions
+7. Prove raw-report determinism
+8. Regenerate baseline from unified scanner
+9. Wire `hulk-uvb76-artifact-producer-gate` to ratchet verifier
+10. Add mutation test: new bypass → non-zero exit
 
 ## Implementation Notes
 
