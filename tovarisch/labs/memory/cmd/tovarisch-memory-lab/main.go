@@ -9,12 +9,15 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -500,13 +503,19 @@ func runCommand(args []string) error {
 		return fmt.Errorf("write verdict: %w", err)
 	}
 
+	// Collect provenance
+	subject, host, controllerPID, _ := collectProvenance()
+
 	// Finalize manifest with all metadata (must be done BEFORE checksums)
 	finalizedManifest := &evidence.Manifest{
-		SchemaVersion: "1.0.0",
-		RunID:         runID,
-		Scenario:      *scenario,
-		StartedAt:     manifest.StartedAt,
-		FinishedAt:    time.Now(),
+		SchemaVersion:   "1.0.0",
+		RunID:           runID,
+		Scenario:        *scenario,
+		StartedAt:       manifest.StartedAt,
+		FinishedAt:      time.Now(),
+		SubjectIdentity: subject,
+		ControllerID:    controllerPID,
+		HostID:          host,
 		DockerID: &evidence.DockerIdentity{
 			EngineVersion: dockerInfo.Version,
 			APIVersion:    dockerClient.ClientVersion(),
@@ -1184,6 +1193,58 @@ func classifyCgroupFailure(err error) sampling.CgroupCapability {
 
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
+}
+
+// collectProvenance collects git, kernel, and binary provenance information.
+func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, string, error) {
+	// Git commit and tree
+	gitCommit, _ := runGit("rev-parse", "HEAD")
+	gitTree, _ := runGit("rev-parse", "HEAD^{tree}")
+	controllerPID := fmt.Sprintf("%d", os.Getpid())
+
+	// Kernel release
+	kernelRelease, _ := os.ReadFile("/proc/version")
+	kernelStr := strings.TrimSpace(string(kernelRelease))
+
+	// Cgroup mode
+	cgroupMode := "unknown"
+	if _, err := os.Stat("/sys/fs/cgroup/cgroup2"); err == nil {
+		cgroupMode = "cgroup2"
+	} else if _, err := os.Stat("/sys/fs/cgroup"); err == nil {
+		cgroupMode = "cgroup1"
+	}
+
+	subject := &evidence.SubjectIdentity{
+		GitCommit: gitCommit,
+		GitTree:   gitTree,
+	}
+	host := &evidence.HostIdentity{
+		KernelRelease: kernelStr,
+		CgroupMode:    cgroupMode,
+	}
+
+	return subject, host, controllerPID, nil
+}
+
+// runGit runs a git command and returns the trimmed output.
+func runGit(args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = "/home/kgb/Projects/KGB"
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// hashFile computes SHA-256 hash of a file.
+func hashFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.Sum256(data)
+	return hex.EncodeToString(hash[:]), nil
 }
 
 // validateStateInvariant validates the state changes match expected invariants.
