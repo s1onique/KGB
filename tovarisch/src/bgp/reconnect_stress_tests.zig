@@ -1,17 +1,18 @@
-// bgp/reconnect_stress_tests.zig — Test infrastructure for bounded memory reconnect ACT
+// bgp/reconnect_stress_tests.zig — test-only reconnect infrastructure.
 //
-// Provides test data types used by future reconnect-proof tests.
-// The actual 10,000-generation stress harness requires integration with the
-// real session closeForReconnect lifecycle (separate ACT).
+// This module remains under src/bgp for the repository's current Zig test
+// layout. Production modules must not import it; shared proof-domain types
+// live in reconnect_stress_support.zig.
 
 const std = @import("std");
 const session = @import("session.zig");
 const types = @import("types.zig");
-const clock = @import("clock.zig");
 const allocation_tracker = @import("../runtime/allocation_tracker.zig");
 
-/// Number of reconnect generations for stress test (declared here for tests below)
-pub const STRESS_TEST_GENERATIONS: u64 = 10_000;
+// Re-export shared constants from the production-neutral support module
+pub const STRESS_TEST_GENERATIONS = @import("reconnect_stress_support.zig").STRESS_TEST_GENERATIONS;
+pub const makeTestSessionConfig = @import("reconnect_stress_support.zig").makeTestSessionConfig;
+pub const ReconnectStressResults = @import("reconnect_stress_support.zig").ReconnectStressResults;
 
 /// Mock clock for deterministic testing
 pub const MockClockForStress = struct {
@@ -82,36 +83,6 @@ pub const AlwaysFailingTransport = struct {
             .ctx = @ptrCast(self),
         };
     }
-};
-
-/// Creates a minimal session config for testing.
-pub fn makeTestSessionConfig() session.SessionConfig {
-    return .{
-        .peer_address = .{ 127, 0, 0, 1 },
-        .peer_port = 179,
-        .local_address = .{ 127, 0, 0, 1 },
-        .local_as = 65001,
-        .peer_as = 65002,
-        .router_id = .{ 10, 0, 0, 1 },
-        .hold_time_seconds = 180,
-        .keepalive_seconds = 60,
-        .connect_timeout_ms = 5000,
-        .prefixes = &.{types.Ipv4Prefix.init("10.0.0.0/8")},
-        .same_as = true,
-    };
-}
-
-/// Results from the reconnect stress test.
-pub const ReconnectStressResults = struct {
-    generations: u64,
-    baseline_live_bytes: u64,
-    final_live_bytes: u64,
-    peak_live_bytes: u64,
-    peak_active_timers: u32,
-    peak_active_sockets: u32,
-    total_reconnect_count: u64,
-    allocations_leaked: bool,
-    resources_at_baseline: bool,
 };
 
 // ============================================================================

@@ -78,7 +78,7 @@
 
 const std = @import("std");
 const config = @import("../config.zig");
-const reconnect_stress = @import("reconnect_stress_tests.zig");
+const reconnect_stress = @import("reconnect_stress_support.zig");
 const serve_integration = @import("serve_integration.zig");
 const tcp_transport = @import("tcp_transport.zig");
 const types = @import("types.zig");

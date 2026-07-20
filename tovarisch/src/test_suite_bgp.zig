@@ -58,6 +58,7 @@ const _bgp_reconnect_hold_timer_tests = @import("bgp/reconnect_hold_timer_tests.
 const _bgp_reconnect_recovery_tests = @import("bgp/reconnect_recovery_tests.zig");
 
 // Bounded memory reconnect tests (ACT-TOVARISCH-BOUNDED-MEMORY-INSTRUMENTATION01)
+// Test module restored to test suite - production modules now import reconnect_stress_support.zig instead
 const _bgp_reconnect_stress_tests = @import("bgp/reconnect_stress_tests.zig");
 
 // BGP export delta tests (ACT: Apply BGP export deltas after watched prefix reload)
