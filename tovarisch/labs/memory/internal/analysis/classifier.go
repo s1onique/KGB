@@ -281,8 +281,14 @@ func getSignalAvailability(name string) func(sampling.Sample) bool {
 		return func(s sampling.Sample) bool { return s.HasDockerMemory }
 	case "thread_count":
 		return func(s sampling.Sample) bool { return s.HasThreadCount }
-	case "pid_count", "fd_count", "socket_fd_count", "vma_count":
-		return func(s sampling.Sample) bool { return true } // Always available if we have a sample
+	case "fd_count":
+		return func(s sampling.Sample) bool { return s.HasFDCount }
+	case "socket_fd_count":
+		return func(s sampling.Sample) bool { return s.HasSocketFDCount }
+	case "vma_count":
+		return func(s sampling.Sample) bool { return s.HasVMACount }
+	case "pid_count":
+		return func(s sampling.Sample) bool { return s.HasPIDCount }
 	default:
 		return func(s sampling.Sample) bool { return true }
 	}

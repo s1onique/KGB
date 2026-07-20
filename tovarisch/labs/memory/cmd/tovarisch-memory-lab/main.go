@@ -22,6 +22,7 @@ import (
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/analysis"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/evidence"
+	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/procfs"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/sampling"
 )
 
@@ -321,6 +322,20 @@ func runCommand(args []string) error {
 		dockerClient,
 		phaseCfg,
 	)
+
+	// Resolve cgroup v2 path for container memory metrics
+	// This enables reading memory.current, memory.stat anon, and pids.current
+	cgroupPath, cgroupErr := procfs.ResolveCgroupV2Path(containerPID)
+	if cgroupErr != nil {
+		// Emit explicit cgroup resolution failure event
+		fmt.Printf("CGROUP RESOLUTION FAILED: pid=%d error=%v\n", containerPID, cgroupErr)
+		// Continue without cgroup - Docker stats will still work as fallback
+	} else {
+		if *verbose {
+			fmt.Printf("CGROUP RESOLVED: pid=%d path=%s\n", containerPID, cgroupPath)
+		}
+		sampler.SetCgroupPath(cgroupPath)
+	}
 
 	// Start sampler
 	sampler.Start(ctx)
