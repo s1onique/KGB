@@ -327,14 +327,20 @@ func runCommand(args []string) error {
 	// This enables reading memory.current, memory.stat anon, and pids.current
 	cgroupPath, cgroupErr := procfs.ResolveCgroupV2Path(containerPID)
 	if cgroupErr != nil {
-		// Emit explicit cgroup resolution failure event
-		fmt.Printf("CGROUP RESOLUTION FAILED: pid=%d error=%v\n", containerPID, cgroupErr)
+		// Classify the failure reason for structured evidence
+		capability := classifyCgroupFailure(cgroupErr)
+		// Record as structured event (not console-only)
+		sampler.RecordCgroupCapability(ctx, containerPID, capability, "", cgroupErr, os.Getpid())
+		if *verbose {
+			fmt.Printf("CGROUP RESOLUTION FAILED: pid=%d capability=%s error=%v\n", containerPID, capability, cgroupErr)
+		}
 		// Continue without cgroup - Docker stats will still work as fallback
 	} else {
 		if *verbose {
 			fmt.Printf("CGROUP RESOLVED: pid=%d path=%s\n", containerPID, cgroupPath)
 		}
 		sampler.SetCgroupPath(cgroupPath)
+		sampler.RecordCgroupCapability(ctx, containerPID, sampling.CgroupCapabilityAvailable, cgroupPath, nil, os.Getpid())
 	}
 
 	// Start sampler
@@ -1154,6 +1160,30 @@ func getScenarioOperationCount(scenario string) int {
 	default:
 		return 32
 	}
+}
+
+// classifyCgroupFailure classifies the cgroup resolution error into a structured capability.
+func classifyCgroupFailure(err error) sampling.CgroupCapability {
+	if err == nil {
+		return sampling.CgroupCapabilityAvailable
+	}
+	errStr := err.Error()
+	switch {
+	case contains(errStr, "permission denied"):
+		return sampling.CgroupCapabilityPermissionDenied
+	case contains(errStr, "cgroup2 mount not found"):
+		return sampling.CgroupCapabilityMountMismatch
+	case contains(errStr, "cgroup2"):
+		return sampling.CgroupCapabilityNotMounted
+	case contains(errStr, "parse"):
+		return sampling.CgroupCapabilityParseFailure
+	default:
+		return sampling.CgroupCapabilityPathAbsent
+	}
+}
+
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
 }
 
 // validateStateInvariant validates the state changes match expected invariants.
