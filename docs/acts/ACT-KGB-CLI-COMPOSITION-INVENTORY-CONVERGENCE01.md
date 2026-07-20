@@ -43,6 +43,7 @@ The canonical inventory uses `(path, pattern)` as the identity key. Multiple `ex
 - **User input**: Target name from function parameter (not user-controlled CLI input)
 - **Shell**: No shell invoked (Go's os/exec does not implicitly invoke shell)
 - **Timeout**: None explicit (dry-run mode only)
+- **Output bound**: No explicit limit
 - **Classification**: `tooling` / `diagnostic_runtime` / `rare`
 - **Usage**: Verifies artifact gate ordering in Makefile
 
@@ -52,17 +53,19 @@ The canonical inventory uses `(path, pattern)` as the identity key. Multiple `ex
 - **User input**: Scanner path from CLI flag
 - **Shell**: No shell invoked
 - **Timeout**: None explicit
+- **Output bound**: No explicit limit
 - **Classification**: `tooling` / `diagnostic_runtime` / `rare`
 - **Usage**: Invokes artifact-writer-scanner for baseline comparison
 
 #### internal/tooling/allocationtrackerimports/selftest.go
 - **Executables**: `git` and `zig` (from PATH)
-- **argv construction**:
+- **argv construction**: 
   - Line 340: `["git", args...]` where args are controlled
   - Line 364: `["zig", "test", importer, ...]` static except importer path
 - **User input**: None
 - **Shell**: No shell invoked
 - **Timeout**: None explicit
+- **Output bound**: No explicit limit (zig test output unbounded)
 - **Classification**: `tooling` / `build_test` / `once`
 - **Usage**: Self-test only (runs during test execution)
 
@@ -74,6 +77,7 @@ The canonical inventory uses `(path, pattern)` as the identity key. Multiple `ex
 - **User input**: Arguments passed to gitList function
 - **Shell**: No shell invoked
 - **Timeout**: None explicit
+- **Output bound**: No explicit limit (git ls-files output proportional to repo size)
 - **Classification**: `tooling` / `diagnostic_runtime` / `rare`
 - **Usage**: Repository root detection and file listing
 
@@ -81,16 +85,32 @@ The canonical inventory uses `(path, pattern)` as the identity key. Multiple `ex
 
 Added 8 new rows to `docs/tooling/cli-composition-inventory.csv`:
 
-| ID | Path | Pattern | Classification |
-|----|------|---------|----------------|
-| CLI-0062 | uvb76/cmd/uvb76-makefile-composition-check/main.go | os/exec import | tooling/diagnostic_runtime/rare |
-| CLI-0063 | uvb76/cmd/uvb76-makefile-composition-check/main.go | exec.Command() | tooling/diagnostic_runtime/rare |
-| CLI-0064 | cmd/ratchet-verifier/main.go | os/exec import | tooling/diagnostic_runtime/rare |
-| CLI-0065 | cmd/ratchet-verifier/main.go | exec.Command() | tooling/diagnostic_runtime/rare |
-| CLI-0066 | internal/tooling/allocationtrackerimports/selftest.go | os/exec import | tooling/build_test/once |
-| CLI-0067 | internal/tooling/allocationtrackerimports/selftest.go | exec.Command() | tooling/build_test/once |
-| CLI-0068 | internal/tooling/allocationtrackerimports/scanner.go | os/exec import | tooling/diagnostic_runtime/rare |
-| CLI-0069 | internal/tooling/allocationtrackerimports/scanner.go | exec.Command() | tooling/diagnostic_runtime/rare |
+| ID | Path | Pattern | Classification | timeout_bounded | output_bounded |
+|----|------|---------|----------------|-----------------|----------------|
+| CLI-0062 | uvb76/cmd/uvb76-makefile-composition-check/main.go | os/exec import | tooling/diagnostic_runtime/rare | no | no |
+| CLI-0063 | uvb76/cmd/uvb76-makefile-composition-check/main.go | exec.Command() | tooling/diagnostic_runtime/rare | no | no |
+| CLI-0064 | cmd/ratchet-verifier/main.go | os/exec import | tooling/diagnostic_runtime/rare | no | no |
+| CLI-0065 | cmd/ratchet-verifier/main.go | exec.Command() | tooling/diagnostic_runtime/rare | no | no |
+| CLI-0066 | internal/tooling/allocationtrackerimports/selftest.go | os/exec import | tooling/build_test/once | no | no |
+| CLI-0067 | internal/tooling/allocationtrackerimports/selftest.go | exec.Command() | tooling/build_test/once | no | no |
+| CLI-0068 | internal/tooling/allocationtrackerimports/scanner.go | os/exec import | tooling/diagnostic_runtime/rare | no | no |
+| CLI-0069 | internal/tooling/allocationtrackerimports/scanner.go | exec.Command() | tooling/diagnostic_runtime/rare | no | no |
+
+## Corrections
+
+### Bounding Metadata Correction (Commit 840da53)
+
+**Issue**: Initial rows set `timeout_bounded=yes` and `output_bounded=yes`, contradicting the source analysis which documented "Timeout: None explicit".
+
+**Original values**: `timeout_bounded=yes, output_bounded=yes`
+
+**Corrected values**: `timeout_bounded=no, output_bounded=no`
+
+**Rationale**:
+- Plain `exec.Command(...).Run()` waits for process completion without timeout
+- `CombinedOutput()` collects output without byte limit
+- `git ls-files -z` output is proportional to repository size
+- `zig test` output is not inherently capped
 
 ## Verification
 
@@ -134,7 +154,7 @@ Removed CLI-0062 (os/exec import for makefile-composition-check):
 
 Restored CLI-0062 and verified VERIFICATION PASSED with 65 entries.
 
-Note: Only CLI-0062 was mutation-tested as a representative case. The pattern `(path, os/exec import)` was confirmed as the detected identity. With CLI-0063 (exec.Command()) still present, the exec import error is correctly reported as the missing identity.
+Note: Only CLI-0062 was mutation-tested as a representative case. The verifier correctly detects missing `(path, pattern)` identities.
 
 ### Gate Status
 
@@ -142,16 +162,21 @@ Note: Only CLI-0062 was mutation-tested as a representative case. The pattern `(
 
 The `make gate` fails at `hulk-uvb76-artifact-producer-gate` due to artifact hygiene issues with file-write operations in uvb76 lab commands. These are pre-existing issues in:
 - uvb76-latency-crash-lab
-- uvb76-memleak-pprof-lab
+- uvb76-memleak-pprof-lab  
 - uvb76-memory-lab
 - uvb76-targets-crash-lab
 - uvb76-tcp-diag-telemetry-lab
 
 The four files registered in this ACT are not mentioned in the artifact hygiene error output.
 
+## Commits
+
+1. **5615f7cf** - docs(tooling): register missing Go CLI composition boundaries
+2. **840da53** - docs(tooling): correct CLI boundary bounding metadata
+
 ## Files Changed
 
-- `docs/tooling/cli-composition-inventory.csv` (+8 rows)
+- `docs/tooling/cli-composition-inventory.csv` (+8 rows, +1 correction)
 - `docs/acts/ACT-KGB-CLI-COMPOSITION-INVENTORY-CONVERGENCE01.md` (new)
 
 ## Integrity Requirements
@@ -162,6 +187,7 @@ The four files registered in this ACT are not mentioned in the artifact hygiene 
 - [x] No shell claims made without code evidence
 - [x] CSV parsing preserved (15 columns, LF line endings, unique IDs)
 - [x] No unrelated source refactoring
+- [x] Bounding metadata corrected to match source analysis
 - [x] ACT document created
 
 ## Notes
@@ -169,4 +195,3 @@ The four files registered in this ACT are not mentioned in the artifact hygiene 
 - Go 1.25.12 is available at `/usr/local/go/bin/go`
 - Go builds for affected commands pass
 - The `make gate` failure is a pre-existing artifact hygiene issue, not related to this CLI composition inventory change
-- The negative proof was performed on CLI-0062 as a representative entry; the verifier correctly detects missing `(path, pattern)` identities
