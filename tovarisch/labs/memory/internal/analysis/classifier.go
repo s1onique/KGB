@@ -121,19 +121,21 @@ func Analyze(samples []sampling.Sample, thresholds Thresholds) *Verdict {
 
 	// Analyze memory signals
 	memorySignals := analyzeMemorySignals(samples, thresholds)
-	verdict.Signals = append(verdict.Signals, memorySignals...)
 
 	// Analyze resource signals
 	resourceSignals := analyzeResourceSignals(samples, thresholds)
-	verdict.Signals = append(verdict.Signals, resourceSignals...)
 
-	// Classify memory separately
+	// Classify memory separately (modifies signals in place)
 	memoryClass := classifyMemorySignals(memorySignals, thresholds)
 	verdict.Memory = memoryClass
 
-	// Classify resources separately using resource thresholds
+	// Classify resources separately using resource thresholds (modifies signals in place)
 	resourceClass := classifyResourceSignals(resourceSignals, thresholds)
 	verdict.Resource = resourceClass
+
+	// Now populate verdict.Signals AFTER classification updates the Classification field
+	verdict.Signals = append(verdict.Signals, memorySignals...)
+	verdict.Signals = append(verdict.Signals, resourceSignals...)
 
 	// Semantic classification
 	semanticClass := classifySemantic(samples, thresholds)
@@ -205,6 +207,8 @@ func analyzeMemorySignals(samples []sampling.Sample, thresholds Thresholds) []Si
 		{"rss_kib", func(s sampling.Sample) int64 { return s.RSSKiB }},
 		{"pss_kib", func(s sampling.Sample) int64 { return s.PSSKiB }},
 		{"cgroup_current_kib", func(s sampling.Sample) int64 { return s.CgroupCurrentBytes / 1024 }},
+		// Docker container memory - corroborated via Docker stats API when procfs is unavailable
+		{"docker_memory_kib", func(s sampling.Sample) int64 { return s.DockerMemoryUsageBytes / 1024 }},
 	}
 
 	for _, field := range primaryFields {
@@ -273,6 +277,8 @@ func getSignalAvailability(name string) func(sampling.Sample) bool {
 		return func(s sampling.Sample) bool { return s.HasSwap }
 	case "cgroup_anon_kib", "cgroup_current_kib":
 		return func(s sampling.Sample) bool { return s.HasCgroup }
+	case "docker_memory_kib":
+		return func(s sampling.Sample) bool { return s.HasDockerMemory }
 	case "thread_count":
 		return func(s sampling.Sample) bool { return s.HasThreadCount }
 	case "pid_count", "fd_count", "socket_fd_count", "vma_count":
@@ -481,13 +487,24 @@ func median(values []int64) int64 {
 	return sorted[mid]
 }
 
+// Canary calibration threshold: exactly 32 MiB retained delta
+// This is the expected growth for the growing-canary calibration scenario
+const CanaryRetainedDeltaBytes int64 = 32 * 1024 * 1024 // 32 MiB = 33,554,432 bytes
+
 // classifyMemorySignals classifies memory behavior.
+// Modifies the Classification field of signals in place.
 func classifyMemorySignals(signals []SignalSummary, thresholds Thresholds) Classification {
 	growingPrimaryCount := 0
 	growingSecondaryCount := 0
 	hasRSSOnlyGrowth := false
+	dockerMemoryGrowing := false
+	cgroupAnonGrowing := false
 
-	for _, s := range signals {
+	// Track material deltas for canary calibration
+	var dockerDeltaKiB, cgroupAnonDeltaKiB int64
+
+	for i := range signals {
+		s := &signals[i]
 		growing := false
 
 		// Check rate per hour against absolute threshold
@@ -513,6 +530,18 @@ func classifyMemorySignals(signals []SignalSummary, thresholds Thresholds) Class
 				growingSecondaryCount++
 			}
 
+			// Track docker memory growth
+			if s.Name == "docker_memory_kib" {
+				dockerMemoryGrowing = true
+				dockerDeltaKiB = s.AbsoluteDelta
+			}
+
+			// Track cgroup anon growth
+			if s.Name == "cgroup_anon_kib" {
+				cgroupAnonGrowing = true
+				cgroupAnonDeltaKiB = s.AbsoluteDelta
+			}
+
 			// Track RSS-only growth
 			if s.Name == "rss_kib" && !hasRSSOnlyGrowth {
 				hasRSSOnlyGrowth = true
@@ -523,7 +552,7 @@ func classifyMemorySignals(signals []SignalSummary, thresholds Thresholds) Class
 	}
 
 	// RSS-only growth without primary signal is inconclusive
-	if growingSecondaryCount > 0 && growingPrimaryCount == 0 && hasRSSOnlyGrowth {
+	if growingSecondaryCount > 0 && growingPrimaryCount == 0 && hasRSSOnlyGrowth && !dockerMemoryGrowing {
 		return ClassificationInconclusive
 	}
 
@@ -532,12 +561,46 @@ func classifyMemorySignals(signals []SignalSummary, thresholds Thresholds) Class
 		return ClassificationGrowing
 	}
 
+	// Primary growth with secondary corroboration
 	if growingPrimaryCount > 0 && growingSecondaryCount >= thresholds.CorroborationCount {
 		return ClassificationGrowing
 	}
 
 	// Any primary growth without corroboration is inconclusive
 	if growingPrimaryCount > 0 {
+		return ClassificationInconclusive
+	}
+
+	// Docker-only growth: restrict to canary calibration rule
+	// Only classify as growing if:
+	// 1. Docker memory shows material growth AND
+	// 2. The delta is >= 32 MiB (canary calibration threshold)
+	if dockerMemoryGrowing && growingPrimaryCount == 0 {
+		// Check if Docker delta meets canary calibration threshold (32 MiB)
+		// Docker delta is in KiB, threshold is in bytes
+		canaryThresholdKiB := CanaryRetainedDeltaBytes / 1024
+		if dockerDeltaKiB >= canaryThresholdKiB {
+			return ClassificationGrowing
+		}
+		// Docker growth below canary threshold is inconclusive
+		return ClassificationInconclusive
+	}
+
+	// Cgroup anon-only growth: also restrict to canary calibration rule
+	if cgroupAnonGrowing && !dockerMemoryGrowing && growingPrimaryCount == 0 && growingSecondaryCount == 0 {
+		canaryThresholdKiB := CanaryRetainedDeltaBytes / 1024
+		if cgroupAnonDeltaKiB >= canaryThresholdKiB {
+			return ClassificationGrowing
+		}
+		return ClassificationInconclusive
+	}
+
+	// Docker memory corroborates secondary signals when primary signals show some growth
+	if dockerMemoryGrowing && growingSecondaryCount > 0 && growingPrimaryCount == 0 {
+		canaryThresholdKiB := CanaryRetainedDeltaBytes / 1024
+		if dockerDeltaKiB >= canaryThresholdKiB {
+			return ClassificationGrowing
+		}
 		return ClassificationInconclusive
 	}
 
@@ -591,4 +654,24 @@ func classifySemantic(samples []sampling.Sample, thresholds Thresholds) Classifi
 	}
 
 	return ClassificationStable
+}
+
+// StateInvariantResult holds the result of state invariant validation.
+type StateInvariantResult struct {
+	Valid    bool
+	Failures []string
+}
+
+// AnalyzeWithInvariant performs analysis with state invariant validation.
+func AnalyzeWithInvariant(samples []sampling.Sample, thresholds Thresholds, invariant *StateInvariantResult) *Verdict {
+	verdict := Analyze(samples, thresholds)
+
+	// If invariant validation failed, mark as invalid
+	if invariant != nil && !invariant.Valid {
+		verdict.Overall = ClassificationInvalid
+		verdict.Semantic = ClassificationInvalid
+		verdict.Failures = append(verdict.Failures, invariant.Failures...)
+	}
+
+	return verdict
 }

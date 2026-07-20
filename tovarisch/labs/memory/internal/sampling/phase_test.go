@@ -74,14 +74,14 @@ func TestPhaseStateAdvance(t *testing.T) {
 		t.Errorf("After advance: got %v, want Warmup", state.Current)
 	}
 
-	// Continue advancing through all phases
-	for i := 0; i < 10; i++ {
+	// Continue advancing through all phases (now including PhaseComplete)
+	for i := 0; i < 11; i++ {
 		time.Sleep(2 * time.Millisecond)
 		state.Advance()
 	}
 
-	if !state.IsFinal() {
-		t.Error("Should be in Final phase")
+	if state.Current != PhaseComplete {
+		t.Errorf("Should be in Complete phase, got %v", state.Current)
 	}
 }
 
@@ -128,7 +128,7 @@ func TestAllPhases(t *testing.T) {
 
 	expected := []Phase{
 		PhaseStartup, PhaseWarmup, PhaseBaseline,
-		PhaseStimulus, PhaseSettling, PhaseFinal,
+		PhaseStimulus, PhaseSettling, PhaseFinal, PhaseComplete,
 	}
 
 	if len(phases) != len(expected) {
@@ -165,5 +165,62 @@ func TestCSVHeaders(t *testing.T) {
 		if !found {
 			t.Errorf("Expected column %q not found in headers", col)
 		}
+	}
+}
+
+// TestPhaseFinalRemaining tests that PhaseFinal returns non-zero before expiry.
+func TestPhaseFinalRemaining(t *testing.T) {
+	cfg := PhaseConfig{
+		StartupDeadline: 1 * time.Millisecond,
+		Warmup:          1 * time.Millisecond,
+		Baseline:        1 * time.Millisecond,
+		Stimulus:        1 * time.Millisecond,
+		Settling:        1 * time.Millisecond,
+		Final:           100 * time.Millisecond,
+	}
+
+	state := NewPhaseState(cfg)
+
+	// Advance to PhaseFinal
+	for state.Current != PhaseFinal {
+		time.Sleep(2 * time.Millisecond)
+		state.Advance()
+	}
+
+	// PhaseFinal should have remaining time
+	remaining := state.Remaining()
+	if remaining <= 0 {
+		t.Errorf("PhaseFinal remaining should be > 0, got %v", remaining)
+	}
+
+	// Should have roughly the Final duration remaining
+	if remaining < 50*time.Millisecond || remaining > 100*time.Millisecond {
+		t.Errorf("PhaseFinal remaining should be ~100ms, got %v", remaining)
+	}
+}
+
+// TestPhaseCompleteRemaining tests that PhaseComplete returns 0.
+func TestPhaseCompleteRemaining(t *testing.T) {
+	cfg := PhaseConfig{
+		StartupDeadline: 1 * time.Millisecond,
+		Warmup:          1 * time.Millisecond,
+		Baseline:        1 * time.Millisecond,
+		Stimulus:        1 * time.Millisecond,
+		Settling:        1 * time.Millisecond,
+		Final:           1 * time.Millisecond,
+	}
+
+	state := NewPhaseState(cfg)
+
+	// Advance to PhaseComplete
+	for state.Current != PhaseComplete {
+		time.Sleep(2 * time.Millisecond)
+		state.Advance()
+	}
+
+	// PhaseComplete should return 0 for remaining
+	remaining := state.Remaining()
+	if remaining != 0 {
+		t.Errorf("PhaseComplete remaining should be 0, got %v", remaining)
 	}
 }

@@ -10,6 +10,7 @@ package dockerlab
 import (
 	"archive/tar"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -115,6 +116,10 @@ func (c *Client) ContainerCreate(ctx context.Context, cfg ContainerConfig) (stri
 	}
 	hostCfg := container.HostConfig{
 		Resources: resources,
+		// Note: Containers use Docker's default isolated PID namespace.
+		// The host controller obtains container PID through Docker inspect.
+		// Do NOT use PidMode: "host" for normal operations.
+		// Container process /proc is visible from host at /proc/{host_pid}.
 	}
 
 	resp, err := c.Client.ContainerCreate(ctx, cfg.Config, &hostCfg, nil, nil, cfg.Name)
@@ -503,4 +508,73 @@ func (c *Client) ContainerGetPID(ctx context.Context, containerID string) (int, 
 	}
 
 	return inspect.State.Pid, nil
+}
+
+// ContainerIP returns the container's IP address in the specified network.
+func (c *Client) ContainerIP(ctx context.Context, containerID string, networkName string) (string, error) {
+	inspect, err := c.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("inspect container: %w", err)
+	}
+
+	if inspect.NetworkSettings == nil {
+		return "", fmt.Errorf("no network settings")
+	}
+
+	// Find the exact network by name
+	if net, ok := inspect.NetworkSettings.Networks[networkName]; ok {
+		if net.IPAddress != "" {
+			return net.IPAddress, nil
+		}
+	}
+
+	// Also try with full network ID pattern (e.g., "network:lab")
+	fullName := "network:" + networkName
+	if net, ok := inspect.NetworkSettings.Networks[fullName]; ok {
+		if net.IPAddress != "" {
+			return net.IPAddress, nil
+		}
+	}
+
+	return "", fmt.Errorf("no IP address found for network %s", networkName)
+}
+
+// ContainerStats holds container resource statistics.
+type ContainerStats struct {
+	MemoryUsageBytes    int64
+	MemoryLimitBytes    int64
+	CPUUsageNanoSeconds uint64
+	MemoryPerc          float64
+}
+
+// ContainerStats returns real-time container stats.
+func (c *Client) ContainerStats(ctx context.Context, containerID string) (*ContainerStats, error) {
+	reader, err := c.Client.ContainerStats(ctx, containerID, false)
+	if err != nil {
+		return nil, fmt.Errorf("get container stats: %w", err)
+	}
+	defer reader.Body.Close()
+
+	// Read stats JSON
+	var stats types.StatsJSON
+	if err := json.NewDecoder(reader.Body).Decode(&stats); err != nil {
+		return nil, fmt.Errorf("decode stats: %w", err)
+	}
+
+	// Extract memory stats
+	memUsage := int64(stats.MemoryStats.Usage)
+	memLimit := int64(stats.MemoryStats.Limit)
+
+	// Extract CPU stats (cumulative nanoseconds)
+	var cpuNano uint64
+	if len(stats.CPUStats.CPUUsage.PercpuUsage) > 0 {
+		cpuNano = stats.CPUStats.CPUUsage.TotalUsage
+	}
+
+	return &ContainerStats{
+		MemoryUsageBytes:    memUsage,
+		MemoryLimitBytes:    memLimit,
+		CPUUsageNanoSeconds: cpuNano,
+		MemoryPerc:          float64(memUsage) / float64(memLimit) * 100,
+	}, nil
 }

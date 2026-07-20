@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/analysis"
@@ -43,11 +45,11 @@ type Manifest struct {
 	Scenario          string            `json:"scenario"`
 	StartedAt         time.Time         `json:"started_at"`
 	FinishedAt        time.Time         `json:"finished_at"`
-	SubjectIdentity   *SubjectIdentity  `json:"subject_identity"`
-	ControllerID      string            `json:"controller_identity"`
-	HostID            *HostIdentity     `json:"host_identity"`
-	DockerID          *DockerIdentity   `json:"docker_identity"`
-	Configuration     *LabConfiguration `json:"configuration"`
+	SubjectIdentity   *SubjectIdentity  `json:"subject_identity,omitempty"`
+	ControllerID      string            `json:"controller_identity,omitempty"`
+	HostID            *HostIdentity     `json:"host_identity,omitempty"`
+	DockerID          *DockerIdentity   `json:"docker_identity,omitempty"`
+	Configuration     *LabConfiguration `json:"configuration,omitempty"`
 	ArtifactInventory []string          `json:"artifact_inventory"`
 }
 
@@ -76,9 +78,9 @@ type DockerIdentity struct {
 
 // LabConfiguration records the lab configuration used.
 type LabConfiguration struct {
-	ResourceLimits interface{} `json:"resource_limits"`
-	PhaseConfig    interface{} `json:"phase_config"`
-	Thresholds     interface{} `json:"thresholds"`
+	ResourceLimits interface{} `json:"resource_limits,omitempty"`
+	PhaseConfig    interface{} `json:"phase_config,omitempty"`
+	Thresholds     interface{} `json:"thresholds,omitempty"`
 }
 
 // Verdict represents the verdict.json structure.
@@ -156,7 +158,7 @@ func (w *Writer) WriteSamplesCSV(samples []sampling.Sample) error {
 }
 
 // WriteEventsJSONL writes events.jsonl with LF endings.
-func (w *Writer) WriteEventsJSONL(events []Event) error {
+func (w *Writer) WriteEventsJSONL(events []sampling.Event) error {
 	path := filepath.Join(w.artifactDir, "events.jsonl")
 	f, err := os.Create(path)
 	if err != nil {
@@ -175,15 +177,6 @@ func (w *Writer) WriteEventsJSONL(events []Event) error {
 	}
 
 	return nil
-}
-
-// Event represents a lab event for events.jsonl.
-type Event struct {
-	Timestamp string      `json:"timestamp"`
-	Type      string      `json:"type"`
-	Phase     string      `json:"phase,omitempty"`
-	Message   string      `json:"message,omitempty"`
-	Data      interface{} `json:"data,omitempty"`
 }
 
 // WriteContainerInspect writes container inspection JSON.
@@ -231,7 +224,39 @@ type Checksum struct {
 	Size   int64  `json:"size"`
 }
 
+// GenerateChecksumsForInventory generates checksums for the exact declared inventory.
+// Excludes checksums.txt itself and fails if any artifact cannot be read.
+func (w *Writer) GenerateChecksumsForInventory(inventory []string) ([]Checksum, error) {
+	// Sort for deterministic order
+	sorted := make([]string, len(inventory))
+	copy(sorted, inventory)
+	sort.Strings(sorted)
+
+	var checksums []Checksum
+	for _, name := range sorted {
+		// Skip checksums.txt itself
+		if name == "checksums.txt" {
+			continue
+		}
+
+		path := filepath.Join(w.artifactDir, name)
+		sum, size, err := computeSHA256(path)
+		if err != nil {
+			return nil, fmt.Errorf("checksum %s: %w", name, err)
+		}
+
+		checksums = append(checksums, Checksum{
+			Path:   name,
+			SHA256: sum,
+			Size:   size,
+		})
+	}
+
+	return checksums, nil
+}
+
 // GenerateChecksums generates checksums for all artifacts in the directory.
+// Excludes checksums.txt and skips unreadable files.
 func (w *Writer) GenerateChecksums() ([]Checksum, error) {
 	entries, err := os.ReadDir(w.artifactDir)
 	if err != nil {
@@ -241,6 +266,10 @@ func (w *Writer) GenerateChecksums() ([]Checksum, error) {
 	var checksums []Checksum
 	for _, entry := range entries {
 		if entry.IsDir() {
+			continue
+		}
+		// Skip checksums.txt
+		if entry.Name() == "checksums.txt" {
 			continue
 		}
 
@@ -257,12 +286,38 @@ func (w *Writer) GenerateChecksums() ([]Checksum, error) {
 		})
 	}
 
+	// Sort for deterministic order
+	sort.Slice(checksums, func(i, j int) bool {
+		return checksums[i].Path < checksums[j].Path
+	})
+
 	return checksums, nil
 }
 
 // WriteChecksums writes checksums.txt with artifact checksums.
 func (w *Writer) WriteChecksums() error {
 	checksums, err := w.GenerateChecksums()
+	if err != nil {
+		return fmt.Errorf("generate checksums: %w", err)
+	}
+
+	path := filepath.Join(w.artifactDir, "checksums.txt")
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create checksums.txt: %w", err)
+	}
+	defer f.Close()
+
+	for _, c := range checksums {
+		fmt.Fprintf(f, "%s  %s\n", c.SHA256, c.Path)
+	}
+
+	return nil
+}
+
+// WriteChecksumsForInventory writes checksums.txt for the exact declared inventory.
+func (w *Writer) WriteChecksumsForInventory(inventory []string) error {
+	checksums, err := w.GenerateChecksumsForInventory(inventory)
 	if err != nil {
 		return fmt.Errorf("generate checksums: %w", err)
 	}
@@ -293,4 +348,83 @@ func computeSHA256(path string) (string, int64, error) {
 	sum := fmt.Sprintf("%x", h.Sum(nil))
 
 	return sum, int64(len(data)), nil
+}
+
+// WriteCanaryState writes canary state to initial-canary-state.json or final-canary-state.json.
+func (w *Writer) WriteCanaryState(phase string, state interface{}) error {
+	filename := fmt.Sprintf("%s-canary-state.json", phase)
+	path := filepath.Join(w.artifactDir, filename)
+	return writeJSON(path, state)
+}
+
+// WriteWorkloadResult writes workload-result.json.
+func (w *Writer) WriteWorkloadResult(result interface{}) error {
+	path := filepath.Join(w.artifactDir, "workload-result.json")
+	return writeJSON(path, result)
+}
+
+// ParseChecksumLine parses a single line from checksums.txt.
+// Returns (hash, path, error).
+func ParseChecksumLine(line string) (hash, path string, err error) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return "", "", fmt.Errorf("empty line")
+	}
+
+	// Format: "hash  filename" (two spaces between)
+	parts := strings.SplitN(line, "  ", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("malformed line: %s", line)
+	}
+
+	hash = strings.TrimSpace(parts[0])
+	path = strings.TrimSpace(parts[1])
+
+	if hash == "" || path == "" {
+		return "", "", fmt.Errorf("missing hash or path")
+	}
+
+	// Validate hash format (64 hex chars)
+	if len(hash) != 64 {
+		return "", "", fmt.Errorf("invalid hash length: %s", hash)
+	}
+
+	return hash, path, nil
+}
+
+// ParseChecksumsFile parses checksums.txt and returns a map of path -> hash.
+func ParseChecksumsFile(data string) (map[string]string, error) {
+	result := make(map[string]string)
+	lines := splitLines(data)
+
+	for _, line := range lines {
+		hash, path, err := ParseChecksumLine(line)
+		if err != nil {
+			return nil, fmt.Errorf("parse line: %w", err)
+		}
+
+		if _, exists := result[path]; exists {
+			return nil, fmt.Errorf("duplicate entry for: %s", path)
+		}
+
+		result[path] = hash
+	}
+
+	return result, nil
+}
+
+// splitLines splits a string on newlines, excluding empty lines.
+func splitLines(s string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i <= len(s); i++ {
+		if i == len(s) || s[i] == '\n' {
+			line := s[start:i]
+			if len(line) > 0 {
+				lines = append(lines, line)
+			}
+			start = i + 1
+		}
+	}
+	return lines
 }

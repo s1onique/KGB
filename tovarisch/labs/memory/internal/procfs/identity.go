@@ -132,3 +132,10 @@ func (e *ProcError) Unwrap() error {
 func (e *ProcError) IsZombie() bool {
 	return strings.Contains(e.Op, "zombie") || strings.Contains(e.Op, "exited")
 }
+
+// Sentinel errors for cgroup operations
+var (
+	ErrNoUnifiedCgroup = fmt.Errorf("no unified cgroup v2 record found")
+	ErrNoCgroup2Mount  = fmt.Errorf("cgroup2 mount not found in mountinfo")
+	ErrPathTraversal   = fmt.Errorf("path traversal detected")
+)

@@ -691,3 +691,83 @@ hulk-uvb76-artifact-producer-gate:
 	@echo "=== Go AST writer-bypass verifier ==="
 	@cd uvb76 && go run ./cmd/uvb76-artifact-writer-verify
 	@echo "=== UVB-76 Hulk Gate: Artifact Producer Enforcement PASSED ==="
+
+# === Tovarisch Memory Lab Docker Targets ===
+# ACT-TOVARISCH-GO-MEMORY-LAB01-CORRECTION07: Docker Canary Acceptance
+#
+# Go-based Docker laboratory for Tovarisch memory investigation.
+# Uses Docker Engine Go client directly; no os/exec docker commands.
+# Binary installed to: .factory/bin/tovarisch-memory-lab
+#
+# Exact classification matrix:
+#   canary-growing:    overall=growth, memory=growing, scenario_valid=true, canaries_valid=true
+#   canary-bounded:    overall=stable, memory=stable, scenario_valid=true, canaries_valid=true
+#   canary-descriptor: overall=resource_growth, resource=resource_growth, scenario_valid=true, canaries_valid=true
+
+MEMORY_LAB := .factory/bin/tovarisch-memory-lab
+
+tovarisch-memory-lab-build:
+	@mkdir -p .factory/bin
+	cd tovarisch/labs/memory && go build -o ../../../.factory/bin/tovarisch-memory-lab ./cmd/tovarisch-memory-lab
+
+# Short growing probe - runs BEFORE the full matrix to verify deterministic phase tests
+tovarisch-memory-lab-growing-probe: tovarisch-memory-lab-build
+	@echo "=== Memory Lab: Growing Probe (short semantic test) ==="
+	"$(MEMORY_LAB)" run \
+		--scenario canary-growing \
+		--duration 32 \
+		--artifacts-dir .factory/tovarisch-memory-lab
+
+tovarisch-memory-lab-test:
+	cd tovarisch/labs/memory && go test -v ./...
+
+tovarisch-memory-lab-test-race:
+	cd tovarisch/labs/memory && go test -race -v ./...
+
+tovarisch-memory-lab-canary-growing:
+	@echo "=== Memory Lab: Canary Growing ==="
+	"$(MEMORY_LAB)" run \
+		--scenario canary-growing \
+		--duration 60 \
+		--artifacts-dir .factory/tovarisch-memory-lab
+
+tovarisch-memory-lab-canary-bounded:
+	@echo "=== Memory Lab: Canary Bounded ==="
+	"$(MEMORY_LAB)" run \
+		--scenario canary-bounded \
+		--duration 60 \
+		--artifacts-dir .factory/tovarisch-memory-lab
+
+tovarisch-memory-lab-canary-descriptor:
+	@echo "=== Memory Lab: Canary Descriptor ==="
+	"$(MEMORY_LAB)" run \
+		--scenario canary-descriptor \
+		--duration 60 \
+		--artifacts-dir .factory/tovarisch-memory-lab
+
+# Full canary suite: all three Docker canaries
+tovarisch-memory-lab-canary-suite: tovarisch-memory-lab-build
+	@echo "=== Memory Lab: Canary Suite ==="
+	"$(MEMORY_LAB)" run \
+		--scenario canary-growing \
+		--duration 60 \
+		--artifacts-dir .factory/tovarisch-memory-lab
+	"$(MEMORY_LAB)" run \
+		--scenario canary-bounded \
+		--duration 60 \
+		--artifacts-dir .factory/tovarisch-memory-lab
+	"$(MEMORY_LAB)" run \
+		--scenario canary-descriptor \
+		--duration 60 \
+		--artifacts-dir .factory/tovarisch-memory-lab
+
+tovarisch-memory-lab-verify-evidence:
+	@test -n "$(RUN_ID)" || { echo "RUN_ID is required, e.g. make tovarisch-memory-lab-verify-evidence RUN_ID=lab-canary-growing-1234567890"; exit 2; }
+	@echo "=== Memory Lab Evidence Verifier ==="
+	"$(MEMORY_LAB)" verify \
+		--artifacts-dir .factory/tovarisch-memory-lab \
+		--run-id "$(RUN_ID)"
+
+tovarisch-memory-lab-clean:
+	rm -rf .factory/tovarisch-memory-lab
+	cd tovarisch/labs/memory && go clean

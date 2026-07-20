@@ -10,6 +10,7 @@ package sampling
 import "time"
 
 // Phase represents the current sampling phase.
+// Implements comparability for ordering.
 type Phase string
 
 const (
@@ -19,6 +20,7 @@ const (
 	PhaseStimulus Phase = "stimulus"
 	PhaseSettling Phase = "settling"
 	PhaseFinal    Phase = "final"
+	PhaseComplete Phase = "complete"
 )
 
 // String returns the string representation of a phase.
@@ -106,7 +108,7 @@ func NewPhaseState(cfg PhaseConfig) *PhaseState {
 }
 
 // Advance moves to the next phase.
-// Returns true if advanced, false if already in final phase.
+// Returns true if advanced, false if already in complete phase.
 func (s *PhaseState) Advance() bool {
 	switch s.Current {
 	case PhaseStartup:
@@ -130,7 +132,11 @@ func (s *PhaseState) Advance() bool {
 		s.PhaseStart = time.Now()
 		return true
 	case PhaseFinal:
-		return false // Already in final
+		s.Current = PhaseComplete
+		s.PhaseStart = time.Now()
+		return true
+	case PhaseComplete:
+		return false // Already complete
 	default:
 		return false
 	}
@@ -142,8 +148,10 @@ func (s *PhaseState) IsFinal() bool {
 }
 
 // Remaining returns the remaining time in the current phase.
+// Returns 0 for PhaseComplete (terminal state).
+// For all other phases including PhaseFinal, returns actual remaining time.
 func (s *PhaseState) Remaining() time.Duration {
-	if s.Current == PhaseFinal {
+	if s.Current == PhaseComplete {
 		return 0
 	}
 	elapsed := time.Since(s.PhaseStart)
@@ -156,8 +164,9 @@ func (s *PhaseState) Remaining() time.Duration {
 }
 
 // Update checks phase transitions based on elapsed time.
+// Allows transition from PhaseFinal to PhaseComplete when Final duration expires.
 func (s *PhaseState) Update() bool {
-	if s.IsFinal() {
+	if s.Current == PhaseComplete {
 		return false
 	}
 
@@ -176,5 +185,28 @@ func AllPhases() []Phase {
 		PhaseStimulus,
 		PhaseSettling,
 		PhaseFinal,
+		PhaseComplete,
+	}
+}
+
+// ParsePhase parses a phase string. Returns empty string for invalid phases.
+func ParsePhase(s string) Phase {
+	switch Phase(s) {
+	case PhaseStartup:
+		return PhaseStartup
+	case PhaseWarmup:
+		return PhaseWarmup
+	case PhaseBaseline:
+		return PhaseBaseline
+	case PhaseStimulus:
+		return PhaseStimulus
+	case PhaseSettling:
+		return PhaseSettling
+	case PhaseFinal:
+		return PhaseFinal
+	case PhaseComplete:
+		return PhaseComplete
+	default:
+		return ""
 	}
 }

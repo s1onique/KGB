@@ -31,3 +31,6 @@ uvb76/uvb76-memory-lab
 uvb76/uvb76-memleak-pprof-lab
 uvb76/uvb76-memleak-pprof-verify
 artifacts/uvb76-memleak-pprof-lab/
+tovarisch/labs/memory/tovarisch-memory-lab
+.factory/bin/tovarisch-memory-lab
+tovarisch/.factory/bin/tovarisch-memory-lab
