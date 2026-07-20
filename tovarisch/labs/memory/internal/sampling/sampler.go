@@ -491,6 +491,11 @@ func (s *Sampler) runLoop(ctx context.Context) {
 	defer ticker.Stop()
 
 	sequence := 0
+	lastSampleTime := time.Now() // Initialize to now for first sample
+
+	// Delay threshold: 50% over nominal interval is considered delayed
+	// This accounts for Docker stats blocking + GC pauses
+	delayThreshold := time.Duration(float64(s.cfg.Interval) * 1.5)
 
 	for {
 		select {
@@ -505,6 +510,8 @@ func (s *Sampler) runLoop(ctx context.Context) {
 			s.mu.Unlock()
 			return
 		case <-ticker.C:
+			scheduledTime := time.Now()
+
 			// Check phase transition atomically
 			s.mu.Lock()
 			s.advanceAndPublishLocked()
@@ -522,24 +529,30 @@ func (s *Sampler) runLoop(ctx context.Context) {
 				continue
 			}
 
-			// Take sample
-			sample := s.takeSample(ctx, pid, sequence, currentPhase)
+			// Calculate delay: actual interval since last sample vs nominal
+			actualInterval := scheduledTime.Sub(lastSampleTime)
+			isDelayed := actualInterval > delayThreshold
+
+			// Take sample with delay info
+			sample := s.takeSample(ctx, pid, sequence, currentPhase, isDelayed)
 			if sample != nil {
 				s.mu.Lock()
 				s.samples = append(s.samples, *sample)
 				s.mu.Unlock()
 				sequence++
+				lastSampleTime = scheduledTime
 			}
 		}
 	}
 }
 
-func (s *Sampler) takeSample(ctx context.Context, pid, seq int, phase Phase) *Sample {
+func (s *Sampler) takeSample(ctx context.Context, pid, seq int, phase Phase, isDelayed bool) *Sample {
 	sample := &Sample{
 		Sequence:  seq,
 		Timestamp: time.Now(),
 		PID:       pid,
 		Phase:     phase,
+		Delayed:   isDelayed,
 	}
 
 	// Docker container stats - ONLY populate Docker-specific fields
