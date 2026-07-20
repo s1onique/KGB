@@ -59,7 +59,7 @@ The canonical inventory uses `(path, pattern)` as the identity key. Multiple `ex
 
 #### internal/tooling/allocationtrackerimports/selftest.go
 - **Executables**: `git` and `zig` (from PATH)
-- **argv construction**: 
+- **argv construction**:
   - Line 340: `["git", args...]` where args are controlled
   - Line 364: `["zig", "test", importer, ...]` static except importer path
 - **User input**: None
@@ -162,7 +162,7 @@ Note: Only CLI-0062 was mutation-tested as a representative case. The verifier c
 
 The `make gate` fails at `hulk-uvb76-artifact-producer-gate` due to artifact hygiene issues with file-write operations in uvb76 lab commands. These are pre-existing issues in:
 - uvb76-latency-crash-lab
-- uvb76-memleak-pprof-lab  
+- uvb76-memleak-pprof-lab
 - uvb76-memory-lab
 - uvb76-targets-crash-lab
 - uvb76-tcp-diag-telemetry-lab
