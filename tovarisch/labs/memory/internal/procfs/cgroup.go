@@ -92,6 +92,33 @@ func parseMemoryEvents(m *CgroupMemory, data []byte) {
 	}
 }
 
+// NamespaceInfo captures namespace identities for mismatch detection.
+type NamespaceInfo struct {
+	MountNamespace string
+	CgroupNamespace string
+}
+
+// ReadNamespaceIDs reads namespace symlink targets for a PID.
+// This enables comparing whether two PIDs share the same namespace.
+func ReadNamespaceIDs(pid int) (*NamespaceInfo, error) {
+	ns := &NamespaceInfo{}
+
+	// Read mount namespace
+	if target, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "ns", "mnt")); err == nil {
+		ns.MountNamespace = target
+	}
+
+	// Read cgroup namespace
+	if target, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "ns", "cgroup")); err == nil {
+		ns.CgroupNamespace = target
+	}
+
+	if ns.MountNamespace == "" && ns.CgroupNamespace == "" {
+		return nil, os.ErrNotExist
+	}
+	return ns, nil
+}
+
 // ResolveCgroupV2Path resolves the cgroup v2 path for a given PID.
 // It reads /proc/<pid>/cgroup to find the unified hierarchy record,
 // discovers the cgroup2 mount from /proc/self/mountinfo,

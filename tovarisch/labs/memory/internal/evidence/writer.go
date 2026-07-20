@@ -55,19 +55,23 @@ type Manifest struct {
 
 // SubjectIdentity captures the subject's identity for binding.
 type SubjectIdentity struct {
-	GitCommit   string `json:"git_commit,omitempty"`
-	GitTree     string `json:"git_tree,omitempty"`
-	Version     string `json:"version,omitempty"`
-	ImageID     string `json:"image_id,omitempty"`
-	ImageDigest string `json:"image_digest,omitempty"`
-	ExecHash    string `json:"exec_hash,omitempty"`
-	ConfigHash  string `json:"config_hash,omitempty"`
+	GitCommit                    string `json:"git_commit,omitempty"`
+	GitTree                      string `json:"git_tree,omitempty"`
+	Version                      string `json:"version,omitempty"`
+	ImageID                      string `json:"image_id,omitempty"`
+	ImageDigest                  string `json:"image_digest,omitempty"`
+	ControllerExecutablePath     string `json:"controller_executable_path,omitempty"`
+	ControllerExecutableSHA256  string `json:"controller_executable_sha256,omitempty"`
+	ExecHash                    string `json:"exec_hash,omitempty"`
+	ConfigHash                  string `json:"config_hash,omitempty"`
 }
 
 // HostIdentity captures the host environment.
 type HostIdentity struct {
-	KernelRelease string `json:"kernel_release"`
-	CgroupMode    string `json:"cgroup_mode"`
+	KernelRelease    string `json:"kernel_release"`
+	KernelVersion   string `json:"kernel_version,omitempty"`
+	CgroupMode      string `json:"cgroup_mode"`
+	CollectionStatus string `json:"collection_status,omitempty"`
 }
 
 // DockerIdentity captures the Docker Engine version.

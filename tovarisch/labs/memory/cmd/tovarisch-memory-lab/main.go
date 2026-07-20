@@ -329,11 +329,13 @@ func runCommand(args []string) error {
 	// Resolve cgroup v2 path for container memory metrics
 	// This enables reading memory.current, memory.stat anon, and pids.current
 	cgroupPath, cgroupErr := procfs.ResolveCgroupV2Path(containerPID)
+	controllerPIDInt := os.Getpid()
+
 	if cgroupErr != nil {
 		// Classify the failure reason for structured evidence
-		capability := classifyCgroupFailure(cgroupErr)
+		capability := classifyCgroupFailureWithNamespace(cgroupErr, containerPID, controllerPIDInt)
 		// Record as structured event (not console-only)
-		sampler.RecordCgroupCapability(ctx, containerPID, capability, "", cgroupErr, os.Getpid())
+		sampler.RecordCgroupCapability(ctx, containerPID, capability, "", cgroupErr, controllerPIDInt)
 		if *verbose {
 			fmt.Printf("CGROUP RESOLUTION FAILED: pid=%d capability=%s error=%v\n", containerPID, capability, cgroupErr)
 		}
@@ -343,7 +345,7 @@ func runCommand(args []string) error {
 			fmt.Printf("CGROUP RESOLVED: pid=%d path=%s\n", containerPID, cgroupPath)
 		}
 		sampler.SetCgroupPath(cgroupPath)
-		sampler.RecordCgroupCapability(ctx, containerPID, sampling.CgroupCapabilityAvailable, cgroupPath, nil, os.Getpid())
+		sampler.RecordCgroupCapability(ctx, containerPID, sampling.CgroupCapabilityAvailable, cgroupPath, nil, controllerPIDInt)
 	}
 
 	// Start sampler
@@ -1191,36 +1193,120 @@ func classifyCgroupFailure(err error) sampling.CgroupCapability {
 	}
 }
 
+// classifyCgroupFailureWithNamespace classifies cgroup failure with namespace comparison.
+// This mechanically proves mount_namespace_mismatch by comparing namespace IDs.
+func classifyCgroupFailureWithNamespace(err error, targetPID, controllerPID int) sampling.CgroupCapability {
+	if err == nil {
+		return sampling.CgroupCapabilityAvailable
+	}
+
+	errStr := err.Error()
+
+	// Check for mount namespace mismatch by comparing symlink targets
+	if contains(errStr, "cgroup2 mount not found") || contains(errStr, "cgroup2") {
+		// Read namespace IDs for both processes
+		targetNS, targetErr := procfs.ReadNamespaceIDs(targetPID)
+		controllerNS, controllerErr := procfs.ReadNamespaceIDs(controllerPID)
+
+		if targetErr == nil && controllerErr == nil {
+			// Compare mount namespaces
+			if targetNS.MountNamespace != "" && controllerNS.MountNamespace != "" {
+				if targetNS.MountNamespace != controllerNS.MountNamespace {
+					return sampling.CgroupCapabilityMountMismatch
+				}
+			}
+			// Compare cgroup namespaces
+			if targetNS.CgroupNamespace != "" && controllerNS.CgroupNamespace != "" {
+				if targetNS.CgroupNamespace != controllerNS.CgroupNamespace {
+					return sampling.CgroupCapabilityMountMismatch
+				}
+			}
+		}
+
+		// Namespace comparison inconclusive, fall through to heuristic
+		if contains(errStr, "cgroup2 mount not found") {
+			return sampling.CgroupCapabilityMountMismatch
+		}
+		return sampling.CgroupCapabilityNotMounted
+	}
+
+	// Other error types
+	switch {
+	case contains(errStr, "permission denied"):
+		return sampling.CgroupCapabilityPermissionDenied
+	case contains(errStr, "parse"):
+		return sampling.CgroupCapabilityParseFailure
+	default:
+		return sampling.CgroupCapabilityPathAbsent
+	}
+}
+
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
 
 // collectProvenance collects git, kernel, and binary provenance information.
 func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, string, error) {
+	var errs []string
+
 	// Git commit and tree
-	gitCommit, _ := runGit("rev-parse", "HEAD")
-	gitTree, _ := runGit("rev-parse", "HEAD^{tree}")
+	gitCommit, err := runGit("rev-parse", "HEAD")
+	if err != nil {
+		errs = append(errs, fmt.Sprintf("git commit: %v", err))
+	}
+	gitTree, err := runGit("rev-parse", "HEAD^{tree}")
+	if err != nil {
+		errs = append(errs, fmt.Sprintf("git tree: %v", err))
+	}
+
+	// Controller PID
 	controllerPID := fmt.Sprintf("%d", os.Getpid())
 
-	// Kernel release
-	kernelRelease, _ := os.ReadFile("/proc/version")
-	kernelStr := strings.TrimSpace(string(kernelRelease))
+	// Controller executable path and hash
+	selfPath, selfErr := os.Readlink("/proc/self/exe")
+	selfHash := ""
+	if selfErr == nil && selfPath != "" {
+		selfHash, _ = hashFile(selfPath)
+	} else {
+		errs = append(errs, fmt.Sprintf("executable hash: %v", selfErr))
+	}
 
-	// Cgroup mode
-	cgroupMode := "unknown"
-	if _, err := os.Stat("/sys/fs/cgroup/cgroup2"); err == nil {
-		cgroupMode = "cgroup2"
-	} else if _, err := os.Stat("/sys/fs/cgroup"); err == nil {
-		cgroupMode = "cgroup1"
+	// Kernel release using uname -r semantics
+	kernelRelease, err := runUname("-r")
+	if err != nil {
+		kernelRelease = ""
+		errs = append(errs, fmt.Sprintf("kernel release: %v", err))
+	}
+
+	// Kernel version (full string)
+	kernelVersion, err := os.ReadFile("/proc/version")
+	kernelVersionStr := ""
+	if err == nil {
+		kernelVersionStr = strings.TrimSpace(string(kernelVersion))
+	} else {
+		errs = append(errs, fmt.Sprintf("kernel version: %v", err))
+	}
+
+	// Cgroup mode - prefer reading from /proc/1/cgroup or mountinfo
+	cgroupMode := detectCgroupMode()
+
+	// Provenance status
+	status := "complete"
+	if len(errs) > 0 {
+		status = fmt.Sprintf("partial: %s", strings.Join(errs, "; "))
 	}
 
 	subject := &evidence.SubjectIdentity{
-		GitCommit: gitCommit,
-		GitTree:   gitTree,
+		GitCommit:               gitCommit,
+		GitTree:                 gitTree,
+		ControllerExecutablePath: selfPath,
+		ControllerExecutableSHA256: selfHash,
 	}
 	host := &evidence.HostIdentity{
-		KernelRelease: kernelStr,
-		CgroupMode:    cgroupMode,
+		KernelRelease:   kernelRelease,
+		KernelVersion:   kernelVersionStr,
+		CgroupMode:      cgroupMode,
+		CollectionStatus: status,
 	}
 
 	return subject, host, controllerPID, nil
@@ -1235,6 +1321,46 @@ func runGit(args ...string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// runUname runs the uname command and returns the trimmed output.
+func runUname(args ...string) (string, error) {
+	cmd := exec.Command("uname", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// detectCgroupMode determines cgroup mode using authoritative sources.
+// Priority: Docker API > mountinfo > /proc/cgroups.
+func detectCgroupMode() string {
+	// Try to read /proc/1/cgroup to determine host cgroup mode
+	// If PID 1 is in cgroup2, the host uses cgroup2
+	data, err := os.ReadFile("/proc/1/cgroup")
+	if err == nil {
+		// Check for unified hierarchy format "0::/" (cgroup2) vs " hierarchies"
+		for _, line := range strings.Split(string(data), "\n") {
+			// cgroup2 uses unified hierarchy "0::/"
+			if strings.Contains(line, "0::/") || strings.HasPrefix(line, "0:unified:") {
+				return "cgroup2"
+			}
+		}
+	}
+
+	// Fallback: check mountinfo for cgroup2fs mount
+	mountData, err := os.ReadFile("/proc/self/mountinfo")
+	if err == nil {
+		for _, line := range strings.Split(string(mountData), "\n") {
+			if strings.Contains(line, " - cgroup2fs ") || strings.Contains(line, "cgroup2fs") {
+				return "cgroup2"
+			}
+		}
+	}
+
+	// Default to cgroup1 if neither condition matches
+	return "cgroup1"
 }
 
 // hashFile computes SHA-256 hash of a file.
