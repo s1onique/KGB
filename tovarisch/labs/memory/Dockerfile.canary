@@ -1,0 +1,25 @@
+# Dockerfile.canary — Memory Canary Container
+#
+# Multi-stage build for static canary binary.
+# Final image is distroless for minimal attack surface.
+
+FROM --platform=linux/amd64 golang:1.23-alpine AS builder
+
+WORKDIR /build
+
+# Copy only the canary source
+COPY cmd/canary/ ./canary/
+
+# Build static binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o canary ./canary/
+
+# Extract binary hash
+RUN sha256sum canary
+
+FROM --platform=linux/amd64 gcr.io/distroless/static:nonroot
+
+COPY --from=builder /build/canary /app/canary
+
+USER nonroot
+
+ENTRYPOINT ["/app/canary"]
