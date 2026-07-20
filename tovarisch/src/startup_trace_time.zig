@@ -1,7 +1,6 @@
 // startup_trace_time.zig — Cross-platform monotonic time for startup tracing.
 ///
 /// Provides monoTimeNanos() for accurate duration measurement across Linux and macOS.
-
 const std = @import("std");
 
 /// Get current monotonic time in nanoseconds since some unspecified starting point.
@@ -17,10 +16,14 @@ pub fn monoTimeNanos() i128 {
             var ts: std.posix.timespec = undefined;
             // CLOCK_MONOTONIC = 1 on Linux
             if (std.posix.clock_gettime(@enumFromInt(1), &ts)) {
-                const sec_val: i128 = if (@hasDecl(std.posix.timespec, "tv_sec"))
-                    @intCast(ts.tv_sec) else @intCast(ts.sec);
-                const nsec_val: i128 = if (@hasDecl(std.posix.timespec, "tv_nsec"))
-                    @intCast(ts.tv_nsec) else @intCast(ts.nsec);
+                const sec_val: i128 = if (@hasField(std.posix.timespec, "tv_sec"))
+                    @intCast(ts.tv_sec)
+                else
+                    @intCast(ts.sec);
+                const nsec_val: i128 = if (@hasField(std.posix.timespec, "tv_nsec"))
+                    @intCast(ts.tv_nsec)
+                else
+                    @intCast(ts.nsec);
                 return sec_val * std.time.ns_per_s + nsec_val;
             }
         }
@@ -36,11 +39,23 @@ pub fn monoTimeNanos() i128 {
         }
     }
 
-    // Fallback: return wall clock time in ns (less accurate but better than 0)
+    // Fallback: return wall clock time in ns (less accurate but better than 0).
+    // Zig 0.16 types clock_gettime's clock ID as clockid_t;
+    // use the named value corresponding to the previous CLOCK_REALTIME value 0.
     if (@hasDecl(std.c, "clock_gettime")) {
         var ts: std.c.timespec = undefined;
-        if (std.c.clock_gettime(0, &ts) == 0) {
-            return @as(i128, ts.tv_sec) * std.time.ns_per_s + @as(i128, ts.tv_nsec);
+        if (std.c.clock_gettime(.REALTIME, &ts) == 0) {
+            // Mirror the defensive @hasField pattern used above for std.posix.timespec.
+            // std.c.timespec uses .sec/.nsec on Linux/macOS/BSD in Zig 0.16.
+            const sec_val: i128 = if (@hasField(std.c.timespec, "tv_sec"))
+                @intCast(ts.tv_sec)
+            else
+                @intCast(ts.sec);
+            const nsec_val: i128 = if (@hasField(std.c.timespec, "tv_nsec"))
+                @intCast(ts.tv_nsec)
+            else
+                @intCast(ts.nsec);
+            return sec_val * std.time.ns_per_s + nsec_val;
         }
     }
 
