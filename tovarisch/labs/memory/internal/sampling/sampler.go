@@ -184,31 +184,45 @@ func NewSamplerWithDocker(containerID string, hostPIDFunc func() int, docker *do
 type CgroupCapability string
 
 const (
-	CgroupCapabilityAvailable         CgroupCapability = "available"
-	CgroupCapabilityPermissionDenied  CgroupCapability = "permission_denied"
-	CgroupCapabilityPIDMismatch      CgroupCapability = "pid_namespace_mismatch"
-	CgroupCapabilityMountMismatch   CgroupCapability = "mount_namespace_mismatch"
-	CgroupCapabilityNotMounted      CgroupCapability = "cgroup2_not_mounted"
-	CgroupCapabilityPathAbsent      CgroupCapability = "resolved_path_absent"
-	CgroupCapabilityParseFailure    CgroupCapability = "parse_failure"
+	CgroupCapabilityAvailable                CgroupCapability = "available"
+	CgroupCapabilityPermissionDenied         CgroupCapability = "permission_denied"
+	CgroupCapabilityPIDMismatch             CgroupCapability = "pid_namespace_mismatch"
+	CgroupCapabilityMountMismatch           CgroupCapability = "mount_namespace_mismatch"
+	CgroupCapabilityNamespaceIdentityUnavail CgroupCapability = "namespace_identity_unavailable"
+	CgroupCapabilityNotMounted             CgroupCapability = "cgroup2_not_mounted"
+	CgroupCapabilityPathAbsent             CgroupCapability = "resolved_path_absent"
+	CgroupCapabilityParseFailure           CgroupCapability = "parse_failure"
 )
+
+// NamespaceProof captures the evidence for namespace-based capability determination.
+type NamespaceProof struct {
+	ControllerMountNamespace string `json:"controller_mount_namespace,omitempty"`
+	TargetMountNamespace     string `json:"target_mount_namespace,omitempty"`
+	ControllerCgroupNamespace string `json:"controller_cgroup_namespace,omitempty"`
+	TargetCgroupNamespace   string `json:"target_cgroup_namespace,omitempty"`
+	NamespaceReadError      string `json:"namespace_read_error,omitempty"`
+	DecisionReason         string `json:"decision_reason,omitempty"`
+}
 
 // RecordCgroupCapability records the result of cgroup v2 resolution as a structured event.
 // This creates durable evidence of the capability classification.
-func (s *Sampler) RecordCgroupCapability(ctx context.Context, pid int, capability CgroupCapability, path string, err error, controllerPID int) {
+func (s *Sampler) RecordCgroupCapability(ctx context.Context, pid int, capability CgroupCapability, path string, err error, controllerPID int, proof *NamespaceProof) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	eventData := map[string]interface{}{
-		"controller_pid":     controllerPID,
-		"target_pid":         pid,
-		"capability":         capability,
+		"controller_pid": controllerPID,
+		"target_pid":     pid,
+		"capability":     capability,
 	}
 	if path != "" {
 		eventData["cgroup_path"] = path
 	}
 	if err != nil {
 		eventData["error"] = err.Error()
+	}
+	if proof != nil {
+		eventData["namespace_proof"] = proof
 	}
 
 	s.events = append(s.events, Event{
