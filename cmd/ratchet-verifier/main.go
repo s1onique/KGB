@@ -14,17 +14,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-)
 
-// Baseline represents the ratchet baseline JSON format.
-type Baseline struct {
-	SchemaVersion   string `json:"schema_version"`
-	BaselineCommit string `json:"baseline_commit"`
-	Generator      string `json:"generator"`
-	Findings       []struct {
-		FindingID string `json:"finding_id"`
-	} `json:"findings"`
-}
+	"github.com/s1onique/KGB/internal/artifactwriterbaseline"
+)
 
 // Finding represents a finding from scanner output.
 type Finding struct {
@@ -33,38 +25,50 @@ type Finding struct {
 
 func main() {
 	var (
-		baselineFile = flag.String("baseline", "", "Path to baseline JSON file")
-		scannerBin  = flag.String("scanner", "/tmp/artifact-writer-scanner", "Path to artifact-writer-scanner binary")
+		baselineDir = flag.String("baseline-dir", "", "Path to baseline directory with manifest.json")
+		scannerBin  = flag.String("scanner", "", "Path to artifact-writer-scanner binary")
+		repoRoot   = flag.String("repo-root", "", "Repository root containing the source tree to scan")
 	)
 	flag.Parse()
 
-	if *baselineFile == "" {
-		fmt.Fprintln(os.Stderr, "Error: --baseline is required")
+	if *baselineDir == "" {
+		fmt.Fprintln(os.Stderr, "Error: --baseline-dir is required")
 		os.Exit(1)
 	}
 
-	// Load baseline
-	baselineData, err := os.ReadFile(*baselineFile)
+	if *scannerBin == "" {
+		fmt.Fprintln(os.Stderr, "Error: --scanner is required")
+		os.Exit(1)
+	}
+
+	if *repoRoot == "" {
+		fmt.Fprintln(os.Stderr, "Error: --repo-root is required")
+		os.Exit(1)
+	}
+
+	// Validate repo root is a directory
+	info, err := os.Stat(*repoRoot)
+	if err != nil || !info.IsDir() {
+		fmt.Fprintf(os.Stderr, "Error: --repo-root %q is not a valid directory\n", *repoRoot)
+		os.Exit(1)
+	}
+
+	// Load baseline using the production loader
+	baselineFindings, err := artifactwriterbaseline.LoadAll(*baselineDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading baseline: %v\n", err)
-		os.Exit(1)
-	}
-
-	var baseline Baseline
-	if err := json.Unmarshal(baselineData, &baseline); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing baseline JSON: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error loading baseline: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Create baseline finding_id set
 	baselineIDs := make(map[string]bool)
-	for _, f := range baseline.Findings {
+	for _, f := range baselineFindings {
 		baselineIDs[f.FindingID] = true
 	}
 
 	// Run scanner to get current findings
 	cmd := exec.Command(*scannerBin, "--format=findings")
-	cmd.Dir = "/home/kgb/Projects/KGB"
+	cmd.Dir = *repoRoot
 	output, err := cmd.Output()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error running scanner: %v\n", err)
@@ -85,7 +89,7 @@ func main() {
 
 	// Compute metrics
 	observedFindings := len(currentFindings)
-	approvedLegacyFindings := len(baseline.Findings)
+	approvedLegacyFindings := len(baselineFindings)
 
 	// Count baseline matches
 	baselineMatches := 0

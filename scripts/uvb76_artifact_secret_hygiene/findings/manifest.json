@@ -1,0 +1,35 @@
+{
+  "schema_version": "ratchet-sharded-v1",
+  "baseline_commit": "9d64d8e",
+  "generator": "artifact-writer-scanner",
+  "generated_at": "",
+  "shards": [
+    "capture-netns-lab-artifacts.jsonl",
+    "capture-netns-polling-artifacts.jsonl",
+    "icmp-ping-soak-artifacts.jsonl",
+    "latency-crash-lab-artifacts.jsonl",
+    "makefile-composition-artifacts.jsonl",
+    "memleak-pprof-lab-artifacts.jsonl",
+    "memory-lab-artifacts.jsonl",
+    "memory-lab-evidence-artifact.jsonl",
+    "memory-lab-evidence-attribution.jsonl",
+    "memory-lab-evidence-main.jsonl",
+    "memory-lab-evidence-tls_config.jsonl",
+    "targets-crash-lab-artifacts.jsonl",
+    "tcp-diag-telemetry-lab-artifacts.jsonl",
+    "wg-netlink-lab-evidence.jsonl"
+  ],
+  "surface_ids": [
+    "capture-netns-lab-artifacts",
+    "capture-netns-polling-artifacts",
+    "icmp-ping-soak-artifacts",
+    "latency-crash-lab-artifacts",
+    "makefile-composition-artifacts",
+    "memleak-pprof-lab-artifacts",
+    "memory-lab-artifacts",
+    "memory-lab-evidence",
+    "targets-crash-lab-artifacts",
+    "tcp-diag-telemetry-lab-artifacts",
+    "wg-netlink-lab-evidence"
+  ]
+}

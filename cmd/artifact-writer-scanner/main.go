@@ -330,8 +330,9 @@ const defaultSuccessor = "ACT-UVB76-RETAINED-ARTIFACT-MIGRATION-WAVE01"
 
 func main() {
 	var (
-		output      = flag.String("output", "", "Output file path (default: stdout)")
-		format      = flag.String("format", "ratchet-baseline", "Output format: ratchet-baseline, findings")
+		output      = flag.String("output", "", "Output file path (default: stdout) for legacy format")
+		outputDir   = flag.String("output-dir", "", "Output directory for sharded baseline (recommended)")
+		format      = flag.String("format", "ratchet-baseline", "Output format: ratchet-baseline, findings, sharded")
 		commit      = flag.String("commit", "", "Git commit hash for baseline")
 		packagePath = flag.String("package", "", "Go package path to scan")
 		directory   = flag.String("directory", "", "Directory to scan")
@@ -397,24 +398,7 @@ func main() {
 
 	switch *format {
 	case "ratchet-baseline":
-		commitHash := *commit
-		if commitHash == "" {
-			// Get current commit
-			if data, err := os.ReadFile(".git/refs/heads/main"); err == nil {
-				commitHash = strings.TrimSpace(string(data))
-			} else {
-				commitHash = "unknown"
-			}
-		}
-
-		baseline := Baseline{
-			SchemaVersion:   "ratchet-v1",
-			BaselineCommit:   commitHash,
-			Generator:        "artifact-writer-scanner",
-			GeneratedAt:      "", // Will be filled by JSON encoder
-			Findings:         findings,
-		}
-
+		baseline := Baseline{SchemaVersion: "ratchet-v1", BaselineCommit: getCommit(*commit), Generator: "artifact-writer-scanner", Findings: findings}
 		outputData, err = json.MarshalIndent(baseline, "", "  ")
 		if err != nil {
 			log.Fatalf("JSON marshal failed: %v", err)
@@ -426,10 +410,22 @@ func main() {
 			log.Fatalf("JSON marshal failed: %v", err)
 		}
 
+	case "sharded":
+		commitHash := *commit
+		if commitHash == "" {
+			commitHash = getCommitHash()
+		}
+		if err := outputSharded(findings, *outputDir, commitHash); err != nil {
+			log.Fatalf("Sharded write failed: %v", err)
+		}
+		fmt.Printf("Wrote %d findings to %s/\n", len(findings), *outputDir)
+		return
+
 	default:
 		log.Fatalf("Unknown format: %s", *format)
 	}
 
+	// Output legacy formats
 	if *output != "" {
 		if err := os.WriteFile(*output, outputData, 0644); err != nil {
 			log.Fatalf("Write failed: %v", err)
@@ -437,6 +433,6 @@ func main() {
 		fmt.Printf("Wrote %d findings to %s\n", len(findings), *output)
 	} else {
 		os.Stdout.Write(outputData)
-		fmt.Println() // newline
+		fmt.Println()
 	}
 }

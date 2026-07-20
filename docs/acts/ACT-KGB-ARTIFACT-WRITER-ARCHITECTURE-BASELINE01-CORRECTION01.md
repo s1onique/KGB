@@ -1,11 +1,11 @@
 # ACT: KGB Artifact Writer Architecture Baseline - CORRECTION01
 
-**Status:** RESOLVED  
-**ACT ID:** ACT-KGB-ARTIFACT-WRITER-ARCHITECTURE-BASELINE01  
-**Correction:** ACT-KGB-ARTIFACT-WRITER-ARCHITECTURE-BASELINE01-CORRECTION01  
-**Date:** 2026-07-20  
-**Original Commit:** 6e37d2f (REVERTED)  
-**Baseline Commit:** 9d64d8e  
+**Status:** PARTIAL — implementation complete; Go 1.25.12 verification pending
+**ACT ID:** ACT-KGB-ARTIFACT-WRITER-ARCHITECTURE-BASELINE01
+**Correction:** ACT-KGB-ARTIFACT-WRITER-ARCHITECTURE-BASELINE01-CORRECTION01
+**Date:** 2026-07-20
+**Original Commit:** 6e37d2f (REVERTED)
+**Baseline Commit:** 9d64d8e
 
 ## Resolution Summary
 
@@ -16,7 +16,9 @@ All P0 defects have been addressed:
 3. **Ratchet verifier** (`cmd/ratchet-verifier`) - fails on stale/unexpected findings
 4. **Valid SHA-256 hashes** - 87/87 findings have valid 64-hex hashes
 
-## Acceptance Checkpoint (VERIFIED)
+## Acceptance Checkpoint
+
+**Historical checkpoint — predates sharded-baseline correction; requires Go 1.25.12 verification**
 
 ```
 observed_findings=87
@@ -24,6 +26,8 @@ approved_legacy_findings=87
 baseline_matches=87
 unexpected_findings=0
 stale_findings=0
+scan_errors=0
+package_load_errors=0
 status=pass_baseline_equivalent
 ```
 
@@ -80,7 +84,7 @@ The ratchet must be implemented in **Go** using `go/ast` and `golang.org/x/tools
 
 ```
 Producer package (Go)           ->  Baseline (JSON)         ->  Verifier (Go)
-detect artifact writers         ->  60 finding_id entries   ->  compare finding_id
+detect artifact writers         ->  87 finding_id entries   ->  compare finding_id
 ```
 
 The Python secret-pattern scanner is **not** the correct foundation for artifact-writer ratchet enforcement.
@@ -88,25 +92,73 @@ The Python secret-pattern scanner is **not** the correct foundation for artifact
 ### Correct Baseline Generation
 
 ```bash
-# Generate baseline from actual AST analysis at commit 9d64d8e
-git checkout 9d64d8e
-go run ./cmd/artifact-writer-scanner --output=legacy_writer_findings.json --format=ratchet-baseline
-git checkout main
+# Generate sharded baseline from actual AST analysis at commit 9d64d8e
+# Uses worktree to keep current scanner implementation while scanning historical code
+repo="$(git rev-parse --show-toplevel)"
+source_parent="$(mktemp -d)"
+source_tree="$source_parent/kgb-baseline-source"
+scanner_bin="$source_parent/artifact-writer-scanner"
+
+cleanup() {
+  git -C "$repo" worktree remove --force "$source_tree" 2>/dev/null || true
+  rm -rf "$source_parent"
+}
+trap cleanup EXIT
+
+# Create detached worktree at historical commit
+git -C "$repo" worktree add --detach "$source_tree" 9d64d8e
+
+# Build current scanner (outside worktree to preserve scanner implementation)
+go -C "$repo/cmd/artifact-writer-scanner" build -o "$scanner_bin" .
+
+# Run scanner from within worktree so paths are relative to subject root
+(
+  cd "$source_tree"
+  "$scanner_bin" \
+    --directory=. \
+    --format=sharded \
+    --output-dir="$repo/scripts/uvb76_artifact_secret_hygiene/findings" \
+    --commit="$(git rev-parse HEAD)"
+)
 ```
 
-### Required Acceptance Checkpoint
+This separates:
+- **Generator identity:** current corrected scanner (built once)
+- **Subject identity:** tree at `9d64d8e`
+- **Execution context:** scanner runs inside worktree with `.` as root (paths stay repository-relative)
+- **Output location:** current correction checkout
+
+### Baseline Sharding
+
+To comply with LLM-friendliness line limits (500-line hard limit), the baseline is split into shards:
 
 ```
-observed_findings=60
-approved_legacy_findings=60
-baseline_matches=60
-unexpected_findings=0
-stale_findings=0
-unbound_findings=0
-scan_errors=0
-package_load_errors=0
-status=pass_baseline_equivalent
+scripts/uvb76_artifact_secret_hygiene/findings/
+├── manifest.json                    # Lists all shards
+├── capture-netns-lab-artifacts.jsonl
+├── capture-netns-polling-artifacts.jsonl
+├── icmp-ping-soak-artifacts.jsonl
+├── latency-crash-lab-artifacts.jsonl
+├── makefile-composition-artifacts.jsonl
+├── memleak-pprof-lab-artifacts.jsonl
+├── memory-lab-artifacts.jsonl
+├── memory-lab-evidence-artifact.jsonl
+├── memory-lab-evidence-attribution.jsonl
+├── memory-lab-evidence-main.jsonl
+├── memory-lab-evidence-tls_config.jsonl
+├── targets-crash-lab-artifacts.jsonl
+├── tcp-diag-telemetry-lab-artifacts.jsonl
+└── wg-netlink-lab-evidence.jsonl
 ```
+
+**Shard format:** JSON Lines (one JSON object per line) for compactness.
+
+**Loader:** Go shard loader in `internal/artifactwriterbaseline` provides:
+- Deterministic merge (sorted by surface_id, file, line, finding_id)
+- Duplicate detection
+- Path traversal validation
+- Schema version enforcement (ratchet-sharded-v1)
+- Strict JSON decoding (DisallowUnknownFields)
 
 ### Required Mutation Tests
 
@@ -119,9 +171,19 @@ status=pass_baseline_equivalent
 | package load failure | FAIL |
 | malformed baseline | FAIL |
 
+## Deferred P1 Hardening (Successor Work)
+
+The following hardening items were identified but deferred to allow this correction to close:
+
+1. **EOF validation on JSON streams** — require a second `Decode` call to return `io.EOF` for manifest and JSONL shards
+2. **Pre-flight validation** — validate all findings and derived shard names before modifying the destination
+3. **Memory-lab-evidence collision resistance** — replace basename-only shard subdivision with collision-resistant canonical identity
+4. **Atomic writes** — generate into fresh temporary directory, validate with `LoadAll`, then replace destination
+5. **Stale shard cleanup** — remove or reject `.jsonl` files not listed in new manifest
+
 ## Blocker for ACT-UVB76-RETAINED-ARTIFACT-MIGRATION-WAVE01
 
-Do not start migration ACT until CORRECTION01 is green.
+Do not start migration ACT until CORRECTION01 passes Go 1.25.12 verification.
 
 ## Implementation Notes
 
@@ -131,7 +193,7 @@ Do not start migration ACT until CORRECTION01 is green.
 // cmd/artifact-writer-scanner/main.go
 // Detects artifact writer patterns:
 // - os.WriteFile (no artifactio)
-// - ioutil.WriteFile (no artifactio)  
+// - ioutil.WriteFile (no artifactio)
 // - os.Create + Write (no artifactio)
 // - http.DetectContentType writes (no artifactio)
 //
