@@ -493,22 +493,23 @@ func TestLoadMatrixVerdict(t *testing.T) {
 
 func TestCrossRunChecksAllTrue(t *testing.T) {
 	checks := &CrossRunChecks{
-		SameCommitTree:         true,
-		SameControllerPID:      true,
-		SameControllerHash:    true,
-		SameSchema:            true,
-		SameThresholds:        true,
-		SamePhaseConfig:       true,
-		SameHostIdentity:      true,
-		SameDockerIdentity:    true,
-		SameImageIdentity:     true,
-		SameCanaryBinary:      true,
-		UniqueRunIDs:          true,
+		SameCommitTree:          true,
+		SameControllerPID:       true,
+		SameControllerHash:      true,
+		SameSchema:             true,
+		SameThresholds:         true,
+		SamePhaseConfig:        true,
+		SameHostIdentity:       true,
+		SameDockerIdentity:     true,
+		SameImageIdentity:      true,
+		SameCanaryBinary:       true,
+		UniqueRunIDs:           true,
 		UniqueSubjectProcesses: true,
-		FixedOrder:            true,
-		NonOverlapping:        true,
-		CleanupComplete:       true,
-		ChecksPassed:          15,
+		UniqueContainerIDs:     true,
+		FixedOrder:             true,
+		NonOverlapping:         true,
+		CleanupComplete:        true,
+		ChecksPassed:           16,
 	}
 
 	if !checks.AllTrue() {

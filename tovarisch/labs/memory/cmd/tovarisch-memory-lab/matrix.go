@@ -1,9 +1,16 @@
 // matrix.go — Canary Matrix Execution Types
 //
-// ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-MATRIX-QUALIFICATION01
+// ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-MATRIX-QUALIFICATION01-CORRECTION02
 //
 // Matrix execution identity and evidence schema for the three-canary
 // classification matrix (growing → bounded → descriptor).
+//
+// CORRECTION02 establishes a SINGLE authoritative reconstruction path:
+// - One shared ReconstructMatrixVerdict function used by both matrix and verify-matrix
+// - Canonical cleanup evidence bound to exact container/network/process identities
+// - Real SameSchema reconstruction from verified child manifests
+// - Complete field-by-field verdict comparison with field-specific diagnostics
+// - Fail-closed CLI exit semantics
 //
 // Core invariant:
 //   one committed implementation
@@ -138,6 +145,7 @@ type CrossRunChecks struct {
 	SameCanaryBinary      bool `json:"same_canary_binary"`
 	UniqueRunIDs          bool `json:"unique_run_ids"`
 	UniqueSubjectProcesses bool `json:"unique_subject_processes"`
+	UniqueContainerIDs    bool `json:"unique_container_ids"`
 	FixedOrder            bool `json:"fixed_order"`
 	NonOverlapping        bool `json:"non_overlapping"`
 	CleanupComplete       bool `json:"cleanup_complete"`
