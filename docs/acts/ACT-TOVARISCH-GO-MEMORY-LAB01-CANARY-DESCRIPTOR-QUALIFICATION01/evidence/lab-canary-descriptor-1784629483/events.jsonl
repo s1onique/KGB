@@ -1,9 +1,0 @@
-{"timestamp":"2026-07-21T13:24:44.230690608+03:00","type":"cgroup_capability","message":"path_absent","data":{"capability":"path_absent","controller_pid":2002770,"error":"procfs resolve cgroup pid 2002863: stat /system.slice/docker-cc82d5e08224daabc2971c448b6efd4caa7d505c6d61c2f5ae7c988fb9f6148c.scope: no such file or directory","namespace_proof":{"controller_mount_namespace":"mnt:[4026531832]","controller_cgroup_namespace":"cgroup:[4026531835]","target_read_error":"file does not exist","decision_reason":"path_absent"},"target_pid":2002863}}
-{"timestamp":"2026-07-21T13:24:44.230691647+03:00","type":"sampling_started","phase":"startup","message":"Sampling loop started"}
-{"timestamp":"2026-07-21T13:24:54.271896142+03:00","type":"phase_transition","phase":"warmup","message":"phase transition: startup -\u003e warmup","data":{"from":"startup","to":"warmup"}}
-{"timestamp":"2026-07-21T13:25:04.307451888+03:00","type":"phase_transition","phase":"baseline","message":"phase transition: warmup -\u003e baseline","data":{"from":"warmup","to":"baseline"}}
-{"timestamp":"2026-07-21T13:25:20.364705062+03:00","type":"phase_transition","phase":"stimulus","message":"phase transition: baseline -\u003e stimulus","data":{"from":"baseline","to":"stimulus"}}
-{"timestamp":"2026-07-21T13:26:20.597579983+03:00","type":"phase_transition","phase":"settling","message":"phase transition: stimulus -\u003e settling","data":{"from":"stimulus","to":"settling"}}
-{"timestamp":"2026-07-21T13:26:30.643185074+03:00","type":"phase_transition","phase":"final","message":"phase transition: settling -\u003e final","data":{"from":"settling","to":"final"}}
-{"timestamp":"2026-07-21T13:26:46.697989716+03:00","type":"phase_transition","phase":"complete","message":"phase transition: final -\u003e complete","data":{"from":"final","to":"complete"}}
-{"timestamp":"2026-07-21T13:26:46.698789848+03:00","type":"sampling_stopped","phase":"complete","message":"Sampling loop stopped"}
