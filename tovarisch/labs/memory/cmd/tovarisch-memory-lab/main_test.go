@@ -225,7 +225,7 @@ func TestValidateProvenanceEvidence(t *testing.T) {
 		ProvenanceError: "",
 	}
 
-	errs := validateProvenanceEvidence(validManifest, validVerdict)
+	errs := validateProvenanceEvidence(*validManifest, *validVerdict)
 	if len(errs) > 0 {
 		t.Errorf("expected no errors for valid evidence, got: %v", errs)
 	}
@@ -350,7 +350,7 @@ func TestValidateProvenanceEvidence_RejectsInvalidFields(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			errs := validateProvenanceEvidence(tc.manifest, tc.verdict)
+			errs := validateProvenanceEvidence(*tc.manifest, *tc.verdict)
 			if len(errs) != tc.wantErrs {
 				t.Errorf("expected %d errors, got %d: %v", tc.wantErrs, len(errs), errs)
 			}

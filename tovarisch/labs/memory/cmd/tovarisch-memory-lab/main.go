@@ -979,48 +979,16 @@ func verifyCommand(args []string) error {
 		verifyErrors = append(verifyErrors, "stored ScenarioValid does not match reconstruction")
 	}
 
-	// Verify provenance fields
-	// ProvenanceValid must be true and ProvenanceError must be empty for valid evidence
-	if !verdict.ProvenanceValid {
-		verifyErrors = append(verifyErrors, fmt.Sprintf("provenance_valid=false: %s", verdict.ProvenanceError))
-	}
-	if verdict.ProvenanceError != "" {
-		verifyErrors = append(verifyErrors, fmt.Sprintf("provenance_error not empty: %s", verdict.ProvenanceError))
-	}
+	// Verify provenance using the pure validator function
+	verifyErrors = append(verifyErrors, validateProvenanceEvidence(manifest, verdict)...)
 
-	// Verify SubjectIdentity fields
-	if manifest.SubjectIdentity != nil {
-		// GitCommit must be valid (non-empty, 40 hex chars for SHA)
-		if manifest.SubjectIdentity.GitCommit == "" {
-			verifyErrors = append(verifyErrors, "subject_identity.git_commit is empty")
-		} else if len(manifest.SubjectIdentity.GitCommit) != 40 {
-			verifyErrors = append(verifyErrors, fmt.Sprintf("subject_identity.git_commit invalid length: %d (expected 40)", len(manifest.SubjectIdentity.GitCommit)))
+	// Verify runtime executable hash matches stored hash (runtime binding)
+	if manifest.SubjectIdentity != nil && manifest.SubjectIdentity.ControllerExecutablePath != "" {
+		runtimeHash, hashErr := hashFile(manifest.SubjectIdentity.ControllerExecutablePath)
+		if hashErr == nil && runtimeHash != manifest.SubjectIdentity.ControllerExecutableSHA256 {
+			verifyErrors = append(verifyErrors, fmt.Sprintf("executable hash mismatch: stored=%s, runtime=%s",
+				manifest.SubjectIdentity.ControllerExecutableSHA256, runtimeHash))
 		}
-		// GitTree must be non-empty
-		if manifest.SubjectIdentity.GitTree == "" {
-			verifyErrors = append(verifyErrors, "subject_identity.git_tree is empty")
-		}
-		// ControllerExecutablePath must be non-empty
-		if manifest.SubjectIdentity.ControllerExecutablePath == "" {
-			verifyErrors = append(verifyErrors, "subject_identity.controller_executable_path is empty")
-		}
-		// ControllerExecutableSHA256 must be valid (64 hex chars for SHA-256)
-		if manifest.SubjectIdentity.ControllerExecutableSHA256 == "" {
-			verifyErrors = append(verifyErrors, "subject_identity.controller_executable_sha256 is empty")
-		} else if len(manifest.SubjectIdentity.ControllerExecutableSHA256) != 64 {
-			verifyErrors = append(verifyErrors, fmt.Sprintf("subject_identity.controller_executable_sha256 invalid length: %d (expected 64)", len(manifest.SubjectIdentity.ControllerExecutableSHA256)))
-		}
-	} else {
-		verifyErrors = append(verifyErrors, "subject_identity is nil")
-	}
-
-	// Verify HostIdentity.CollectionStatus = "complete"
-	if manifest.HostID != nil {
-		if manifest.HostID.CollectionStatus != "complete" {
-			verifyErrors = append(verifyErrors, fmt.Sprintf("host_identity.collection_status=%s (expected 'complete')", manifest.HostID.CollectionStatus))
-		}
-	} else {
-		verifyErrors = append(verifyErrors, "host_identity is nil")
 	}
 
 	// Print verification results
@@ -1595,7 +1563,7 @@ func provenanceErrorString(err error) string {
 // validateProvenanceEvidence validates provenance fields in manifest and verdict.
 // Returns a list of errors for any validation failures.
 // This is a pure function suitable for testing and verifier use.
-func validateProvenanceEvidence(manifest *evidence.Manifest, verdict *evidence.Verdict) []string {
+func validateProvenanceEvidence(manifest evidence.Manifest, verdict evidence.Verdict) []string {
 	var errs []string
 
 	// Check ProvenanceValid and ProvenanceError
@@ -1612,17 +1580,17 @@ func validateProvenanceEvidence(manifest *evidence.Manifest, verdict *evidence.V
 		return errs
 	}
 
-	// GitCommit must be valid (non-empty, 40 hex chars for SHA-1 or 64 for SHA-256)
+	// GitCommit must be valid Git object ID (20 bytes for SHA-1 or 32 bytes for SHA-256)
 	if manifest.SubjectIdentity.GitCommit == "" {
 		errs = append(errs, "subject_identity.git_commit is empty")
-	} else if err := validateHexString(manifest.SubjectIdentity.GitCommit); err != nil {
+	} else if err := validateGitObjectID(manifest.SubjectIdentity.GitCommit, ""); err != nil {
 		errs = append(errs, fmt.Sprintf("subject_identity.git_commit: %v", err))
 	}
 
-	// GitTree must be valid hex
+	// GitTree must be valid Git object ID
 	if manifest.SubjectIdentity.GitTree == "" {
 		errs = append(errs, "subject_identity.git_tree is empty")
-	} else if err := validateHexString(manifest.SubjectIdentity.GitTree); err != nil {
+	} else if err := validateGitObjectID(manifest.SubjectIdentity.GitTree, ""); err != nil {
 		errs = append(errs, fmt.Sprintf("subject_identity.git_tree: %v", err))
 	}
 
@@ -1631,10 +1599,10 @@ func validateProvenanceEvidence(manifest *evidence.Manifest, verdict *evidence.V
 		errs = append(errs, "subject_identity.controller_executable_path is empty")
 	}
 
-	// ControllerExecutableSHA256 must be valid 64-char hex
+	// ControllerExecutableSHA256 must be exactly 64 hex chars (32 bytes)
 	if manifest.SubjectIdentity.ControllerExecutableSHA256 == "" {
 		errs = append(errs, "subject_identity.controller_executable_sha256 is empty")
-	} else if err := validateHexString(manifest.SubjectIdentity.ControllerExecutableSHA256); err != nil {
+	} else if err := validateSHA256(manifest.SubjectIdentity.ControllerExecutableSHA256); err != nil {
 		errs = append(errs, fmt.Sprintf("subject_identity.controller_executable_sha256: %v", err))
 	}
 
@@ -1648,12 +1616,60 @@ func validateProvenanceEvidence(manifest *evidence.Manifest, verdict *evidence.V
 	return errs
 }
 
-// validateHexString validates that a string is valid hexadecimal and has expected length.
-// Returns error if the string contains non-hex characters or has invalid length.
+// validateHexString validates that a string is valid hexadecimal.
+// Returns error if the string contains non-hex characters.
 func validateHexString(s string) error {
-	// Try to decode - this validates hex syntax
 	if _, err := hex.DecodeString(s); err != nil {
 		return fmt.Errorf("invalid hex: %w", err)
+	}
+	return nil
+}
+
+// validateSHA256 validates that a string is valid 64-char hexadecimal representing SHA-256.
+// Returns error if the string is not valid hex or has wrong length (must be 64 hex chars = 32 bytes).
+func validateSHA256(value string) error {
+	if value == "" {
+		return fmt.Errorf("empty")
+	}
+	decoded, err := hex.DecodeString(value)
+	if err != nil {
+		return fmt.Errorf("invalid hex: %w", err)
+	}
+	if len(decoded) != sha256.Size {
+		return fmt.Errorf("decoded length=%d, want %d", len(decoded), sha256.Size)
+	}
+	return nil
+}
+
+// validateGitObjectID validates a Git object ID against the expected format.
+// Git object IDs are either SHA-1 (40 hex chars = 20 bytes) or SHA-256 (64 hex chars = 32 bytes).
+// If gitObjectFormat is provided, validates against that specific format.
+// Otherwise accepts either format.
+func validateGitObjectID(value string, gitObjectFormat string) error {
+	if value == "" {
+		return fmt.Errorf("empty")
+	}
+	decoded, err := hex.DecodeString(value)
+	if err != nil {
+		return fmt.Errorf("invalid hex: %w", err)
+	}
+
+	var expectedLen int
+	switch gitObjectFormat {
+	case "sha1", "sha-1":
+		expectedLen = 20
+	case "sha256", "sha-256":
+		expectedLen = 32
+	default:
+		// No format specified - accept either SHA-1 or SHA-256
+		if len(decoded) != 20 && len(decoded) != 32 {
+			return fmt.Errorf("decoded length=%d, want 20 (sha1) or 32 (sha256)", len(decoded))
+		}
+		return nil
+	}
+
+	if len(decoded) != expectedLen {
+		return fmt.Errorf("decoded length=%d, want %d for %s", len(decoded), expectedLen, gitObjectFormat)
 	}
 	return nil
 }
