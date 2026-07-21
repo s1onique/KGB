@@ -101,6 +101,8 @@ type Verdict struct {
 	Failures               []string                 `json:"failures,omitempty"`
 	Warnings               []string                 `json:"warnings,omitempty"`
 	Unknowns               []string                 `json:"unknowns,omitempty"`
+	ProvenanceValid        bool                     `json:"provenance_valid"`
+	ProvenanceError        string                   `json:"provenance_error,omitempty"`
 }
 
 // WriteManifest writes the manifest.json file.

@@ -487,7 +487,17 @@ func runCommand(args []string) error {
 		verdict.Overall == expectedVerdict &&
 		invariantResult.Valid
 
-	// Write verdict (without duplicating invariant failures)
+	// Collect provenance BEFORE writing verdict (fail-closed: if hash fails, verdict must reflect incomplete evidence)
+	subject, host, controllerPID, provenanceErr := collectProvenance()
+	provenanceValid := provenanceErr == nil
+
+	// Provenance failure makes scenario invalid (evidence is incomplete)
+	if provenanceErr != nil {
+		scenarioValid = false
+		canariesValid = false
+	}
+
+	// Write verdict with provenance status
 	verdictOutput := &evidence.Verdict{
 		OverallClassification:  verdict.Overall,
 		Scenario:               *scenario,
@@ -498,20 +508,21 @@ func runCommand(args []string) error {
 		SemanticClassification: verdict.Semantic,
 		SignalSummaries:        verdict.Signals,
 		Thresholds:             &thresholds,
-		Failures:               verdict.Failures, // Don't duplicate
+		Failures:               verdict.Failures,
 		Warnings:               verdict.Warnings,
 		Unknowns:               verdict.Unknowns,
+		ProvenanceValid:        provenanceValid,
+		ProvenanceError:        provenanceErrorString(provenanceErr),
 	}
 	if err := evidenceWriter.WriteVerdict(verdictOutput); err != nil {
 		cleanup.Cleanup(ctx)
 		return fmt.Errorf("write verdict: %w", err)
 	}
 
-	// Collect provenance (fail-closed: error means evidence is incomplete)
-	subject, host, controllerPID, err := collectProvenance()
-	if err != nil {
+	// If provenance failed, do not write manifest/checksums - evidence is incomplete
+	if provenanceErr != nil {
 		cleanup.Cleanup(ctx)
-		return fmt.Errorf("collect provenance: %w", err)
+		return fmt.Errorf("provenance collection failed: %w", provenanceErr)
 	}
 
 	// Finalize manifest with all metadata (must be done BEFORE checksums)
@@ -1211,7 +1222,7 @@ func classifyCgroupFailureWithReader(
 		capability = sampling.CgroupCapabilityNoUnifiedHierarchy
 	case errors.Is(err, procfs.ErrPathTraversal):
 		capability = sampling.CgroupCapabilityPathTraversal
-	case errors.Is(err, procfs.ErrPermissionDenied):
+	case errors.Is(err, os.ErrPermission), errors.Is(err, procfs.ErrPermissionDenied):
 		capability = sampling.CgroupCapabilityPermissionDenied
 	case errors.Is(err, procfs.ErrParseFailure):
 		capability = sampling.CgroupCapabilityParseFailure
@@ -1219,9 +1230,17 @@ func classifyCgroupFailureWithReader(
 		capability = sampling.CgroupCapabilityPathAbsent
 	}
 
-	// Read namespace IDs for both processes
-	targetNS, _ := readNS(targetPID)
-	controllerNS, _ := readNS(controllerPID)
+	// Read namespace IDs for both processes (capture errors for proof)
+	targetNS, targetReadErr := readNS(targetPID)
+	controllerNS, controllerReadErr := readNS(controllerPID)
+
+	// Record top-level read errors
+	if targetReadErr != nil {
+		proof.TargetReadError = targetReadErr.Error()
+	}
+	if controllerReadErr != nil {
+		proof.ControllerReadError = controllerReadErr.Error()
+	}
 
 	// Populate proof with what we read
 	if targetNS != nil {
@@ -1497,6 +1516,14 @@ func hashFile(path string) (string, error) {
 	}
 	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:]), nil
+}
+
+// provenanceErrorString returns a string representation of an error, or empty string if nil.
+func provenanceErrorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // validateStateInvariant validates the state changes match expected invariants.

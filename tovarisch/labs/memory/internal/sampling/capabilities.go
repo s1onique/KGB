@@ -65,6 +65,10 @@ type NamespaceProof struct {
 	ControllerMountNamespace   string `json:"controller_mount_namespace,omitempty"`
 	ControllerCgroupNamespace string `json:"controller_cgroup_namespace,omitempty"`
 
+	// Top-level read errors (when reader returns nil, error)
+	TargetReadError       string `json:"target_read_error,omitempty"`
+	ControllerReadError   string `json:"controller_read_error,omitempty"`
+
 	// Per-field read errors (for independent verification)
 	TargetMountNamespaceErr   string `json:"target_mount_namespace_err,omitempty"`
 	TargetCgroupNamespaceErr string `json:"target_cgroup_namespace_err,omitempty"`
