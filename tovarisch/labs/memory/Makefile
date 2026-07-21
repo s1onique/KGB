@@ -13,7 +13,9 @@ FACTORY := /home/kgb/Projects/KGB/.factory/bin
 	tovarisch-memory-lab-canary-bounded \
 	tovarisch-memory-lab-canary-descriptor \
 	tovarisch-memory-lab-canary-suite \
-	tovarisch-memory-lab-verify-evidence
+	tovarisch-memory-lab-verify-evidence \
+	tovarisch-memory-lab-matrix \
+	tovarisch-memory-lab-verify-matrix
 
 all: build test
 
@@ -85,3 +87,21 @@ tovarisch-memory-lab-verify-evidence:
 	$(FACTORY)/$(BINARY) verify \
 		--run-id $(RUN_ID) \
 		--artifacts-dir $(ARTIFACTS)
+
+# === ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-MATRIX-QUALIFICATION01 ===
+# Matrix command: execute all three scenarios with frozen execution identity
+
+tovarisch-memory-lab-matrix:
+	mkdir -p $(ARTIFACTS)
+	$(FACTORY)/$(BINARY) matrix \
+		--duration 60 \
+		--artifacts-dir $(ARTIFACTS)
+
+# Verify matrix (requires MATRIX_DIR env var)
+tovarisch-memory-lab-verify-matrix:
+	@if [ -z "$(MATRIX_DIR)" ]; then \
+		echo "Usage: make tovarisch-memory-lab-verify-matrix MATRIX_DIR=<path>"; \
+		exit 1; \
+	fi
+	$(FACTORY)/$(BINARY) verify-matrix \
+		--matrix-dir $(MATRIX_DIR)

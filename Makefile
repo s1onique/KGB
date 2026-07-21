@@ -1,4 +1,4 @@
-.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-bounded-memory-reconnect-proof tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate memory-lab memory-lab-test lab-tovarisch-memory lab-uvb76-memory lab-uvb76-memory-attribution verify-uvb76-memory-attribution hulk-uvb76-gate tovarisch-test-base-fingerprint verify-script-doctrine hulk-uvb76-artifact-secret-gate hulk-uvb76-artifact-producer-gate hulk-uvb76-capture-gate hulk-uvb76-latency-gate hulk-uvb76-reachability-gate
+.PHONY: gate digest llm-friendliness tovarisch-build tovarisch-test tovarisch-bounded-memory-reconnect-proof tovarisch-run tovarisch-status tovarisch-serve-liveness tovarisch-compile-linux cross-platform-gate coverage coverage-report verify-structured-logs verify-plaintext-logs health-audit lab-bgp-bfd lab-bgp-bfd-reconnect lab-bgp-bfd-reconnect-bgp-reset install-git-safety-hooks verify-git-history-safety verify-github-ruleset uvb76-build uvb76-build-linux-arm64 uvb76-test uvb76-polling-build uvb76-polling-test lab-uvb76-capture-url verify-memory-budgets verify-memory-lab-artifacts verify-memory-ownership memory-gate memory-lab memory-lab-test lab-tovarisch-memory lab-uvb76-memory lab-uvb76-memory-attribution verify-uvb76-memory-attribution hulk-uvb76-gate tovarisch-test-base-fingerprint verify-script-doctrine hulk-uvb76-artifact-secret-gate hulk-uvb76-artifact-producer-gate hulk-uvb76-capture-gate hulk-uvb76-latency-gate hulk-uvb76-reachability-gate tovarisch-memory-lab-matrix tovarisch-memory-lab-verify-matrix
 
 # Coverage threshold: percentage of line coverage required to pass
 COVERAGE_THRESHOLD ?= 87
@@ -776,4 +776,23 @@ tovarisch-memory-lab-verify-evidence:
 
 tovarisch-memory-lab-clean:
 	rm -rf .factory/tovarisch-memory-lab
+
+# === ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-MATRIX-QUALIFICATION01 ===
+# Matrix command: execute all three scenarios with frozen execution identity
+
+tovarisch-memory-lab-matrix: tovarisch-memory-lab-build
+	@echo "=== Memory Lab: Matrix (all three scenarios with frozen identity) ==="
+	@mkdir -p .factory/tovarisch-memory-lab
+	"$(MEMORY_LAB)" matrix \
+		--duration 60 \
+		--artifacts-dir .factory/tovarisch-memory-lab
+
+tovarisch-memory-lab-verify-matrix:
+	@if [ -z "$(MATRIX_DIR)" ]; then \
+		echo "MATRIX_DIR is required, e.g. make tovarisch-memory-lab-verify-matrix MATRIX_DIR=.factory/tovarisch-memory-lab/matrix-1234567890"; \
+		exit 1; \
+	fi
+	@echo "=== Memory Lab Matrix Verifier ==="
+	"$(MEMORY_LAB)" verify-matrix \
+		--matrix-dir "$(MATRIX_DIR)"
 	cd tovarisch/labs/memory && go clean

@@ -1,4 +1,4 @@
-// cmd/tovarisch-memory-lab/main.go — Memory Laboratory CLI
+// cmd/tovarisch-memory-lab/main.go โ�� Memory Laboratory CLI
 //
 // Go-based Docker laboratory for deterministic memory investigation.
 // Uses Docker SDK with Engine API version negotiation.
@@ -71,7 +71,7 @@ type WorkloadResult struct {
 }
 
 // CanaryImageProvenance captures the canary image identity, labels,
-// and source-tree binding. CORRECTION02 §7.
+// and source-tree binding. CORRECTION02 ยง7.
 type CanaryImageProvenance struct {
 	ImageID                       string   `json:"canary_image_id"`
 	RepoDigests                   []string `json:"canary_repo_digests"`
@@ -98,7 +98,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: %s <run|verify|derive-runtime-state> [options]", args[0])
+		return fmt.Errorf("usage: %s <run|verify|derive-runtime-state|matrix|verify-matrix> [options]", args[0])
 	}
 
 	switch args[1] {
@@ -108,8 +108,12 @@ func run(args []string) error {
 		return verifyCommand(args[1:])
 	case "derive-runtime-state":
 		return deriveRuntimeStateCommand(args[1:])
+	case "matrix":
+		return matrixCommand(args[1:])
+	case "verify-matrix":
+		return verifyMatrixCommand(args[1:])
 	default:
-		return fmt.Errorf("unknown subcommand: %s (expected 'run', 'verify', or 'derive-runtime-state')", args[1])
+		return fmt.Errorf("unknown subcommand: %s (expected 'run', 'verify', 'derive-runtime-state', 'matrix', or 'verify-matrix')", args[1])
 	}
 }
 
@@ -723,7 +727,7 @@ func captureAndVerifyCanaryImageIdentity(
 		BinarySHA256Label:       labels["kgb.dev/canary-binary-sha256"],
 	}
 
-	// CORRECTION03 §3 + §5: fail-closed before stimulus if
+	// CORRECTION03 ยง3 + ยง5: fail-closed before stimulus if
 	// any comparison fails.
 	if build.PrebuildBinarySHA256 == "" {
 		return nil, fmt.Errorf("pre-build canary binary hash is empty in build metadata")
@@ -764,7 +768,7 @@ func captureAndVerifyCanaryImageIdentity(
 			sii.SourceSubtreeLabel, build.CanarySourceSubtreeOID)
 	}
 
-	// CORRECTION03 §5: container inspect must report the
+	// CORRECTION03 ยง5: container inspect must report the
 	// verified image ID.
 	inspectedImage, err := dockerClient.ContainerImageID(ctx, canaryContainerID)
 	if err != nil || inspectedImage == "" {
@@ -781,7 +785,7 @@ func captureAndVerifyCanaryImageIdentity(
 
 // deriveRuntimeStateCommand reads a verified evidence bundle and
 // emits the canonical runtime-state block for the close report.
-// CORRECTION02 §8.
+// CORRECTION02 ยง8.
 func deriveRuntimeStateCommand(args []string) error {
 	fs := flag.NewFlagSet("memory-lab derive-runtime-state", flag.ContinueOnError)
 	artifactsDir := fs.String("artifacts-dir", "", "Artifacts directory (required)")
@@ -1269,7 +1273,7 @@ func verifyCommand(args []string) error {
 		}
 	}
 
-	// CORRECTION02 §6: reconstruct verdicts using the manifest
+	// CORRECTION02 ยง6: reconstruct verdicts using the manifest
 	// thresholds, NOT analysis.DefaultThresholds(). The manifest
 	// thresholds are the committed, authoritative values; a
 	// threshold mutation must force the verifier to reject the
@@ -1298,7 +1302,7 @@ func verifyCommand(args []string) error {
 		manifestThresholds = analysis.DefaultThresholds()
 	}
 
-	// CORRECTION02 §6: compare the verifier-reconstructed
+	// CORRECTION02 ยง6: compare the verifier-reconstructed
 	// thresholds against the verdict's persisted thresholds. A
 	// material mutation in the manifest must surface here.
 	if verdict.Thresholds != nil {
@@ -1468,7 +1472,7 @@ func verifyCommand(args []string) error {
 							fmt.Sprintf("descriptor_state_invariant classification=%s != resource_growth",
 								invariant.Classification))
 					}
-					// CORRECTION02 §2: structural counters.
+					// CORRECTION02 ยง2: structural counters.
 					if invariant.SampleCount != 2 {
 						verifyErrors = append(verifyErrors,
 							fmt.Sprintf("descriptor_state_invariant sample_count=%d, expected 2",
@@ -1585,7 +1589,7 @@ func verifyCommand(args []string) error {
 		}
 	}
 
-	// CORRECTION03 §6: canary image identity is reconstructed
+	// CORRECTION03 ยง6: canary image identity is reconstructed
 	// from the manifest's subject_image_identity block. The
 	// sidecar canary-image-provenance.json is no longer part of
 	// the canonical schema. The verifier must reject the sidecar
@@ -1701,7 +1705,7 @@ func verifyCommand(args []string) error {
 				fmt.Sprintf("subject_image_identity.container_image_id=%s != container-inspect.json image=%s",
 					sii.ContainerImageID, containerImageID))
 		}
-		// CORRECTION04 §2: image_id must equal container_image_id
+		// CORRECTION04 ยง2: image_id must equal container_image_id
 		// and both must equal container-inspect.json's Image.
 		if sii.ImageID != "" && sii.ContainerImageID != "" &&
 			!strings.EqualFold(sii.ImageID, sii.ContainerImageID) {
@@ -1721,7 +1725,7 @@ func verifyCommand(args []string) error {
 				fmt.Sprintf("subject_image_identity.image_reference=%s does not match container inspect Config.Image=%s",
 					sii.ImageReference, inspectImageRef))
 		}
-		// CORRECTION04 §3: repository digest status and grammar.
+		// CORRECTION04 ยง3: repository digest status and grammar.
 		switch sii.RepoDigestStatus {
 		case "available":
 			if len(sii.RepoDigests) == 0 {
@@ -2444,7 +2448,7 @@ func extractContainerImageReference(data []byte) (string, error) {
 }
 
 // validateRepoDigest validates a repository-digest string of
-// the form name@sha256:<64-lowercase-hex>. CORRECTION04 §3.
+// the form name@sha256:<64-lowercase-hex>. CORRECTION04 ยง3.
 func validateRepoDigest(d string) error {
 	at := strings.LastIndex(d, "@")
 	if at <= 0 || at == len(d)-1 {
