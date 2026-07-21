@@ -904,6 +904,16 @@ func verifyCommand(args []string) error {
 			workload.Requested, workload.Attempted, workload.Completed, workload.Failed))
 	}
 
+	// Verify returned equals completed: the producer MUST persist the
+	// observed completed count as the returned count. The bounded,
+	// growing, and descriptor canary contracts all require this
+	// invariant; a mismatch indicates evidence tampering or producer
+	// regression.
+	if workload.Returned != workload.Completed {
+		verifyErrors = append(verifyErrors, fmt.Sprintf("workload returned=%d != completed=%d (expected returned=completed)",
+			workload.Returned, workload.Completed))
+	}
+
 	// Verify state deltas match scenario
 	opDelta := finalState.OperationCount - initialState.OperationCount
 	if opDelta != workload.Completed {
@@ -1041,7 +1051,16 @@ func verifyScenarioValid(scenario string, samples []sampling.Sample, workload Wo
 			hasFinal = true
 		}
 	}
-	return hasBaseline && hasFinal && workload.Completed == workload.Requested && len(samples) > 0
+	// Workload arithmetic: requested == attempted == completed,
+	// failed == 0, returned == completed. The producer MUST persist
+	// the observed completed count as the returned count; any
+	// mismatch indicates evidence tampering.
+	return hasBaseline && hasFinal &&
+		workload.Requested == workload.Attempted &&
+		workload.Attempted == workload.Completed &&
+		workload.Failed == 0 &&
+		workload.Returned == workload.Completed &&
+		len(samples) > 0
 }
 
 // ContainerInspect represents the container inspect data

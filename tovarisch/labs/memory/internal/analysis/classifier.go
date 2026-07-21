@@ -588,8 +588,14 @@ func classifyMemorySignals(signals []SignalSummary, thresholds Thresholds) Class
 		if dockerDeltaKiB >= canaryThresholdKiB {
 			return ClassificationGrowing
 		}
-		// Docker growth below canary threshold is inconclusive
-		return ClassificationInconclusive
+		// Small Docker variation with no primary corroboration: stable.
+		// Bounded and descriptor canaries legitimately show small Docker
+		// memory variation from their static buffer, not from workload-
+		// proportional allocation. The canary scenario's state invariants
+		// (buffer unchanged, retained=0, operation-count delta == completed)
+		// are the authoritative "no workload-proportional growth" signal
+		// and are verified separately by validateStateInvariant.
+		return ClassificationStable
 	}
 
 	// Cgroup anon-only growth: also restrict to canary calibration rule

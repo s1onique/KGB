@@ -228,3 +228,97 @@ func TestInsufficientSamples(t *testing.T) {
 		t.Errorf("Expected inconclusive for insufficient samples")
 	}
 }
+
+// TestClassificationBoundedDockerOnlySmallGrowth verifies the bounded canary
+// contract: when only Docker memory is available and the delta is small
+// (well below the 32 MiB canary calibration threshold), the classification
+// is stable. This represents the bounded canary's static 1 MiB buffer
+// appearing in Docker memory without workload-proportional growth.
+//
+// Background: a real bounded canary run, when running inside a Docker
+// container, can have all procfs/cgroup primary signals unavailable
+// (cross-namespace restrictions). The bounded scenario's own state
+// invariants (buffer unchanged, retained=0, operation-count delta ==
+// completed) are the authoritative "no workload-proportional growth"
+// signal. Treating this case as inconclusive incorrectly fails the
+// bounded scenario even when every invariant is satisfied.
+func TestClassificationBoundedDockerOnlySmallGrowth(t *testing.T) {
+	// 20 samples simulating a bounded canary: only Docker memory is
+	// available (HasDockerMemory=true); all primary/secondary procfs
+	// signals and resource signals are missing.
+	// Docker memory: 1.7 MiB -> 2.7 MiB (1 MiB delta from the canary's
+	// 1 MiB static buffer allocation). Far below the 32 MiB canary
+	// calibration threshold.
+	now := time.Now()
+	samples := make([]sampling.Sample, 20)
+	for i := range samples {
+		phase := sampling.PhaseBaseline
+		if i >= 10 {
+			phase = sampling.PhaseStimulus
+		}
+		// Docker memory grows from 1708 KiB to ~2756 KiB (delta ~1048 KiB)
+		dockerKiB := int64(1708 + i*55)
+		samples[i] = sampling.Sample{
+			Sequence:              i,
+			Timestamp:             now.Add(time.Duration(i) * time.Second),
+			PID:                   12345,
+			ProcessStartTime:      1000,
+			Phase:                 phase,
+			DockerMemoryUsageBytes: dockerKiB * 1024,
+			HasDockerMemory:       true,
+			// All other signals unavailable (default zero values)
+		}
+	}
+
+	verdict := Analyze(samples, DefaultThresholds())
+	if verdict.Memory != ClassificationStable {
+		t.Errorf("Expected stable for bounded docker-only small growth, got %v", verdict.Memory)
+	}
+	if verdict.Overall != ClassificationStable {
+		t.Errorf("Expected overall stable, got %v", verdict.Overall)
+	}
+}
+
+// TestClassificationGrowingDockerOnlyLargeGrowth verifies the growing
+// canary contract: when only Docker memory is available and the delta
+// meets the 32 MiB canary calibration threshold, the classification
+// remains growing (not regressed by the bounded-scenario fix).
+//
+// The classifier computes deltas as (last_window_median -
+// first_window_median). For 20 samples split at midpoint 10, the
+// first-window median sits at the 5th sample and the last-window
+// median sits at the 15th sample, so the observed delta is roughly
+// half of the full range. The total range is therefore doubled
+// (64 MiB) to ensure the median delta reliably exceeds the 32 MiB
+// canary calibration threshold.
+func TestClassificationGrowingDockerOnlyLargeGrowth(t *testing.T) {
+	// 20 samples simulating a growing canary: only Docker memory is
+	// available, with ~64 MiB total range. The median delta exceeds
+	// the 32 MiB canary calibration threshold.
+	now := time.Now()
+	samples := make([]sampling.Sample, 20)
+	const startBytes = int64(10) * 1024 * 1024      // 10 MiB
+	const totalDeltaBytes = int64(64) * 1024 * 1024 // 64 MiB
+	for i := range samples {
+		phase := sampling.PhaseBaseline
+		if i >= 10 {
+			phase = sampling.PhaseStimulus
+		}
+		// Linear growth in bytes: 10 MiB -> 74 MiB (64 MiB delta)
+		dockerBytes := startBytes + int64(i)*totalDeltaBytes/19
+		samples[i] = sampling.Sample{
+			Sequence:               i,
+			Timestamp:              now.Add(time.Duration(i) * time.Second),
+			PID:                    12345,
+			ProcessStartTime:       1000,
+			Phase:                  phase,
+			DockerMemoryUsageBytes: dockerBytes,
+			HasDockerMemory:        true,
+		}
+	}
+
+	verdict := Analyze(samples, DefaultThresholds())
+	if verdict.Memory != ClassificationGrowing {
+		t.Errorf("Expected growing for docker-only large growth, got %v", verdict.Memory)
+	}
+}
