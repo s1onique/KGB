@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0.0",
+  "run_id": "lab-canary-descriptor-1784631468",
+  "scenario": "canary-descriptor",
+  "started_at": "2026-07-21T13:57:48.126783695+03:00",
+  "finished_at": "2026-07-21T13:59:51.061843516+03:00",
+  "subject_identity": {
+    "git_commit": "d2638c044ac4ee54f060970d0f51af32e0cee86b",
+    "git_tree": "9eaf21dbb45fda00ee6fcc2d1e211eb20a69f2c3",
+    "git_object_format": "sha1",
+    "controller_executable_path": "/home/kgb/Projects/KGB/.factory/bin/tovarisch-memory-lab",
+    "controller_executable_sha256": "50ce317ec64b98593e384cc0ad47dd6c70857fa9e2f6e0339225147d90dd5bdf"
+  },
+  "controller_identity": "2084786",
+  "host_identity": {
+    "kernel_release": "6.17.0-19-generic",
+    "kernel_version": "Linux version 6.17.0-19-generic (buildd@lcy02-amd64-019) (x86_64-linux-gnu-gcc-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, GNU ld (GNU Binutils for Ubuntu) 2.42) #19~24.04.2-Ubuntu SMP PREEMPT_DYNAMIC Fri Mar  6 23:08:46 UTC 2",
+    "cgroup_mode": "cgroup2",
+    "collection_status": "complete"
+  },
+  "docker_identity": {
+    "engine_version": "29.6.2",
+    "api_version": "1.44"
+  },
+  "configuration": {
+    "phase_config": {
+      "StartupDeadline": 10000000000,
+      "Warmup": 10000000000,
+      "Baseline": 15000000000,
+      "Stimulus": 60000000000,
+      "Settling": 10000000000,
+      "Final": 15000000000,
+      "Interval": 1000000000
+    },
+    "thresholds": {
+      "MemoryGrowthKibPerHour": 500,
+      "MemoryGrowthPercentPerHour": 0.5,
+      "ResourceGrowthPerHour": 10,
+      "CorroborationCount": 2,
+      "SampleCountMinimum": 10,
+      "WindowMinimum": 3
+    }
+  },
+  "artifact_inventory": [
+    "manifest.json",
+    "verdict.json",
+    "samples.csv",
+    "events.jsonl",
+    "container-inspect.json",
+    "container-logs.txt",
+    "initial-canary-state.json",
+    "final-canary-state.json",
+    "workload-result.json",
+    "checksums.txt"
+  ]
+}
