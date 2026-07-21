@@ -215,6 +215,51 @@ func (c *Client) ContainerExec(ctx context.Context, containerID string, cmd []st
 	return info.ExitCode, string(output), nil
 }
 
+// ContainerExtractFile extracts a single file from a running
+// (or stopped) container via `docker cp` and returns its
+// contents as a byte slice. Used by CORRECTION03 to hash
+// /app/canary inside the built image.
+func (c *Client) ContainerExtractFile(ctx context.Context, containerID, path string) ([]byte, error) {
+	rc, _, err := c.Client.CopyFromContainer(ctx, containerID, path)
+	if err != nil {
+		return nil, fmt.Errorf("copy from container: %w", err)
+	}
+	defer rc.Close()
+	// Untar: the docker cp protocol emits a tar stream
+	// containing the file. We extract the first regular file.
+	tr := tar.NewReader(rc)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil, fmt.Errorf("no file in tar stream for %s", path)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("tar next: %w", err)
+		}
+		if hdr.Typeflag == tar.TypeReg {
+			data, err := io.ReadAll(tr)
+			if err != nil {
+				return nil, fmt.Errorf("read file: %w", err)
+			}
+			return data, nil
+		}
+	}
+}
+
+// ContainerCreateReadOnly creates a read-only container from
+// the given image so the binary can be extracted without
+// running the canary. Returns the container ID.
+func (c *Client) ContainerCreateReadOnly(ctx context.Context, imageID string) (string, error) {
+	resp, err := c.Client.ContainerCreate(ctx,
+		&container.Config{Image: imageID, Cmd: []string{"/bin/sh"}},
+		&container.HostConfig{AutoRemove: false},
+		nil, nil, "")
+	if err != nil {
+		return "", fmt.Errorf("create read-only container: %w", err)
+	}
+	return resp.ID, nil
+}
+
 func (c *Client) NetworkCreate(ctx context.Context, name string, driver string) (string, error) {
 	resp, err := c.Client.NetworkCreate(ctx, name, types.NetworkCreate{
 		Driver: driver,

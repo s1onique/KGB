@@ -59,6 +59,13 @@ type Manifest struct {
 	DockerID          *DockerIdentity   `json:"docker_identity,omitempty"`
 	Configuration     *LabConfiguration `json:"configuration,omitempty"`
 	ArtifactInventory []string          `json:"artifact_inventory"`
+
+	// CORRECTION03: SubjectImageIdentity moves the canary-image
+	// provenance from the unchecked canary-image-provenance.json
+	// sidecar into the canonical checksummed manifest. Every
+	// fact used by the close report must live inside the
+	// checksum boundary.
+	SubjectImageIdentity *SubjectImageIdentity `json:"subject_image_identity,omitempty"`
 }
 
 // SubjectIdentity captures the subject's identity for binding.
@@ -94,6 +101,46 @@ type LabConfiguration struct {
 	ResourceLimits interface{} `json:"resource_limits,omitempty"`
 	PhaseConfig    interface{} `json:"phase_config,omitempty"`
 	Thresholds     interface{} `json:"thresholds,omitempty"`
+}
+
+// SubjectImageIdentity captures the canary image identity and
+// the source-tree binding. CORRECTION03 §2-§6: every fact used
+// by the close report must live inside the canonical checksum
+// boundary (i.e. inside the manifest.json file). The verifier
+// reads this block and reconstructs the image identity without
+// contacting Docker or Git.
+type SubjectImageIdentity struct {
+	// Image identity (actual docker image inspect output, never
+	// synthesized).
+	ImageReference     string   `json:"image_reference,omitempty"`
+	ImageID            string   `json:"image_id,omitempty"`
+	RepoDigests        []string `json:"repo_digests,omitempty"`
+	RepoDigestStatus   string   `json:"repo_digest_status,omitempty"` // "available" | "unavailable_local_image"
+
+	// Source-tree binding (captured at image-build time via
+	// `git rev-parse`).
+	SourceCommitOID      string `json:"source_commit_oid,omitempty"`
+	RepositoryTreeOID    string `json:"repository_tree_oid,omitempty"`
+	CanarySourceSubtreeOID string `json:"canary_source_subtree_oid,omitempty"`
+
+	// Binary hash binding. PrebuildBinarySHA256 is computed
+	// before `docker build`; ExtractedImageBinarySHA256 is
+	// computed by `docker create` + `docker cp` + `sha256sum`
+	// of /app/canary inside the built image. The two MUST be
+	// equal; the producer fails closed if they disagree.
+	PrebuildBinarySHA256        string `json:"prebuild_binary_sha256,omitempty"`
+	ExtractedImageBinarySHA256  string `json:"extracted_image_binary_sha256,omitempty"`
+
+	// OCI + kgb.dev provenance labels captured at build time.
+	// Verified against the source-tree identity and the
+	// extracted binary hash.
+	RevisionLabel         string `json:"revision_label,omitempty"`
+	RepositoryTreeLabel   string `json:"repository_tree_label,omitempty"`
+	SourceSubtreeLabel    string `json:"source_subtree_label,omitempty"`
+	BinarySHA256Label     string `json:"binary_sha256_label,omitempty"`
+
+	// Container image ID (after `docker create`).
+	ContainerImageID string `json:"container_image_id,omitempty"`
 }
 
 // Verdict represents the verdict.json structure.

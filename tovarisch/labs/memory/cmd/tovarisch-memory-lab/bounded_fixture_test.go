@@ -93,6 +93,26 @@ func rebindFixture(t *testing.T, boundDir string) string {
 	manifest.SubjectIdentity.ControllerExecutableSHA256 = verifierSHA()
 	manifest.SubjectIdentity.ControllerExecutablePath = verifierPath()
 
+	// CORRECTION03: the subject_image_identity must agree with
+	// the bound subject_identity (source commit / repository tree
+	// are bound from HEAD; canary subtree is bound from HEAD;
+	// container_image_id is bound from container-inspect.json).
+	if manifest.SubjectImageIdentity != nil {
+		canarySubtree, _ := runGitForTest("rev-parse", "HEAD:tovarisch/labs/memory/cmd/canary")
+		inspectPath := filepath.Join(boundDir, "container-inspect.json")
+		if inspectData, ierr := os.ReadFile(inspectPath); ierr == nil {
+			if cid, eerr := extractContainerImageID(inspectData); eerr == nil && cid != "" {
+				manifest.SubjectImageIdentity.ContainerImageID = cid
+			}
+		}
+		manifest.SubjectImageIdentity.SourceCommitOID = headCommit
+		manifest.SubjectImageIdentity.RepositoryTreeOID = headTree
+		manifest.SubjectImageIdentity.CanarySourceSubtreeOID = canarySubtree
+		manifest.SubjectImageIdentity.RevisionLabel = headCommit
+		manifest.SubjectImageIdentity.RepositoryTreeLabel = headTree
+		manifest.SubjectImageIdentity.SourceSubtreeLabel = canarySubtree
+	}
+
 	// Re-marshal with LF endings (json.Encoder appends a trailing
 	// newline automatically).
 	rewritten, err := json.MarshalIndent(&manifest, "", "  ")

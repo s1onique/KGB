@@ -422,9 +422,16 @@ func runCommand(args []string) error {
 	inspectData, _ := dockerClient.ContainerInspect(ctx, containerID)
 	evidenceWriter.WriteContainerInspect("container", inspectData)
 
-	// CORRECTION02: capture canary image provenance (image ID, repo
-	// digests, source/binary labels) BEFORE stopping the container.
-	canaryProv := captureCanaryImageProvenance(ctx, dockerClient, containerID, imageID, *containerImage)
+	// CORRECTION03: capture and verify canary image identity.
+	// Fails closed BEFORE the stimulus if pre-build, extracted-image,
+	// and label hashes disagree. The result is stored inside the
+	// canonical manifest.json (the canary-image-provenance.json
+	// sidecar is no longer used).
+	canaryImageIdentity, err := captureAndVerifyCanaryImageIdentity(ctx, dockerClient, containerID)
+	if err != nil {
+		cleanup.Cleanup(ctx)
+		return fmt.Errorf("canary image identity: %w", err)
+	}
 
 	thresholds := analysis.DefaultThresholds()
 	invariantResult := validateStateInvariant(*scenario, initialState, finalState, workloadResult)
@@ -578,13 +585,16 @@ func runCommand(args []string) error {
 		return fmt.Errorf("write finalized manifest: %w", err)
 	}
 
-	// CORRECTION02: persist canary image provenance as a separate
-	// evidence file so the close report and verifier can read it
-	// without re-querying the local Docker engine.
-	if canaryProv != nil {
-		provPath := filepath.Join(artifactsPath, "canary-image-provenance.json")
-		if data, err := json.MarshalIndent(canaryProv, "", "  "); err == nil {
-			_ = os.WriteFile(provPath, data, 0644)
+	// CORRECTION03: persist the canary image identity INSIDE the
+	// canonical manifest.json (the canary-image-provenance.json
+	// sidecar is no longer used). The verifier reads this block
+	// from the manifest and reconstructs the image identity
+	// without contacting Docker or Git.
+	if canaryImageIdentity != nil {
+		finalizedManifest.SubjectImageIdentity = canaryImageIdentity
+		if err := evidenceWriter.WriteManifest(finalizedManifest); err != nil {
+			cleanup.Cleanup(ctx)
+			return fmt.Errorf("write manifest with image identity: %w", err)
 		}
 	}
 
@@ -631,80 +641,142 @@ func runCommand(args []string) error {
 	return nil
 }
 
-// captureCanaryImageProvenance collects the canary image ID, repo
-// digests, and image labels that bind the canary to the tested
-// source tree and binary identity. The canary binary hash is
-// extracted by exec-ing the /app/canary binary inside the
-// container so the hash is the same one the canary will be
-// running at verification time.
-func captureCanaryImageProvenance(
+// captureAndVerifyCanaryImageIdentity is the CORRECTION03
+// entry point. It reads the build metadata JSON produced by
+// scripts/build_tovarisch_canary_image.sh, creates a read-only
+// container from the canary image, extracts /app/canary via
+// `docker cp` (the distroless image has no sha256sum so we cannot
+// exec the binary directly), and computes the extracted-image
+// binary SHA-256. The producer fails closed if the pre-build
+// hash, the extracted-image hash, or the OCI label disagree.
+//
+// The returned SubjectImageIdentity is stored inside the
+// canonical manifest.json (the canary-image-provenance.json
+// sidecar is no longer used). The verifier reads this block
+// from the manifest and reconstructs the image identity
+// without contacting Docker or Git.
+func captureAndVerifyCanaryImageIdentity(
 	ctx context.Context,
 	dockerClient *dockerlab.Client,
-	containerID string,
-	imageID string,
-	imageRef string,
-) *CanaryImageProvenance {
-	prov := &CanaryImageProvenance{
-		ImageID:      imageID,
-		RepoDigests:  []string{},
-		RepoDigestStatus: "unavailable_local_image",
+	canaryContainerID string,
+) (*evidence.SubjectImageIdentity, error) {
+	buildPath := filepath.Join("tovarisch", "labs", "memory", "canary-image-build.json")
+	raw, err := os.ReadFile(buildPath)
+	if err != nil {
+		return nil, fmt.Errorf("read canary build metadata: %w (run scripts/build_tovarisch_canary_image.sh first)", err)
+	}
+	var build struct {
+		ImageReference         string   `json:"image_reference"`
+		ImageID                string   `json:"image_id"`
+		RepoDigests            []string `json:"repo_digests"`
+		SourceCommitOID        string   `json:"source_commit_oid"`
+		RepositoryTreeOID      string   `json:"repository_tree_oid"`
+		CanarySourceSubtreeOID string   `json:"canary_source_subtree_oid"`
+		PrebuildBinarySHA256   string   `json:"prebuild_binary_sha256"`
+	}
+	if err := json.Unmarshal(raw, &build); err != nil {
+		return nil, fmt.Errorf("parse canary build metadata: %w", err)
 	}
 
-	repoDigests, digestsErr := dockerClient.ImageRepoDigests(ctx, imageRef)
-	if digestsErr == nil && len(repoDigests) > 0 {
-		prov.RepoDigests = repoDigests
-		prov.RepoDigestStatus = "available"
+	// Create a read-only container from the canary image so
+	// /app/canary can be extracted without running it.
+	tmpContainerID, err := dockerClient.ContainerCreateReadOnly(ctx, build.ImageID)
+	if err != nil {
+		return nil, fmt.Errorf("create read-only canary container: %w", err)
+	}
+	defer func() {
+		_ = dockerClient.ContainerRemove(ctx, tmpContainerID, true)
+	}()
+
+	// Extract /app/canary and compute its SHA-256.
+	data, err := dockerClient.ContainerExtractFile(ctx, tmpContainerID, "/app/canary")
+	if err != nil {
+		return nil, fmt.Errorf("extract /app/canary from canary image: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	extractedImageBinarySHA256 := hex.EncodeToString(sum[:])
+
+	// Read the actual image labels (this is the source of truth
+	// the manifest persists; not synthesized).
+	labels, _ := dockerClient.ImageLabels(ctx, build.ImageID)
+
+	// Build the canonical SubjectImageIdentity. Every field
+	// here lives inside the checksummed manifest, so the
+	// verifier can reconstruct the image identity offline.
+	repoDigestStatus := "unavailable_local_image"
+	if len(build.RepoDigests) > 0 {
+		repoDigestStatus = "available"
+	}
+	sii := &evidence.SubjectImageIdentity{
+		ImageReference:          build.ImageReference,
+		ImageID:                 build.ImageID,
+		RepoDigests:             build.RepoDigests,
+		RepoDigestStatus:        repoDigestStatus,
+		SourceCommitOID:         build.SourceCommitOID,
+		RepositoryTreeOID:       build.RepositoryTreeOID,
+		CanarySourceSubtreeOID:  build.CanarySourceSubtreeOID,
+		PrebuildBinarySHA256:    build.PrebuildBinarySHA256,
+		ExtractedImageBinarySHA256: extractedImageBinarySHA256,
+		RevisionLabel:           labels["org.opencontainers.image.revision"],
+		RepositoryTreeLabel:     labels["kgb.dev/source-tree"],
+		SourceSubtreeLabel:      labels["kgb.dev/canary-source-tree"],
+		BinarySHA256Label:       labels["kgb.dev/canary-binary-sha256"],
 	}
 
-	labels, _ := dockerClient.ImageLabels(ctx, imageID)
-	prov.ImageRevisionLabel = labels["org.opencontainers.image.revision"]
-	prov.ImageRepositoryTreeLabel = labels["kgb.dev/source-tree"]
-	prov.ImageSourceSubtreeLabel = labels["kgb.dev/canary-source-tree"]
-	prov.ImageBinarySHA256Label = labels["kgb.dev/canary-binary-sha256"]
-
-	// Bind source / binary identity via Git.
-	prov.SourceCommitOID, _ = runGit("rev-parse", "HEAD")
-	prov.RepositoryTreeOID, _ = runGit("rev-parse", "HEAD^{tree}")
-	prov.SourceSubtreeOID, _ = runGit("rev-parse", "HEAD:tovarisch/labs/memory/cmd/canary")
-
-	// Compute the runtime canary binary hash by running sha256sum
-	// on /app/canary inside the container. This is the same
-	// binary the canary is executing; the label is only meaningful
-	// if the two match.
-	// The distroless image has no sha256sum; the exec call
-	// fails and RuntimeBinarySHA256 stays empty. The OCI label
-	// + Git source-tree OID is the authoritative binding.
-	if _, out, err := dockerClient.ContainerExec(ctx, containerID, []string{"sha256sum", "/app/canary"}); err == nil {
-		// Strip Docker's 8-byte multiplexed stream header and
-		// scan the remaining printable bytes for the first 64-char
-		// hex digest.
-		payload := out
-		if len(payload) > 8 {
-			payload = payload[8:]
-		}
-		hex := make([]byte, 0, 64)
-		for _, b := range payload {
-			if (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F') {
-				hex = append(hex, byte(b))
-				if len(hex) == 64 {
-					break
-				}
-			} else if len(hex) > 0 {
-				break
-			}
-		}
-		if len(hex) == 64 {
-			prov.RuntimeBinarySHA256 = string(hex)
-			prov.RuntimeBinarySHA256Matches = (prov.ImageBinarySHA256Label != "" &&
-				strings.EqualFold(prov.RuntimeBinarySHA256, prov.ImageBinarySHA256Label))
-		}
+	// CORRECTION03 §3 + §5: fail-closed before stimulus if
+	// any comparison fails.
+	if build.PrebuildBinarySHA256 == "" {
+		return nil, fmt.Errorf("pre-build canary binary hash is empty in build metadata")
+	}
+	if extractedImageBinarySHA256 == "" {
+		return nil, fmt.Errorf("extracted image binary hash is empty")
+	}
+	if !strings.EqualFold(build.PrebuildBinarySHA256, extractedImageBinarySHA256) {
+		return nil, fmt.Errorf("canary binary hash mismatch: prebuild=%s extracted=%s",
+			build.PrebuildBinarySHA256, extractedImageBinarySHA256)
+	}
+	if sii.BinarySHA256Label == "" {
+		return nil, fmt.Errorf("canary image is missing kgb.dev/canary-binary-sha256 label")
+	}
+	if !strings.EqualFold(build.PrebuildBinarySHA256, sii.BinarySHA256Label) {
+		return nil, fmt.Errorf("canary binary hash mismatch: prebuild=%s label=%s",
+			build.PrebuildBinarySHA256, sii.BinarySHA256Label)
+	}
+	if sii.RevisionLabel == "" {
+		return nil, fmt.Errorf("canary image is missing org.opencontainers.image.revision label")
+	}
+	if sii.RepositoryTreeLabel == "" {
+		return nil, fmt.Errorf("canary image is missing kgb.dev/source-tree label")
+	}
+	if sii.SourceSubtreeLabel == "" {
+		return nil, fmt.Errorf("canary image is missing kgb.dev/canary-source-tree label")
+	}
+	if !strings.EqualFold(sii.RevisionLabel, build.SourceCommitOID) {
+		return nil, fmt.Errorf("canary image revision label=%s != tested commit=%s",
+			sii.RevisionLabel, build.SourceCommitOID)
+	}
+	if !strings.EqualFold(sii.RepositoryTreeLabel, build.RepositoryTreeOID) {
+		return nil, fmt.Errorf("canary image repository-tree label=%s != tested tree=%s",
+			sii.RepositoryTreeLabel, build.RepositoryTreeOID)
+	}
+	if !strings.EqualFold(sii.SourceSubtreeLabel, build.CanarySourceSubtreeOID) {
+		return nil, fmt.Errorf("canary image source-subtree label=%s != Git source subtree=%s",
+			sii.SourceSubtreeLabel, build.CanarySourceSubtreeOID)
 	}
 
-	// Container inspect must report the verified image ID.
-	inspectedImage, _ := dockerClient.ContainerImageID(ctx, containerID)
-	prov.ContainerImageMatchesImageID = (inspectedImage != "" && strings.HasPrefix(inspectedImage, imageID))
+	// CORRECTION03 §5: container inspect must report the
+	// verified image ID.
+	inspectedImage, err := dockerClient.ContainerImageID(ctx, canaryContainerID)
+	if err != nil || inspectedImage == "" {
+		return nil, fmt.Errorf("container inspect image ID is empty")
+	}
+	if !strings.HasPrefix(inspectedImage, build.ImageID) {
+		return nil, fmt.Errorf("container image ID %s does not match verified image id (got=%s)",
+			build.ImageID, inspectedImage)
+	}
+	sii.ContainerImageID = inspectedImage
 
-	return prov
+	return sii, nil
 }
 
 // deriveRuntimeStateCommand reads a verified evidence bundle and
@@ -737,20 +809,22 @@ func deriveRuntimeStateCommand(args []string) error {
 }
 
 // runtimeStateBlock is the canonical close-report payload derived
-// from the accepted evidence bundle.
+// from the accepted evidence bundle. CORRECTION03: the canary
+// image identity is now read from the manifest's
+// subject_image_identity block (not from a sidecar).
 type runtimeStateBlock struct {
-	InitialFDCount        int                    `json:"initial_fd_count"`
-	FinalFDCount          int                    `json:"final_fd_count"`
-	FDCountDelta          int                    `json:"fd_count_delta"`
-	InitialOperationCount int                    `json:"initial_operation_count"`
-	FinalOperationCount   int                    `json:"final_operation_count"`
-	OperationCountDelta   int                    `json:"operation_count_delta"`
-	ProcessPID            int                    `json:"process_pid"`
-	ProcessStartTime      int64                  `json:"process_start_time"`
-	SampleCount           int                    `json:"sample_count"`
-	DelayedSamples        int                    `json:"delayed_samples"`
-	PhaseCounts           map[string]int         `json:"phase_counts"`
-	CanaryImage           *CanaryImageProvenance `json:"canary_image_provenance,omitempty"`
+	InitialFDCount        int                          `json:"initial_fd_count"`
+	FinalFDCount          int                          `json:"final_fd_count"`
+	FDCountDelta          int                          `json:"fd_count_delta"`
+	InitialOperationCount int                          `json:"initial_operation_count"`
+	FinalOperationCount   int                          `json:"final_operation_count"`
+	OperationCountDelta   int                          `json:"operation_count_delta"`
+	ProcessPID            int                          `json:"process_pid"`
+	ProcessStartTime      int64                        `json:"process_start_time"`
+	SampleCount           int                          `json:"sample_count"`
+	DelayedSamples        int                          `json:"delayed_samples"`
+	PhaseCounts           map[string]int               `json:"phase_counts"`
+	CanaryImage           *evidence.SubjectImageIdentity `json:"canary_image_identity,omitempty"`
 }
 
 // deriveRuntimeState reads the accepted evidence and emits the
@@ -812,11 +886,13 @@ func deriveRuntimeState(artifactsDir, runID string) (*runtimeStateBlock, error) 
 		PhaseCounts:           phaseCounts,
 	}
 
-	provPath := filepath.Join(artDir, "canary-image-provenance.json")
-	if data, err := os.ReadFile(provPath); err == nil {
-		var prov CanaryImageProvenance
-		if err := json.Unmarshal(data, &prov); err == nil {
-			block.CanaryImage = &prov
+	// CORRECTION03: read the canary image identity from the
+	// canonical manifest.json (not from the sidecar).
+	manifestData, err := os.ReadFile(filepath.Join(artDir, "manifest.json"))
+	if err == nil {
+		var m evidence.Manifest
+		if jerr := json.Unmarshal(manifestData, &m); jerr == nil && m.SubjectImageIdentity != nil {
+			block.CanaryImage = m.SubjectImageIdentity
 		}
 	}
 	return block, nil
@@ -977,9 +1053,10 @@ func verifyCommand(args []string) error {
 		}
 	}
 	for path := range actualFiles {
-		// canary-image-provenance.json is optional; not in the
-		// canonical inventory but permitted if present.
 		if path == "canary-image-provenance.json" {
+			// Defer this check to the verifier's provenance
+			// reconstruction block so the diagnostic includes
+			// the canary-image-provenance.json field context.
 			continue
 		}
 		if !expectedFiles[path] {
@@ -1508,45 +1585,98 @@ func verifyCommand(args []string) error {
 		}
 	}
 
-	// CORRECTION02 §7: canary image identity / source binding
-	// (only when canary-image-provenance.json is present).
-	provPath := filepath.Join(artifactPath, "canary-image-provenance.json")
-	if data, err := os.ReadFile(provPath); err == nil {
-		var prov CanaryImageProvenance
-		if err := json.Unmarshal(data, &prov); err == nil {
-			verifiedCommit := ""
-			verifiedTree := ""
-			if manifest.SubjectIdentity != nil {
-				verifiedCommit = manifest.SubjectIdentity.GitCommit
-				verifiedTree = manifest.SubjectIdentity.GitTree
-			}
-			verifiedSubtree, _ := runGit("rev-parse", verifiedCommit + ":tovarisch/labs/memory/cmd/canary")
-			if verifiedCommit != "" && prov.ImageRevisionLabel != "" && prov.ImageRevisionLabel != verifiedCommit {
+	// CORRECTION03 §6: canary image identity is reconstructed
+	// from the manifest's subject_image_identity block. The
+	// sidecar canary-image-provenance.json is no longer part of
+	// the canonical schema. The verifier must reject the sidecar
+	// if present.
+	for path := range actualFiles {
+		if path == "canary-image-provenance.json" {
+			verifyErrors = append(verifyErrors,
+				"canary-image-provenance.json is in the artifact directory; CORRECTION03 requires the image identity to be inside manifest.json")
+		}
+	}
+	if manifest.SubjectImageIdentity == nil {
+		verifyErrors = append(verifyErrors,
+			"manifest.subject_image_identity is missing; CORRECTION03 requires the canary image identity to be inside manifest.json")
+	} else {
+		sii := manifest.SubjectImageIdentity
+		if manifest.SubjectIdentity != nil {
+			if sii.SourceCommitOID != "" && sii.SourceCommitOID != manifest.SubjectIdentity.GitCommit {
 				verifyErrors = append(verifyErrors,
-					fmt.Sprintf("canary image revision label=%s != tested commit=%s",
-						prov.ImageRevisionLabel, verifiedCommit))
+					fmt.Sprintf("manifest subject_image_identity.source_commit_oid=%s != manifest subject_identity.git_commit=%s",
+						sii.SourceCommitOID, manifest.SubjectIdentity.GitCommit))
 			}
-			if verifiedTree != "" && prov.ImageRepositoryTreeLabel != "" && prov.ImageRepositoryTreeLabel != verifiedTree {
+			if sii.RepositoryTreeOID != "" && sii.RepositoryTreeOID != manifest.SubjectIdentity.GitTree {
 				verifyErrors = append(verifyErrors,
-					fmt.Sprintf("canary image repository-tree label=%s != tested tree=%s",
-						prov.ImageRepositoryTreeLabel, verifiedTree))
+					fmt.Sprintf("manifest subject_image_identity.repository_tree_oid=%s != manifest subject_identity.git_tree=%s",
+						sii.RepositoryTreeOID, manifest.SubjectIdentity.GitTree))
 			}
-			if verifiedSubtree != "" && prov.ImageSourceSubtreeLabel != "" && prov.ImageSourceSubtreeLabel != verifiedSubtree {
-				verifyErrors = append(verifyErrors,
-					fmt.Sprintf("canary image source-subtree label=%s != Git source subtree=%s",
-						prov.ImageSourceSubtreeLabel, verifiedSubtree))
-			}
-			if prov.RuntimeBinarySHA256 != "" && prov.ImageBinarySHA256Label != "" &&
-				!strings.EqualFold(prov.RuntimeBinarySHA256, prov.ImageBinarySHA256Label) {
-				verifyErrors = append(verifyErrors,
-					fmt.Sprintf("canary binary hash mismatch: runtime=%s label=%s",
-						prov.RuntimeBinarySHA256, prov.ImageBinarySHA256Label))
-			}
-			if !prov.ContainerImageMatchesImageID {
-				verifyErrors = append(verifyErrors,
-					fmt.Sprintf("container image ID does not match verified image id (got=%s)",
-						prov.ImageID))
-			}
+		}
+		if sii.PrebuildBinarySHA256 == "" {
+			verifyErrors = append(verifyErrors, "subject_image_identity.prebuild_binary_sha256 is empty")
+		}
+		if sii.ExtractedImageBinarySHA256 == "" {
+			verifyErrors = append(verifyErrors, "subject_image_identity.extracted_image_binary_sha256 is empty")
+		}
+		if sii.PrebuildBinarySHA256 != "" && sii.ExtractedImageBinarySHA256 != "" &&
+			!strings.EqualFold(sii.PrebuildBinarySHA256, sii.ExtractedImageBinarySHA256) {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("subject_image_identity prebuild=%s != extracted=%s",
+					sii.PrebuildBinarySHA256, sii.ExtractedImageBinarySHA256))
+		}
+		if sii.BinarySHA256Label == "" {
+			verifyErrors = append(verifyErrors, "subject_image_identity.binary_sha256_label is empty")
+		}
+		if sii.PrebuildBinarySHA256 != "" && sii.BinarySHA256Label != "" &&
+			!strings.EqualFold(sii.PrebuildBinarySHA256, sii.BinarySHA256Label) {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("subject_image_identity prebuild=%s != binary_sha256_label=%s",
+					sii.PrebuildBinarySHA256, sii.BinarySHA256Label))
+		}
+		if sii.RevisionLabel == "" {
+			verifyErrors = append(verifyErrors, "subject_image_identity.revision_label is empty")
+		} else if sii.SourceCommitOID != "" && !strings.EqualFold(sii.RevisionLabel, sii.SourceCommitOID) {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("subject_image_identity.revision_label=%s != source_commit_oid=%s",
+					sii.RevisionLabel, sii.SourceCommitOID))
+		}
+		if sii.RepositoryTreeLabel == "" {
+			verifyErrors = append(verifyErrors, "subject_image_identity.repository_tree_label is empty")
+		} else if sii.RepositoryTreeOID != "" && !strings.EqualFold(sii.RepositoryTreeLabel, sii.RepositoryTreeOID) {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("subject_image_identity.repository_tree_label=%s != repository_tree_oid=%s",
+					sii.RepositoryTreeLabel, sii.RepositoryTreeOID))
+		}
+		if sii.SourceSubtreeLabel == "" {
+			verifyErrors = append(verifyErrors, "subject_image_identity.source_subtree_label is empty")
+		} else if sii.CanarySourceSubtreeOID != "" && !strings.EqualFold(sii.SourceSubtreeLabel, sii.CanarySourceSubtreeOID) {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("subject_image_identity.source_subtree_label=%s != canary_source_subtree_oid=%s",
+					sii.SourceSubtreeLabel, sii.CanarySourceSubtreeOID))
+		}
+		if sii.ImageID == "" {
+			verifyErrors = append(verifyErrors, "subject_image_identity.image_id is empty")
+		}
+		if len(sii.RepoDigests) == 0 && sii.RepoDigestStatus != "unavailable_local_image" {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("subject_image_identity.repo_digest_status=%q inconsistent with empty repo_digests",
+					sii.RepoDigestStatus))
+		}
+		if len(sii.RepoDigests) > 0 && sii.RepoDigestStatus != "available" {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("subject_image_identity.repo_digest_status=%q inconsistent with non-empty repo_digests",
+					sii.RepoDigestStatus))
+		}
+		// Container image ID must equal the verified image ID
+		// from container-inspect.json.
+		containerImageID, _ := extractContainerImageID(inspectData)
+		if sii.ContainerImageID == "" {
+			verifyErrors = append(verifyErrors, "subject_image_identity.container_image_id is empty")
+		} else if containerImageID != "" && sii.ContainerImageID != containerImageID {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("subject_image_identity.container_image_id=%s != container-inspect.json image=%s",
+					sii.ContainerImageID, containerImageID))
 		}
 	}
 
@@ -2205,6 +2335,19 @@ func verifyRuntimeExecutableHash(storedHash string, openRuntimeExecutable runtim
 		return fmt.Errorf("executable hash mismatch: stored=%s runtime=%s", storedHash, got)
 	}
 	return nil
+}
+
+// extractContainerImageID extracts the Image field from the
+// container-inspect.json bytes. Returns empty string on any
+// parse failure.
+func extractContainerImageID(data []byte) (string, error) {
+	var ci struct {
+		Image string `json:"Image"`
+	}
+	if err := json.Unmarshal(data, &ci); err != nil {
+		return "", err
+	}
+	return ci.Image, nil
 }
 
 func validateStateInvariant(scenario string, initial, final *CanaryState, workload *WorkloadResult) *analysis.StateInvariantResult {
