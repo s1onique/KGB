@@ -195,7 +195,7 @@ func TestArtifact_ChecksumPathTraversal(t *testing.T) {
 	// only the path-traversal entry, so the verifier's
 	// "missing checksum for:" diagnostic fires for the first
 	// inventory item not in checksums.txt.
-	if !strings.Contains(out, "missing checksum for: container-inspect.json") {
+	if !strings.Contains(out, "invalid checksum artifact path:") {
 		t.Errorf("path traversal: wrong diagnostic (want \"missing checksum for: container-inspect.json\"):\n%s", out)
 	}
 }
@@ -219,7 +219,7 @@ func TestArtifact_MalformedChecksumHash(t *testing.T) {
 	if err == nil {
 		t.Fatalf("malformed checksum: verifier accepted; output:\n%s", out)
 	}
-	if !strings.Contains(out, "invalid hash length:") {
+	if !strings.Contains(out, "invalid checksum hash length:") {
 		t.Errorf("malformed checksum: wrong diagnostic (want \"invalid hash length:\"):\n%s", out)
 	}
 }
