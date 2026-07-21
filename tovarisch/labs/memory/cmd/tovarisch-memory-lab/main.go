@@ -1596,9 +1596,30 @@ func verifyCommand(args []string) error {
 				"canary-image-provenance.json is in the artifact directory; CORRECTION03 requires the image identity to be inside manifest.json")
 		}
 	}
-	if manifest.SubjectImageIdentity == nil {
+	// CORRECTION04: schema_version check.
+	switch manifest.SchemaVersion {
+	case "1.0.0":
+		// Legacy: subject_image_identity is optional; the
+		// verifier does not claim image-provenance PASS for 1.0.0.
+		if manifest.SubjectImageIdentity != nil {
+			verifyErrors = append(verifyErrors,
+				"schema_version 1.0.0 evidence must not carry subject_image_identity; remove the block or upgrade to 1.1.0")
+		}
+	case "1.1.0":
+		if manifest.SubjectImageIdentity == nil {
+			verifyErrors = append(verifyErrors,
+				"manifest.subject_image_identity is missing; schema 1.1.0 requires the canary image identity to be inside manifest.json")
+		}
+	default:
 		verifyErrors = append(verifyErrors,
-			"manifest.subject_image_identity is missing; CORRECTION03 requires the canary image identity to be inside manifest.json")
+			fmt.Sprintf("unsupported manifest_schema_version=%q (CORRECTION04 accepts only 1.0.0 legacy or 1.1.0 current)",
+				manifest.SchemaVersion))
+	}
+	if manifest.SubjectImageIdentity == nil && manifest.SchemaVersion == "1.1.0" {
+		verifyErrors = append(verifyErrors,
+			"manifest.subject_image_identity is missing; schema 1.1.0 requires the canary image identity to be inside manifest.json")
+	} else if manifest.SubjectImageIdentity == nil {
+		// Legacy 1.0.0: subject_image_identity is permitted to be missing.
 	} else {
 		sii := manifest.SubjectImageIdentity
 		if manifest.SubjectIdentity != nil {
@@ -1671,12 +1692,69 @@ func verifyCommand(args []string) error {
 		// Container image ID must equal the verified image ID
 		// from container-inspect.json.
 		containerImageID, _ := extractContainerImageID(inspectData)
+		// image_reference should match container-inspect.json Config.Image.
+		inspectImageRef, _ := extractContainerImageReference(inspectData)
 		if sii.ContainerImageID == "" {
 			verifyErrors = append(verifyErrors, "subject_image_identity.container_image_id is empty")
 		} else if containerImageID != "" && sii.ContainerImageID != containerImageID {
 			verifyErrors = append(verifyErrors,
 				fmt.Sprintf("subject_image_identity.container_image_id=%s != container-inspect.json image=%s",
 					sii.ContainerImageID, containerImageID))
+		}
+		// CORRECTION04 §2: image_id must equal container_image_id
+		// and both must equal container-inspect.json's Image.
+		if sii.ImageID != "" && sii.ContainerImageID != "" &&
+			!strings.EqualFold(sii.ImageID, sii.ContainerImageID) {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("subject_image_identity.image_id=%s does not match subject_image_identity.container_image_id=%s",
+					sii.ImageID, sii.ContainerImageID))
+		}
+		if sii.ImageID != "" && containerImageID != "" &&
+			!strings.EqualFold(sii.ImageID, containerImageID) {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("subject_image_identity.image_id=%s does not match container inspect Image=%s",
+					sii.ImageID, containerImageID))
+		}
+		if sii.ImageReference != "" && inspectImageRef != "" &&
+			!strings.EqualFold(sii.ImageReference, inspectImageRef) {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("subject_image_identity.image_reference=%s does not match container inspect Config.Image=%s",
+					sii.ImageReference, inspectImageRef))
+		}
+		// CORRECTION04 §3: repository digest status and grammar.
+		switch sii.RepoDigestStatus {
+		case "available":
+			if len(sii.RepoDigests) == 0 {
+				verifyErrors = append(verifyErrors,
+					"subject_image_identity.repo_digest_status=available inconsistent with empty repo_digests")
+			}
+			for _, d := range sii.RepoDigests {
+				if err := validateRepoDigest(d); err != nil {
+					verifyErrors = append(verifyErrors,
+						fmt.Sprintf("subject_image_identity.repo_digests contains invalid entry %q: %v", d, err))
+				}
+			}
+		case "unavailable_local_image":
+			if len(sii.RepoDigests) != 0 {
+				verifyErrors = append(verifyErrors,
+					"subject_image_identity.repo_digest_status=unavailable_local_image inconsistent with non-empty repo_digests")
+			}
+		case "":
+			verifyErrors = append(verifyErrors,
+				"subject_image_identity.repo_digest_status is empty")
+		default:
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("subject_image_identity.repo_digest_status=%q invalid (expected available or unavailable_local_image)",
+					sii.RepoDigestStatus))
+		}
+		// Reject duplicate repo digests.
+		seen := make(map[string]bool)
+		for _, d := range sii.RepoDigests {
+			if seen[d] {
+				verifyErrors = append(verifyErrors,
+					fmt.Sprintf("subject_image_identity.repo_digests contains duplicate entry %q", d))
+			}
+			seen[d] = true
 		}
 	}
 
@@ -2348,6 +2426,53 @@ func extractContainerImageID(data []byte) (string, error) {
 		return "", err
 	}
 	return ci.Image, nil
+}
+
+// extractContainerImageReference extracts the Config.Image
+// field from the container-inspect.json bytes. Returns empty
+// string on any parse failure.
+func extractContainerImageReference(data []byte) (string, error) {
+	var ci struct {
+		Config struct {
+			Image string `json:"Image"`
+		} `json:"Config"`
+	}
+	if err := json.Unmarshal(data, &ci); err != nil {
+		return "", err
+	}
+	return ci.Config.Image, nil
+}
+
+// validateRepoDigest validates a repository-digest string of
+// the form name@sha256:<64-lowercase-hex>. CORRECTION04 §3.
+func validateRepoDigest(d string) error {
+	at := strings.LastIndex(d, "@")
+	if at <= 0 || at == len(d)-1 {
+		return fmt.Errorf("missing @ separator or empty repository name")
+	}
+	name := d[:at]
+	digest := d[at+1:]
+	if name == "" {
+		return fmt.Errorf("empty repository name")
+	}
+	colon := strings.Index(digest, ":")
+	if colon < 0 {
+		return fmt.Errorf("missing : separator in digest payload")
+	}
+	algo := digest[:colon]
+	payload := digest[colon+1:]
+	if algo != "sha256" {
+		return fmt.Errorf("unsupported digest algorithm %q (expected sha256)", algo)
+	}
+	if len(payload) != 64 {
+		return fmt.Errorf("digest payload length %d != 64", len(payload))
+	}
+	for _, c := range payload {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return fmt.Errorf("digest payload %q contains non-lowercase-hex", payload)
+		}
+	}
+	return nil
 }
 
 func validateStateInvariant(scenario string, initial, final *CanaryState, workload *WorkloadResult) *analysis.StateInvariantResult {

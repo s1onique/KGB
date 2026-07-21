@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "run_id": "lab-canary-descriptor-placeholder",
   "scenario": "canary-descriptor",
   "started_at": "2026-07-21T12:00:00.000000000+03:00",

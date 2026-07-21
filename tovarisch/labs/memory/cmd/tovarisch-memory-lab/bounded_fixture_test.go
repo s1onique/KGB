@@ -102,7 +102,15 @@ func rebindFixture(t *testing.T, boundDir string) string {
 		inspectPath := filepath.Join(boundDir, "container-inspect.json")
 		if inspectData, ierr := os.ReadFile(inspectPath); ierr == nil {
 			if cid, eerr := extractContainerImageID(inspectData); eerr == nil && cid != "" {
+				// CORRECTION04: image_id == container_image_id
+				// and both == container-inspect.json Image.
 				manifest.SubjectImageIdentity.ContainerImageID = cid
+				manifest.SubjectImageIdentity.ImageID = cid
+			}
+			if ref, eerr := extractContainerImageReference(inspectData); eerr == nil && ref != "" {
+				// CORRECTION04: image_reference == container-inspect
+				// Config.Image.
+				manifest.SubjectImageIdentity.ImageReference = ref
 			}
 		}
 		manifest.SubjectImageIdentity.SourceCommitOID = headCommit
