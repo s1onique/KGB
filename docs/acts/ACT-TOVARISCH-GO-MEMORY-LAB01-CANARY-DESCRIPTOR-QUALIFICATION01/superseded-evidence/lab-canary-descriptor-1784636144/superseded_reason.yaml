@@ -1,0 +1,6 @@
+superseded_reason:
+  - canary_image_provenance_outside_checksum_inventory
+  - final_image_binary_hash_not_independently_recorded
+  - repository_digest_identity_not_independently_demonstrated
+  - controller_executable_hash_placeholder_in_close_report
+  - closure_identity_summary_stale
