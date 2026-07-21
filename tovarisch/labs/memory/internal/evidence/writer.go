@@ -57,6 +57,7 @@ type Manifest struct {
 type SubjectIdentity struct {
 	GitCommit                    string `json:"git_commit,omitempty"`
 	GitTree                      string `json:"git_tree,omitempty"`
+	GitObjectFormat              string `json:"git_object_format,omitempty"` // "sha1" or "sha256"
 	Version                      string `json:"version,omitempty"`
 	ImageID                      string `json:"image_id,omitempty"`
 	ImageDigest                  string `json:"image_digest,omitempty"`

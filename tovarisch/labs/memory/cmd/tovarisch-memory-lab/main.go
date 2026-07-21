@@ -983,11 +983,15 @@ func verifyCommand(args []string) error {
 	verifyErrors = append(verifyErrors, validateProvenanceEvidence(manifest, verdict)...)
 
 	// Verify runtime executable hash matches stored hash (runtime binding)
-	if manifest.SubjectIdentity != nil && manifest.SubjectIdentity.ControllerExecutablePath != "" {
-		runtimeHash, hashErr := hashFile(manifest.SubjectIdentity.ControllerExecutablePath)
-		if hashErr == nil && runtimeHash != manifest.SubjectIdentity.ControllerExecutableSHA256 {
-			verifyErrors = append(verifyErrors, fmt.Sprintf("executable hash mismatch: stored=%s, runtime=%s",
-				manifest.SubjectIdentity.ControllerExecutableSHA256, runtimeHash))
+	// P0: Hash the verifier's live inode through /proc/self/exe, NOT the path
+	// from manifest. An altered evidence set could point the descriptive path
+	// field at another readable file; the opener seam is the only selector.
+	if manifest.SubjectIdentity != nil && manifest.SubjectIdentity.ControllerExecutableSHA256 != "" {
+		if err := verifyRuntimeExecutableHash(
+			manifest.SubjectIdentity.ControllerExecutableSHA256,
+			openProcSelfExe,
+		); err != nil {
+			verifyErrors = append(verifyErrors, err.Error())
 		}
 	}
 
@@ -1346,6 +1350,16 @@ func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, str
 		errs = append(errs, fmt.Sprintf("git tree: %v", treeErr))
 	}
 
+	// Git object format - REQUIRED for current schema.
+	// Authoritative source: `git rev-parse --show-object-format=storage`.
+	// This is a runtime repository property, not a compile-time capability.
+	gitObjectFormat, formatErr := runGit("rev-parse", "--show-object-format=storage")
+	if formatErr != nil {
+		errs = append(errs, fmt.Sprintf("git object format: %v", formatErr))
+	}
+	// Normalise to canonical "sha1" / "sha256" form.
+	gitObjectFormat = canonicalGitObjectFormat(gitObjectFormat)
+
 	// Controller PID
 	controllerPID := fmt.Sprintf("%d", os.Getpid())
 
@@ -1394,6 +1408,7 @@ func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, str
 	subject := &evidence.SubjectIdentity{
 		GitCommit:                 gitCommit,
 		GitTree:                   gitTree,
+		GitObjectFormat:           gitObjectFormat,
 		ControllerExecutablePath:   selfPath,
 		ControllerExecutableSHA256: selfHash,
 	}
@@ -1405,13 +1420,16 @@ func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, str
 	}
 
 	// Build comprehensive error if any required field failed
-	// Required: git commit, git tree, executable path, executable hash (valid 64-char hex)
+	// Required: git commit, git tree, git object format, executable path, executable hash (valid 64-char hex)
 	var requiredErrs []string
 	if gitErr != nil || gitCommit == "" {
 		requiredErrs = append(requiredErrs, "git_commit")
 	}
 	if treeErr != nil || gitTree == "" {
 		requiredErrs = append(requiredErrs, "git_tree")
+	}
+	if formatErr != nil || gitObjectFormat == "" {
+		requiredErrs = append(requiredErrs, "git_object_format")
 	}
 	if pathErr != nil || selfPath == "" {
 		requiredErrs = append(requiredErrs, "executable_path")
@@ -1446,6 +1464,20 @@ func runUname(args ...string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// canonicalGitObjectFormat normalises the output of
+// `git rev-parse --show-object-format=storage` to the canonical lowercase
+// "sha1" or "sha256" form. Returns empty string if the input is unrecognised.
+func canonicalGitObjectFormat(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "sha1":
+		return "sha1"
+	case "sha256":
+		return "sha256"
+	default:
+		return ""
+	}
 }
 
 // detectCgroupMode determines cgroup mode using authoritative sources.
@@ -1594,6 +1626,11 @@ func validateProvenanceEvidence(manifest evidence.Manifest, verdict evidence.Ver
 		errs = append(errs, fmt.Sprintf("subject_identity.git_tree: %v", err))
 	}
 
+	// Validate GitObjectFormat consistency
+	if err := validateGitObjectFormatConsistency(manifest.SubjectIdentity); err != nil {
+		errs = append(errs, fmt.Sprintf("subject_identity.git_object_format: %v", err))
+	}
+
 	// ControllerExecutablePath must be non-empty
 	if manifest.SubjectIdentity.ControllerExecutablePath == "" {
 		errs = append(errs, "subject_identity.controller_executable_path is empty")
@@ -1670,6 +1707,99 @@ func validateGitObjectID(value string, gitObjectFormat string) error {
 
 	if len(decoded) != expectedLen {
 		return fmt.Errorf("decoded length=%d, want %d for %s", len(decoded), expectedLen, gitObjectFormat)
+	}
+	return nil
+}
+
+// validateGitObjectFormatConsistency validates that git_commit and git_tree
+// both use the same hash algorithm as specified in git_object_format.
+//
+// For the current evidence schema (1.x), git_object_format is REQUIRED.
+// Empty format is rejected so that new evidence cannot smuggle a SHA-1/SHA-256
+// mismatch past the validator.
+func validateGitObjectFormatConsistency(subject *evidence.SubjectIdentity) error {
+	format := subject.GitObjectFormat
+
+	// Current-schema evidence must declare git_object_format. Empty format
+	// would allow the validator to accept any length mismatch between commit
+	// and tree, defeating the purpose of declaring the algorithm.
+	if format == "" {
+		return fmt.Errorf("git_object_format is required (expected 'sha1' or 'sha256')")
+	}
+
+	// Decode both IDs to get their actual lengths
+	commitDecoded, commitErr := hex.DecodeString(subject.GitCommit)
+	treeDecoded, treeErr := hex.DecodeString(subject.GitTree)
+
+	// Both must be valid hex
+	if commitErr != nil || treeErr != nil {
+		return fmt.Errorf("commit or tree not valid hex")
+	}
+
+	commitLen := len(commitDecoded)
+	treeLen := len(treeDecoded)
+
+	switch format {
+	case "sha1", "sha-1":
+		if commitLen != 20 || treeLen != 20 {
+			return fmt.Errorf("git_object_format=sha1 but commit len=%d or tree len=%d (want 20)", commitLen, treeLen)
+		}
+	case "sha256", "sha-256":
+		if commitLen != 32 || treeLen != 32 {
+			return fmt.Errorf("git_object_format=sha256 but commit len=%d or tree len=%d (want 32)", commitLen, treeLen)
+		}
+	default:
+		return fmt.Errorf("unsupported git_object_format=%q (expected 'sha1' or 'sha256')", format)
+	}
+
+	// Commit and tree must use same length (already checked by format above)
+	return nil
+}
+
+// runtimeExecutableOpener is a seam for opening the currently executing binary.
+// Production opens /proc/self/exe (which always points at the live inode, even
+// if the binary on disk has been replaced); tests inject deterministic bytes
+// and failure modes.
+type runtimeExecutableOpener func() (io.ReadCloser, error)
+
+// openProcSelfExe opens /proc/self/exe for the currently executing process.
+// /proc/self/exe is a symlink to the actual inode the kernel loaded, so the
+// opened file descriptor tracks the running binary even if its on-disk
+// pathname has been replaced or unlinked.
+func openProcSelfExe() (io.ReadCloser, error) {
+	return os.Open("/proc/self/exe")
+}
+
+// verifyRuntimeExecutableHash hashes the currently executing binary through the
+// supplied opener and compares it against the stored SHA-256 from the evidence
+// set. The opener is the source of truth for which bytes get hashed; the
+// manifest-supplied path is descriptive only and is never used to select the
+// file for hashing.
+//
+// Returns nil only when:
+//   - the opener succeeds;
+//   - reading the bytes succeeds;
+//   - the resulting SHA-256 equals storedHash.
+//
+// Any failure (open error, read error, hash mismatch) is returned as a
+// non-nil error so the caller can record it as a verification failure.
+func verifyRuntimeExecutableHash(storedHash string, openRuntimeExecutable runtimeExecutableOpener) error {
+	if storedHash == "" {
+		return fmt.Errorf("stored executable hash is empty")
+	}
+	rc, err := openRuntimeExecutable()
+	if err != nil {
+		return fmt.Errorf("open runtime executable: %w", err)
+	}
+	defer rc.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, rc); err != nil {
+		return fmt.Errorf("read runtime executable: %w", err)
+	}
+	got := hex.EncodeToString(h.Sum(nil))
+	if got != storedHash {
+		return fmt.Errorf("executable hash mismatch: stored=%s runtime=%s", storedHash, got)
 	}
 	return nil
 }
