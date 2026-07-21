@@ -93,24 +93,37 @@ func parseMemoryEvents(m *CgroupMemory, data []byte) {
 }
 
 // NamespaceInfo captures namespace identities for mismatch detection.
+// Includes per-field errors so callers can distinguish partial failures.
 type NamespaceInfo struct {
-	MountNamespace string
-	CgroupNamespace string
+	MountNamespace   string
+	MountNamespaceErr error
+	CgroupNamespace  string
+	CgroupNamespaceErr error
 }
 
 // ReadNamespaceIDs reads namespace symlink targets for a PID.
 // This enables comparing whether two PIDs share the same namespace.
+// PID 0 is treated as the current process.
 func ReadNamespaceIDs(pid int) (*NamespaceInfo, error) {
 	ns := &NamespaceInfo{}
+
+	// PID 0 means current process
+	if pid == 0 {
+		pid = os.Getpid()
+	}
 
 	// Read mount namespace
 	if target, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "ns", "mnt")); err == nil {
 		ns.MountNamespace = target
+	} else {
+		ns.MountNamespaceErr = err
 	}
 
 	// Read cgroup namespace
 	if target, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "ns", "cgroup")); err == nil {
 		ns.CgroupNamespace = target
+	} else {
+		ns.CgroupNamespaceErr = err
 	}
 
 	if ns.MountNamespace == "" && ns.CgroupNamespace == "" {
@@ -220,8 +233,10 @@ func parseMountinfoLine(line string) (string, bool) {
 		return "", false
 	}
 
-	// Check if this is cgroup2fs
-	if fsParts[0] != "cgroup2fs" {
+	// Check if this is cgroup2 (the correct filesystem type per man page)
+	// Accept "cgroup2" (canonical) and "cgroup2fs" (legacy)
+	fsType := fsParts[0]
+	if fsType != "cgroup2" && fsType != "cgroup2fs" {
 		return "", false
 	}
 

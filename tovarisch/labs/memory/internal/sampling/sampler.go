@@ -180,29 +180,6 @@ func NewSamplerWithDocker(containerID string, hostPIDFunc func() int, docker *do
 	}
 }
 
-// CgroupCapability represents the capability result for cgroup v2 acquisition.
-type CgroupCapability string
-
-const (
-	CgroupCapabilityAvailable                CgroupCapability = "available"
-	CgroupCapabilityPermissionDenied         CgroupCapability = "permission_denied"
-	CgroupCapabilityPIDMismatch             CgroupCapability = "pid_namespace_mismatch"
-	CgroupCapabilityMountMismatch           CgroupCapability = "mount_namespace_mismatch"
-	CgroupCapabilityNamespaceIdentityUnavail CgroupCapability = "namespace_identity_unavailable"
-	CgroupCapabilityNotMounted             CgroupCapability = "cgroup2_not_mounted"
-	CgroupCapabilityPathAbsent             CgroupCapability = "resolved_path_absent"
-	CgroupCapabilityParseFailure           CgroupCapability = "parse_failure"
-)
-
-// NamespaceProof captures the evidence for namespace-based capability determination.
-type NamespaceProof struct {
-	ControllerMountNamespace string `json:"controller_mount_namespace,omitempty"`
-	TargetMountNamespace     string `json:"target_mount_namespace,omitempty"`
-	ControllerCgroupNamespace string `json:"controller_cgroup_namespace,omitempty"`
-	TargetCgroupNamespace   string `json:"target_cgroup_namespace,omitempty"`
-	NamespaceReadError      string `json:"namespace_read_error,omitempty"`
-	DecisionReason         string `json:"decision_reason,omitempty"`
-}
 
 // RecordCgroupCapability records the result of cgroup v2 resolution as a structured event.
 // This creates durable evidence of the capability classification.

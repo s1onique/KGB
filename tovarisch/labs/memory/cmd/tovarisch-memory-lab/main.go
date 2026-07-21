@@ -506,8 +506,12 @@ func runCommand(args []string) error {
 		return fmt.Errorf("write verdict: %w", err)
 	}
 
-	// Collect provenance
-	subject, host, controllerPID, _ := collectProvenance()
+	// Collect provenance (fail-closed: error means evidence is incomplete)
+	subject, host, controllerPID, err := collectProvenance()
+	if err != nil {
+		cleanup.Cleanup(ctx)
+		return fmt.Errorf("collect provenance: %w", err)
+	}
 
 	// Finalize manifest with all metadata (must be done BEFORE checksums)
 	finalizedManifest := &evidence.Manifest{
@@ -1184,7 +1188,7 @@ func classifyCgroupFailure(err error) sampling.CgroupCapability {
 	case contains(errStr, "permission denied"):
 		return sampling.CgroupCapabilityPermissionDenied
 	case contains(errStr, "cgroup2 mount not found"):
-		return sampling.CgroupCapabilityMountMismatch
+		return sampling.CgroupCapabilityMountNamespaceMismatch
 	case contains(errStr, "cgroup2"):
 		return sampling.CgroupCapabilityNotMounted
 	case contains(errStr, "parse"):
@@ -1196,6 +1200,7 @@ func classifyCgroupFailure(err error) sampling.CgroupCapability {
 
 // classifyCgroupFailureWithNamespace classifies cgroup failure with namespace comparison.
 // Returns capability and proof for verifier to reconstruct the decision.
+// Uses separate outcomes for mount vs cgroup namespace mismatch.
 func classifyCgroupFailureWithNamespace(err error, targetPID, controllerPID int) (sampling.CgroupCapability, *sampling.NamespaceProof) {
 	proof := &sampling.NamespaceProof{}
 
@@ -1206,56 +1211,65 @@ func classifyCgroupFailureWithNamespace(err error, targetPID, controllerPID int)
 	errStr := err.Error()
 
 	// Read namespace IDs for both processes
-	targetNS, targetErr := procfs.ReadNamespaceIDs(targetPID)
-	controllerNS, controllerErr := procfs.ReadNamespaceIDs(controllerPID)
+	targetNS, _ := procfs.ReadNamespaceIDs(targetPID)
+	controllerNS, _ := procfs.ReadNamespaceIDs(controllerPID)
 
 	// Populate proof with what we read
 	if targetNS != nil {
 		proof.TargetMountNamespace = targetNS.MountNamespace
 		proof.TargetCgroupNamespace = targetNS.CgroupNamespace
+		// Record per-field errors
+		if targetNS.MountNamespaceErr != nil {
+			proof.TargetMountNamespaceErr = targetNS.MountNamespaceErr.Error()
+		}
+		if targetNS.CgroupNamespaceErr != nil {
+			proof.TargetCgroupNamespaceErr = targetNS.CgroupNamespaceErr.Error()
+		}
 	}
 	if controllerNS != nil {
 		proof.ControllerMountNamespace = controllerNS.MountNamespace
 		proof.ControllerCgroupNamespace = controllerNS.CgroupNamespace
+		// Record per-field errors
+		if controllerNS.MountNamespaceErr != nil {
+			proof.ControllerMountNamespaceErr = controllerNS.MountNamespaceErr.Error()
+		}
+		if controllerNS.CgroupNamespaceErr != nil {
+			proof.ControllerCgroupNamespaceErr = controllerNS.CgroupNamespaceErr.Error()
+		}
 	}
 
-	// Track read errors
-	var readErrors []string
-	if targetErr != nil {
-		readErrors = append(readErrors, fmt.Sprintf("target_ns: %v", targetErr))
-	}
-	if controllerErr != nil {
-		readErrors = append(readErrors, fmt.Sprintf("controller_ns: %v", controllerErr))
-	}
-	if len(readErrors) > 0 {
-		proof.NamespaceReadError = strings.Join(readErrors, "; ")
-	}
-
-	// Check for mount namespace mismatch by comparing symlink targets
+	// Check for cgroup2-related errors
 	if contains(errStr, "cgroup2 mount not found") || contains(errStr, "cgroup2") {
-		// If either read failed, we cannot prove mismatch mechanically
-		if targetErr != nil || controllerErr != nil {
-			proof.DecisionReason = "namespace_read_failed"
+		// If we can't read either namespace, we cannot prove mismatch
+		canProveMount := targetNS != nil && targetNS.MountNamespaceErr == nil &&
+			controllerNS != nil && controllerNS.MountNamespaceErr == nil
+		canProveCgroup := targetNS != nil && targetNS.CgroupNamespaceErr == nil &&
+			controllerNS != nil && controllerNS.CgroupNamespaceErr == nil
+
+		// If neither namespace can be proven, return unavailable
+		if !canProveMount && !canProveCgroup {
+			proof.DecisionReason = "namespace_identity_unavailable"
 			return sampling.CgroupCapabilityNamespaceIdentityUnavail, proof
 		}
 
-		// Compare mount namespaces
-		if proof.TargetMountNamespace != "" && proof.ControllerMountNamespace != "" {
-			if proof.TargetMountNamespace != proof.ControllerMountNamespace {
-				proof.DecisionReason = "mount_namespace_differ"
-				return sampling.CgroupCapabilityMountMismatch, proof
-			}
-		}
-		// Compare cgroup namespaces
-		if proof.TargetCgroupNamespace != "" && proof.ControllerCgroupNamespace != "" {
-			if proof.TargetCgroupNamespace != proof.ControllerCgroupNamespace {
-				proof.DecisionReason = "cgroup_namespace_differ"
-				return sampling.CgroupCapabilityMountMismatch, proof
-			}
+		// Check mount namespace mismatch
+		if canProveMount &&
+			proof.TargetMountNamespace != "" && proof.ControllerMountNamespace != "" &&
+			proof.TargetMountNamespace != proof.ControllerMountNamespace {
+			proof.DecisionReason = "mount_namespace_differ"
+			return sampling.CgroupCapabilityMountNamespaceMismatch, proof
 		}
 
-		// Namespaces match or empty - cgroup not visible to this namespace
-		proof.DecisionReason = "namespaces_match_cgroup_not_visible"
+		// Check cgroup namespace mismatch
+		if canProveCgroup &&
+			proof.TargetCgroupNamespace != "" && proof.ControllerCgroupNamespace != "" &&
+			proof.TargetCgroupNamespace != proof.ControllerCgroupNamespace {
+			proof.DecisionReason = "cgroup_namespace_differ"
+			return sampling.CgroupCapabilityCgroupNamespaceMismatch, proof
+		}
+
+		// Namespaces match or unavailable - cgroup not visible to this namespace
+		proof.DecisionReason = "namespaces_match_or_unavailable"
 		return sampling.CgroupCapabilityNotMounted, proof
 	}
 
@@ -1386,38 +1400,53 @@ func runUname(args ...string) (string, error) {
 // Never returns a default when detection is inconclusive.
 func detectCgroupMode() string {
 	// Try to read /proc/1/cgroup to determine host cgroup mode
-	// If PID 1 is in cgroup2, the host uses cgroup2
+	// Format: hierarchy-id:controllers:control-group-path
+	// - hierarchy-id == 0 with empty controllers = v2 (unified)
+	// - hierarchy-id > 0 with controllers = v1
+	// - both present = hybrid
 	data, err := os.ReadFile("/proc/1/cgroup")
 	if err == nil {
-		hasUnified := false
-		hasMultiple := false
+		hasV2 := false
+		hasV1 := false
 		for _, line := range strings.Split(string(data), "\n") {
 			if line == "" {
 				continue
 			}
-			// cgroup2 uses unified hierarchy "0::/"
-			if strings.Contains(line, "0::/") || strings.HasPrefix(line, "0:unified:") {
-				hasUnified = true
+			// Parse cgroup record: hierarchy-id:controllers:path
+			parts := strings.SplitN(line, ":", 3)
+			if len(parts) < 2 {
+				continue
 			}
-			// cgroup1/hybrid has named hierarchies (e.g., "1:name=systemd:")
-			if strings.Contains(line, "name=") {
-				hasMultiple = true
+			hierarchyID := strings.TrimSpace(parts[0])
+			controllers := ""
+			if len(parts) >= 2 {
+				controllers = strings.TrimSpace(parts[1])
+			}
+
+			// v2: hierarchy-id is "0" and controllers is empty or "unified"
+			if hierarchyID == "0" && (controllers == "" || controllers == "unified" || strings.HasPrefix(controllers, "0::")) {
+				hasV2 = true
+			}
+			// v1: hierarchy-id is non-zero or controllers has controller names
+			if hierarchyID != "0" || (controllers != "" && controllers != "unified") {
+				// Also check for named hierarchies (e.g., "1:name=systemd:")
+				if strings.Contains(controllers, "name=") || hierarchyID != "0" {
+					hasV1 = true
+				}
 			}
 		}
-		if hasUnified && hasMultiple {
+		if hasV2 && hasV1 {
 			return "hybrid"
 		}
-		if hasUnified {
+		if hasV2 {
 			return "cgroup2"
 		}
-		if hasMultiple {
+		if hasV1 {
 			return "cgroup1"
 		}
 	}
 
 	// Fallback: check mountinfo for cgroup2 mount
-	// Format: "id parent_id maj:min rem options - fs_type source super_options"
-	// The filesystem type is field 9 (after the '-' separator)
 	mountData, err := os.ReadFile("/proc/self/mountinfo")
 	if err == nil {
 		hasCgroup2 := false
