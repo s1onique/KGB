@@ -1,25 +1,31 @@
 // reconstruct.go — Single Authority Matrix Verdict Reconstruction
 //
-// ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-MATRIX-QUALIFICATION01-CORRECTION02
+// ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-MATRIX-QUALIFICATION01-CORRECTION03
 //
 // This file contains the SINGLE authoritative reconstruction path for matrix verdicts.
 // Both `matrix` and `verify-matrix` commands MUST use ReconstructMatrixVerdict.
 //
-// CORRECTION02 establishes:
+// CORRECTION03 establishes:
 // - One shared ReconstructMatrixVerdict function (no duplicate authority)
 // - Canonical cleanup evidence bound to exact container/network/process identities
 // - Real SameSchema reconstruction from verified child manifests
 // - Canonical cross-run check enumeration (mechanically derived, not hardcoded)
 // - Complete field-by-field verdict comparison with field-specific diagnostics
 // - Fail-closed CLI exit semantics
+// - Strict single-document JSON parsing for all artifacts
+// - Observed cleanup verification (not asserted)
+// - Complete cleanup contract validation
 
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -29,6 +35,35 @@ import (
 
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/evidence"
 )
+
+// =============================================================================
+// STRICT JSON DECODING
+// =============================================================================
+
+// P0-8 FIX: Strict single-document JSON parsing for all canonical matrix artifacts.
+// Rejects unknown fields and ensures exactly one JSON value per document.
+func decodeStrictJSON[T any](data []byte, dst *T) error {
+	if len(data) == 0 {
+		return errors.New("empty input")
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+
+	if err := dec.Decode(dst); err != nil {
+		return fmt.Errorf("decode: %w", err)
+	}
+
+	// Ensure exactly one top-level JSON value (no trailing data)
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("unexpected second JSON value in document")
+		}
+		return fmt.Errorf("trailing JSON data: %w", err)
+	}
+
+	return nil
+}
 
 // =============================================================================
 // CANONICAL CONSTANTS
@@ -167,29 +202,67 @@ type ProcessCleanupRecord struct {
 }
 
 // LoadMatrixCleanupEvidence loads and parses matrix-cleanup.json.
+// P0-8 FIX: Uses strict single-document JSON parsing with DisallowUnknownFields.
 func LoadMatrixCleanupEvidence(path string) (*MatrixCleanupEvidence, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read matrix cleanup evidence: %w", err)
 	}
 	var ce MatrixCleanupEvidence
-	if err := json.Unmarshal(data, &ce); err != nil {
+	if err := decodeStrictJSON(data, &ce); err != nil {
 		return nil, fmt.Errorf("parse matrix cleanup evidence: %w", err)
 	}
 	return &ce, nil
 }
 
+// SupportedCleanupSchemaVersions defines the supported cleanup evidence schema versions.
+var SupportedCleanupSchemaVersions = []string{"1.0.0"}
+
 // ValidateCleanupEvidence validates cleanup evidence is bound correctly to the matrix manifest.
+// Validates:
+// - Cleanup schema version is supported
+// - Matrix ID matches manifest
+// - Network ownership mode is valid
+// - Each record has required identities based on ownership mode
+// - No duplicate network IDs when per_run mode
 func ValidateCleanupEvidence(cleanup *MatrixCleanupEvidence, manifest *MatrixManifest) error {
+	// Validate schema version
+	if cleanup.SchemaVersion == "" {
+		return errors.New("cleanup evidence has empty schema_version")
+	}
+	schemaValid := false
+	for _, v := range SupportedCleanupSchemaVersions {
+		if cleanup.SchemaVersion == v {
+			schemaValid = true
+			break
+		}
+	}
+	if !schemaValid {
+		return fmt.Errorf("cleanup schema version %q is not supported", cleanup.SchemaVersion)
+	}
+
+	// Validate MatrixID binding
 	if cleanup.MatrixID != manifest.MatrixID {
 		return fmt.Errorf("cleanup matrix_id %q != manifest matrix_id %q", cleanup.MatrixID, manifest.MatrixID)
 	}
 
+	// Validate run count matches
 	if len(cleanup.Runs) != len(manifest.Runs) {
 		return fmt.Errorf("cleanup has %d runs, manifest declares %d runs", len(cleanup.Runs), len(manifest.Runs))
 	}
 
+	// Validate network ownership mode
+	networkOwnership := cleanup.NetworkOwnership
+	if networkOwnership != "per_run" && networkOwnership != "matrix_shared" {
+		return fmt.Errorf("cleanup has invalid network_ownership %q (expected per_run or matrix_shared)", networkOwnership)
+	}
+
+	// Track network IDs for per_run mode
+	seenNetworkIDs := make(map[string]bool)
+	var sharedNetworkID string
+
 	for i, rec := range cleanup.Runs {
+		// Validate record geometry
 		if rec.Index != i {
 			return fmt.Errorf("cleanup run[%d] has index %d", i, rec.Index)
 		}
@@ -204,6 +277,39 @@ func ValidateCleanupEvidence(cleanup *MatrixCleanupEvidence, manifest *MatrixMan
 		}
 		if rec.Scenario == "" {
 			return fmt.Errorf("cleanup run[%d] has empty scenario", i)
+		}
+
+		// Validate container identity (required for all modes)
+		if rec.Container.ID == "" {
+			return fmt.Errorf("cleanup run[%d] has empty container.id", i)
+		}
+
+		// Validate process identity (required for all modes)
+		if rec.Process.PID == 0 {
+			return fmt.Errorf("cleanup run[%d] has empty process.pid", i)
+		}
+
+		// Validate network identity according to ownership mode
+		switch networkOwnership {
+		case "per_run":
+			// Every record must have a non-empty, unique network ID
+			if rec.Network.ID == "" {
+				return fmt.Errorf("cleanup run[%d] has empty network.id (per_run mode requires unique network)", i)
+			}
+			if seenNetworkIDs[rec.Network.ID] {
+				return fmt.Errorf("cleanup has duplicate network.id %q in per_run mode", rec.Network.ID)
+			}
+			seenNetworkIDs[rec.Network.ID] = true
+		case "matrix_shared":
+			// First record establishes shared ID; all records must reference same ID
+			if rec.Network.ID == "" {
+				return fmt.Errorf("cleanup run[%d] has empty network.id (matrix_shared mode requires shared network)", i)
+			}
+			if sharedNetworkID == "" {
+				sharedNetworkID = rec.Network.ID
+			} else if rec.Network.ID != sharedNetworkID {
+				return fmt.Errorf("cleanup run[%d] has different network.id %q (expected shared %q)", i, rec.Network.ID, sharedNetworkID)
+			}
 		}
 	}
 
@@ -555,25 +661,69 @@ func ReconstructCrossRunChecks(
 }
 
 // reconstructCleanupComplete derives CleanupComplete from verified cleanup records.
+// P0-3 FIX: Validates ALL cleanup identities (container, network, process), not just process.
+// P0-7 FIX: Missing/empty identities cause failure, not skip.
 func reconstructCleanupComplete(verifiedRuns []*VerifiedRun, cleanup *MatrixCleanupEvidence) bool {
 	if cleanup == nil {
 		return false
 	}
 
+	// P0-3: Validate cleanup evidence schema and matrix binding
+	if cleanup.SchemaVersion == "" {
+		return false
+	}
+	if cleanup.MatrixID == "" {
+		return false
+	}
+	if len(cleanup.Runs) != len(verifiedRuns) {
+		return false
+	}
+
 	for i, run := range verifiedRuns {
-		if !run.CleanupVerified {
-			return false
-		}
-		// Verify cleanup record maps to correct run
-		if i >= len(cleanup.Runs) {
-			return false
-		}
 		rec := cleanup.Runs[i]
+
+		// P0-3: Verify cleanup record maps to correct run
 		if rec.RunID != run.DeclaredRunID {
 			return false
 		}
-		// Process cleanup status must be "gone" or "pid_reused"
+		if rec.Scenario != run.DeclaredScenario {
+			return false
+		}
+
+		// P0-3: Container identity must be present and "gone"
+		if rec.Container.ID == "" {
+			return false // P0-7: Missing container ID is failure, not skip
+		}
+		if rec.Container.ID != run.ContainerID {
+			return false // Container ID mismatch
+		}
+		if rec.Container.Status != "gone" {
+			return false // Container still exists
+		}
+
+		// P0-3: Process identity must be present with valid cleanup status
+		if rec.Process.PID == 0 {
+			return false // P0-7: Missing PID is failure
+		}
+		if rec.Process.PID != run.SubjectPID {
+			return false // PID mismatch
+		}
+		if rec.Process.StartTime != run.SubjectStartTime {
+			return false // Start time mismatch
+		}
 		if rec.Process.Status != "gone" && rec.Process.Status != "pid_reused" {
+			return false // Process still alive or unavailable
+		}
+
+		// P0-3: Network identity must be present if expected
+		if run.NetworkID != "" && rec.Network.ID == "" {
+			return false // Expected network ID but cleanup has none
+		}
+		if rec.Network.ID != run.NetworkID {
+			return false // Network ID mismatch
+		}
+		// Network status check - if network cleanup was observed, it should be "gone"
+		if rec.Network.ID != "" && rec.Network.Status != "gone" {
 			return false
 		}
 	}
@@ -618,6 +768,14 @@ func ReconstructScenarioResults(verifiedRuns []*VerifiedRun) (map[string]*Scenar
 // SINGLE AUTHORITATIVE RECONSTRUCTION FUNCTION
 // =============================================================================
 
+// ExpectedScenarioClassifications defines the required overall classification for each scenario.
+// P0-4 FIX: Matrix validity must verify expected scenario outcomes.
+var ExpectedScenarioClassifications = map[string]string{
+	"canary-growing":    "growth",
+	"canary-bounded":    "stable",
+	"canary-descriptor": "resource_growth",
+}
+
 // ReconstructMatrixVerdict is the SINGLE authoritative function for reconstructing
 // a matrix verdict. Both `matrix` and `verify-matrix` commands MUST use this function.
 // No producer-only or verifier-only function may independently compute matrix validity.
@@ -638,11 +796,14 @@ func ReconstructMatrixVerdict(
 		return nil, fmt.Errorf("reconstruct scenario results: %w", err)
 	}
 
+	// P0-4 FIX: Verify expected scenario classifications
+	scenarioClassificationsValid := verifyExpectedClassifications(scenarioResults)
+
 	// Compute check counts from canonical projection
 	checksTotal, checksPassed, checksFailed := CountCanonicalChecks(crossRunChecks)
 
-	// Matrix valid if all checks pass
-	matrixValid := checksFailed == 0
+	// P0-4 FIX: Matrix valid if ALL checks pass AND scenario classifications match
+	matrixValid := checksFailed == 0 && scenarioClassificationsValid
 
 	verdict := &MatrixVerdict{
 		MatrixID:        matrixManifest.MatrixID,
@@ -655,6 +816,20 @@ func ReconstructMatrixVerdict(
 	}
 
 	return verdict, nil
+}
+
+// verifyExpectedClassifications checks that each scenario has its expected overall classification.
+func verifyExpectedClassifications(results map[string]*ScenarioResult) bool {
+	for scenario, expectedOverall := range ExpectedScenarioClassifications {
+		result, ok := results[scenario]
+		if !ok {
+			return false // Scenario missing
+		}
+		if result.Overall != expectedOverall {
+			return false // Wrong classification
+		}
+	}
+	return true
 }
 
 // =============================================================================
@@ -935,9 +1110,11 @@ func ComputeMatrixChecksums(matrixDir string) (string, error) {
 // HERMETIC VERIFIED RUN BUILDER
 // =============================================================================
 
-// BuildVerifiedRunsFromMatrix constructs verified runs from a matrix manifest and directory.
-// This is used by both the producer and verifier paths.
-func BuildVerifiedRunsFromMatrix(matrixDir string, manifest *MatrixManifest) ([]*VerifiedRun, error) {
+// BuildVerifiedRunsFromMatrix constructs verified runs from a matrix manifest and cleanup evidence.
+// P0-1 FIX: CleanupVerified and ProcessCleanupStatus are now hydrated from cleanup evidence.
+// P0-6 FIX: Single builder used by both producer and verifier paths.
+// P0-8 FIX: Uses strict single-document JSON parsing for all artifacts.
+func BuildVerifiedRunsFromMatrix(matrixDir string, manifest *MatrixManifest, cleanup *MatrixCleanupEvidence) ([]*VerifiedRun, error) {
 	runsDir := filepath.Join(matrixDir, "runs")
 	runs := make([]*VerifiedRun, len(manifest.Runs))
 
@@ -949,44 +1126,68 @@ func BuildVerifiedRunsFromMatrix(matrixDir string, manifest *MatrixManifest) ([]
 			RunIndex:        i,
 		}
 
-		// Load manifest
+		// Load manifest with strict JSON parsing
 		manifestData, err := os.ReadFile(filepath.Join(runPath, "manifest.json"))
 		if err != nil {
 			return nil, fmt.Errorf("read manifest for %s: %w", decl.RunID, err)
 		}
 		var childManifest evidence.Manifest
-		if err := json.Unmarshal(manifestData, &childManifest); err != nil {
+		if err := decodeStrictJSON(manifestData, &childManifest); err != nil {
 			return nil, fmt.Errorf("parse manifest for %s: %w", decl.RunID, err)
 		}
 		run.ActualManifest = &childManifest
 
-		// Load verdict
+		// Load verdict with strict JSON parsing
 		verdictData, err := os.ReadFile(filepath.Join(runPath, "verdict.json"))
 		if err != nil {
 			return nil, fmt.Errorf("read verdict for %s: %w", decl.RunID, err)
 		}
 		var childVerdict evidence.Verdict
-		if err := json.Unmarshal(verdictData, &childVerdict); err != nil {
+		if err := decodeStrictJSON(verdictData, &childVerdict); err != nil {
 			return nil, fmt.Errorf("parse verdict for %s: %w", decl.RunID, err)
 		}
 		run.ActualVerdict = &childVerdict
 
-		// Extract container identity from container-inspect.json
+		// P0-1 FIX: Extract container identity from container-inspect.json
 		containerData, err := os.ReadFile(filepath.Join(runPath, "container-inspect.json"))
-		if err == nil {
-			var inspect struct {
-				ID string `json:"Id"`
-			}
-			if json.Unmarshal(containerData, &inspect) == nil {
-				run.ContainerID = inspect.ID
-			}
+		if err != nil {
+			return nil, fmt.Errorf("read container-inspect.json for %s: %w", decl.RunID, err)
 		}
+		var inspect struct {
+			ID string `json:"Id"`
+		}
+		if err := decodeStrictJSON(containerData, &inspect); err != nil {
+			return nil, fmt.Errorf("parse container-inspect.json for %s: %w", decl.RunID, err)
+		}
+		run.ContainerID = inspect.ID
 
-		// Extract process identity from samples.csv
+		// P0-1 FIX: Extract process identity from samples.csv (fail-closed)
 		pid, startTime, err := extractProcessIdentity(filepath.Join(runPath, "samples.csv"))
-		if err == nil {
-			run.SubjectPID = pid
-			run.SubjectStartTime = startTime
+		if err != nil {
+			return nil, fmt.Errorf("extract process identity for %s: %w", decl.RunID, err)
+		}
+		run.SubjectPID = pid
+		run.SubjectStartTime = startTime
+
+		// P0-1 FIX: Hydrate cleanup status from cleanup evidence
+		if cleanup != nil && i < len(cleanup.Runs) {
+			rec := cleanup.Runs[i]
+			run.ContainerName = rec.Container.Name
+			run.NetworkID = rec.Network.ID
+			run.NetworkName = rec.Network.Name
+
+			// Map process cleanup status from string to enum
+			switch rec.Process.Status {
+			case "gone":
+				run.ProcessCleanupStatus = ProcessGone
+			case "pid_reused":
+				run.ProcessCleanupStatus = ProcessPIDReused
+			case "still_alive":
+				run.ProcessCleanupStatus = ProcessStillAlive
+			default:
+				run.ProcessCleanupStatus = ProcessUnavailable
+			}
+			run.CleanupVerified = true
 		}
 
 		runs[i] = run

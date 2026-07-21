@@ -309,19 +309,34 @@ func matrixCommand(args []string) error {
 		return fmt.Errorf("write matrix manifest: %w", err)
 	}
 
-	// Step 5: Build verified runs from completed scenarios
-	verifiedRuns := buildVerifiedRunsFromRunData(runsDir, runDeclarations, runManifests)
+	// Step 5: Build preliminary verified runs (producer observed state)
+	// P0-6 FIX: Build runs from observed state first
+	preliminaryRuns := buildVerifiedRunsFromRunData(runsDir, runDeclarations, runManifests)
 
 	// Step 6: Collect cleanup evidence from all runs
-	cleanupEvidence := buildCleanupEvidence(runsDir, runDeclarations)
+	// P0-2 FIX: Observe actual cleanup state, not assert
+	cleanupEvidence := BuildMatrixCleanupEvidence(matrixID, "per_run", preliminaryRuns, time.Now())
 
-	// Step 7: Write cleanup evidence artifact using shared authority
+	// Step 7: Validate cleanup evidence is bound correctly
+	// P0-6 FIX: Validate before writing
+	if err := ValidateCleanupEvidence(cleanupEvidence, matrixManifest); err != nil {
+		return fmt.Errorf("validate cleanup evidence: %w", err)
+	}
+
+	// Step 8: Write cleanup evidence artifact using shared authority
 	if err := WriteMatrixCleanupEvidence(matrixDir, cleanupEvidence); err != nil {
 		return fmt.Errorf("write cleanup evidence: %w", err)
 	}
 
-	// Step 8: Use single authority for verdict reconstruction
-	// CORRECTION02: Use ReconstructMatrixVerdict as single source of truth
+	// Step 9: Re-read artifacts using shared builder
+	// P0-6 FIX: Producer and verifier use same builder path
+	verifiedRuns, err := BuildVerifiedRunsFromMatrix(matrixDir, matrixManifest, cleanupEvidence)
+	if err != nil {
+		return fmt.Errorf("build verified runs from artifacts: %w", err)
+	}
+
+	// Step 10: Use single authority for verdict reconstruction
+	// CORRECTION03: Use ReconstructMatrixVerdict as single source of truth
 	verdict, err := ReconstructMatrixVerdict(matrixManifest, verifiedRuns, cleanupEvidence)
 	if err != nil {
 		return fmt.Errorf("reconstruct matrix verdict: %w", err)
@@ -1132,8 +1147,9 @@ func verifyMatrixCommandCORRECTION02(args []string) error {
 	fmt.Printf("  Matrix checksums: PASS\n")
 
 	// 6. Build verified runs from matrix directory
+	// P0-1 FIX: Pass cleanup evidence so CleanupVerified and ProcessCleanupStatus are hydrated
 	fmt.Printf("  Building verified runs...\n")
-	verifiedRuns, err := BuildVerifiedRunsFromMatrix(*matrixDir, manifest)
+	verifiedRuns, err := BuildVerifiedRunsFromMatrix(*matrixDir, manifest, cleanup)
 	if err != nil {
 		return fmt.Errorf("build verified runs: %w", err)
 	}
