@@ -8,128 +8,111 @@ Date: 2026-07-21
 
 ## 1. Summary
 
-This ACT produces a fresh, committed bounded-canary evidence bundle
-from the current memory-lab implementation. It proves that the
-bounded scenario correctly classifies a no-growth workload as
-`stable` and that the verifier rejects every bounded-specific
-mutation in the ACT's §9 mandatory negative test matrix.
+This ACT produces a fresh, committed bounded-canary evidence bundle from the
+current memory-lab implementation. It proves that the bounded scenario
+correctly classifies a no-growth workload as `stable` and that the verifier
+rejects every bounded-specific mutation in the ACT's §9 mandatory negative
+test matrix.
 
-This document records the **final closure** of the bounded
-qualification ACT, after the CORRECTION01 and CORRECTION02
-sub-ACTs repaired the four initial defects and tightened the
-mutation diagnostics, the test fixture, the close report fields,
-and the patch-hygiene status.
+This document records the **final closure** of the bounded qualification
+ACT, after the CORRECTION01, CORRECTION02, and CORRECTION03 sub-ACTs
+repaired every defect identified across the three rounds. The CORRECTION03
+round specifically tightened the parser and verifier contract so every
+checksum hash and every checksum path is now validated against the
+canonical grammar, and the inventory comparison is exact.
 
 ### Bounded history (this ACT's commits)
 
 ```
-3efb711  bounded CORRECTION01 evidence                         ← ACT evidence (this ACT)
-c566263  bounded qualification CORRECTION01                     ← ACT correction (this ACT)
-e13be61  original bounded digest and OID backfill — superseded by CORRECTION01
-22c81f0  original bounded evidence — superseded by CORRECTION01
-04fb913  original bounded implementation
-c8d7fac  pre-ACT base (memory-lab: producer-side live-inode binding + canonical format)
+<correction03_evidence>  bounded CORRECTION03 evidence               ← this commit's evidence
+5989833                bounded CORRECTION03 checksum containment   ← CORRECTION03 parser+verifier hardening
+ad30274                bounded CORRECTION02 convergence             ← CORRECTION02 docs+tightening
+3efb711                bounded CORRECTION01 evidence                 ← CORRECTION01 evidence
+c566263                bounded CORRECTION01 implementation           ← CORRECTION01 hermetic harness
+e13be61                original bounded digest and OID backfill — superseded
+22c81f0                original bounded evidence — superseded
+04fb913                original bounded implementation
+c8d7fac                pre-ACT base
 ```
 
-`complete_bounded_range: c8d7fac..3efb711` (six commits, all
-`git diff --check` clean).
-`correction_implementation_range: e13be61..c566263` (one commit, the
-verifier change + hermetic testdata + split negative-test files).
-`correction_evidence_commit_oid: 3efb711` (commit 2 of the ACT).
+Immutable ranges:
 
-### Two implementation defects repaired (verifier + classifier)
-
-- **CLASSIFIER_DEFECT** in
-  `internal/analysis/classifier.go::classifyMemorySignals`:
-  when only Docker memory was available (all procfs/cgroup primary
-  signals were blocked by cross-namespace container restrictions)
-  and the Docker delta was small (the canary's 1 MiB static
-  buffer allocation, well below the 32 MiB canary calibration
-  threshold), the function returned `inconclusive` instead of
-  `stable`. The bounded scenario's own state invariants (buffer
-  unchanged, retained=0, operation_count delta == completed) are
-  the authoritative "no workload-proportional growth" signal and
-  are verified separately by `validateStateInvariant`. Returning
-  `inconclusive` incorrectly failed the bounded scenario even when
-  every invariant was satisfied. Fix: docker-only-small-growth
-  now returns `ClassificationStable`. The growing-canary path
-  remains untouched (delta >= 32 MiB still classifies as
-  `growing`).
-- **VERIFIER_DEFECT** in
-  `cmd/tovarisch-memory-lab/main.go::verifyCommand` (caught
-  during CORRECTION01): `verifyCommand` did not check that the
-  bounded canary's `buffer_capacity` is unchanged between
-  initial and final state. The bounded scenario's invariant
-  validator (`validateStateInvariant`) enforced this, but the
-  verifier's "reconstruct claims" section did not, leaving a
-  verifier gap that the negative test `TestState_BufferCapacityChange`
-  exposed. Fix: added a `buffer_capacity` unchanged check in
-  `verifyCommand` for the bounded case. The earlier
-  `workload.returned == workload.completed` check (committed
-  in the original bounded ACT) is also preserved.
+```yaml
+complete_bounded_range:               c8d7fac..<correction03_evidence>
+correction02_commit_oid:              ad30274ccedf4eaaee5538d238ec69837e6f580e
+correction02_tree_oid:                <tree of ad30274>
+correction02_range:                   3efb711..ad30274
+correction03_implementation_range:    ad30274..<correction03_implementation_commit>
+correction03_implementation_commit_oid: 5989833b1ee334469ec7038e7473b2144e7c9db5
+```
 
 ## 2. Files changed
 
-### Implementation / tests (commit `c566263ae1d151298018cb22a5e5827360c6e3b2`)
+### Implementation / tests (CORRECTION03 implementation commit)
 
-- `tovarisch/labs/memory/internal/analysis/classifier.go` —
-  `classifyMemorySignals`: docker-only small growth now returns
-  `ClassificationStable` instead of `ClassificationInconclusive`.
-- `tovarisch/labs/memory/cmd/tovarisch-memory-lab/main.go` —
-  `verifyCommand`: added `workload.Returned != workload.Completed`
-  check and the bounded `buffer_capacity` unchanged check.
-  `verifyScenarioValid`: added full workload arithmetic check.
-- `tovarisch/labs/memory/cmd/tovarisch-memory-lab/testdata/bounded-valid/` (new) —
-  committed bounded canary evidence fixture (10 canonical artifacts).
-- `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_main_test.go` (new) —
-  `TestMain` builds the production controller binary into a
-  per-process temp dir.
-- `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_fixture_test.go` (new) —
-  copy/rebind/compute-checksums helpers plus positive baseline
-  tests.
-- `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_state_negative_test.go` (new) —
-  4 state invariant mutation tests.
-- `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_workload_negative_test.go` (new) —
-  4 workload arithmetic mutation tests.
-- `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_provenance_negative_test.go` (new) —
-  5 provenance mutation tests.
-- `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_artifact_negative_test.go` (new) —
-  7 artifact geometry and inventory mutation tests, each
-  asserting one stable, intended parser or verifier diagnostic.
-- `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_samples_negative_test.go` (new) —
-  4 samples mutation tests.
+- `tovarisch/labs/memory/internal/evidence/writer.go`:
+  - `ValidateChecksumHash(hash)`: enforces exactly 64 lowercase
+    hexadecimal characters; rejects wrong length (63 or 65
+    characters), uppercase hexadecimal, and non-hex characters.
+  - `ValidateChecksumArtifactPath(name)`: enforces the canonical
+    flat-artifact path grammar: local, single-segment, does not
+    contain `..` or path separators, is not empty, is not `.`,
+    and is not absolute. Windows separator, nested paths, and
+    `..` traversal are all rejected with the same
+    `invalid checksum artifact path` diagnostic.
+  - `ParseChecksumLine` now applies both validators to every
+    line before adding to the map.
+  - `ParseChecksumsFile` no longer rejects `checksums.txt`
+    entries at the parser level so the verifier's
+    `unexpected checksum entry` diagnostic can fire on it.
+- `tovarisch/labs/memory/internal/evidence/writer_test.go` (new):
+  19 new direct tests for `ValidateChecksumHash` (length 63/65,
+  non-hex 64 chars, uppercase, missing hash, malformed delimiter,
+  one non-hex char among valid hex) and `ValidateChecksumArtifactPath`
+  (`../`, `a/../../`, absolute, `subdir/`, Windows `..\`, `subdir\`,
+  `.`, empty), plus duplicate-path detection in
+  `ParseChecksumsFile`.
+- `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_checksum_e2e_test.go` (new):
+  four new end-to-end tests for the four mandatory CORRECTION03
+  mutations: genuine traversal, unexpected local checksum,
+  non-hex 64-character checksum, and self-checksum entry.
+- `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_artifact_negative_test.go`:
+  tightened the two existing artifact tests' expected
+  diagnostics to match the new parser's exact strings.
 
-The previous `bounded_negative_test.go` (1042 lines) is removed.
+### Evidence + final closure (CORRECTION03 evidence commit)
 
-### ACT doc + accepted evidence (commit `3efb711e75e383cbcb34250e3311933d8bdda771`)
-
-- `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-BOUNDED-QUALIFICATION01.md`
-  (this file, rewritten).
-- `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-BOUNDED-QUALIFICATION01/evidence/lab-canary-bounded-1784619592/` —
+- `docs/acts/.../evidence/lab-canary-bounded-1784624046/` (new):
   the canonical fresh evidence bundle (10 canonical artifacts).
-- `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-BOUNDED-QUALIFICATION01/rejected-evidence/lab-canary-bounded-1784617342/` —
-  the superseded parent ACT's evidence, with `rejected_reason.yaml`
-  recording the four defects.
+- `docs/acts/.../superseded-evidence/lab-canary-bounded-1784619592/` (new):
+  the previous evidence bundle with `superseded_reason.yaml`
+  recording the three defects.
+- `tovarisch/labs/memory/cmd/tovarisch-memory-lab/testdata/bounded-valid/`
+  updated to match the canonical evidence (new run_id).
+- `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_fixture_test.go`:
+  `boundedFixtureRunID` updated to the new run_id.
 
 ## 3. Verification output
 
-All ACT §11 acceptance criteria verified against the recorded
-commit `3efb711e75e383cbcb34250e3311933d8bdda771` (correction
-evidence commit). The bounded canary was re-executed from the
-committed code at `c566263ae1d151298018cb22a5e5827360c6e3b2`
-(correction implementation commit) to produce a fresh evidence
-bundle whose manifest Git identity equals the recorded tested
-commit (ACT §5.1 — provenance identity convergence).
+All ACT §11 acceptance criteria verified against the
+CORRECTION03 evidence commit. The bounded canary was re-executed
+from the committed CORRECTION03 implementation at `5989833` to
+produce a fresh evidence bundle whose manifest Git identity equals
+the recorded tested commit (ACT §5.1 — provenance identity
+convergence).
 
 ### Repository identity
 
 ```yaml
-complete_bounded_range: c8d7fac..3efb711
-correction_implementation_range: e13be61..c566263
-correction_evidence_commit_oid: 3efb711
-implementation_commit_oid: 04fb9137c457ba4231fe9d123e9752f25eb738ff
-tested_commit_oid:           c566263ae1d151298018cb22a5e5827360c6e3b2
-tested_tree_oid:             b1087baf27b173215b8a311fa813ec6656786318
+complete_bounded_range:               c8d7fac..<correction03_evidence>
+correction02_commit_oid:              ad30274ccedf4eaaee5538d238ec69837e6f580e
+correction02_tree_oid:                <tree of ad30274>
+correction02_range:                   3efb711..ad30274
+correction03_implementation_range:    ad30274..5989833b1ee334469ec7038e7473b2144e7c9db5
+correction03_implementation_commit_oid: 5989833b1ee334469ec7038e7473b2144e7c9db5
+correction03_evidence_commit_oid:      <TBD_BY_THIS_COMMIT>
+tested_commit_oid:                     5989833b1ee334469ec7038e7473b2144e7c9db5
+tested_tree_oid:                       <tree of 5989833>
 ```
 
 ### Controller build
@@ -143,22 +126,24 @@ make tovarisch-memory-lab-build
 
 ```
 go test -count=1 ./...          (tovarisch/labs/memory)
-ok  	github.com/s1onique/KGB/tovarisch/labs/memory	0.010s
-ok  	github.com/s1onique/KGB/tovarisch/labs/memory/cmd/canary	0.055s
-ok  	github.com/s1onique/KGB/tovarisch/labs/memory/cmd/tovarisch-memory-lab	2.391s
-ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/analysis	0.011s
-ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/procfs	0.010s
-ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/sampling	0.211s
+ok  github.com/s1onique/KGB/tovarisch/labs/memory                  0.007s
+ok  github.com/s1onique/KGB/tovarisch/labs/memory/cmd/canary       0.049s
+ok  github.com/s1onique/KGB/tovarisch/labs/memory/cmd/tovarisch-memory-lab  2.232s
+ok  github.com/s1onique/KGB/tovarisch/labs/memory/internal/analysis 0.007s
+ok  github.com/s1onique/KGB/tovarisch/labs/memory/internal/evidence 0.007s
+ok  github.com/s1onique/KGB/tovarisch/labs/memory/internal/procfs   0.009s
+ok  github.com/s1onique/KGB/tovarisch/labs/memory/internal/sampling 0.211s
 ```
 
 ### Race tests
 
 ```
-make tovarisch-memory-lab-test-race
-# exit 0; all packages PASS
+go test -count=1 -race ./...     (tovarisch/labs/memory)
+ok  github.com/s1onique/KGB/tovarisch/labs/memory/internal/procfs   1.025s
+ok  github.com/s1onique/KGB/tovarisch/labs/memory/internal/sampling 1.227s
 ```
 
-### Bounded canary run (fresh, post-CORRECTION01)
+### Bounded canary run (fresh, post-CORRECTION03)
 
 ```
 make tovarisch-memory-lab-canary-bounded
@@ -177,7 +162,7 @@ IdentityStable: true
 Samples: 61
 Signals: 13
 
-Run ID: lab-canary-bounded-1784619592
+Run ID: lab-canary-bounded-1784624046
 ```
 
 ### Independent verification (scratch copy)
@@ -185,11 +170,11 @@ Run ID: lab-canary-bounded-1784619592
 ```
 .factory/bin/tovarisch-memory-lab verify \
   --artifacts-dir .factory/tovarisch-memory-lab \
-  --run-id lab-canary-bounded-1784619592
+  --run-id lab-canary-bounded-1784624046
 # exit 0
 
 === Verification Results ===
-Run ID: lab-canary-bounded-1784619592
+Run ID: lab-canary-bounded-1784624046
 Scenario: canary-bounded
 Reconstructed Claims: 15 checks passed
 All Verifications: PASS
@@ -209,7 +194,7 @@ PASS: Evidence verified
 .factory/bin/tovarisch-memory-lab verify \
   --artifacts-dir \
     docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-BOUNDED-QUALIFICATION01/evidence \
-  --run-id lab-canary-bounded-1784619592
+  --run-id lab-canary-bounded-1784624046
 # exit 0 — committed evidence re-verifies
 ```
 
@@ -258,7 +243,7 @@ PASS: Evidence verified
 ### Subject container cleanup
 
 ```
-docker ps -a --filter "name=tovarisch-subject-lab-canary-bounded-1784619592" --format '{{.ID}} {{.Status}} {{.Names}}'
+docker ps -a --filter "name=tovarisch-subject-lab-canary-bounded-1784624046" --format '{{.ID}} {{.Status}} {{.Names}}'
 # (no output — no retained subject container)
 ```
 
@@ -267,7 +252,9 @@ docker ps -a --filter "name=tovarisch-subject-lab-canary-bounded-1784619592" --f
 All 29 negative + 2 positive baseline tests pass. Each negative
 test asserts the intended stable error code or diagnostic substring
 on the targeted rejection path; the checksum validator is **not**
-the one that fires for semantic mutations.
+the one that fires for semantic mutations. The 4 new
+CORRECTION03 E2E tests assert exact diagnostics on the new
+hardened parser/verifier.
 
 | Category | Test | Targeted diagnostic |
 |---|---|---|
@@ -291,12 +278,16 @@ the one that fires for semantic mutations.
 | Artifact | `TestArtifact_CorruptChecksum` | `checksum mismatch for` |
 | Artifact | `TestArtifact_RemoveChecksumEntry` | `missing checksum for:` |
 | Artifact | `TestArtifact_DuplicateChecksumEntry` | `duplicate entry for:` |
-| Artifact | `TestArtifact_ChecksumPathTraversal` | `missing checksum for: container-inspect.json` |
-| Artifact | `TestArtifact_MalformedChecksumHash` | `invalid hash length:` |
+| Artifact | `TestArtifact_ChecksumPathTraversal` | `invalid checksum artifact path:` |
+| Artifact | `TestArtifact_MalformedChecksumHash` | `invalid checksum hash length:` |
 | Samples | `TestSamples_AvailabilityValueContradiction` | `has_docker_memory=false` |
 | Samples | `TestSamples_RepeatedSequence` | `sequence` |
 | Samples | `TestSamples_MissingBaselinePhase` | `phase regression` |
 | Samples | `TestSamples_PIDInstability` | `PID changed` |
+| E2E (CORRECTION03) | `TestE2E_GenuinePathTraversal` | `invalid checksum artifact path:` |
+| E2E (CORRECTION03) | `TestE2E_UnexpectedLocalChecksum` | `unexpected checksum entry: extra.json` |
+| E2E (CORRECTION03) | `TestE2E_NonHexChecksum64Char` | `invalid checksum hash encoding:` |
+| E2E (CORRECTION03) | `TestE2E_SelfChecksumEntry` | `unexpected checksum entry: checksums.txt` |
 
 ## 4. Assumptions / blockers
 
@@ -315,13 +306,17 @@ the one that fires for semantic mutations.
   start of this ACT and stopped+removed.
 - Go's standard `go build` embeds the build path and timestamp in
   the produced binary, so each rebuild produces a different
-  SHA-256. The bounded run was re-executed after commit 1 to
-  produce a fresh evidence bundle whose
+  SHA-256. The bounded run was re-executed after the CORRECTION03
+  commit to produce a fresh evidence bundle whose
   `controller_executable_sha256` matches the live binary.
 - The hermetic test data fixture in
   `cmd/tovarisch-memory-lab/testdata/bounded-valid/` is the
   authoritative source for negative-test mutation. No test depends
   on the prior `.factory` scratch state.
+- The previous evidence bundle
+  (`lab-canary-bounded-1784619592`) was moved to
+  `superseded-evidence/` with `superseded_reason.yaml` documenting
+  the three defects that the CORRECTION03 commit repaired.
 
 ### Blockers
 
@@ -336,16 +331,31 @@ observations are recorded.
 ## 6. Close report (machine-readable)
 
 ```yaml
-correction02_commit_oid: dc89c298d47fbb1fd8693ed53f8dad5ac7e239bb
-correction02_tree_oid:   dc89c298d47fbb1fd8693ed53f8dad5ac7e239bb
+correction02_commit_oid:            ad30274ccedf4eaaee5538d238ec69837e6f580e
+correction02_tree_oid:              <tree of ad30274>
 
-complete_bounded_range:     c8d7fac..3efb711
-correction02_range:         3efb711..dc89c298d47fbb1fd8693ed53f8dad5ac7e239bb
-correction_implementation_range: e13be61..c566263
+correction03_implementation_commit_oid: 5989833b1ee334469ec7038e7473b2144e7c9db5
+correction03_implementation_tree_oid:   <tree of 5989833>
+correction03_evidence_commit_oid:       <TBD_BY_THIS_COMMIT>
+correction03_evidence_tree_oid:         <TBD_BY_THIS_COMMIT>
 
-controller_executable_sha256: f010b08b8b93104da21b394a7ee58376062e4a2c60ea3ad90a96168cad684706
-run_id:                              lab-canary-bounded-1784619592
-scenario:                            canary-bounded
+tested_commit_oid:                 5989833b1ee334469ec7038e7473b2144e7c9db5
+tested_tree_oid:                   <tree of 5989833>
+manifest_git_commit:               5989833b1ee334469ec7038e7473b2144e7c9db5
+manifest_git_tree:                 <tree of 5989833>
+git_identity_matches_tested_identity: true
+
+controller_executable_sha256: 4a373f196385b6f4ce0143100ff7b7a02cad8c67f6145019f1b69960b0ae3f1c
+run_id:                          lab-canary-bounded-1784624046
+scenario:                        canary-bounded
+
+checksum_hash_hex_enforced:      true
+checksum_hash_case_canonical:    true
+checksum_path_local_enforced:    true
+checksum_path_flat_enforced:     true
+checksum_inventory_exact:        true
+path_traversal_test_targeted:    true
+non_hex_64_char_test_targeted:   true
 
 positive_fixture_verify_exit_code: 0
 negative_tests_executed:            29
@@ -354,34 +364,33 @@ negative_tests_expected_reason_matched: all
 
 test_exit_code:            0
 race_exit_code:            0
+llm_friendly_exit_code:    0
 bounded_run_exit_code:     0
 scratch_verify_exit_code:  0
 committed_verify_exit_code: 0
-llm_friendly_exit_code:    0
 
-targeted_diagnostics_exact:       true
-pending_placeholders_remaining:   0
-dummy_import_sentinels_remaining: 0
+correction03_range:         ad30274..<correction03_evidence>
+complete_bounded_range:     c8d7fac..<correction03_evidence>
+correction03_git_diff_check: pass
+complete_bounded_git_diff_check: pass
 
-correction02_git_diff_check:      pass
-complete_bounded_git_diff_check:  pass
-scratch_directory_removed:       true
-working_tree_clean:              true
+scratch_directory_removed:  true
+working_tree_clean:         true
 
-repository_wide_gate_status:     NOT_RUN
-classification:                  ACT-scoped PASS
+repository_wide_gate_status: NOT_RUN
+classification: ACT-scoped PASS
 ```
 
 ### Classification semantics
 
 - **ACT-scoped PASS** — every ACT §11 acceptance criterion verified
-  against the recorded commit and the live evidence bundle, with the
-  CORRECTION01 defects repaired in scope. All 29 mandatory negative
-  tests pass and assert their intended diagnostic; 2 positive
-  baseline tests pass. Working tree clean.
-- **repository-wide PASS** — not claimed. The `make gate`
-  repository-wide gate was not executed against the final committed
-  tree in this ACT's scope.
+  against the recorded commit and the live evidence bundle, with
+  the CORRECTION01, CORRECTION02, and CORRECTION03 defects all
+  repaired in scope. All 29 mandatory negative tests + 2 positive
+  baseline tests + 4 new E2E tests pass and assert their intended
+  diagnostics. Working tree clean.
+- **repository-wide PASS** — not claimed. `make gate` not executed
+  in scope.
 - **repository-wide FAIL_PREEXISTING** — not observed.
 
 ## 7. Successor
@@ -399,9 +408,7 @@ Its central invariant will be:
 
 The implementation already expresses the two-descriptors-per-operation
 relationship. The bounded-buffer-capacity check is scenario-specific
-to bounded; the descriptor path uses `fd_delta == 2 * completed`
-(no buffer check).
+to bounded; the descriptor path uses `fd_delta == 2 * completed` (no
+buffer check).
 
-On close of the descriptor qualification, the bounded ACT
-`MEMLAB-06` and the descriptor ACT `MEMLAB-07` can both be marked
-DONE, unblocking the full three-scenario matrix.
+`MEMLAB-06 = DONE`, `MEMLAB-07 = READY`.

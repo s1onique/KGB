@@ -1,0 +1,9 @@
+{
+  "mode": "bounded",
+  "retained_blocks": 0,
+  "retained_bytes": 0,
+  "operation_count": 0,
+  "fd_count": 8,
+  "buffer_capacity": 1048576,
+  "ready": true
+}

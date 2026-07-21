@@ -1,0 +1,20 @@
+superseded_reason:
+  verifier_checksum_path_grammar_hardened: |
+    ParseChecksumLine now applies ValidateChecksumArtifactPath
+    (rejects '../escape.json', 'a/../../escape.json',
+    '/tmp/escape.json', 'subdir/manifest.json', '..\escape.json',
+    '.', and empty) before the checksum is added to the map.
+  verifier_checksum_hash_grammar_hardened: |
+    ParseChecksumLine now applies ValidateChecksumHash (rejects
+    63 or 65 characters, uppercase hexadecimal, and non-hex
+    characters) before the checksum is added to the map.
+  exact_checksum_inventory_enforced: |
+    The verifier iterates the manifest inventory and the stored
+    checksums map in both directions, requiring the sets to be
+    exactly equal. A checksum for checksums.txt fires the
+    'unexpected checksum entry' diagnostic. An extra checksum
+    (extra.json) fires the same diagnostic.
+canonical_accepted_evidence:
+  path: ../../evidence/lab-canary-bounded-1784624046/
+  run_id: lab-canary-bounded-1784624046
+  commit_oid: 5989833b1ee334469ec7038e7473b2144e7c9db5
