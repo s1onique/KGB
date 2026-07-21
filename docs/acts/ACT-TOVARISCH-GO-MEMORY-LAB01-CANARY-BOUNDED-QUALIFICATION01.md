@@ -71,11 +71,12 @@ growing-canary and descriptor-canary contract.
   - `TestBoundedNegative_PrintFixtureDigest`: diagnostic harness for
     the close report.
 
-### ACT doc + evidence (commit 2)
+### ACT doc + evidence (commit 2, OID `22c81f036cb6f188f771ae17f352f7733709d5c5`)
 
 - `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-BOUNDED-QUALIFICATION01.md`
   (this file).
 - `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-BOUNDED-QUALIFICATION01/evidence/lab-canary-bounded-1784617342/{manifest.json,verdict.json,samples.csv,events.jsonl,container-inspect.json,container-logs.txt,initial-canary-state.json,final-canary-state.json,workload-result.json,checksums.txt}`
+- `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-BOUNDED-QUALIFICATION01-range-digest.txt` — Leamas digest of the implementation range `c8d7fac~1..04fb913`.
 
 ## 3. Verification output
 
@@ -352,8 +353,9 @@ scenario_valid:            true
 canaries_valid:            true
 provenance_valid:          true
 cleanup_result:            no_retained_subject_container
-evidence_commit_oid:       TBD_BY_COMMIT_2
-digest_range:              TBD_BY_LEAMAS_DIGEST
+evidence_commit_oid:       22c81f036cb6f188f771ae17f352f7733709d5c5
+digest_range:              c8d7fac~1..04fb913
+digest_path:               docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-BOUNDED-QUALIFICATION01-range-digest.txt
 repository_wide_gate_status: NOT_RUN  # ACT-scoped PASS only
 classification:            ACT-scoped PASS
 ```
