@@ -933,6 +933,10 @@ func verifyCommand(args []string) error {
 		}
 
 	case "canary-bounded":
+		if initialState.BufferCapacity != finalState.BufferCapacity {
+			verifyErrors = append(verifyErrors, fmt.Sprintf("bounded: buffer_capacity changed from %d to %d",
+				initialState.BufferCapacity, finalState.BufferCapacity))
+		}
 		if finalState.RetainedBlocks != 0 || finalState.RetainedBytes != 0 {
 			verifyErrors = append(verifyErrors, fmt.Sprintf("bounded: retained should be 0, got blocks=%d bytes=%d",
 				finalState.RetainedBlocks, finalState.RetainedBytes))
