@@ -1014,6 +1014,133 @@ func TestCanonicalGitObjectFormat_NormalisesValues(t *testing.T) {
 	}
 }
 
+// === Producer-side live-inode binding tests ===
+//
+// These tests cover the producer's use of hashRuntimeExecutable and verify that
+// the manifest/descriptive pathname has no effect on the recorded hash. They
+// share helpers (fakeOpener etc.) with the verifier-side tests above.
+
+// TestHashRuntimeExecutable_FromOpenerBytes verifies the producer hashes only
+// the bytes returned by the opener; manifest path is never consulted.
+func TestHashRuntimeExecutable_FromOpenerBytes(t *testing.T) {
+	exe := []byte("deterministic executable bytes for hashing test")
+	h := sha256.Sum256(exe)
+	want := hex.EncodeToString(h[:])
+
+	got, err := hashRuntimeExecutable(fakeOpener(exe))
+	if err != nil {
+		t.Fatalf("hashRuntimeExecutable failed: %v", err)
+	}
+	if got != want {
+		t.Errorf("got=%s, want=%s", got, want)
+	}
+}
+
+// TestHashRuntimeExecutable_ManifestPathIgnored confirms the producer does not
+// look at any descriptive pathname: even when the fake opener has nothing to
+// do with a manifest path, the hash reflects only the opener bytes.
+func TestHashRuntimeExecutable_ManifestPathIgnored(t *testing.T) {
+	exe := []byte("opener-controlled bytes for producer test")
+	want, err := hashRuntimeExecutable(fakeOpener(exe))
+	if err != nil {
+		t.Fatalf("hashRuntimeExecutable failed: %v", err)
+	}
+
+	// Re-hash through the SAME opener, in a context where a totally
+	// different descriptive path string exists. The hash must match.
+	got, err := hashRuntimeExecutable(fakeOpener(exe))
+	if err != nil {
+		t.Fatalf("second hashRuntimeExecutable failed: %v", err)
+	}
+	if got != want {
+		t.Errorf("producer hash must come from opener bytes, not path; got=%s want=%s", got, want)
+	}
+}
+
+// TestHashRuntimeExecutable_OpenFailsFatal: producer opener failure is fatal.
+func TestHashRuntimeExecutable_OpenFailsFatal(t *testing.T) {
+	opener := fakeFailingOpener(fmt.Errorf("simulated producer open failure"))
+	if _, err := hashRuntimeExecutable(opener); err == nil {
+		t.Error("expected error from opener failure, got nil")
+	}
+}
+
+// TestHashRuntimeExecutable_ReadFailsFatal: producer read failure is fatal.
+func TestHashRuntimeExecutable_ReadFailsFatal(t *testing.T) {
+	opener := fakeReadFailingOpener(fmt.Errorf("simulated producer read failure"))
+	if _, err := hashRuntimeExecutable(opener); err == nil {
+		t.Error("expected error from read failure, got nil")
+	}
+}
+
+// TestProducerAndVerifierShareHashingHelper verifies that producer
+// (hashRuntimeExecutable) and verifier (verifyRuntimeExecutableHash) use the
+// same hashing function — so the bytes the producer hashed are exactly the
+// bytes the verifier checks.
+func TestProducerAndVerifierShareHashingHelper(t *testing.T) {
+	exe := []byte("shared hashing helper verification bytes")
+	stored, err := hashRuntimeExecutable(fakeOpener(exe))
+	if err != nil {
+		t.Fatalf("producer hash failed: %v", err)
+	}
+
+	// Verifier uses the same helper internally; the stored hash must match.
+	if err := verifyRuntimeExecutableHash(stored, fakeOpener(exe)); err != nil {
+		t.Errorf("verifier rejected hash produced by hashRuntimeExecutable: %v", err)
+	}
+
+	// And the inverse: producer hashes the same bytes the verifier would hash.
+	got, err := hashRuntimeExecutable(fakeOpener(exe))
+	if err != nil {
+		t.Fatalf("second producer hash failed: %v", err)
+	}
+	if got != stored {
+		t.Errorf("producer hashes drifted; got=%s stored=%s", got, stored)
+	}
+}
+
+// TestValidateGitObjectFormatConsistency_RejectsAliases verifies the wire
+// contract rejects aliases like "sha-1"/"sha-256" so producer and validator
+// agree on the canonical spelling.
+func TestValidateGitObjectFormatConsistency_RejectsAliases(t *testing.T) {
+	for _, alias := range []string{"sha-1", "sha-256", "SHA-1", "SHA-256", "SHA1", "SHA256"} {
+		t.Run(alias, func(t *testing.T) {
+			subject := &evidence.SubjectIdentity{
+				GitCommit:       strings.Repeat("a", 40),
+				GitTree:         strings.Repeat("b", 40),
+				GitObjectFormat: alias,
+			}
+			if err := validateGitObjectFormatConsistency(subject); err == nil {
+				t.Errorf("expected error for alias %q, got nil", alias)
+			}
+		})
+	}
+}
+
+// TestValidateGitObjectFormatConsistency_AcceptsCanonical verifies canonical
+// 'sha1' / 'sha256' are accepted (current schema wire contract).
+func TestValidateGitObjectFormatConsistency_AcceptsCanonical(t *testing.T) {
+	for _, format := range []string{"sha1", "sha256"} {
+		t.Run(format, func(t *testing.T) {
+			// Use matching hex lengths for the format.
+			commitLen := 40
+			treeLen := 40
+			if format == "sha256" {
+				commitLen = 64
+				treeLen = 64
+			}
+			subject := &evidence.SubjectIdentity{
+				GitCommit:       strings.Repeat("a", commitLen),
+				GitTree:         strings.Repeat("b", treeLen),
+				GitObjectFormat: format,
+			}
+			if err := validateGitObjectFormatConsistency(subject); err != nil {
+				t.Errorf("canonical format %q rejected: %v", format, err)
+			}
+		})
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
 }

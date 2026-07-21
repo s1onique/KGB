@@ -1363,7 +1363,13 @@ func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, str
 	// Controller PID
 	controllerPID := fmt.Sprintf("%d", os.Getpid())
 
-	// Controller executable path and hash - both required
+	// Controller executable path and hash - both required.
+	//
+	// The path is descriptive only (collected via /proc/self/exe readlink).
+	// The hash MUST come from the same live-inode source the verifier will
+	// use later: hashRuntimeExecutable(openProcSelfExe). This prevents a
+	// substitution window where the on-disk binary is swapped between
+	// process start and hash collection.
 	selfPath, pathErr := os.Readlink("/proc/self/exe")
 	selfHash := ""
 	selfHashErr := error(nil)
@@ -1373,7 +1379,7 @@ func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, str
 		errs = append(errs, "executable path: empty")
 	} else {
 		var hashErr error
-		selfHash, hashErr = hashFile(selfPath)
+		selfHash, hashErr = hashRuntimeExecutable(openProcSelfExe)
 		if hashErr != nil {
 			errs = append(errs, fmt.Sprintf("executable hash: %v", hashErr))
 			selfHashErr = hashErr
@@ -1584,6 +1590,29 @@ func hashFile(path string) (string, error) {
 	return hex.EncodeToString(hash[:]), nil
 }
 
+// hashRuntimeExecutable computes the SHA-256 of the currently executing binary
+// through the supplied opener. This is the producer-side counterpart to
+// verifyRuntimeExecutableHash: both producer and verifier must hash the same
+// live inode via the opener seam, never the descriptive pathname from
+// /proc/self/exe readlink.
+//
+// The opener is the only selector for which bytes get hashed. A swapped or
+// replaced on-disk pathname cannot influence the result because we never
+// reopen the path.
+func hashRuntimeExecutable(openRuntimeExecutable runtimeExecutableOpener) (string, error) {
+	rc, err := openRuntimeExecutable()
+	if err != nil {
+		return "", fmt.Errorf("open runtime executable: %w", err)
+	}
+	defer rc.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, rc); err != nil {
+		return "", fmt.Errorf("read runtime executable: %w", err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 // provenanceErrorString returns a string representation of an error, or empty string if nil.
 func provenanceErrorString(err error) string {
 	if err == nil {
@@ -1714,15 +1743,15 @@ func validateGitObjectID(value string, gitObjectFormat string) error {
 // validateGitObjectFormatConsistency validates that git_commit and git_tree
 // both use the same hash algorithm as specified in git_object_format.
 //
-// For the current evidence schema (1.x), git_object_format is REQUIRED.
-// Empty format is rejected so that new evidence cannot smuggle a SHA-1/SHA-256
-// mismatch past the validator.
+// For the current evidence schema (1.x), git_object_format is REQUIRED and
+// must be one of the canonical values produced by canonicalGitObjectFormat:
+// "sha1" or "sha256". Aliases like "sha-1" / "sha-256" are rejected so the
+// wire contract is deterministic — both producer (canonicalGitObjectFormat)
+// and validator (this function) agree on the exact on-wire spelling.
 func validateGitObjectFormatConsistency(subject *evidence.SubjectIdentity) error {
 	format := subject.GitObjectFormat
 
-	// Current-schema evidence must declare git_object_format. Empty format
-	// would allow the validator to accept any length mismatch between commit
-	// and tree, defeating the purpose of declaring the algorithm.
+	// Current-schema evidence must declare git_object_format in canonical form.
 	if format == "" {
 		return fmt.Errorf("git_object_format is required (expected 'sha1' or 'sha256')")
 	}
@@ -1740,15 +1769,17 @@ func validateGitObjectFormatConsistency(subject *evidence.SubjectIdentity) error
 	treeLen := len(treeDecoded)
 
 	switch format {
-	case "sha1", "sha-1":
+	case "sha1":
 		if commitLen != 20 || treeLen != 20 {
 			return fmt.Errorf("git_object_format=sha1 but commit len=%d or tree len=%d (want 20)", commitLen, treeLen)
 		}
-	case "sha256", "sha-256":
+	case "sha256":
 		if commitLen != 32 || treeLen != 32 {
 			return fmt.Errorf("git_object_format=sha256 but commit len=%d or tree len=%d (want 32)", commitLen, treeLen)
 		}
 	default:
+		// Reject aliases and unknown values; current schema requires canonical
+		// 'sha1' or 'sha256' only.
 		return fmt.Errorf("unsupported git_object_format=%q (expected 'sha1' or 'sha256')", format)
 	}
 
@@ -1777,27 +1808,24 @@ func openProcSelfExe() (io.ReadCloser, error) {
 // file for hashing.
 //
 // Returns nil only when:
+//   - the stored hash is non-empty;
 //   - the opener succeeds;
 //   - reading the bytes succeeds;
 //   - the resulting SHA-256 equals storedHash.
 //
-// Any failure (open error, read error, hash mismatch) is returned as a
-// non-nil error so the caller can record it as a verification failure.
+// Any failure (empty hash, open error, read error, hash mismatch) is returned
+// as a non-nil error so the caller can record it as a verification failure.
+//
+// This function shares hashRuntimeExecutable with the producer so both sides
+// use the same hashing helper.
 func verifyRuntimeExecutableHash(storedHash string, openRuntimeExecutable runtimeExecutableOpener) error {
 	if storedHash == "" {
 		return fmt.Errorf("stored executable hash is empty")
 	}
-	rc, err := openRuntimeExecutable()
+	got, err := hashRuntimeExecutable(openRuntimeExecutable)
 	if err != nil {
-		return fmt.Errorf("open runtime executable: %w", err)
+		return err
 	}
-	defer rc.Close()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, rc); err != nil {
-		return fmt.Errorf("read runtime executable: %w", err)
-	}
-	got := hex.EncodeToString(h.Sum(nil))
 	if got != storedHash {
 		return fmt.Errorf("executable hash mismatch: stored=%s runtime=%s", storedHash, got)
 	}
