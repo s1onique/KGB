@@ -1514,9 +1514,13 @@ func verifyCommand(args []string) error {
 	if data, err := os.ReadFile(provPath); err == nil {
 		var prov CanaryImageProvenance
 		if err := json.Unmarshal(data, &prov); err == nil {
-			verifiedTree, _ := runGit("rev-parse", "HEAD^{tree}")
-			verifiedSubtree, _ := runGit("rev-parse", "HEAD:tovarisch/labs/memory/cmd/canary")
-			verifiedCommit, _ := runGit("rev-parse", "HEAD")
+			verifiedCommit := ""
+			verifiedTree := ""
+			if manifest.SubjectIdentity != nil {
+				verifiedCommit = manifest.SubjectIdentity.GitCommit
+				verifiedTree = manifest.SubjectIdentity.GitTree
+			}
+			verifiedSubtree, _ := runGit("rev-parse", verifiedCommit + ":tovarisch/labs/memory/cmd/canary")
 			if verifiedCommit != "" && prov.ImageRevisionLabel != "" && prov.ImageRevisionLabel != verifiedCommit {
 				verifyErrors = append(verifyErrors,
 					fmt.Sprintf("canary image revision label=%s != tested commit=%s",

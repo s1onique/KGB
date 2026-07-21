@@ -1,17 +1,17 @@
 {
   "schema_version": "1.0.0",
-  "run_id": "lab-canary-descriptor-1784635776",
+  "run_id": "lab-canary-descriptor-1784636144",
   "scenario": "canary-descriptor",
-  "started_at": "2026-07-21T15:09:36.737252498+03:00",
-  "finished_at": "2026-07-21T15:11:39.961128967+03:00",
+  "started_at": "2026-07-21T15:15:44.894967958+03:00",
+  "finished_at": "2026-07-21T15:17:48.063165823+03:00",
   "subject_identity": {
-    "git_commit": "9c1f0200ac55e632ab50d555e68fc52c25552574",
-    "git_tree": "68c7fb0439535b3b4d17456af8adbba27ac19c14",
+    "git_commit": "f7dcef8a51203dff9741f32a6dda7a80972280c4",
+    "git_tree": "e91e1b24aa899b9d1b47ffe29fcb684606dd3f88",
     "git_object_format": "sha1",
     "controller_executable_path": "/home/kgb/Projects/KGB/.factory/bin/tovarisch-memory-lab",
-    "controller_executable_sha256": "2dea05827dde351e1aa02dba5c1a964c7b1fad29981880df909bd674be13e091"
+    "controller_executable_sha256": "d7eaf3ab5ebf527b6526c1b6b70f2b3a685b3bf958b5e730c0113cbdfccd04f2"
   },
-  "controller_identity": "2169054",
+  "controller_identity": "2189056",
   "host_identity": {
     "kernel_release": "6.17.0-19-generic",
     "kernel_version": "Linux version 6.17.0-19-generic (buildd@lcy02-amd64-019) (x86_64-linux-gnu-gcc-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, GNU ld (GNU Binutils for Ubuntu) 2.42) #19~24.04.2-Ubuntu SMP PREEMPT_DYNAMIC Fri Mar  6 23:08:46 UTC 2",

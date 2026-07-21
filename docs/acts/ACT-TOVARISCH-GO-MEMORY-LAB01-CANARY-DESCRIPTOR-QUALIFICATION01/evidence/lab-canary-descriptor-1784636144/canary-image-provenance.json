@@ -1,0 +1,15 @@
+{
+  "canary_image_id": "sha256:2d4c69310e7b17a0af416bb37cf9fd416ad6e61282c796208f58b206b70e64c7",
+  "canary_repo_digests": [
+    "kgb-tovarisch-canary@sha256:2d4c69310e7b17a0af416bb37cf9fd416ad6e61282c796208f58b206b70e64c7"
+  ],
+  "canary_repo_digest_status": "available",
+  "canary_source_commit_oid": "f7dcef8a51203dff9741f32a6dda7a80972280c4",
+  "canary_repository_tree_oid": "e91e1b24aa899b9d1b47ffe29fcb684606dd3f88",
+  "canary_source_subtree_oid": "056016e82fba903ed25d0bab98197e2a424b2a67",
+  "canary_image_revision_label": "f7dcef8a51203dff9741f32a6dda7a80972280c4",
+  "canary_image_tree_label": "e91e1b24aa899b9d1b47ffe29fcb684606dd3f88",
+  "canary_image_source_subtree_label": "056016e82fba903ed25d0bab98197e2a424b2a67",
+  "canary_image_binary_sha256_label": "b386ef9010335805ccc27e96ae7778bbfa3dbca60030fd5569df4458524b4e9d",
+  "canary_container_image_matches_id": true
+}

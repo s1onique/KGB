@@ -80,7 +80,7 @@ CORRECTION02 fixes all five:
   sourced from canonical evidence only.
 
 The fresh committed evidence
-(`lab-canary-descriptor-1784635776`) verifies with the new
+(`lab-canary-descriptor-1784636144`) verifies with the new
 verifier (15 reconstructed claims pass; all four
 classifications match; all three validity fields match;
 the `descriptor_state_invariant` signal carries the
@@ -94,20 +94,20 @@ all match the verified source tree).
 
 ```yaml
 pre_correction02_commit_oid: 0749e48d7ed8bd05a1bfc0f1c2a2c2b40fd2d75a
-pre_correction02_tested_tree_oid: 68c7fb0439535b3b4d17456af8adbba27ac19c14
+pre_correction02_tested_tree_oid: e91e1b24aa899b9d1b47ffe29fcb684606dd3f88
 
-correction02_implementation_commit_oid: 9c1f0200ac55e632ab50d555e68fc52c25552574
-correction02_implementation_tree_oid:   68c7fb0439535b3b4d17456af8adbba27ac19c14
+correction02_implementation_commit_oid: f7dcef8a51203dff9741f32a6dda7a80972280c4
+correction02_implementation_tree_oid:   e91e1b24aa899b9d1b47ffe29fcb684606dd3f88
 
-correction02_tested_commit_oid:         9c1f0200ac55e632ab50d555e68fc52c25552574
-correction02_tested_tree_oid:           68c7fb0439535b3b4d17456af8adbba27ac19c14
-manifest_git_commit:                   9c1f0200ac55e632ab50d555e68fc52c25552574
-manifest_git_tree:                     68c7fb0439535b3b4d17456af8adbba27ac19c14
+correction02_tested_commit_oid:         f7dcef8a51203dff9741f32a6dda7a80972280c4
+correction02_tested_tree_oid:           e91e1b24aa899b9d1b47ffe29fcb684606dd3f88
+manifest_git_commit:                   f7dcef8a51203dff9741f32a6dda7a80972280c4
+manifest_git_tree:                     e91e1b24aa899b9d1b47ffe29fcb684606dd3f88
 git_identity_matches_tested_identity:   true
 
 controller_executable_sha256: <controller hash from the final run>
 controller_executable_path:   /home/kgb/Projects/KGB/.factory/bin/tovarisch-memory-lab
-run_id:                          lab-canary-descriptor-1784635776
+run_id:                          lab-canary-descriptor-1784636144
 scenario:                        canary-descriptor
 host_kernel:                     6.17.0-19-generic
 cgroup_mode:                     cgroup2
@@ -139,8 +139,8 @@ scenario_valid:  true
 canaries_valid:  true
 provenance_valid: true
 
-process_pid:         2169125
-process_start_time:  636273148
+process_pid:         2189128
+process_start_time:  636309962
 sample_count:        61
 phase_counts:
   startup:  5
@@ -151,17 +151,17 @@ phase_counts:
   final:    8
 delayed_samples: 59
 
-canary_image_id:                sha256:db1c85fe0a26da0dc33f7a9e50bb343b0f96b0a586f72f91f119a3f4b503bf5e
+canary_image_id:                sha256:2d4c69310e7b17a0af416bb37cf9fd416ad6e61282c796208f58b206b70e64c7
 canary_repo_digests:
-  - kgb-tovarisch-canary@sha256:db1c85fe0a26da0dc33f7a9e50bb343b0f96b0a586f72f91f119a3f4b503bf5e
+  - kgb-tovarisch-canary@sha256:2d4c69310e7b17a0af416bb37cf9fd416ad6e61282c796208f58b206b70e64c7
 canary_repo_digest_status:      available
-canary_source_commit_oid:       9c1f0200ac55e632ab50d555e68fc52c25552574
-canary_repository_tree_oid:     68c7fb0439535b3b4d17456af8adbba27ac19c14
+canary_source_commit_oid:       f7dcef8a51203dff9741f32a6dda7a80972280c4
+canary_repository_tree_oid:     e91e1b24aa899b9d1b47ffe29fcb684606dd3f88
 canary_source_subtree_oid:      056016e82fba903ed25d0bab98197e2a424b2a67
-canary_image_revision_label:    9c1f0200ac55e632ab50d555e68fc52c25552574
-canary_image_tree_label:        68c7fb0439535b3b4d17456af8adbba27ac19c14
+canary_image_revision_label:    f7dcef8a51203dff9741f32a6dda7a80972280c4
+canary_image_tree_label:        e91e1b24aa899b9d1b47ffe29fcb684606dd3f88
 canary_image_source_subtree_label: 056016e82fba903ed25d0bab98197e2a424b2a67
-canary_image_binary_sha256_label:  aac6bb8d50dee648b7006dbcd2c5d36474f6419c32f2b2a2999b1b0b8cea08b1
+canary_image_binary_sha256_label:  b386ef9010335805ccc27e96ae7778bbfa3dbca60030fd5569df4458524b4e9d
 canary_container_image_matches_id: true
 
 # Test accounting (current CORRECTION02 stream):
@@ -291,7 +291,7 @@ passing.
 ## 4. Verifier reconstruction (full)
 
 For the committed fresh evidence
-(`lab-canary-descriptor-1784635776`):
+(`lab-canary-descriptor-1784636144`):
 
 ```yaml
 manifest.scenario:                 canary-descriptor
@@ -581,15 +581,15 @@ to `scripts/build_tovarisch_canary_image.sh`). The script:
 5. Tags the image `kgb-tovarisch-canary:latest`.
 
 ```yaml
-canary_image_id:              sha256:db1c85fe0a26da0dc33f7a9e50bb343b0f96b0a586f72f91f119a3f4b503bf5e
-canary_image_repo_digest:     kgb-tovarisch-canary@sha256:db1c85fe0a26da0dc33f7a9e50bb343b0f96b0a586f72f91f119a3f4b503bf5e
-canary_source_commit_oid:     9c1f0200ac55e632ab50d555e68fc52c25552574
-canary_repository_tree_oid:   68c7fb0439535b3b4d17456af8adbba27ac19c14
+canary_image_id:              sha256:2d4c69310e7b17a0af416bb37cf9fd416ad6e61282c796208f58b206b70e64c7
+canary_image_repo_digest:     kgb-tovarisch-canary@sha256:2d4c69310e7b17a0af416bb37cf9fd416ad6e61282c796208f58b206b70e64c7
+canary_source_commit_oid:     f7dcef8a51203dff9741f32a6dda7a80972280c4
+canary_repository_tree_oid:   e91e1b24aa899b9d1b47ffe29fcb684606dd3f88
 canary_source_subtree_oid:    056016e82fba903ed25d0bab98197e2a424b2a67
-canary_image_revision_label:  9c1f0200ac55e632ab50d555e68fc52c25552574
-canary_image_tree_label:      68c7fb0439535b3b4d17456af8adbba27ac19c14
+canary_image_revision_label:  f7dcef8a51203dff9741f32a6dda7a80972280c4
+canary_image_tree_label:      e91e1b24aa899b9d1b47ffe29fcb684606dd3f88
 canary_image_source_subtree_label: 056016e82fba903ed25d0bab98197e2a424b2a67
-canary_image_binary_sha256_label:  aac6bb8d50dee648b7006dbcd2c5d36474f6419c32f2b2a2999b1b0b8cea08b1
+canary_image_binary_sha256_label:  b386ef9010335805ccc27e96ae7778bbfa3dbca60030fd5569df4458524b4e9d
 canary_source_matches_tested_tree: true
 canary_container_image_matches_id: true
 ```
@@ -622,7 +622,7 @@ make tovarisch-memory-lab-canary-descriptor
 ```
 
 The fresh descriptor run produces
-`lab-canary-descriptor-1784635776` with the ten canonical
+`lab-canary-descriptor-1784636144` with the ten canonical
 artifacts (plus the new `canary-image-provenance.json`). Both
 the scratch and committed evidence copies re-verify with
 exit 0.
@@ -657,7 +657,7 @@ canonical close-report payload from accepted evidence only.
 The fixture value `initial_fd_count: 8` (used in CORRECTION01)
 has been replaced by the freshly-observed value
 `initial_fd_count: 0`. All values are sourced from the
-accepted `lab-canary-descriptor-1784635776` evidence:
+accepted `lab-canary-descriptor-1784636144` evidence:
 
 ```yaml
 initial_fd_count:        0
@@ -678,7 +678,7 @@ phase_counts:
   settling: 5
   final:    8
 canary_image_provenance:
-  canary_image_id:                  sha256:db1c85fe...
+  canary_image_id:                  sha256:2d4c6931...
   canary_repo_digests:               [kgb-tovarisch-canary@sha256:47c4ca8b...]
   canary_repo_digest_status:         available
   canary_source_commit_oid:          dd85a3cb...
@@ -687,7 +687,7 @@ canary_image_provenance:
   canary_image_revision_label:       dd85a3cb...
   canary_image_tree_label:           4d1e9e60...
   canary_image_source_subtree_label: 056016e8...
-  canary_image_binary_sha256_label:  aac6bb8d5...
+  canary_image_binary_sha256_label:  b386ef9010...
   canary_container_image_matches_id: true
 ```
 
@@ -713,7 +713,7 @@ superseded_reason:
   - close_report_runtime_state_copied_from_fixture
 ```
 
-Only the fresh CORRECTION02 run (`lab-canary-descriptor-1784635776`)
+Only the fresh CORRECTION02 run (`lab-canary-descriptor-1784636144`)
 is canonical.
 
 ## 18. Existing tag disposition
@@ -769,7 +769,7 @@ go test -count=1 -json -run 'TestDescriptor|TestClassification|TestApplyDescript
 # Runtime-state derivation (canonical close-report payload):
 ./.factory/bin/tovarisch-memory-lab derive-runtime-state \
   --artifacts-dir docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-DESCRIPTOR-QUALIFICATION01/evidence \
-  --run-id lab-canary-descriptor-1784635776
+  --run-id lab-canary-descriptor-1784636144
 
 # ACT range diff checks:
 git diff --check dd85a3c~..HEAD
@@ -912,7 +912,7 @@ descriptor ACT only touches
 
 - `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-DESCRIPTOR-QUALIFICATION01-CORRECTION02.md`:
   this close report.
-- `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-DESCRIPTOR-QUALIFICATION01/evidence/lab-canary-descriptor-1784635776/`:
+- `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-DESCRIPTOR-QUALIFICATION01/evidence/lab-canary-descriptor-1784636144/`:
   the canonical fresh evidence bundle (10 canonical
   artifacts + `canary-image-provenance.json`).
 - `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-DESCRIPTOR-QUALIFICATION01/superseded-evidence/lab-canary-descriptor-1784631920/`:
@@ -958,14 +958,14 @@ ok    github.com/s1onique/KGB/tovarisch/labs/memory/cmd/tovarisch-memory-lab    
 ```bash
 $ make tovarisch-memory-lab-canary-image
 === Building canary image with provenance labels ===
-TESTED_COMMIT=9c1f0200ac55e632ab50d555e68fc52c25552574
-TESTED_TREE=68c7fb0439535b3b4d17456af8adbba27ac19c14
+TESTED_COMMIT=f7dcef8a51203dff9741f32a6dda7a80972280c4
+TESTED_TREE=e91e1b24aa899b9d1b47ffe29fcb684606dd3f88
 CANARY_SUBTREE=056016e82fba903ed25d0bab98197e2a424b2a67
-CANARY_SHA256=aac6bb8d50dee648b7006dbcd2c5d36474f6419c32f2b2a2999b1b0b8cea08b1
+CANARY_SHA256=b386ef9010335805ccc27e96ae7778bbfa3dbca60030fd5569df4458524b4e9d
 # Docker build output ...
 === canary image built: kgb-tovarisch-canary:latest ===
-9c1f0200ac55e632ab50d555e68fc52c25552574
-aac6bb8d50dee648b7006dbcd2c5d36474f6419c32f2b2a2999b1b0b8cea08b1
+f7dcef8a51203dff9741f32a6dda7a80972280c4
+b386ef9010335805ccc27e96ae7778bbfa3dbca60030fd5569df4458524b4e9d
 # exit 0
 ```
 
@@ -993,8 +993,8 @@ IdentityStable: true
 Samples: 61
 Signals: 14
 
-Artifacts written to: .factory/tovarisch-memory-lab/lab-canary-descriptor-1784635776
-Run ID: lab-canary-descriptor-1784635776
+Artifacts written to: .factory/tovarisch-memory-lab/lab-canary-descriptor-1784636144
+Run ID: lab-canary-descriptor-1784636144
 # exit 0
 ```
 
@@ -1003,9 +1003,9 @@ Run ID: lab-canary-descriptor-1784635776
 ```bash
 $ ./.factory/bin/tovarisch-memory-lab verify \
     --artifacts-dir ./.factory/tovarisch-memory-lab \
-    --run-id lab-canary-descriptor-1784635776
+    --run-id lab-canary-descriptor-1784636144
 === Verification Results ===
-Run ID: lab-canary-descriptor-1784635776
+Run ID: lab-canary-descriptor-1784636144
 Scenario: canary-descriptor
 Reconstructed Claims: 15 checks passed
 All Verifications: PASS
@@ -1026,9 +1026,9 @@ PASS: Evidence verified
 $ ./.factory/bin/tovarisch-memory-lab verify \
     --artifacts-dir \
       docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-DESCRIPTOR-QUALIFICATION01/evidence \
-    --run-id lab-canary-descriptor-1784635776
+    --run-id lab-canary-descriptor-1784636144
 === Verification Results ===
-Run ID: lab-canary-descriptor-1784635776
+Run ID: lab-canary-descriptor-1784636144
 Scenario: canary-descriptor
 Reconstructed Claims: 15 checks passed
 All Verifications: PASS
@@ -1049,7 +1049,7 @@ PASS: Evidence verified
 $ ./.factory/bin/tovarisch-memory-lab derive-runtime-state \
     --artifacts-dir \
       docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-DESCRIPTOR-QUALIFICATION01/evidence \
-    --run-id lab-canary-descriptor-1784635776
+    --run-id lab-canary-descriptor-1784636144
 {
   "initial_fd_count": 0,
   "final_fd_count": 200,
@@ -1070,18 +1070,18 @@ $ ./.factory/bin/tovarisch-memory-lab derive-runtime-state \
     "warmup": 5
   },
   "canary_image_provenance": {
-    "canary_image_id": "sha256:db1c85fe0a26da0dc33f7a9e50bb343b0f96b0a586f72f91f119a3f4b503bf5e",
+    "canary_image_id": "sha256:2d4c69310e7b17a0af416bb37cf9fd416ad6e61282c796208f58b206b70e64c7",
     "canary_repo_digests": [
-      "kgb-tovarisch-canary@sha256:db1c85fe0a26da0dc33f7a9e50bb343b0f96b0a586f72f91f119a3f4b503bf5e"
+      "kgb-tovarisch-canary@sha256:2d4c69310e7b17a0af416bb37cf9fd416ad6e61282c796208f58b206b70e64c7"
     ],
     "canary_repo_digest_status": "available",
-    "canary_source_commit_oid": "9c1f0200ac55e632ab50d555e68fc52c25552574",
-    "canary_repository_tree_oid": "68c7fb0439535b3b4d17456af8adbba27ac19c14",
+    "canary_source_commit_oid": "f7dcef8a51203dff9741f32a6dda7a80972280c4",
+    "canary_repository_tree_oid": "e91e1b24aa899b9d1b47ffe29fcb684606dd3f88",
     "canary_source_subtree_oid": "056016e82fba903ed25d0bab98197e2a424b2a67",
-    "canary_image_revision_label": "9c1f0200ac55e632ab50d555e68fc52c25552574",
-    "canary_image_tree_label": "68c7fb0439535b3b4d17456af8adbba27ac19c14",
+    "canary_image_revision_label": "f7dcef8a51203dff9741f32a6dda7a80972280c4",
+    "canary_image_tree_label": "e91e1b24aa899b9d1b47ffe29fcb684606dd3f88",
     "canary_image_source_subtree_label": "056016e82fba903ed25d0bab98197e2a424b2a67",
-    "canary_image_binary_sha256_label": "aac6bb8d50dee648b7006dbcd2c5d36474f6419c32f2b2a2999b1b0b8cea08b1",
+    "canary_image_binary_sha256_label": "b386ef9010335805ccc27e96ae7778bbfa3dbca60030fd5569df4458524b4e9d",
     "canary_container_image_matches_id": true
   }
 }
@@ -1090,7 +1090,7 @@ $ ./.factory/bin/tovarisch-memory-lab derive-runtime-state \
 ### Subject container cleanup
 
 ```bash
-$ docker ps -a --filter "name=tovarisch-subject-lab-canary-descriptor-1784635776" \
+$ docker ps -a --filter "name=tovarisch-subject-lab-canary-descriptor-1784636144" \
     --format '{{.ID}} {{.Status}} {{.Names}}'
 # (no output — no retained subject container)
 ```

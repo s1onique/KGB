@@ -1,6 +1,6 @@
 {
-  "Id": "d2f0fefcdda776fcecb2786fbcf033e35856138ccba5f0c528024702b347962f",
-  "Created": "2026-07-21T12:09:36.814525136Z",
+  "Id": "89d6ab01b5a75905faa2b82c7c5e83d253d859801f4473f682ad2cd1f351a0b5",
+  "Created": "2026-07-21T12:15:44.969359893Z",
   "Path": "/app/canary",
   "Args": [
     "--mode=descriptor"
@@ -12,18 +12,18 @@
     "Restarting": false,
     "OOMKilled": false,
     "Dead": false,
-    "Pid": 2169125,
+    "Pid": 2189128,
     "ExitCode": 0,
     "Error": "",
-    "StartedAt": "2026-07-21T12:09:36.920801714Z",
+    "StartedAt": "2026-07-21T12:15:45.055224709Z",
     "FinishedAt": "0001-01-01T00:00:00Z"
   },
-  "Image": "sha256:db1c85fe0a26da0dc33f7a9e50bb343b0f96b0a586f72f91f119a3f4b503bf5e",
-  "ResolvConfPath": "/var/lib/docker/containers/d2f0fefcdda776fcecb2786fbcf033e35856138ccba5f0c528024702b347962f/resolv.conf",
-  "HostnamePath": "/var/lib/docker/containers/d2f0fefcdda776fcecb2786fbcf033e35856138ccba5f0c528024702b347962f/hostname",
-  "HostsPath": "/var/lib/docker/containers/d2f0fefcdda776fcecb2786fbcf033e35856138ccba5f0c528024702b347962f/hosts",
-  "LogPath": "/var/lib/docker/containers/d2f0fefcdda776fcecb2786fbcf033e35856138ccba5f0c528024702b347962f/d2f0fefcdda776fcecb2786fbcf033e35856138ccba5f0c528024702b347962f-json.log",
-  "Name": "/tovarisch-subject-lab-canary-descriptor-1784635776",
+  "Image": "sha256:2d4c69310e7b17a0af416bb37cf9fd416ad6e61282c796208f58b206b70e64c7",
+  "ResolvConfPath": "/var/lib/docker/containers/89d6ab01b5a75905faa2b82c7c5e83d253d859801f4473f682ad2cd1f351a0b5/resolv.conf",
+  "HostnamePath": "/var/lib/docker/containers/89d6ab01b5a75905faa2b82c7c5e83d253d859801f4473f682ad2cd1f351a0b5/hostname",
+  "HostsPath": "/var/lib/docker/containers/89d6ab01b5a75905faa2b82c7c5e83d253d859801f4473f682ad2cd1f351a0b5/hosts",
+  "LogPath": "/var/lib/docker/containers/89d6ab01b5a75905faa2b82c7c5e83d253d859801f4473f682ad2cd1f351a0b5/89d6ab01b5a75905faa2b82c7c5e83d253d859801f4473f682ad2cd1f351a0b5-json.log",
+  "Name": "/tovarisch-subject-lab-canary-descriptor-1784636144",
   "RestartCount": 0,
   "Driver": "overlayfs",
   "Platform": "linux",
@@ -154,7 +154,7 @@
   },
   "Mounts": [],
   "Config": {
-    "Hostname": "d2f0fefcdda7",
+    "Hostname": "89d6ab01b5a7",
     "Domainname": "",
     "User": "nonroot",
     "AttachStdin": false,
@@ -178,41 +178,41 @@
     ],
     "OnBuild": null,
     "Labels": {
-      "kgb.dev/canary-binary-sha256": "aac6bb8d50dee648b7006dbcd2c5d36474f6419c32f2b2a2999b1b0b8cea08b1",
+      "kgb.dev/canary-binary-sha256": "b386ef9010335805ccc27e96ae7778bbfa3dbca60030fd5569df4458524b4e9d",
       "kgb.dev/canary-source-tree": "056016e82fba903ed25d0bab98197e2a424b2a67",
       "kgb.dev/lab": "tovarisch-memory",
-      "kgb.dev/lab.run-id": "lab-canary-descriptor-1784635776",
+      "kgb.dev/lab.run-id": "lab-canary-descriptor-1784636144",
       "kgb.dev/lab.scenario": "canary-descriptor",
-      "kgb.dev/source-tree": "68c7fb0439535b3b4d17456af8adbba27ac19c14",
-      "org.opencontainers.image.revision": "9c1f0200ac55e632ab50d555e68fc52c25552574"
+      "kgb.dev/source-tree": "e91e1b24aa899b9d1b47ffe29fcb684606dd3f88",
+      "org.opencontainers.image.revision": "f7dcef8a51203dff9741f32a6dda7a80972280c4"
     }
   },
   "NetworkSettings": {
     "Bridge": "",
-    "SandboxID": "87fa9ab59f248c5b79659f147d946d7279d39113524b5e667765140f3f104c68",
-    "SandboxKey": "/var/run/docker/netns/87fa9ab59f24",
+    "SandboxID": "7fc792607d299cdd6039789d71975fd5cd1909a12bf5545d55a3fa08aa4b30bc",
+    "SandboxKey": "/var/run/docker/netns/7fc792607d29",
     "Ports": {},
     "HairpinMode": false,
     "LinkLocalIPv6Address": "",
     "LinkLocalIPv6PrefixLen": 0,
     "SecondaryIPAddresses": null,
     "SecondaryIPv6Addresses": null,
-    "EndpointID": "4b8620cfef9e99d8e924641c5ff5dc4070cb63b0daf9029b48ddc2903c70e8eb",
+    "EndpointID": "b672ba882a45282631ef76d8a8b6e2b063ca79f22589dd97397fff9ea2f77b86",
     "Gateway": "172.17.0.1",
     "GlobalIPv6Address": "",
     "GlobalIPv6PrefixLen": 0,
     "IPAddress": "172.17.0.2",
     "IPPrefixLen": 16,
     "IPv6Gateway": "",
-    "MacAddress": "1a:c0:48:0b:63:9a",
+    "MacAddress": "2a:1e:d2:22:89:ac",
     "Networks": {
       "bridge": {
         "IPAMConfig": null,
         "Links": null,
         "Aliases": null,
-        "MacAddress": "1a:c0:48:0b:63:9a",
+        "MacAddress": "2a:1e:d2:22:89:ac",
         "NetworkID": "84ef70d0b8c11ef311c71544827cfe5ace33d3dcba99514afb476b6140388518",
-        "EndpointID": "4b8620cfef9e99d8e924641c5ff5dc4070cb63b0daf9029b48ddc2903c70e8eb",
+        "EndpointID": "b672ba882a45282631ef76d8a8b6e2b063ca79f22589dd97397fff9ea2f77b86",
         "Gateway": "172.17.0.1",
         "IPAddress": "172.17.0.2",
         "IPPrefixLen": 16,
@@ -222,15 +222,15 @@
         "DriverOpts": null,
         "DNSNames": null
       },
-      "kgb-lab-lab-canary-descriptor-1784635776-lab": {
+      "kgb-lab-lab-canary-descriptor-1784636144-lab": {
         "IPAMConfig": null,
         "Links": null,
         "Aliases": [
-          "d2f0fefcdda7"
+          "89d6ab01b5a7"
         ],
-        "MacAddress": "2a:0e:72:c1:50:70",
-        "NetworkID": "02ca848b909c8c71ff9df81f444867555e765bfd0b4f25f598964a9caf3102ee",
-        "EndpointID": "4bb515a2d06ed0c984f0226f19a9f0e4e5f7085a98f1848be425f625fca521e3",
+        "MacAddress": "1e:d5:e8:0f:b4:f2",
+        "NetworkID": "1cc9c4754fb17dacb80cb8c627f57316b892b9b1196a2e2929d15f74e0c99e1d",
+        "EndpointID": "f520291431536f023abbb359e1ba06e41b066734cfe2855661a9713804e51357",
         "Gateway": "172.19.0.1",
         "IPAddress": "172.19.0.2",
         "IPPrefixLen": 16,
@@ -239,8 +239,8 @@
         "GlobalIPv6PrefixLen": 0,
         "DriverOpts": null,
         "DNSNames": [
-          "tovarisch-subject-lab-canary-descriptor-1784635776",
-          "d2f0fefcdda7"
+          "tovarisch-subject-lab-canary-descriptor-1784636144",
+          "89d6ab01b5a7"
         ]
       }
     }
