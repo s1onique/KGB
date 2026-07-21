@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.1.0",
+  "run_id": "lab-canary-descriptor-1784641337",
+  "scenario": "canary-descriptor",
+  "started_at": "2026-07-21T16:42:17.074168221+03:00",
+  "finished_at": "2026-07-21T16:44:20.223651595+03:00",
+  "subject_identity": {
+    "git_commit": "2791912723a6d9dad1e34dc4f7a1bb061901e792",
+    "git_tree": "19a40b10d08a5bee5f95622e952b1a827bd3f790",
+    "git_object_format": "sha1",
+    "controller_executable_path": "/home/kgb/Projects/KGB/.factory/bin/tovarisch-memory-lab",
+    "controller_executable_sha256": "f44fdb86f0030ac6df5a9ca6a860d107f7ce377bbf4278849600573bfc5eba76"
+  },
+  "controller_identity": "2296756",
+  "host_identity": {
+    "kernel_release": "6.17.0-19-generic",
+    "kernel_version": "Linux version 6.17.0-19-generic (buildd@lcy02-amd64-019) (x86_64-linux-gnu-gcc-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, GNU ld (GNU Binutils for Ubuntu) 2.42) #19~24.04.2-Ubuntu SMP PREEMPT_DYNAMIC Fri Mar  6 23:08:46 UTC 2",
+    "cgroup_mode": "cgroup2",
+    "collection_status": "complete"
+  },
+  "docker_identity": {
+    "engine_version": "29.6.2",
+    "api_version": "1.44"
+  },
+  "configuration": {
+    "phase_config": {
+      "StartupDeadline": 10000000000,
+      "Warmup": 10000000000,
+      "Baseline": 15000000000,
+      "Stimulus": 60000000000,
+      "Settling": 10000000000,
+      "Final": 15000000000,
+      "Interval": 1000000000
+    },
+    "thresholds": {
+      "MemoryGrowthKibPerHour": 500,
+      "MemoryGrowthPercentPerHour": 0.5,
+      "ResourceGrowthPerHour": 10,
+      "CorroborationCount": 2,
+      "SampleCountMinimum": 10,
+      "WindowMinimum": 3
+    }
+  },
+  "artifact_inventory": [
+    "manifest.json",
+    "verdict.json",
+    "samples.csv",
+    "events.jsonl",
+    "container-inspect.json",
+    "container-logs.txt",
+    "initial-canary-state.json",
+    "final-canary-state.json",
+    "workload-result.json",
+    "checksums.txt"
+  ],
+  "subject_image_identity": {
+    "image_reference": "kgb-tovarisch-canary:latest",
+    "image_id": "sha256:318f3aa49873231d3b7fefed088202340dcdf7c3f3febfe628f51f6169d69aad",
+    "repo_digests": [
+      "kgb-tovarisch-canary@sha256:318f3aa49873231d3b7fefed088202340dcdf7c3f3febfe628f51f6169d69aad"
+    ],
+    "repo_digest_status": "available",
+    "source_commit_oid": "2791912723a6d9dad1e34dc4f7a1bb061901e792",
+    "repository_tree_oid": "19a40b10d08a5bee5f95622e952b1a827bd3f790",
+    "canary_source_subtree_oid": "056016e82fba903ed25d0bab98197e2a424b2a67",
+    "prebuild_binary_sha256": "9b3726a7d00fde1fa410faf6c34c68ba25dc00ee18d1b9e3616892bcbe3cf683",
+    "extracted_image_binary_sha256": "9b3726a7d00fde1fa410faf6c34c68ba25dc00ee18d1b9e3616892bcbe3cf683",
+    "revision_label": "2791912723a6d9dad1e34dc4f7a1bb061901e792",
+    "repository_tree_label": "19a40b10d08a5bee5f95622e952b1a827bd3f790",
+    "source_subtree_label": "056016e82fba903ed25d0bab98197e2a424b2a67",
+    "binary_sha256_label": "9b3726a7d00fde1fa410faf6c34c68ba25dc00ee18d1b9e3616892bcbe3cf683",
+    "container_image_id": "sha256:318f3aa49873231d3b7fefed088202340dcdf7c3f3febfe628f51f6169d69aad"
+  }
+}

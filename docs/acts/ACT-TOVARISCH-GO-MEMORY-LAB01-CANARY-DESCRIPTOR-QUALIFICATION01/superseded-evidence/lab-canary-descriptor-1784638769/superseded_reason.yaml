@@ -1,0 +1,4 @@
+superseded_reason:
+  - subject_image_identity_image_id_not_independently_verified
+  - manifest_contract_changed_without_schema_version_change
+  - close_report_test_accounting_approximate_and_contradictory
