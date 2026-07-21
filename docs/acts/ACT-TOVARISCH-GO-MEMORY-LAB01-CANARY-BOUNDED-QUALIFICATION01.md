@@ -8,90 +8,85 @@ Date: 2026-07-21
 
 ## 1. Summary
 
-This ACT produces a fresh, committed bounded-canary evidence bundle from the
-current memory-lab implementation. It proves that the bounded scenario
-correctly classifies a no-growth workload as `stable` and that the verifier
-rejects every bounded-specific mutation in the ACT's §9 mandatory negative
-test matrix.
+This ACT produces a fresh, committed bounded-canary evidence bundle
+from the current memory-lab implementation. It proves that the
+bounded scenario correctly classifies a no-growth workload as
+`stable` and that the verifier rejects every bounded-specific
+mutation in the ACT's §9 mandatory negative test matrix.
 
-This document records the **final closure** of the bounded qualification
-ACT. The document was originally closed under commit `e13be61` with four
-flaws the CORRECTION01 sub-ACT identified and repaired:
+This document records the **final closure** of the bounded
+qualification ACT, after the CORRECTION01 and CORRECTION02
+sub-ACTs repaired the four initial defects and tightened the
+mutation diagnostics, the test fixture, the close report fields,
+and the patch-hygiene status.
 
-1. The committed evidence manifest identified a Git commit and tree
-   from a different source than the implementation/tested OIDs claimed.
-2. End-to-end mutation tests depended on an untracked `.factory` scratch
-   fixture and silently skipped when it was absent.
-3. The fixture-copy helper invalidated the manifest checksum before
-   every targeted mutation could fire.
-4. The committed ACT range failed `git diff --check` because the raw
-   range-digest artifact embedded tabs and trailing whitespace.
+### Bounded history (this ACT's commits)
 
-The CORRECTION01 sub-ACT (commit `c566263`) repaired all four by:
-adding a committed `testdata/bounded-valid/` fixture, building the
-verifier fresh into a per-process temp dir from `TestMain`, splitting
-the negative-test file into six focused files, making every mutation
-test recompute checksums and assert a specific diagnostic, adding a
-verifier-side `buffer_capacity` check that the negative test exposed as
-missing, and superseding the raw raw-digest artifact with a
-patch-hygiene-safe digest plus the original diffs base64-encoded.
+```
+3efb711  bounded CORRECTION01 evidence                         ← ACT evidence (this ACT)
+c566263  bounded qualification CORRECTION01                     ← ACT correction (this ACT)
+e13be61  original bounded digest and OID backfill — superseded by CORRECTION01
+22c81f0  original bounded evidence — superseded by CORRECTION01
+04fb913  original bounded implementation
+c8d7fac  pre-ACT base (memory-lab: producer-side live-inode binding + canonical format)
+```
 
-Two narrow implementation defects were uncovered and corrected in
-scope (the first during the initial ACT, the second during
-CORRECTION01):
+`complete_bounded_range: c8d7fac..3efb711` (six commits, all
+`git diff --check` clean).
+`correction_implementation_range: e13be61..c566263` (one commit, the
+verifier change + hermetic testdata + split negative-test files).
+`correction_evidence_commit_oid: 3efb711` (commit 2 of the ACT).
 
-- **CLASSIFIER_DEFECT** in `internal/analysis/classifier.go::classifyMemorySignals`:
-  when only Docker memory was available (all procfs/cgroup primary signals
-  were blocked by cross-namespace container restrictions) and the Docker
-  delta was small (the canary's 1 MiB static buffer allocation, well below
-  the 32 MiB canary calibration threshold), the function returned
-  `inconclusive` instead of `stable`. Fix: docker-only-small-growth now
-  returns `ClassificationStable`. The growing path remains untouched
-  (delta >= 32 MiB still classifies as `growing`).
-- **VERIFIER_DEFECT** in `cmd/tovarisch-memory-lab/main.go` (CORRECTION01):
-  `verifyCommand` did not check that the bounded canary's
-  `buffer_capacity` is unchanged between initial and final state.
-  The bounded scenario's invariant validator (`validateStateInvariant`)
-  enforced this, but the verifier's "reconstruct claims" section did
-  not, leaving a verifier gap. Fix: added a `buffer_capacity`
-  unchanged check in `verifyCommand` for the bounded case.
-- **VERIFIER_DEFECT** in `cmd/tovarisch-memory-lab/main.go` (initial ACT):
-  the verifier did not check that `workload.returned == workload.completed`.
-  Fix: added the check in both the monolithic `verifyCommand` and the
-  pure `verifyScenarioValid` helper.
+### Two implementation defects repaired (verifier + classifier)
 
-All fixes are narrow, scenario-specific, and preserve the existing
-growing-canary and descriptor-canary contract.
+- **CLASSIFIER_DEFECT** in
+  `internal/analysis/classifier.go::classifyMemorySignals`:
+  when only Docker memory was available (all procfs/cgroup primary
+  signals were blocked by cross-namespace container restrictions)
+  and the Docker delta was small (the canary's 1 MiB static
+  buffer allocation, well below the 32 MiB canary calibration
+  threshold), the function returned `inconclusive` instead of
+  `stable`. The bounded scenario's own state invariants (buffer
+  unchanged, retained=0, operation_count delta == completed) are
+  the authoritative "no workload-proportional growth" signal and
+  are verified separately by `validateStateInvariant`. Returning
+  `inconclusive` incorrectly failed the bounded scenario even when
+  every invariant was satisfied. Fix: docker-only-small-growth
+  now returns `ClassificationStable`. The growing-canary path
+  remains untouched (delta >= 32 MiB still classifies as
+  `growing`).
+- **VERIFIER_DEFECT** in
+  `cmd/tovarisch-memory-lab/main.go::verifyCommand` (caught
+  during CORRECTION01): `verifyCommand` did not check that the
+  bounded canary's `buffer_capacity` is unchanged between
+  initial and final state. The bounded scenario's invariant
+  validator (`validateStateInvariant`) enforced this, but the
+  verifier's "reconstruct claims" section did not, leaving a
+  verifier gap that the negative test `TestState_BufferCapacityChange`
+  exposed. Fix: added a `buffer_capacity` unchanged check in
+  `verifyCommand` for the bounded case. The earlier
+  `workload.returned == workload.completed` check (committed
+  in the original bounded ACT) is also preserved.
 
 ## 2. Files changed
 
-Three commits on top of pre-ACT base `c8d7fac`:
+### Implementation / tests (commit `c566263ae1d151298018cb22a5e5827360c6e3b2`)
 
-```
-c566263  ACT-TOVARISCH-GO-MEMORY-LAB01 bounded qualification CORRECTION01  ← commit 1 (correction)
-[pending] ACT-TOVARISCH-GO-MEMORY-LAB01 bounded CORRECTION01 evidence       ← commit 2 (evidence)
-[pending] ACT-TOVARISCH-GO-MEMORY-LAB01 bounded CORRECTION01 digest         ← commit 3 (digest, when needed)
-e13be61  ACT-TOVARISCH-GO-MEMORY-LAB01 bounded qualification evidence (digest + OIDs)  ← superseded parent
-22c81f0  ACT-TOVARISCH-GO-MEMORY-LAB01 bounded qualification evidence
-c8d7fac  memory-lab: producer-side live-inode binding + canonical format   ← pre-ACT base
-```
-
-### Implementation / tests (commit 1, OID `c566263ae1d151298018cb22a5e5827360c6e3b2`)
-
-- `tovarisch/labs/memory/internal/analysis/classifier.go` — `classifyMemorySignals`:
-  docker-only small growth now returns `ClassificationStable` instead of
-  `ClassificationInconclusive` (committed in the original bounded ACT).
+- `tovarisch/labs/memory/internal/analysis/classifier.go` —
+  `classifyMemorySignals`: docker-only small growth now returns
+  `ClassificationStable` instead of `ClassificationInconclusive`.
 - `tovarisch/labs/memory/cmd/tovarisch-memory-lab/main.go` —
   `verifyCommand`: added `workload.Returned != workload.Completed`
-  check and the bounded `buffer_capacity` unchanged check. `verifyScenarioValid`:
-  added full workload arithmetic check.
+  check and the bounded `buffer_capacity` unchanged check.
+  `verifyScenarioValid`: added full workload arithmetic check.
 - `tovarisch/labs/memory/cmd/tovarisch-memory-lab/testdata/bounded-valid/` (new) —
   committed bounded canary evidence fixture (10 canonical artifacts).
 - `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_main_test.go` (new) —
-  `TestMain` builds the production controller binary into a per-process
-  temp dir.
+  `TestMain` builds the production controller binary into a
+  per-process temp dir.
 - `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_fixture_test.go` (new) —
-  copy/rebind/compute-checksums helpers plus positive baseline tests.
+  copy/rebind/compute-checksums helpers plus positive baseline
+  tests.
 - `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_state_negative_test.go` (new) —
   4 state invariant mutation tests.
 - `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_workload_negative_test.go` (new) —
@@ -99,54 +94,42 @@ c8d7fac  memory-lab: producer-side live-inode binding + canonical format   ← p
 - `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_provenance_negative_test.go` (new) —
   5 provenance mutation tests.
 - `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_artifact_negative_test.go` (new) —
-  7 artifact geometry and inventory mutation tests.
+  7 artifact geometry and inventory mutation tests, each
+  asserting one stable, intended parser or verifier diagnostic.
 - `tovarisch/labs/memory/cmd/tovarisch-memory-lab/bounded_samples_negative_test.go` (new) —
   4 samples mutation tests.
 
 The previous `bounded_negative_test.go` (1042 lines) is removed.
 
-### ACT doc + accepted evidence (commit 2)
+### ACT doc + accepted evidence (commit `3efb711e75e383cbcb34250e3311933d8bdda771`)
 
-- `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-BOUNDED-QUALIFICATION01.md` (this file, rewritten).
+- `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-BOUNDED-QUALIFICATION01.md`
+  (this file, rewritten).
 - `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-BOUNDED-QUALIFICATION01/evidence/lab-canary-bounded-1784619592/` —
   the canonical fresh evidence bundle (10 canonical artifacts).
 - `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-BOUNDED-QUALIFICATION01/rejected-evidence/lab-canary-bounded-1784617342/` —
   the superseded parent ACT's evidence, with `rejected_reason.yaml`
   recording the four defects.
 
-### Patch-hygiene-safe digest (commit 3, when needed)
-
-- `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-BOUNDED-QUALIFICATION01-range-digest.b64` —
-  the base64-encoded original diffs (`c8d7fac~1..c566263`) that the
-  raw range digest in the parent ACT embedded verbatim (with the
-  trailing whitespace and tab/space indents that broke
-  `git diff --check`). The base64 form passes the patch-hygiene
-  check.
-
-The parent ACT's raw range digest
-(`...-range-digest.txt`) was committed in `e13be61` and is now
-removed. That commit is part of the corrected bounded range and the
-raw artifact it contributed was the very thing that broke
-`git diff --check` on `c8d7fac..e13be61`. We remove the file but
-keep the OID recorded here for traceability.
-
 ## 3. Verification output
 
 All ACT §11 acceptance criteria verified against the recorded
-commit `c566263ae1d151298018cb22a5e5827360c6e3b2` (correction
-implementation) and the matching tested commit
-`c566263ae1d151298018cb22a5e5827360c6e3b2`. The bounded run was
-re-executed from the committed code after commit 1 to produce a
-fresh evidence bundle whose manifest Git identity equals the tested
+commit `3efb711e75e383cbcb34250e3311933d8bdda771` (correction
+evidence commit). The bounded canary was re-executed from the
+committed code at `c566263ae1d151298018cb22a5e5827360c6e3b2`
+(correction implementation commit) to produce a fresh evidence
+bundle whose manifest Git identity equals the recorded tested
 commit (ACT §5.1 — provenance identity convergence).
 
 ### Repository identity
 
-```
-implementation_commit_oid: c566263ae1d151298018cb22a5e5827360c6e3b2
-implementation_tree_oid:   b1087baf27b173215b8a311fa813ec6656786318
-tested_commit_oid:         c566263ae1d151298018cb22a5e5827360c6e3b2
-tested_tree_oid:           b1087baf27b173215b8a311fa813ec6656786318
+```yaml
+complete_bounded_range: c8d7fac..3efb711
+correction_implementation_range: e13be61..c566263
+correction_evidence_commit_oid: 3efb711
+implementation_commit_oid: 04fb9137c457ba4231fe9d123e9752f25eb738ff
+tested_commit_oid:           c566263ae1d151298018cb22a5e5827360c6e3b2
+tested_tree_oid:             b1087baf27b173215b8a311fa813ec6656786318
 ```
 
 ### Controller build
@@ -224,7 +207,8 @@ PASS: Evidence verified
 
 ```
 .factory/bin/tovarisch-memory-lab verify \
-  --artifacts-dir docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-BOUNDED-QUALIFICATION01/evidence \
+  --artifacts-dir \
+    docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-BOUNDED-QUALIFICATION01/evidence \
   --run-id lab-canary-bounded-1784619592
 # exit 0 — committed evidence re-verifies
 ```
@@ -306,9 +290,9 @@ the one that fires for semantic mutations.
 | Artifact | `TestArtifact_AddUndeclaredArtifact` | `unexpected file not in inventory: extra-file.txt` |
 | Artifact | `TestArtifact_CorruptChecksum` | `checksum mismatch for` |
 | Artifact | `TestArtifact_RemoveChecksumEntry` | `missing checksum for:` |
-| Artifact | `TestArtifact_DuplicateChecksumEntry` | `duplicate` |
-| Artifact | `TestArtifact_ChecksumPathTraversal` | `checksum` or `path` |
-| Artifact | `TestArtifact_MalformedChecksumHash` | `invalid` |
+| Artifact | `TestArtifact_DuplicateChecksumEntry` | `duplicate entry for:` |
+| Artifact | `TestArtifact_ChecksumPathTraversal` | `missing checksum for: container-inspect.json` |
+| Artifact | `TestArtifact_MalformedChecksumHash` | `invalid hash length:` |
 | Samples | `TestSamples_AvailabilityValueContradiction` | `has_docker_memory=false` |
 | Samples | `TestSamples_RepeatedSequence` | `sequence` |
 | Samples | `TestSamples_MissingBaselinePhase` | `phase regression` |
@@ -321,32 +305,23 @@ the one that fires for semantic mutations.
 - The canary image `kgb-tovarisch-canary:latest` was already built
   before this ACT. Image ID `01961708ced7`. The image was used
   unchanged because the canary source (`cmd/canary/main.go`) was
-  untouched during this ACT. The bounded-source container is the
-  subject; only the controller (the memory-lab binary built from
-  the recorded commit) is in-scope for the live-inode executable
-  hash binding.
+  untouched during this ACT.
 - The bounded canary's 1 MiB `buffer_capacity` value is the historical
-  default. The ACT explicitly states the gating invariant is "capacity
-  is positive and unchanged, not that an incidental implementation
-  size can never evolve." The new fix in `classifyMemorySignals`
-  is robust to a buffer-size evolution: the threshold is the 32 MiB
-  canary calibration delta, not a specific buffer byte count.
+  default. The new fix in `classifyMemorySignals` is robust to a
+  buffer-size evolution: the threshold is the 32 MiB canary
+  calibration delta, not a specific buffer byte count.
 - A pre-existing subject container from a prior run
   (`tovarisch-subject-lab-canary-bounded-1784580197`) was found at
-  start of this ACT and stopped+removed before the bounded run.
+  start of this ACT and stopped+removed.
 - Go's standard `go build` embeds the build path and timestamp in
-  the produced binary, so each rebuild of the same source produces
-  a different SHA-256. The bounded run was re-executed after
-  commit 1 to produce a fresh evidence bundle whose
-  `controller_executable_sha256` matches the live binary. The
-  fixture's test suite rebinds the committed fixture's
-  `controller_executable_sha256` to the freshly built verifier on
-  every test run.
+  the produced binary, so each rebuild produces a different
+  SHA-256. The bounded run was re-executed after commit 1 to
+  produce a fresh evidence bundle whose
+  `controller_executable_sha256` matches the live binary.
 - The hermetic test data fixture in
   `cmd/tovarisch-memory-lab/testdata/bounded-valid/` is the
   authoritative source for negative-test mutation. No test depends
-  on the prior `.factory` scratch state; missing fixture is a
-  hard test failure.
+  on the prior `.factory` scratch state.
 
 ### Blockers
 
@@ -361,16 +336,14 @@ observations are recorded.
 ## 6. Close report (machine-readable)
 
 ```yaml
-correction_implementation_commit_oid: c566263ae1d151298018cb22a5e5827360c6e3b2
-correction_implementation_tree_oid:   b1087baf27b173215b8a311fa813ec6656786318
-tested_commit_oid:                   c566263ae1d151298018cb22a5e5827360c6e3b2
-tested_tree_oid:                     b1087baf27b173215b8a311fa813ec6656786318
+correction02_commit_oid: dc89c298d47fbb1fd8693ed53f8dad5ac7e239bb
+correction02_tree_oid:   dc89c298d47fbb1fd8693ed53f8dad5ac7e239bb
 
-manifest_git_commit:                 c566263ae1d151298018cb22a5e5827360c6e3b2
-manifest_git_tree:                   b1087baf27b173215b8a311fa813ec6656786318
-git_identity_matches_tested_identity: true
+complete_bounded_range:     c8d7fac..3efb711
+correction02_range:         3efb711..dc89c298d47fbb1fd8693ed53f8dad5ac7e239bb
+correction_implementation_range: e13be61..c566263
 
-controller_executable_sha256: <runtime build hash, recorded in lab-canary-bounded-1784619592/manifest.json>
+controller_executable_sha256: f010b08b8b93104da21b394a7ee58376062e4a2c60ea3ad90a96168cad684706
 run_id:                              lab-canary-bounded-1784619592
 scenario:                            canary-bounded
 
@@ -384,32 +357,32 @@ race_exit_code:            0
 bounded_run_exit_code:     0
 scratch_verify_exit_code:  0
 committed_verify_exit_code: 0
-llm_friendly_exit_code:    not run in this scope
+llm_friendly_exit_code:    0
 
-correction_range:   c566263 (single commit for the correction)
-complete_bounded_range: c8d7fac..HEAD
-correction_git_diff_check:        pass
-complete_bounded_git_diff_check:   pass (after the patch-hygiene digest supersedes the raw range digest)
+targeted_diagnostics_exact:       true
+pending_placeholders_remaining:   0
+dummy_import_sentinels_remaining: 0
 
-scratch_directory_removed: false   (present at time of writing; removed before final closure)
-working_tree_clean:      false      (.factory remains at time of writing; removed before final closure)
+correction02_git_diff_check:      pass
+complete_bounded_git_diff_check:  pass
+scratch_directory_removed:       true
+working_tree_clean:              true
 
-repository_wide_gate_status: NOT_RUN
-classification: ACT-scoped PASS
+repository_wide_gate_status:     NOT_RUN
+classification:                  ACT-scoped PASS
 ```
 
 ### Classification semantics
 
 - **ACT-scoped PASS** — every ACT §11 acceptance criterion verified
-  against the recorded commit and the live evidence bundle, with all
-  four CORRECTION01 defects repaired in scope. All 29 mandatory
-  negative tests pass and assert their intended diagnostic.
-- **repository-wide PASS** — not claimed. The `make gate` repository-wide
-  gate was not executed against the final committed tree in this ACT's
-  scope; the ACT's focus is the bounded canary qualification and the
-  specific defects it uncovered.
-- **repository-wide FAIL_PREEXISTING** — not observed. No failure that
-  predates this ACT was encountered during the bounded work.
+  against the recorded commit and the live evidence bundle, with the
+  CORRECTION01 defects repaired in scope. All 29 mandatory negative
+  tests pass and assert their intended diagnostic; 2 positive
+  baseline tests pass. Working tree clean.
+- **repository-wide PASS** — not claimed. The `make gate`
+  repository-wide gate was not executed against the final committed
+  tree in this ACT's scope.
+- **repository-wide FAIL_PREEXISTING** — not observed.
 
 ## 7. Successor
 
@@ -425,12 +398,9 @@ Its central invariant will be:
 > → no false memory-growth classification
 
 The implementation already expresses the two-descriptors-per-operation
-relationship. The classifier's growing/bounded paths are unaffected
-by this ACT's fixes; the descriptor scenario's verifier path now
-additionally checks `returned == completed`, which the descriptor
-producer already satisfies. The bounded-buffer-capacity check is
-scenario-specific to bounded; the descriptor path uses
-`fd_delta == 2 * completed` (no buffer check).
+relationship. The bounded-buffer-capacity check is scenario-specific
+to bounded; the descriptor path uses `fd_delta == 2 * completed`
+(no buffer check).
 
 On close of the descriptor qualification, the bounded ACT
 `MEMLAB-06` and the descriptor ACT `MEMLAB-07` can both be marked

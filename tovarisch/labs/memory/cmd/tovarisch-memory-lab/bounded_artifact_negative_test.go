@@ -159,18 +159,22 @@ func TestArtifact_DuplicateChecksumEntry(t *testing.T) {
 		t.Fatalf("write duplicate checksums: %v", err)
 	}
 
+	// ParseChecksumsFile returns "duplicate entry for: <path>".
 	out, err := runVerifier(t, dst)
 	if err == nil {
 		t.Fatalf("duplicate checksum: verifier accepted; output:\n%s", out)
 	}
-	// Production parser returns "duplicate entry for: <path>".
-	if !strings.Contains(out, "duplicate") {
-		t.Errorf("duplicate checksum: wrong diagnostic:\n%s", out)
+	if !strings.Contains(out, "duplicate entry for:") {
+		t.Errorf("duplicate checksum: wrong diagnostic (want \"duplicate entry for:\"):\n%s", out)
 	}
 }
 
 // TestArtifact_ChecksumPathTraversal rejects an evidence bundle
-// where checksums.txt contains a path-traversal entry.
+// where checksums.txt contains a path-traversal entry. The
+// replacement overwrites every checksum with one entry whose path
+// is outside the manifest inventory, so the verifier's
+// "missing checksum for:" diagnostic fires for the inventory
+// item whose checksum was lost.
 func TestArtifact_ChecksumPathTraversal(t *testing.T) {
 	dst := t.TempDir()
 	boundDir := copyBoundedFixture(t, dst)
@@ -187,17 +191,18 @@ func TestArtifact_ChecksumPathTraversal(t *testing.T) {
 	if err == nil {
 		t.Fatalf("path traversal: verifier accepted; output:\n%s", out)
 	}
-	// Production ParseChecksumsFile rejects any path containing "..".
-	// Or, if the line is rejected as an inventory check, the
-	// "missing checksum for" diagnostic will fire. Either way the
-	// verifier must reject. We accept either diagnostic.
-	if !strings.Contains(out, "checksum") && !strings.Contains(out, "path") {
-		t.Errorf("path traversal: wrong diagnostic:\n%s", out)
+	// The replacement removes every inventory checksum and leaves
+	// only the path-traversal entry, so the verifier's
+	// "missing checksum for:" diagnostic fires for the first
+	// inventory item not in checksums.txt.
+	if !strings.Contains(out, "missing checksum for: container-inspect.json") {
+		t.Errorf("path traversal: wrong diagnostic (want \"missing checksum for: container-inspect.json\"):\n%s", out)
 	}
 }
 
 // TestArtifact_MalformedChecksumHash rejects an evidence bundle
-// where checksums.txt contains a non-hex hash.
+// where checksums.txt contains a non-hex hash. ParseChecksumLine
+// returns "invalid hash length" because the hash is not 64 hex chars.
 func TestArtifact_MalformedChecksumHash(t *testing.T) {
 	dst := t.TempDir()
 	boundDir := copyBoundedFixture(t, dst)
@@ -214,7 +219,7 @@ func TestArtifact_MalformedChecksumHash(t *testing.T) {
 	if err == nil {
 		t.Fatalf("malformed checksum: verifier accepted; output:\n%s", out)
 	}
-	if !strings.Contains(out, "invalid hash") && !strings.Contains(out, "invalid") {
-		t.Errorf("malformed checksum: wrong diagnostic:\n%s", out)
+	if !strings.Contains(out, "invalid hash length:") {
+		t.Errorf("malformed checksum: wrong diagnostic (want \"invalid hash length:\"):\n%s", out)
 	}
 }

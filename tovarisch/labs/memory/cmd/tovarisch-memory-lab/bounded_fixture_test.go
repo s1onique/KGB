@@ -20,7 +20,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -379,5 +378,4 @@ func TestBoundedPositiveBaseline_InventoryVerifies(t *testing.T) {
 	}
 	// Reference fs to keep the import set tight; the package only
 	// uses fs in this file's test helpers via copyDirContents.
-	_ = fs.ModeDir
 }
