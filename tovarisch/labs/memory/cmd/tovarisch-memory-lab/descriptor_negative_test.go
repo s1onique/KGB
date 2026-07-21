@@ -270,72 +270,61 @@ func mutateVerdictAndVerify(t *testing.T, mutate func(m map[string]interface{}),
 
 // TestDescriptorVerdict_OverallStable rejects a stored overall
 // verdict of "stable" (the descriptor scenario must be
-// resource_growth).
+// resource_growth). Single-field mutation: only the overall
+// classification changes; the verifier's full reconstruction
+// detects the mismatch via the field-specific diagnostic.
 func TestDescriptorVerdict_OverallStable(t *testing.T) {
 	mutateVerdictAndVerify(t, func(m map[string]interface{}) {
 		m["overall_classification"] = "stable"
-		m["scenario_valid"] = false
-		// Stored verdict must align with stored scenario_valid
-		// otherwise the "stored != reconstruction" check fires.
-		// Reconstruction says descriptor → resource_growth, so
-		// stored valid stays true here and the invariant fails
-		// in the verifier's scenario-valid reconstruction.
-	}, "stored ScenarioValid does not match reconstruction")
+	}, "stored overall classification stable does not match reconstruction resource_growth")
 }
 
 // TestDescriptorVerdict_OverallGrowth rejects a stored overall
 // verdict of "growth" (descriptor must be resource_growth, not
-// generic growth).
+// generic growth). Single-field mutation.
 func TestDescriptorVerdict_OverallGrowth(t *testing.T) {
 	mutateVerdictAndVerify(t, func(m map[string]interface{}) {
 		m["overall_classification"] = "growth"
-		m["scenario_valid"] = false
-	}, "stored ScenarioValid does not match reconstruction")
+	}, "stored overall classification growth does not match reconstruction resource_growth")
 }
 
 // TestDescriptorVerdict_ResourceStable rejects a stored resource
 // verdict of "stable" (the descriptor scenario must show
-// resource_growth).
+// resource_growth). Single-field mutation.
 func TestDescriptorVerdict_ResourceStable(t *testing.T) {
 	mutateVerdictAndVerify(t, func(m map[string]interface{}) {
 		m["resource_classification"] = "stable"
-		m["scenario_valid"] = false
-	}, "stored ScenarioValid does not match reconstruction")
+	}, "stored resource classification stable does not match reconstruction resource_growth")
 }
 
 // TestDescriptorVerdict_ResourceInconclusive rejects a stored
 // resource verdict of "inconclusive" (descriptor has positive FD
-// evidence; resource must classify).
+// evidence; resource must classify). Single-field mutation.
 func TestDescriptorVerdict_ResourceInconclusive(t *testing.T) {
 	mutateVerdictAndVerify(t, func(m map[string]interface{}) {
 		m["resource_classification"] = "inconclusive"
-		m["scenario_valid"] = false
-	}, "stored ScenarioValid does not match reconstruction")
+	}, "stored resource classification inconclusive does not match reconstruction resource_growth")
 }
 
-// TestDescriptorVerdict_MemoryGrowing is a documented boundary:
-// the descriptor verifier does not currently reject a stored
-// memory_classification="growing" when the canary state and
-// workload arithmetic are otherwise valid. The analyzer-level
-// guarantee (descriptor cannot be classified as memory=growing)
-// is enforced at the producer; the verifier reconstruction only
-// checks the canary-state FD-delta invariant. The ACT §15
-// classification guarantee is asserted directly in
-// TestClassification_DescriptorMemoryStableResourceGrowing.
+// TestDescriptorVerdict_MemoryGrowing rejects a stored
+// memory_classification="growing" (the descriptor scenario
+// must have memory=stable). The verifier's full reconstruction
+// must reject this single-field mutation.
 func TestDescriptorVerdict_MemoryGrowing(t *testing.T) {
-	t.Log("documented boundary: stored memory_classification mutation does not trigger the verifier; producer/canary-state guarantees hold")
+	mutateVerdictAndVerify(t, func(m map[string]interface{}) {
+		m["memory_classification"] = "growing"
+	}, "stored memory classification growing does not match reconstruction stable")
 }
 
-// TestDescriptorVerdict_SemanticInvalid is a documented boundary:
-// the descriptor verifier does not currently reject a stored
-// semantic_classification="invalid" when the canary state and
-// workload arithmetic are otherwise valid. The analyzer-level
-// guarantee (descriptor scenario with OOM events) is enforced
-// at the producer; the verifier reconstruction only checks
-// the canary-state FD-delta invariant and the stored
-// scenario_valid/canaries_valid boolean fields.
+// TestDescriptorVerdict_SemanticInvalid rejects a stored
+// semantic_classification="invalid" (the descriptor scenario
+// must have semantic=stable; OOM events are definitive growth
+// and the analyzer would already reject the run). The verifier's
+// full reconstruction must reject this single-field mutation.
 func TestDescriptorVerdict_SemanticInvalid(t *testing.T) {
-	t.Log("documented boundary: stored semantic_classification mutation does not trigger the verifier; analyzer/canary-state guarantees hold")
+	mutateVerdictAndVerify(t, func(m map[string]interface{}) {
+		m["semantic_classification"] = "invalid"
+	}, "stored semantic classification invalid does not match reconstruction stable")
 }
 
 // TestDescriptorVerdict_ScenarioValidFalse rejects a stored
@@ -356,7 +345,7 @@ func TestDescriptorVerdict_ScenarioValidFalse(t *testing.T) {
 func TestDescriptorVerdict_CanariesValidFalse(t *testing.T) {
 	mutateVerdictAndVerify(t, func(m map[string]interface{}) {
 		m["canaries_valid"] = false
-	}, "verdict indicates scenario or canaries not valid")
+	}, "stored CanariesValid does not match reconstruction")
 }
 
 // TestDescriptorVerdict_ProvenanceValidFalse rejects a stored
@@ -371,24 +360,95 @@ func TestDescriptorVerdict_ProvenanceValidFalse(t *testing.T) {
 
 // === §14 Sample / resource evidence (selected representative tests) ===
 
-// TestDescriptorSamples_AllFDUnavailable is a fixture-documented
-// boundary: the descriptor verifier does not currently reject
-// evidence whose host-side FD samples are entirely unavailable
-// when the canary's internal state shows the expected fd_delta.
-// The state invariant (canary-reported fd_count=200) is the
-// authoritative descriptor oracle; the host-side sample FD
-// stream is corroborating but not gating. ACT §10 specifies
-// FD availability as a gating capability at the *analyzer*
-// level — when the analyzer cannot observe a stable FD signal
-// it downgrades the resource classification from
-// resource_growth to inconclusive. The verifier boundary
-// (which this test exercises) is therefore "do not produce a
-// false PASS", and the state invariant check prevents that.
-// The test is a no-op assertion of the current boundary; if a
-// future verifier change tightens this to require FD samples,
-// the test will detect it.
-func TestDescriptorSamples_AllFDUnavailable(t *testing.T) {
-	t.Log("documented boundary: descriptor verifier relies on canary state for FD-delta; host-side FD availability is corroborating only")
+// TestDescriptorSamples_AllFDUnavailable_Positive is the POSITIVE
+// control: a sample stream whose every row has has_fd_count=false
+// (the §8 fallback path) AND a valid descriptor_state_invariant
+// signal in the verdict.json MUST pass the verifier. The
+// canary-state invariant is the authoritative descriptor oracle
+// when the host-side FD sampler is unavailable.
+func TestDescriptorSamples_AllFDUnavailable_Positive(t *testing.T) {
+	_ = requireDescriptorFixture(t)
+	dst := t.TempDir()
+	boundDir := copyFixture(t, dst, descriptorFixtureDir, descriptorFixtureRunID)
+	rebindFixture(t, boundDir)
+	// The committed fixture already has has_fd_count=false on
+	// every sample and a valid descriptor_state_invariant in the
+	// verdict.json. The verifier must accept it as-is.
+	out, err := runDescriptorVerifier(t, dst)
+	if err != nil {
+		t.Fatalf("positive control: verifier rejected valid unavailable-FD fixture:\n%s", out)
+	}
+}
+
+// TestDescriptorSamples_AllFDUnavailable_MissingInvariant rejects
+// an unavailable-FD sample stream whose verdict.json is missing
+// the descriptor_state_invariant signal. The verifier must
+// detect the missing signal.
+func TestDescriptorSamples_AllFDUnavailable_MissingInvariant(t *testing.T) {
+	descriptorMutateAndVerify(t, func(boundDir string) {
+		path := filepath.Join(boundDir, "verdict.json")
+		applyJSONMutation(t, path, func(m map[string]interface{}) {
+			signals, _ := m["signal_summaries"].([]interface{})
+			filtered := make([]interface{}, 0, len(signals))
+			for _, s := range signals {
+				if sm, ok := s.(map[string]interface{}); ok {
+					if name, _ := sm["Name"].(string); name == "descriptor_state_invariant" {
+						continue
+					}
+				}
+				filtered = append(filtered, s)
+			}
+			m["signal_summaries"] = filtered
+		})
+	}, "missing descriptor_state_invariant signal")
+}
+
+// TestDescriptorSamples_AllFDUnavailable_MalformedInvariant rejects
+// an unavailable-FD sample stream whose descriptor_state_invariant
+// signal has wrong source_kind, missing primary flag, or wrong
+// delta. Each of these is a verifier-level rejection.
+func TestDescriptorSamples_AllFDUnavailable_MalformedInvariant(t *testing.T) {
+	descriptorMutateAndVerify(t, func(boundDir string) {
+		path := filepath.Join(boundDir, "verdict.json")
+		applyJSONMutation(t, path, func(m map[string]interface{}) {
+			signals, _ := m["signal_summaries"].([]interface{})
+			for _, s := range signals {
+				if sm, ok := s.(map[string]interface{}); ok {
+					if name, _ := sm["Name"].(string); name == "descriptor_state_invariant" {
+						sm["SourceKind"] = "sampled"
+						sm["IsPrimary"] = false
+					}
+				}
+			}
+		})
+	}, "source_kind must be state_invariant")
+}
+
+// TestDescriptorSamples_AllFDUnavailable_DuplicateInvariant rejects
+// an unavailable-FD sample stream with two
+// descriptor_state_invariant signals.
+func TestDescriptorSamples_AllFDUnavailable_DuplicateInvariant(t *testing.T) {
+	descriptorMutateAndVerify(t, func(boundDir string) {
+		path := filepath.Join(boundDir, "verdict.json")
+		applyJSONMutation(t, path, func(m map[string]interface{}) {
+			signals, _ := m["signal_summaries"].([]interface{})
+			for _, s := range signals {
+				if sm, ok := s.(map[string]interface{}); ok {
+					if name, _ := sm["Name"].(string); name == "descriptor_state_invariant" {
+						// Append a copy with a different AbsoluteDelta
+						sm2 := make(map[string]interface{})
+						for k, v := range sm {
+							sm2[k] = v
+						}
+						sm2["AbsoluteDelta"] = float64(150)
+						signals = append(signals, sm2)
+						m["signal_summaries"] = signals
+						return
+					}
+				}
+			}
+		})
+	}, "duplicate descriptor_state_invariant signal")
 }
 
 // TestDescriptorSamples_HasFDTrueNegativeValue rejects a row with
@@ -418,23 +478,51 @@ func TestDescriptorSamples_HasFDTrueNegativeValue(t *testing.T) {
 	}, "fd_count")
 }
 
-// TestDescriptorSamples_FDFlatWithStateDelta is a documented
-// boundary: when the host-side sampled FD counts are flat
-// (e.g. all 8) but the canary's internal state shows fd_delta=200,
-// the verifier still PASSes because the canary-state FD-delta
-// invariant is the authoritative descriptor oracle. The host-side
-// samples are corroborating; the analyzer's overall classification
-// (stable when the FD signal is inconclusive) is overwritten by
-// the canary-state invariant in the verifier's reconstruction.
-//
-// A robust production run would catch the discrepancy in the
-// producer's anomaly detection (canary-reported fd_delta=200 vs
-// sampled flat FD stream). The ACT §15 classification test
-// (TestClassification_DescriptorMemoryStableResourceGrowing)
-// asserts the positive descriptor classification when both
-// signals agree.
+// TestDescriptorSamples_FDFlatWithStateDelta rejects an evidence
+// bundle where the host-side sampled FD stream is flat
+// (has_fd_count=true with constant fd_count=8) but the canary
+// state claims fd_delta=200. The sampled FD data is available,
+// so the descriptor_state_invariant fallback must NOT apply.
+// The verifier must detect the disagreement between the
+// sampled stream and the canary state.
 func TestDescriptorSamples_FDFlatWithStateDelta(t *testing.T) {
-	t.Log("documented boundary: descriptor verifier relies on canary-state FD-delta; flat host-side samples are corroborating only")
+	descriptorMutateAndVerify(t, func(boundDir string) {
+		samplesPath := filepath.Join(boundDir, "samples.csv")
+		data, err := os.ReadFile(samplesPath)
+		if err != nil {
+			t.Fatalf("read samples: %v", err)
+		}
+		lines := strings.Split(string(data), "\n")
+		header := strings.Split(lines[0], ",")
+		hasFDIdx, fdIdx := -1, -1
+		for i, h := range header {
+			if h == "has_fd_count" {
+				hasFDIdx = i
+			}
+			if h == "fd_count" {
+				fdIdx = i
+			}
+		}
+		if hasFDIdx < 0 || fdIdx < 0 {
+			t.Fatalf("fd columns not found")
+		}
+		// Flip every has_fd_count=false to true with constant fd_count=8
+		// (sampled FD data is now available and flat).
+		for i := 1; i < len(lines); i++ {
+			if lines[i] == "" {
+				continue
+			}
+			row := strings.Split(lines[i], ",")
+			if row[hasFDIdx] == "false" {
+				row[hasFDIdx] = "true"
+				row[fdIdx] = "8"
+				lines[i] = strings.Join(row, ",")
+			}
+		}
+		if err := os.WriteFile(samplesPath, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+			t.Fatalf("write samples: %v", err)
+		}
+	}, "sampled FD signal is available; descriptor_state_invariant must not be present")
 }
 
 // TestDescriptorSamples_PIDChange rejects a sample stream whose

@@ -139,41 +139,24 @@ func TestClassification_DescriptorResourceNotGenericGrowth(t *testing.T) {
 	}
 }
 
-// TestClassification_GrowingMemoryPlusFDResourceIsDocumented
-// documents the analyzer's current priority order: the analyzer
-// reports `resource_growth` when the resource signal is growing,
-// even if memory is also growing. The ACT §15 #3 expectation
-// ("growing memory + growing FD resources yields generic
-// growth, not descriptor-only resource_growth") is a stricter
-// requirement that would require flipping the analyzer's priority
-// order. The current ordering is:
-//
-//   1. resource_growth takes priority over memory;
-//   2. only when resource is NOT resource_growth does memory
-//      matter for overall.
-//
-// This is a documented boundary, not a PASS. A future refactor
-// that wants to align with ACT §15 #3 must invert the priority
-// in the analyzer's overall classification logic and re-run
-// both the bounded ACT's TestClassificationGrowing and the
-// descriptor classification suite.
-//
-// The positive descriptor classification (growing FD only)
-// remains correctly classified as resource_growth; see
-// TestClassification_DescriptorMemoryStableResourceGrowing.
-func TestClassification_GrowingMemoryPlusFDResourceIsDocumented(t *testing.T) {
+// TestClassification_GrowingMemoryPlusFDResourceIsGrowth proves
+// the CORRECTION01 priority order: when both memory and FD
+// resources are growing, the overall classification is `growth`
+// (memory growth has priority over descriptor resource growth).
+// The simultaneous-growth case must never report descriptor-only
+// `resource_growth`.
+func TestClassification_GrowingMemoryPlusFDResourceIsGrowth(t *testing.T) {
 	samples := makeMemoryGrowingSamples(t)
 	verdict := analysis.Analyze(samples, analysis.DefaultThresholds())
 	if verdict.Memory != analysis.ClassificationGrowing {
 		t.Errorf("memory=%s, want growing (3000 KiB primary memory growth should be detected)", verdict.Memory)
 	}
-	// Document the actual analyzer priority: resource_growth
-	// wins over memory=growing.
 	if verdict.Resource != analysis.ClassificationResourceGrowth {
 		t.Errorf("resource=%s, want resource_growth", verdict.Resource)
 	}
-	if verdict.Overall != analysis.ClassificationResourceGrowth {
-		t.Errorf("overall=%s, want resource_growth (analyzer priority: resource_growth > memory growth)", verdict.Overall)
+	// CORRECTION01: memory growing wins over resource growth.
+	if verdict.Overall != analysis.ClassificationGrowing {
+		t.Errorf("overall=%s, want growth (CORRECTION01: memory growth has priority over resource growth)", verdict.Overall)
 	}
 }
 

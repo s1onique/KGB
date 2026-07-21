@@ -472,54 +472,58 @@ func runCommand(args []string) error {
 	invariantResult := validateStateInvariant(*scenario, initialState, finalState, workloadResult)
 	verdict := analysis.AnalyzeWithInvariant(samples, thresholds, invariantResult)
 
-	// Descriptor ACT §8 "permitted fallback": when the canary's
-	// internal state shows the exact descriptor fd_delta
-	// (final.fd_count - initial.fd_count == workload.completed * 2)
-	// but the host-side FD sampler could not acquire the FD signal
-	// (has_fd_count=false on every sample), use the canary state
-	// invariant as an explicit, named, invariant-based
-	// resource-classification source. The sampled FD signal
-	// remains truthfully unavailable; the canary-state source
-	// is named distinctly as "descriptor_state_invariant" in
-	// the verdict's signal_summaries.
-	//
-	// This implements the ACT §8 / §10 invariant-only path so a
-	// descriptor run is not falsely classified as `stable` when
-	// the host-side sampler cannot acquire FD counts but the
-	// canary's internal state proves the descriptor leak.
-	if *scenario == "canary-descriptor" && invariantResult.Valid {
-		fdDelta := finalState.FDCount - initialState.FDCount
-		expectedFDDelta := workloadResult.Completed * 2
-		if fdDelta == expectedFDDelta {
-			// Can the host-side FD sampler corroborate? Only
-			// emit the invariant-based source if no sampled FD
-			// signal is available.
-			sampledFDAvailable := false
-			for _, s := range samples {
-				if s.HasFDCount {
-					sampledFDAvailable = true
-					break
-				}
-			}
-			if !sampledFDAvailable {
-				verdict.Resource = analysis.ClassificationResourceGrowth
-				verdict.Overall = analysis.ClassificationResourceGrowth
-				verdict.Signals = append(verdict.Signals, analysis.SignalSummary{
-					Name:              "descriptor_state_invariant",
-					FirstWindowMedian: int64(initialState.FDCount),
-					LastWindowMedian:  int64(finalState.FDCount),
-					AbsoluteDelta:     int64(fdDelta),
-					RelativeDelta:     0,
-					RatePerHour:       0,
-					Slope:             0,
-					SampleCount:       len(samples),
-					AvailableCount:    0,
-					Minimum:           int64(initialState.FDCount),
-					Maximum:           int64(finalState.FDCount),
-					Classification:    analysis.ClassificationResourceGrowth,
-					IsPrimary:         true,
-				})
-			}
+	// Descriptor ACT §8 "permitted fallback": the canary-state
+	// invariant is the named, distinct resource-classification
+	// source when the host-side FD sampler is unavailable.
+	// The producer and verifier share the same pure function
+	// (analysis.applyDescriptorStateInvariant) so both apply
+	// identical fallback semantics.
+	if *scenario == "canary-descriptor" {
+		descInvariant := analysis.ComputeDescriptorStateInvariant(
+			initialState.FDCount, finalState.FDCount,
+			initialState.OperationCount, finalState.OperationCount,
+			analysis.DescriptorWorkloadResult{
+				Requested: workloadResult.Requested,
+				Attempted: workloadResult.Attempted,
+				Completed: workloadResult.Completed,
+				Failed:    workloadResult.Failed,
+				Returned:  workloadResult.Returned,
+			},
+		)
+		fallback := analysis.DescriptorFallbackInput{
+			Scenario: *scenario,
+			Invariant: descInvariant,
+			Initial: analysis.DescriptorInitialState{
+				FDCount:        initialState.FDCount,
+				OperationCount: initialState.OperationCount,
+				Mode:           initialState.Mode,
+				Ready:          initialState.Ready,
+			},
+			Final: analysis.DescriptorFinalState{
+				FDCount:        finalState.FDCount,
+				OperationCount: finalState.OperationCount,
+				Mode:           finalState.Mode,
+				Ready:          finalState.Ready,
+				RetainedBlocks: finalState.RetainedBlocks,
+				RetainedBytes:  finalState.RetainedBytes,
+			},
+			Workload: analysis.DescriptorWorkloadResult{
+				Requested: workloadResult.Requested,
+				Attempted: workloadResult.Attempted,
+				Completed: workloadResult.Completed,
+				Failed:    workloadResult.Failed,
+				Returned:  workloadResult.Returned,
+			},
+			SamplesAvailable: analysis.SamplesHaveFDAvailable(samples),
+			SamplesCount:     len(samples),
+		}
+		fbRes := analysis.ApplyDescriptorStateInvariant(fallback)
+		if fbRes.Applied {
+			verdict.Resource = analysis.ClassificationResourceGrowth
+			verdict.Overall = analysis.ComputeOverall(
+				verdict.Memory, verdict.Resource, verdict.Semantic,
+			)
+			verdict.Signals = append(verdict.Signals, fbRes.Signal)
 		}
 	}
 
@@ -1059,13 +1063,231 @@ func verifyCommand(args []string) error {
 		}
 	}
 
-	// Verify stored verdict matches reconstruction
-	if verdict.ScenarioValid != verifyScenarioValid(manifest.Scenario, csvSamples, workload, verifyErrors) {
-		verifyErrors = append(verifyErrors, "stored ScenarioValid does not match reconstruction")
+	// Validate state invariant (CORRECTION01)
+	invariantResult := validateStateInvariant(manifest.Scenario, &initialState, &finalState, &workload)
+	if !invariantResult.Valid {
+		for _, f := range invariantResult.Failures {
+			verifyErrors = append(verifyErrors, f)
+		}
 	}
 
+	// === Full verdict reconstruction ===
+	//
+	// The verifier reconstructs every classification field
+	// independently and compares it against the stored verdict.
+	// No stored classification may be trusted without independent
+	// reconstruction.
+
+	// 1. Reconstruct resource classification.
+	//    For the descriptor scenario, the canary-state invariant
+	//    is the named, distinct fallback source when the host-side
+	//    FD sampler is unavailable. Use the shared
+	//    ApplyDescriptorStateInvariant function so producer and
+	//    verifier apply identical fallback semantics.
+	reconstructedResource := analysis.ClassificationStable
+	reconstructedSignals := analysis.Analyze(csvSamples, analysis.DefaultThresholds()).Signals
+	if manifest.Scenario == "canary-descriptor" {
+		descInvariant := analysis.ComputeDescriptorStateInvariant(
+			initialState.FDCount, finalState.FDCount,
+			initialState.OperationCount, finalState.OperationCount,
+			analysis.DescriptorWorkloadResult{
+				Requested: workload.Requested,
+				Attempted: workload.Attempted,
+				Completed: workload.Completed,
+				Failed:    workload.Failed,
+				Returned:  workload.Returned,
+			},
+		)
+		fallback := analysis.DescriptorFallbackInput{
+			Scenario: manifest.Scenario,
+			Invariant: descInvariant,
+			Initial: analysis.DescriptorInitialState{
+				FDCount:        initialState.FDCount,
+				OperationCount: initialState.OperationCount,
+				Mode:           initialState.Mode,
+				Ready:          initialState.Ready,
+			},
+			Final: analysis.DescriptorFinalState{
+				FDCount:        finalState.FDCount,
+				OperationCount: finalState.OperationCount,
+				Mode:           finalState.Mode,
+				Ready:          finalState.Ready,
+				RetainedBlocks: finalState.RetainedBlocks,
+				RetainedBytes:  finalState.RetainedBytes,
+			},
+			Workload: analysis.DescriptorWorkloadResult{
+				Requested: workload.Requested,
+				Attempted: workload.Attempted,
+				Completed: workload.Completed,
+				Failed:    workload.Failed,
+				Returned:  workload.Returned,
+			},
+			SamplesAvailable: analysis.SamplesHaveFDAvailable(csvSamples),
+			SamplesCount:     len(csvSamples),
+		}
+		fbRes := analysis.ApplyDescriptorStateInvariant(fallback)
+		if fbRes.Applied {
+			reconstructedResource = analysis.ClassificationResourceGrowth
+		} else {
+			// Sampled FD path: use the analyzer's resource classification
+			analyzed := analysis.Analyze(csvSamples, analysis.DefaultThresholds())
+			reconstructedResource = analyzed.Resource
+		}
+	} else {
+		// Non-descriptor scenarios: use the analyzer directly
+		analyzed := analysis.Analyze(csvSamples, analysis.DefaultThresholds())
+		reconstructedResource = analyzed.Resource
+	}
+
+	// 2. Reconstruct memory and semantic classifications from samples
+	analyzed := analysis.Analyze(csvSamples, analysis.DefaultThresholds())
+	reconstructedMemory := analyzed.Memory
+	reconstructedSemantic := analyzed.Semantic
+
+	// 3. Reconstruct overall from the four classifications
+	reconstructedOverall := analysis.ComputeOverall(
+		reconstructedMemory,
+		reconstructedResource,
+		reconstructedSemantic,
+	)
+
+	// 4. Reconstruct validity fields
+	reconstructedScenarioValid := verifyScenarioValid(manifest.Scenario, csvSamples, workload, verifyErrors) && len(verifyErrors) == 0
+	reconstructedCanariesValid := reconstructedScenarioValid &&
+		reconstructedOverall == getExpectedVerdict(manifest.Scenario) &&
+		invariantResult.Valid
+	// Provenance is verified separately via validateProvenanceEvidence
+	// below; reconstructedProvenanceValid starts true and is set false
+	// by validateProvenanceEvidence errors.
+	reconstructedProvenanceValid := true
+
+	// 5. Validate descriptor invariant signal
+	//    For canary-descriptor: exactly one descriptor_state_invariant
+	//    signal with source_kind=state_invariant, is_primary=true,
+	//    correct initial/final/delta/classification. If no sampled
+	//    FD data is available, the invariant must exist; if sampled
+	//    FD data is available, the invariant must NOT exist.
+	if manifest.Scenario == "canary-descriptor" {
+		descriptorInvariants := 0
+		var invariant *analysis.SignalSummary
+		for i := range verdict.SignalSummaries {
+			sig := &verdict.SignalSummaries[i]
+			if sig.Name == "descriptor_state_invariant" {
+				descriptorInvariants++
+				invariant = sig
+			}
+		}
+		sampledFDAvailable := analysis.SamplesHaveFDAvailable(csvSamples)
+		if sampledFDAvailable {
+			if descriptorInvariants > 0 {
+				verifyErrors = append(verifyErrors,
+					"sampled FD signal is available; descriptor_state_invariant must not be present")
+			}
+		} else {
+			if descriptorInvariants == 0 {
+				verifyErrors = append(verifyErrors,
+					"missing descriptor_state_invariant signal")
+			}
+			if descriptorInvariants > 1 {
+				verifyErrors = append(verifyErrors,
+					"duplicate descriptor_state_invariant signal")
+			}
+			if invariant != nil {
+				if invariant.SourceKind != analysis.SignalKindStateInvariant {
+					verifyErrors = append(verifyErrors,
+						"descriptor_state_invariant source_kind must be state_invariant")
+				}
+				if !invariant.IsPrimary {
+					verifyErrors = append(verifyErrors,
+						"descriptor_state_invariant must be primary")
+				}
+				if invariant.FirstWindowMedian != int64(initialState.FDCount) {
+					verifyErrors = append(verifyErrors,
+						fmt.Sprintf("descriptor_state_invariant initial=%d != canary initial=%d",
+							invariant.FirstWindowMedian, initialState.FDCount))
+				}
+				if invariant.LastWindowMedian != int64(finalState.FDCount) {
+					verifyErrors = append(verifyErrors,
+						fmt.Sprintf("descriptor_state_invariant final=%d != canary final=%d",
+							invariant.LastWindowMedian, finalState.FDCount))
+				}
+				expectedDelta := int64(workload.Completed * 2)
+				if invariant.AbsoluteDelta != expectedDelta {
+					verifyErrors = append(verifyErrors,
+						fmt.Sprintf("descriptor_state_invariant absolute_delta=%d != expected=%d",
+							invariant.AbsoluteDelta, expectedDelta))
+				}
+				if invariant.Classification != analysis.ClassificationResourceGrowth {
+					verifyErrors = append(verifyErrors,
+						fmt.Sprintf("descriptor_state_invariant classification=%s != resource_growth",
+							invariant.Classification))
+				}
+			}
+		}
+	}
+
+	// 6. Validate sampled-signal source_kind consistency
+	//    Every non-invariant signal must have source_kind=sampled.
+	for _, sig := range verdict.SignalSummaries {
+		if sig.Name == "descriptor_state_invariant" {
+			continue
+		}
+		if sig.SourceKind == "" {
+			// Backwards-compat: pre-CORRECTION01 fixtures may have
+			// empty source_kind; coerce to sampled to keep the
+			// existing fixture-verification path stable.
+			continue
+		}
+		if sig.SourceKind != analysis.SignalKindSampled {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("signal %q has source_kind=%s, expected sampled",
+					sig.Name, sig.SourceKind))
+		}
+	}
+
+	// 7. Compare stored vs reconstructed classifications (CORRECTION01)
+	if verdict.OverallClassification != reconstructedOverall {
+		verifyErrors = append(verifyErrors,
+			fmt.Sprintf("stored overall classification %s does not match reconstruction %s",
+				verdict.OverallClassification, reconstructedOverall))
+	}
+	if verdict.MemoryClassification != reconstructedMemory {
+		verifyErrors = append(verifyErrors,
+			fmt.Sprintf("stored memory classification %s does not match reconstruction %s",
+				verdict.MemoryClassification, reconstructedMemory))
+	}
+	if verdict.ResourceClassification != reconstructedResource {
+		verifyErrors = append(verifyErrors,
+			fmt.Sprintf("stored resource classification %s does not match reconstruction %s",
+				verdict.ResourceClassification, reconstructedResource))
+	}
+	if verdict.SemanticClassification != reconstructedSemantic {
+		verifyErrors = append(verifyErrors,
+			fmt.Sprintf("stored semantic classification %s does not match reconstruction %s",
+				verdict.SemanticClassification, reconstructedSemantic))
+	}
+
+	// 8. Compare stored vs reconstructed validity fields
+	if verdict.ScenarioValid != reconstructedScenarioValid {
+		verifyErrors = append(verifyErrors, "stored ScenarioValid does not match reconstruction")
+	}
+	if verdict.CanariesValid != reconstructedCanariesValid {
+		verifyErrors = append(verifyErrors, "stored CanariesValid does not match reconstruction")
+	}
+	// Provisional: will be updated by validateProvenanceEvidence below
+	_ = reconstructedSignals
+
 	// Verify provenance using the pure validator function
-	verifyErrors = append(verifyErrors, validateProvenanceEvidence(manifest, verdict)...)
+	provErrs := validateProvenanceEvidence(manifest, verdict)
+	if len(provErrs) > 0 {
+		reconstructedProvenanceValid = false
+	}
+	verifyErrors = append(verifyErrors, provErrs...)
+
+	// Compare stored vs reconstructed provenance_valid
+	if verdict.ProvenanceValid != reconstructedProvenanceValid {
+		verifyErrors = append(verifyErrors, "stored ProvenanceValid does not match reconstruction")
+	}
 
 	// Verify runtime executable hash matches stored hash (runtime binding)
 	// P0: Hash the verifier's live inode through /proc/self/exe, NOT the path

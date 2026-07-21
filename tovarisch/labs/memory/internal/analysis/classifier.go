@@ -9,6 +9,7 @@
 package analysis
 
 import (
+	"fmt"
 	"sort"
 	"time"
 
@@ -61,9 +62,28 @@ type Verdict struct {
 	Unknowns []string
 }
 
+// SignalKind identifies the evidence source of a SignalSummary.
+//
+// "sampled" is the default kind for host-side sample streams
+// (memory and resource counts observed during the run).
+//
+// "state_invariant" is the descriptor-specific fallback source
+// reconstructed from the canary's authoritative state endpoint
+// (initial and final canary states plus workload result). It is
+// used when the host-side FD signal is unavailable so the
+// canary-state invariant can act as the named, distinct
+// resource-classification source.
+type SignalKind string
+
+const (
+	SignalKindSampled        SignalKind = "sampled"
+	SignalKindStateInvariant SignalKind = "state_invariant"
+)
+
 // SignalSummary holds statistics for a single signal.
 type SignalSummary struct {
 	Name              string
+	SourceKind        SignalKind // "sampled" or "state_invariant"
 	FirstWindowMedian int64
 	LastWindowMedian  int64
 	AbsoluteDelta     int64
@@ -141,20 +161,52 @@ func Analyze(samples []sampling.Sample, thresholds Thresholds) *Verdict {
 	semanticClass := classifySemantic(samples, thresholds)
 	verdict.Semantic = semanticClass
 
-	// Overall classification: resource growth takes priority
-	if resourceClass == ClassificationResourceGrowth {
-		verdict.Overall = ClassificationResourceGrowth
-	} else if memoryClass == ClassificationGrowing {
-		verdict.Overall = ClassificationGrowing
-	} else if memoryClass == ClassificationInconclusive {
-		verdict.Overall = ClassificationInconclusive
-	} else if memoryClass == ClassificationProcessReplaced {
-		verdict.Overall = ClassificationProcessReplaced
-	} else {
-		verdict.Overall = ClassificationStable
-	}
-
+	// Overall classification (CORRECTION01 priority order):
+	//   1. invalid semantic or invalid invariant → invalid
+	//   2. memory growing → growth (memory growth has priority over
+	//      descriptor resource growth; simultaneous memory and FD
+	//      growth yields overall=growth, not descriptor-only
+	//      resource_growth)
+	//   3. else resource growing → resource_growth
+	//   4. else stable/inconclusive/process_replaced per existing
+	//      rules
+	verdict.Overall = computeOverall(verdict.Memory, verdict.Resource, verdict.Semantic)
 	return verdict
+}
+
+// computeOverall derives the overall classification from the
+// per-dimension classifications. Pure function so producer and
+// verifier can derive the same overall value independently.
+//
+// Priority order (CORRECTION01):
+//   1. invalid semantic → invalid
+//   2. memory growing → growth (memory growth has priority over
+//      descriptor resource growth)
+//   3. else resource growing → resource_growth
+//   4. else follow memory: inconclusive / process_replaced / stable
+func computeOverall(memory, resource, semantic Classification) Classification {
+	if semantic == ClassificationInvalid {
+		return ClassificationInvalid
+	}
+	if memory == ClassificationGrowing {
+		return ClassificationGrowing
+	}
+	if resource == ClassificationResourceGrowth {
+		return ClassificationResourceGrowth
+	}
+	if memory == ClassificationInconclusive {
+		return ClassificationInconclusive
+	}
+	if memory == ClassificationProcessReplaced {
+		return ClassificationProcessReplaced
+	}
+	return ClassificationStable
+}
+
+// ComputeOverall exposes the priority logic for tests and
+// reconstruction. It mirrors computeOverall exactly.
+func ComputeOverall(memory, resource, semantic Classification) Classification {
+	return computeOverall(memory, resource, semantic)
 }
 
 func hasProcessReplacement(samples []sampling.Sample) bool {
@@ -300,6 +352,7 @@ func analyzeSignal(name string, samples []sampling.Sample, getValue func(samplin
 	if len(samples) < 2 {
 		return SignalSummary{
 			Name:           name,
+			SourceKind:     SignalKindSampled,
 			SampleCount:    len(samples),
 			Classification: ClassificationInconclusive,
 			IsPrimary:      isPrimary,
@@ -328,6 +381,7 @@ func analyzeSignal(name string, samples []sampling.Sample, getValue func(samplin
 	if len(points) < 2 {
 		return SignalSummary{
 			Name:           name,
+			SourceKind:     SignalKindSampled,
 			SampleCount:    len(samples),
 			AvailableCount: availableCount,
 			MissingCount:   missingCount,
@@ -391,6 +445,7 @@ func analyzeSignal(name string, samples []sampling.Sample, getValue func(samplin
 
 	return SignalSummary{
 		Name:              name,
+		SourceKind:        SignalKindSampled,
 		FirstWindowMedian: firstMedian,
 		LastWindowMedian:  lastMedian,
 		AbsoluteDelta:     absDelta,
@@ -686,4 +741,184 @@ func AnalyzeWithInvariant(samples []sampling.Sample, thresholds Thresholds, inva
 	}
 
 	return verdict
+}
+
+// DescriptorInitialState captures the canary's initial descriptor-mode
+// state. Both fields are part of the descriptor invariant contract.
+type DescriptorInitialState struct {
+	FDCount        int
+	OperationCount int
+	Mode           string
+	Ready          bool
+}
+
+// DescriptorFinalState captures the canary's final descriptor-mode
+// state. The retained_blocks/retained_bytes fields must be zero
+// (the descriptor scenario does not retain memory).
+type DescriptorFinalState struct {
+	FDCount        int
+	OperationCount int
+	Mode           string
+	Ready          bool
+	RetainedBlocks int
+	RetainedBytes  int64
+}
+
+// DescriptorWorkloadResult is the workload result for the descriptor
+// scenario (mirrors WorkloadResult but is defined here so the analysis
+// package does not import the main package).
+type DescriptorWorkloadResult struct {
+	Requested int
+	Attempted int
+	Completed int
+	Failed    int
+	Returned  int
+}
+
+// DescriptorStateInvariant holds the precomputed canary-state
+// invariant values: the FD delta, the expected FD delta, and
+// whether the workload arithmetic supports the descriptor contract.
+type DescriptorStateInvariant struct {
+	FDDelta          int
+	ExpectedFDDelta  int
+	OpDelta          int
+	WorkloadComplete int
+	WorkloadFailed   int
+	WorkloadReturned int
+}
+
+// DescriptorFallbackInput bundles the inputs that determine whether
+// the descriptor-fallback path is allowed.
+type DescriptorFallbackInput struct {
+	Scenario         string
+	Invariant        DescriptorStateInvariant
+	Initial          DescriptorInitialState
+	Final            DescriptorFinalState
+	Workload         DescriptorWorkloadResult
+	SamplesAvailable bool // at least one sample has HasFDCount=true
+	SamplesCount     int
+}
+
+// DescriptorFallbackResult is the output of applyDescriptorStateInvariant.
+// It carries the exact signal summary, the modified verdict fields, and
+// a flag indicating whether the fallback was applied.
+type DescriptorFallbackResult struct {
+	Applied    bool
+	Signal     SignalSummary
+	Invariants DescriptorStateInvariant
+	Failures   []string
+}
+
+// applyDescriptorStateInvariant is the pure function shared by
+// producer and verifier. It applies the §8 "permitted fallback":
+// when the descriptor scenario's canary-state invariant is
+// satisfied (operation_count delta == workload.completed, FD delta
+// == workload.completed × 2) and the host-side FD sampler is
+// unavailable (no sample has has_fd_count=true), the canary-state
+// invariant becomes the named, distinct resource-classification
+// source — descriptor_state_invariant.
+//
+// The function returns the canonical signal summary, the precomputed
+// invariant, and any structural failures encountered. The caller is
+// responsible for splicing the returned signal into the verdict's
+// signal_summaries list and updating verdict.Resource and
+// verdict.Overall via the priority logic.
+//
+// The function is a no-op when any of the four gates fails:
+//   - scenario != "canary-descriptor"
+//   - workload.completed != 100 (descriptor contract)
+//   - operation_count delta != workload.completed
+//   - fd_delta != workload.completed × 2
+//   - any sample has has_fd_count=true (sampled FD data is
+//     available, so the canary-state fallback must not apply)
+func ApplyDescriptorStateInvariant(
+	input DescriptorFallbackInput,
+) DescriptorFallbackResult {
+	res := DescriptorFallbackResult{}
+	res.Invariants = input.Invariant
+
+	// Gate 1: scenario
+	if input.Scenario != "canary-descriptor" {
+		res.Failures = append(res.Failures,
+			fmt.Sprintf("scenario=%s, expected canary-descriptor", input.Scenario))
+		return res
+	}
+	// Gate 2: workload.completed must be 100 (the descriptor contract)
+	if input.Workload.Completed != 100 {
+		res.Failures = append(res.Failures,
+			fmt.Sprintf("workload.completed=%d, expected 100", input.Workload.Completed))
+		return res
+	}
+	// Gate 3: operation_count delta must equal workload.completed
+	if input.Invariant.OpDelta != input.Invariant.WorkloadComplete {
+		res.Failures = append(res.Failures,
+			fmt.Sprintf("operation_count_delta=%d != workload.completed=%d",
+				input.Invariant.OpDelta, input.Invariant.WorkloadComplete))
+		return res
+	}
+	// Gate 4: fd_delta must equal workload.completed × 2
+	if input.Invariant.FDDelta != input.Invariant.ExpectedFDDelta {
+		res.Failures = append(res.Failures,
+			fmt.Sprintf("fd_delta=%d != expected=%d",
+				input.Invariant.FDDelta, input.Invariant.ExpectedFDDelta))
+		return res
+	}
+	// Gate 5: host-side FD sampler must be unavailable
+	if input.SamplesAvailable {
+		res.Failures = append(res.Failures,
+			"host-side FD sample is available; descriptor_state_invariant fallback must not apply")
+		return res
+	}
+
+	// All gates pass — the canary-state invariant becomes the
+	// authoritative descriptor oracle.
+	res.Applied = true
+	res.Signal = SignalSummary{
+		Name:              "descriptor_state_invariant",
+		SourceKind:        SignalKindStateInvariant,
+		FirstWindowMedian: int64(input.Initial.FDCount),
+		LastWindowMedian:  int64(input.Final.FDCount),
+		AbsoluteDelta:     int64(input.Invariant.FDDelta),
+		RelativeDelta:     0,
+		RatePerHour:       0,
+		Slope:             0,
+		SampleCount:       input.SamplesCount,
+		MissingCount:      input.SamplesCount,
+		AvailableCount:    2, // initial + final canary-state observations
+		Minimum:           int64(input.Initial.FDCount),
+		Maximum:           int64(input.Final.FDCount),
+		Classification:    ClassificationResourceGrowth,
+		IsPrimary:         true,
+	}
+	return res
+}
+
+// ComputeDescriptorStateInvariant derives the canary-state
+// descriptor invariant values from the canary's initial/final state
+// and the workload result. Pure function for use by both producer
+// and verifier.
+func ComputeDescriptorStateInvariant(
+	initialFDCount, finalFDCount, initialOpCount, finalOpCount int,
+	workload DescriptorWorkloadResult,
+) DescriptorStateInvariant {
+	return DescriptorStateInvariant{
+		FDDelta:          finalFDCount - initialFDCount,
+		ExpectedFDDelta:  workload.Completed * 2,
+		OpDelta:          finalOpCount - initialOpCount,
+		WorkloadComplete: workload.Completed,
+		WorkloadFailed:   workload.Failed,
+		WorkloadReturned: workload.Returned,
+	}
+}
+
+// samplesHaveFDAvailable reports whether any sample in the slice
+// carries a usable FD observation (HasFDCount=true). Used by the
+// descriptor-fallback gate.
+func SamplesHaveFDAvailable(samples []sampling.Sample) bool {
+	for _, s := range samples {
+		if s.HasFDCount {
+			return true
+		}
+	}
+	return false
 }
