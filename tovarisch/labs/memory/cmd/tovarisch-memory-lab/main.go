@@ -1179,15 +1179,23 @@ func getScenarioOperationCount(scenario string) int {
 	}
 }
 
-// classifyCgroupFailureWithNamespace classifies cgroup failure with namespace comparison.
+// namespaceReader is a seam for reading namespace info from a PID.
+// Allows injection of fake readers for testing.
+type namespaceReader func(pid int) (*procfs.NamespaceInfo, error)
+
+// classifyCgroupFailureWithReader classifies cgroup failure using injected namespace reader.
 // Returns capability and proof for verifier to reconstruct the decision.
-// Uses typed errors for reliable classification.
 //
 // Classification rules:
 // - Observed mismatch in required namespace → corresponding mismatch result
 // - Any required identity unavailable → namespace_identity_unavailable
 // - No mismatch observed → not_mounted
-func classifyCgroupFailureWithNamespace(err error, targetPID, controllerPID int) (sampling.CgroupCapability, *sampling.NamespaceProof) {
+func classifyCgroupFailureWithReader(
+	err error,
+	targetPID int,
+	controllerPID int,
+	readNS namespaceReader,
+) (sampling.CgroupCapability, *sampling.NamespaceProof) {
 	proof := &sampling.NamespaceProof{}
 
 	if err == nil {
@@ -1203,21 +1211,17 @@ func classifyCgroupFailureWithNamespace(err error, targetPID, controllerPID int)
 		capability = sampling.CgroupCapabilityNoUnifiedHierarchy
 	case errors.Is(err, procfs.ErrPathTraversal):
 		capability = sampling.CgroupCapabilityPathTraversal
+	case errors.Is(err, procfs.ErrPermissionDenied):
+		capability = sampling.CgroupCapabilityPermissionDenied
+	case errors.Is(err, procfs.ErrParseFailure):
+		capability = sampling.CgroupCapabilityParseFailure
 	default:
-		// Check for permission/parse errors
-		errStr := err.Error()
-		if strings.Contains(errStr, "permission denied") || strings.Contains(errStr, "permission") {
-			capability = sampling.CgroupCapabilityPermissionDenied
-		} else if strings.Contains(errStr, "parse") {
-			capability = sampling.CgroupCapabilityParseFailure
-		} else {
-			capability = sampling.CgroupCapabilityPathAbsent
-		}
+		capability = sampling.CgroupCapabilityPathAbsent
 	}
 
 	// Read namespace IDs for both processes
-	targetNS, _ := procfs.ReadNamespaceIDs(targetPID)
-	controllerNS, _ := procfs.ReadNamespaceIDs(controllerPID)
+	targetNS, _ := readNS(targetPID)
+	controllerNS, _ := readNS(controllerPID)
 
 	// Populate proof with what we read
 	if targetNS != nil {
@@ -1244,7 +1248,7 @@ func classifyCgroupFailureWithNamespace(err error, targetPID, controllerPID int)
 	// For cgroup visibility errors, attempt namespace comparison
 	if capability == sampling.CgroupCapabilityCgroupNotVisible ||
 		capability == sampling.CgroupCapabilityNoUnifiedHierarchy {
-		
+
 		canProveMount := targetNS != nil && targetNS.MountNamespaceErr == nil &&
 			controllerNS != nil && controllerNS.MountNamespaceErr == nil
 		canProveCgroup := targetNS != nil && targetNS.CgroupNamespaceErr == nil &&
@@ -1283,8 +1287,9 @@ func classifyCgroupFailureWithNamespace(err error, targetPID, controllerPID int)
 	return capability, proof
 }
 
-func contains(s, substr string) bool {
-	return strings.Contains(s, substr)
+// classifyCgroupFailureWithNamespace classifies cgroup failure using procfs namespace reader.
+func classifyCgroupFailureWithNamespace(err error, targetPID, controllerPID int) (sampling.CgroupCapability, *sampling.NamespaceProof) {
+	return classifyCgroupFailureWithReader(err, targetPID, controllerPID, procfs.ReadNamespaceIDs)
 }
 
 // collectProvenance collects git, kernel, and binary provenance information.

@@ -2,12 +2,10 @@
 //
 // Reference: kgb://doctrine/embedded-memory-frugality
 //
-// Note: Sentinel errors (ErrNoCgroup2Mount, ErrNoUnifiedCgroup, ErrPathTraversal)
-// are defined in procfs/cgroup.go and imported via the procfs package.
+// Sentinel errors (ErrNoCgroup2Mount, ErrNoUnifiedCgroup, ErrPathTraversal,
+// ErrPermissionDenied, ErrParseFailure) are defined in procfs/identity.go.
 
 package sampling
-
-import "github.com/s1onique/KGB/tovarisch/labs/memory/internal/procfs"
 
 // CgroupCapability classifies the result of cgroup v2 resolution attempts.
 type CgroupCapability string
@@ -89,12 +87,3 @@ type CgroupCapabilityEvent struct {
 	ControllerPID   int             `json:"controller_pid"`
 	Proof           *NamespaceProof  `json:"proof,omitempty"`
 }
-
-// Re-export errors from procfs for convenience in error classification.
-// Callers should use procfs.ErrNoCgroup2Mount, procfs.ErrNoUnifiedCgroup, etc.
-// These are type-compatible for errors.Is() checks.
-var (
-	_ = procfs.ErrNoCgroup2Mount
-	_ = procfs.ErrNoUnifiedCgroup
-	_ = procfs.ErrPathTraversal
-)
