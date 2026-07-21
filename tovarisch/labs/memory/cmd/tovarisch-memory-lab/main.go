@@ -979,6 +979,50 @@ func verifyCommand(args []string) error {
 		verifyErrors = append(verifyErrors, "stored ScenarioValid does not match reconstruction")
 	}
 
+	// Verify provenance fields
+	// ProvenanceValid must be true and ProvenanceError must be empty for valid evidence
+	if !verdict.ProvenanceValid {
+		verifyErrors = append(verifyErrors, fmt.Sprintf("provenance_valid=false: %s", verdict.ProvenanceError))
+	}
+	if verdict.ProvenanceError != "" {
+		verifyErrors = append(verifyErrors, fmt.Sprintf("provenance_error not empty: %s", verdict.ProvenanceError))
+	}
+
+	// Verify SubjectIdentity fields
+	if manifest.SubjectIdentity != nil {
+		// GitCommit must be valid (non-empty, 40 hex chars for SHA)
+		if manifest.SubjectIdentity.GitCommit == "" {
+			verifyErrors = append(verifyErrors, "subject_identity.git_commit is empty")
+		} else if len(manifest.SubjectIdentity.GitCommit) != 40 {
+			verifyErrors = append(verifyErrors, fmt.Sprintf("subject_identity.git_commit invalid length: %d (expected 40)", len(manifest.SubjectIdentity.GitCommit)))
+		}
+		// GitTree must be non-empty
+		if manifest.SubjectIdentity.GitTree == "" {
+			verifyErrors = append(verifyErrors, "subject_identity.git_tree is empty")
+		}
+		// ControllerExecutablePath must be non-empty
+		if manifest.SubjectIdentity.ControllerExecutablePath == "" {
+			verifyErrors = append(verifyErrors, "subject_identity.controller_executable_path is empty")
+		}
+		// ControllerExecutableSHA256 must be valid (64 hex chars for SHA-256)
+		if manifest.SubjectIdentity.ControllerExecutableSHA256 == "" {
+			verifyErrors = append(verifyErrors, "subject_identity.controller_executable_sha256 is empty")
+		} else if len(manifest.SubjectIdentity.ControllerExecutableSHA256) != 64 {
+			verifyErrors = append(verifyErrors, fmt.Sprintf("subject_identity.controller_executable_sha256 invalid length: %d (expected 64)", len(manifest.SubjectIdentity.ControllerExecutableSHA256)))
+		}
+	} else {
+		verifyErrors = append(verifyErrors, "subject_identity is nil")
+	}
+
+	// Verify HostIdentity.CollectionStatus = "complete"
+	if manifest.HostID != nil {
+		if manifest.HostID.CollectionStatus != "complete" {
+			verifyErrors = append(verifyErrors, fmt.Sprintf("host_identity.collection_status=%s (expected 'complete')", manifest.HostID.CollectionStatus))
+		}
+	} else {
+		verifyErrors = append(verifyErrors, "host_identity is nil")
+	}
+
 	// Print verification results
 	fmt.Printf("=== Verification Results ===\n")
 	fmt.Printf("Run ID: %s\n", *runID)
@@ -1268,10 +1312,18 @@ func classifyCgroupFailureWithReader(
 	if capability == sampling.CgroupCapabilityCgroupNotVisible ||
 		capability == sampling.CgroupCapabilityNoUnifiedHierarchy {
 
-		canProveMount := targetNS != nil && targetNS.MountNamespaceErr == nil &&
-			controllerNS != nil && controllerNS.MountNamespaceErr == nil
-		canProveCgroup := targetNS != nil && targetNS.CgroupNamespaceErr == nil &&
-			controllerNS != nil && controllerNS.CgroupNamespaceErr == nil
+		// Top-level reader errors make identity unavailable
+		if targetReadErr != nil || controllerReadErr != nil {
+			proof.DecisionReason = "namespace_identity_unavailable"
+			return sampling.CgroupCapabilityNamespaceIdentityUnavail, proof
+		}
+
+		canProveMount := targetNS != nil && controllerNS != nil &&
+			targetNS.MountNamespaceErr == nil && controllerNS.MountNamespaceErr == nil &&
+			targetNS.MountNamespace != "" && controllerNS.MountNamespace != ""
+		canProveCgroup := targetNS != nil && controllerNS != nil &&
+			targetNS.CgroupNamespaceErr == nil && controllerNS.CgroupNamespaceErr == nil &&
+			targetNS.CgroupNamespace != "" && controllerNS.CgroupNamespace != ""
 
 		// Check mount namespace mismatch first
 		if canProveMount &&
@@ -1312,11 +1364,11 @@ func classifyCgroupFailureWithNamespace(err error, targetPID, controllerPID int)
 }
 
 // collectProvenance collects git, kernel, and binary provenance information.
-// Returns error if required provenance is missing - fail-closed for evidence integrity.
+// Returns error if any required provenance is missing - fail-closed for evidence integrity.
 func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, string, error) {
 	var errs []string
 
-	// Git commit and tree
+	// Git commit and tree - required
 	gitCommit, gitErr := runGit("rev-parse", "HEAD")
 	if gitErr != nil {
 		errs = append(errs, fmt.Sprintf("git commit: %v", gitErr))
@@ -1329,7 +1381,7 @@ func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, str
 	// Controller PID
 	controllerPID := fmt.Sprintf("%d", os.Getpid())
 
-	// Controller executable path and hash
+	// Controller executable path and hash - both required
 	selfPath, pathErr := os.Readlink("/proc/self/exe")
 	selfHash := ""
 	selfHashErr := error(nil)
@@ -1341,7 +1393,6 @@ func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, str
 		var hashErr error
 		selfHash, hashErr = hashFile(selfPath)
 		if hashErr != nil {
-			// Hash failure is critical - add to errs so status is not "complete"
 			errs = append(errs, fmt.Sprintf("executable hash: %v", hashErr))
 			selfHashErr = hashErr
 		}
@@ -1366,7 +1417,7 @@ func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, str
 	// Cgroup mode - prefer reading from /proc/1/cgroup or mountinfo
 	cgroupMode := detectCgroupMode()
 
-	// Provenance status - fail-closed: if hash failed, status is NOT "complete"
+	// Provenance status
 	status := "complete"
 	if len(errs) > 0 {
 		status = fmt.Sprintf("partial: %s", strings.Join(errs, "; "))
@@ -1385,9 +1436,24 @@ func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, str
 		CollectionStatus: status,
 	}
 
-	// Return error if executable hash failed - this is required provenance
-	if selfHashErr != nil {
-		return subject, host, controllerPID, fmt.Errorf("required provenance unavailable: executable hash failed: %w", selfHashErr)
+	// Build comprehensive error if any required field failed
+	// Required: git commit, git tree, executable path, executable hash (valid 64-char hex)
+	var requiredErrs []string
+	if gitErr != nil || gitCommit == "" {
+		requiredErrs = append(requiredErrs, "git_commit")
+	}
+	if treeErr != nil || gitTree == "" {
+		requiredErrs = append(requiredErrs, "git_tree")
+	}
+	if pathErr != nil || selfPath == "" {
+		requiredErrs = append(requiredErrs, "executable_path")
+	}
+	if selfHashErr != nil || len(selfHash) != 64 {
+		requiredErrs = append(requiredErrs, "executable_hash")
+	}
+
+	if len(requiredErrs) > 0 {
+		return subject, host, controllerPID, fmt.Errorf("required provenance unavailable: %s", strings.Join(requiredErrs, ", "))
 	}
 
 	return subject, host, controllerPID, nil
