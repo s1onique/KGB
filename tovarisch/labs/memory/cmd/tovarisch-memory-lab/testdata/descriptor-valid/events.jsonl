@@ -1,0 +1,8 @@
+{"timestamp":"2026-07-21T12:00:00.000000000+03:00","type":"sampling_started","phase":"startup","message":"Sampling loop started"}
+{"timestamp":"2026-07-21T12:00:10.000000000+03:00","type":"phase_transition","phase":"warmup","message":"phase transition: startup -> warmup","data":{"from":"startup","to":"warmup"}}
+{"timestamp":"2026-07-21T12:00:20.000000000+03:00","type":"phase_transition","phase":"baseline","message":"phase transition: warmup -> baseline","data":{"from":"warmup","to":"baseline"}}
+{"timestamp":"2026-07-21T12:00:35.000000000+03:00","type":"phase_transition","phase":"stimulus","message":"phase transition: baseline -> stimulus","data":{"from":"baseline","to":"stimulus"}}
+{"timestamp":"2026-07-21T12:00:45.000000000+03:00","type":"operate","message":"operate request","data":{"count":100}}
+{"timestamp":"2026-07-21T12:00:46.000000000+03:00","type":"phase_transition","phase":"settling","message":"phase transition: stimulus -> settling","data":{"from":"stimulus","to":"settling"}}
+{"timestamp":"2026-07-21T12:00:56.000000000+03:00","type":"phase_transition","phase":"final","message":"phase transition: settling -> final","data":{"from":"settling","to":"final"}}
+{"timestamp":"2026-07-21T12:01:11.000000000+03:00","type":"phase_complete","phase":"complete","message":"sampling complete"}

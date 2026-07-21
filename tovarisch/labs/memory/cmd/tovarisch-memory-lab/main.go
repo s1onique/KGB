@@ -472,6 +472,57 @@ func runCommand(args []string) error {
 	invariantResult := validateStateInvariant(*scenario, initialState, finalState, workloadResult)
 	verdict := analysis.AnalyzeWithInvariant(samples, thresholds, invariantResult)
 
+	// Descriptor ACT §8 "permitted fallback": when the canary's
+	// internal state shows the exact descriptor fd_delta
+	// (final.fd_count - initial.fd_count == workload.completed * 2)
+	// but the host-side FD sampler could not acquire the FD signal
+	// (has_fd_count=false on every sample), use the canary state
+	// invariant as an explicit, named, invariant-based
+	// resource-classification source. The sampled FD signal
+	// remains truthfully unavailable; the canary-state source
+	// is named distinctly as "descriptor_state_invariant" in
+	// the verdict's signal_summaries.
+	//
+	// This implements the ACT §8 / §10 invariant-only path so a
+	// descriptor run is not falsely classified as `stable` when
+	// the host-side sampler cannot acquire FD counts but the
+	// canary's internal state proves the descriptor leak.
+	if *scenario == "canary-descriptor" && invariantResult.Valid {
+		fdDelta := finalState.FDCount - initialState.FDCount
+		expectedFDDelta := workloadResult.Completed * 2
+		if fdDelta == expectedFDDelta {
+			// Can the host-side FD sampler corroborate? Only
+			// emit the invariant-based source if no sampled FD
+			// signal is available.
+			sampledFDAvailable := false
+			for _, s := range samples {
+				if s.HasFDCount {
+					sampledFDAvailable = true
+					break
+				}
+			}
+			if !sampledFDAvailable {
+				verdict.Resource = analysis.ClassificationResourceGrowth
+				verdict.Overall = analysis.ClassificationResourceGrowth
+				verdict.Signals = append(verdict.Signals, analysis.SignalSummary{
+					Name:              "descriptor_state_invariant",
+					FirstWindowMedian: int64(initialState.FDCount),
+					LastWindowMedian:  int64(finalState.FDCount),
+					AbsoluteDelta:     int64(fdDelta),
+					RelativeDelta:     0,
+					RatePerHour:       0,
+					Slope:             0,
+					SampleCount:       len(samples),
+					AvailableCount:    0,
+					Minimum:           int64(initialState.FDCount),
+					Maximum:           int64(finalState.FDCount),
+					Classification:    analysis.ClassificationResourceGrowth,
+					IsPrimary:         true,
+				})
+			}
+		}
+	}
+
 	// Determine expected verdict based on scenario
 	expectedVerdict := getExpectedVerdict(*scenario)
 
@@ -940,6 +991,26 @@ func verifyCommand(args []string) error {
 		if finalState.RetainedBlocks != 0 || finalState.RetainedBytes != 0 {
 			verifyErrors = append(verifyErrors, fmt.Sprintf("bounded: retained should be 0, got blocks=%d bytes=%d",
 				finalState.RetainedBlocks, finalState.RetainedBytes))
+		}
+
+	case "canary-descriptor":
+		// Descriptor contract: each completed operation retains exactly
+		// 2 file descriptors (a pipe read end + write end). The canary's
+		// internal state.fd_count counter is the authoritative record of
+		// that retention; the verifier reconstructs the exact delta from
+		// initial and final canary states.
+		fdDelta := finalState.FDCount - initialState.FDCount
+		expectedFDDelta := workload.Completed * 2
+		if fdDelta != expectedFDDelta {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("descriptor: fd_delta=%d != expected=%d", fdDelta, expectedFDDelta))
+		}
+		// The descriptor canary never retains memory buffers; the
+		// bookkeeping fields must remain zero across the run.
+		if finalState.RetainedBlocks != 0 || finalState.RetainedBytes != 0 {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("descriptor: retained should be 0, got blocks=%d bytes=%d",
+					finalState.RetainedBlocks, finalState.RetainedBytes))
 		}
 	}
 

@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0.0",
+  "run_id": "lab-canary-descriptor-placeholder",
+  "scenario": "canary-descriptor",
+  "started_at": "2026-07-21T12:00:00.000000000+03:00",
+  "finished_at": "2026-07-21T12:01:11.000000000+03:00",
+  "subject_identity": {
+    "git_commit": "0000000000000000000000000000000000000000",
+    "git_tree": "0000000000000000000000000000000000000000",
+    "git_object_format": "sha1",
+    "controller_executable_path": "/home/kgb/Projects/KGB/.factory/bin/tovarisch-memory-lab",
+    "controller_executable_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "controller_identity": "0",
+  "host_identity": {
+    "kernel_release": "0.0.0",
+    "kernel_version": "Linux 0.0.0 placeholder",
+    "cgroup_mode": "cgroup2",
+    "collection_status": "complete"
+  },
+  "docker_identity": {
+    "engine_version": "0.0.0",
+    "api_version": "1.0"
+  },
+  "configuration": {
+    "phase_config": {
+      "StartupDeadline": 10000000000,
+      "Warmup": 10000000000,
+      "Baseline": 15000000000,
+      "Stimulus": 60000000000,
+      "Settling": 10000000000,
+      "Final": 15000000000,
+      "Interval": 1000000000
+    },
+    "thresholds": {
+      "MemoryGrowthKibPerHour": 500,
+      "MemoryGrowthPercentPerHour": 0.5,
+      "ResourceGrowthPerHour": 10,
+      "CorroborationCount": 2,
+      "SampleCountMinimum": 10,
+      "WindowMinimum": 3
+    }
+  },
+  "artifact_inventory": [
+    "manifest.json",
+    "verdict.json",
+    "samples.csv",
+    "events.jsonl",
+    "container-inspect.json",
+    "container-logs.txt",
+    "initial-canary-state.json",
+    "final-canary-state.json",
+    "workload-result.json",
+    "checksums.txt"
+  ]
+}
