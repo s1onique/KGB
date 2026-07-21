@@ -57,7 +57,7 @@ CORRECTION01 fixes all four:
   `source_kind`.
 
 The fresh committed evidence
-(`lab-canary-descriptor-1784631468`) verifies with the new
+(`lab-canary-descriptor-1784631920`) verifies with the new
 verifier (15 reconstructed claims pass; all four
 classifications match; all three validity fields match;
 the `descriptor_state_invariant` signal carries the
@@ -88,18 +88,18 @@ Only the fresh CORRECTION01 run remains canonical.
 ```yaml
 pre_correction_commit_oid: 1b9862314f5c8a41d6ae0675419344c3663c63b6
 
-implementation_commit_oid: d2638c044ac4ee54f060970d0f51af32e0cee86b
-implementation_tree_oid:   9eaf21dbb45fda00ee6fcc2d1e211eb20a69f2c3
+implementation_commit_oid: 2a9f7705345b01004746f49fa7127420d87ffa1b
+implementation_tree_oid:   6bbbe1b623690dac0a4cbced8cd0fd8e35357ab6
 
-tested_commit_oid:         d2638c044ac4ee54f060970d0f51af32e0cee86b
-tested_tree_oid:           9eaf21dbb45fda00ee6fcc2d1e211eb20a69f2c3
-manifest_git_commit:       d2638c044ac4ee54f060970d0f51af32e0cee86b
-manifest_git_tree:         9eaf21dbb45fda00ee6fcc2d1e211eb20a69f2c3
+tested_commit_oid:         2a9f7705345b01004746f49fa7127420d87ffa1b
+tested_tree_oid:           6bbbe1b623690dac0a4cbced8cd0fd8e35357ab6
+manifest_git_commit:       2a9f7705345b01004746f49fa7127420d87ffa1b
+manifest_git_tree:         6bbbe1b623690dac0a4cbced8cd0fd8e35357ab6
 git_identity_matches_tested_identity: true
 
-controller_executable_sha256: 50ce317ec64b98593e384cc0ad47dd6c70857fa9e2f6e0339225147d90dd5bdf
+controller_executable_sha256: 033a43607a97e92609df073f1e085a74ff34b5be05aea6c370fe1b4d625aabe9
 controller_executable_path:   /home/kgb/Projects/KGB/.factory/bin/tovarisch-memory-lab
-run_id:                          lab-canary-descriptor-1784631468
+run_id:                          lab-canary-descriptor-1784631920
 scenario:                        canary-descriptor
 host_kernel:                     6.17.0-19-generic
 cgroup_mode:                     cgroup2
@@ -131,8 +131,8 @@ scenario_valid:  true
 canaries_valid:  true
 provenance_valid: true
 
-process_pid:         2084858
-process_start_time:  635842283
+process_pid:         2095009
+process_start_time:  635887477
 sample_count:        61
 phase_counts:
   startup:  5
@@ -269,7 +269,7 @@ shared suite) the canonical accounting reports
 ## 4. Verifier reconstruction (full)
 
 For the committed fresh evidence
-(`lab-canary-descriptor-1784631468`):
+(`lab-canary-descriptor-1784631920`):
 
 ```yaml
 manifest.scenario:                 canary-descriptor
@@ -443,8 +443,8 @@ Total: 61 samples. Required sample properties:
 * sequence begins at 0: PASS
 * sequence is strictly increasing: PASS
 * timestamps are increasing: PASS
-* one stable process PID (2084858): PASS
-* one stable process start time (635842283): PASS
+* one stable process PID (2095009): PASS
+* one stable process start time (635887477): PASS
 * no subject-process replacement: PASS
 * sample count meets the configured minimum (61 ≥ 10): PASS
 * baseline and final windows are present: PASS
@@ -533,7 +533,7 @@ make tovarisch-memory-lab-canary-descriptor
 ```
 
 The fresh descriptor run produces
-`lab-canary-descriptor-1784631468` with all ten canonical
+`lab-canary-descriptor-1784631920` with all ten canonical
 artifacts. Both the scratch and committed evidence copies
 re-verify with exit 0.
 
@@ -581,7 +581,7 @@ superseded_reason:
 ```
 
 Only the fresh CORRECTION01 run
-(`lab-canary-descriptor-1784631468`) is canonical.
+(`lab-canary-descriptor-1784631920`) is canonical.
 
 ## 12. Existing tag disposition
 
@@ -755,7 +755,7 @@ descriptor ACT only touches
 
 - `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-DESCRIPTOR-QUALIFICATION01-CORRECTION01.md`:
   this close report.
-- `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-DESCRIPTOR-QUALIFICATION01/evidence/lab-canary-descriptor-1784631468/`:
+- `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-DESCRIPTOR-QUALIFICATION01/evidence/lab-canary-descriptor-1784631920/`:
   the canonical fresh evidence bundle (10 files).
 - `docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-DESCRIPTOR-QUALIFICATION01/superseded-evidence/lab-canary-descriptor-1784629483/`:
   the previous run's 10 canonical artifacts, retained
@@ -818,8 +818,8 @@ IdentityStable: true
 Samples: 61
 Signals: 14
 
-Artifacts written to: .factory/tovarisch-memory-lab/lab-canary-descriptor-1784631468
-Run ID: lab-canary-descriptor-1784631468
+Artifacts written to: .factory/tovarisch-memory-lab/lab-canary-descriptor-1784631920
+Run ID: lab-canary-descriptor-1784631920
 # exit 0
 ```
 
@@ -828,9 +828,9 @@ Run ID: lab-canary-descriptor-1784631468
 ```bash
 $ .factory/bin/tovarisch-memory-lab verify \
     --artifacts-dir .factory/tovarisch-memory-lab \
-    --run-id lab-canary-descriptor-1784631468
+    --run-id lab-canary-descriptor-1784631920
 === Verification Results ===
-Run ID: lab-canary-descriptor-1784631468
+Run ID: lab-canary-descriptor-1784631920
 Scenario: canary-descriptor
 Reconstructed Claims: 15 checks passed
 All Verifications: PASS
@@ -851,9 +851,9 @@ PASS: Evidence verified
 $ .factory/bin/tovarisch-memory-lab verify \
     --artifacts-dir \
       docs/acts/ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-DESCRIPTOR-QUALIFICATION01/evidence \
-    --run-id lab-canary-descriptor-1784631468
+    --run-id lab-canary-descriptor-1784631920
 === Verification Results ===
-Run ID: lab-canary-descriptor-1784631468
+Run ID: lab-canary-descriptor-1784631920
 Scenario: canary-descriptor
 Reconstructed Claims: 15 checks passed
 All Verifications: PASS
@@ -917,7 +917,7 @@ permitted fallback.
 ### Subject container cleanup
 
 ```bash
-$ docker ps -a --filter "name=tovarisch-subject-lab-canary-descriptor-1784631468" \
+$ docker ps -a --filter "name=tovarisch-subject-lab-canary-descriptor-1784631920" \
     --format '{{.ID}} {{.Status}} {{.Names}}'
 # (no output — no retained subject container)
 ```
