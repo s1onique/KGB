@@ -7,12 +7,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -108,8 +112,8 @@ func matrixCommand(args []string) error {
 		CanarySourceSubtreeOID string   `json:"canary_source_subtree_oid"`
 		PrebuildBinarySHA256   string   `json:"prebuild_binary_sha256"`
 		ImageReference         string   `json:"image_reference"`
-		ImageID               string   `json:"image_id"`
-		RepoDigests           []string `json:"repo_digests"`
+		ImageID                string   `json:"image_id"`
+		RepoDigests            []string `json:"repo_digests"`
 	}
 	if err := json.Unmarshal(buildData, &canaryBuild); err != nil {
 		return fmt.Errorf("parse canary build metadata: %w", err)
@@ -255,10 +259,10 @@ func matrixCommand(args []string) error {
 			}
 
 			runDeclarations = append(runDeclarations, MatrixRunDeclaration{
-				Index:          i + 1,
-				Scenario:       scenario,
-				RunID:          runID,
-				Path:           filepath.Join("runs", runID),
+				Index:           i + 1,
+				Scenario:        scenario,
+				RunID:           runID,
+				Path:            filepath.Join("runs", runID),
 				ChecksumsSHA256: checksumHash,
 			})
 			runManifests = append(runManifests, &manifest)
@@ -271,8 +275,8 @@ func matrixCommand(args []string) error {
 			}
 		}
 
-		// Verify container cleanup
-		if err := verifyContainerCleanup(dockerClient, ctx, runID); err != nil {
+		// Verify container and process cleanup
+		if err := verifyContainerCleanup(dockerClient, ctx, runID, runPath); err != nil {
 			fmt.Printf("ERROR: container cleanup verification failed for %s: %v\n", runID, err)
 			runErrors = append(runErrors, err)
 		}
@@ -283,11 +287,11 @@ func matrixCommand(args []string) error {
 	// Step 4: Create matrix manifest
 	matrixManifest := &MatrixManifest{
 		SchemaVersion:     MatrixSchemaVersion,
-		MatrixID:         matrixID,
-		StartedAt:        matrixStartedAt,
-		FinishedAt:       matrixFinishedAt,
+		MatrixID:          matrixID,
+		StartedAt:         matrixStartedAt,
+		FinishedAt:        matrixFinishedAt,
 		ExecutionIdentity: executionID,
-		Runs:             runDeclarations,
+		Runs:              runDeclarations,
 	}
 
 	manifestJSON, err := json.MarshalIndent(matrixManifest, "", "  ")
@@ -306,7 +310,7 @@ func matrixCommand(args []string) error {
 		MatrixID:        matrixID,
 		MatrixValid:     len(runErrors) == 0 && crossRunChecks.AllTrue(),
 		ScenarioResults: make(map[string]*ScenarioResult),
-		CrossRunChecks: crossRunChecks,
+		CrossRunChecks:  crossRunChecks,
 	}
 
 	for i, decl := range runDeclarations {
@@ -602,8 +606,133 @@ func reconstructScenarioResult(manifest *evidence.Manifest) *ScenarioResult {
 	}
 }
 
-// verifyContainerCleanup verifies no containers or networks remain.
-func verifyContainerCleanup(client *dockerlab.Client, ctx context.Context, runID string) error {
+// extractProcessIdentity extracts the subject process PID and start time from samples.csv.
+// Returns fail-closed: any error or malformed data causes failure.
+func extractProcessIdentity(samplesPath string) (int, uint64, error) {
+	samplesData, err := os.ReadFile(samplesPath)
+	if err != nil {
+		return 0, 0, fmt.Errorf("process cleanup evidence unavailable: %w", err)
+	}
+
+	reader := csv.NewReader(bytes.NewReader(samplesData))
+	reader.FieldsPerRecord = -1
+
+	records, err := reader.ReadAll()
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse samples.csv: %w", err)
+	}
+
+	if len(records) < 2 {
+		return 0, 0, fmt.Errorf("samples.csv has no data rows")
+	}
+
+	// Parse header to find column indices
+	header := records[0]
+	pidIdx := -1
+	startIdx := -1
+	for i, col := range header {
+		col = strings.TrimSpace(col)
+		if col == "process_pid" {
+			if pidIdx >= 0 {
+				return 0, 0, fmt.Errorf("duplicate process_pid column in header")
+			}
+			pidIdx = i
+		}
+		if col == "process_start_time" {
+			if startIdx >= 0 {
+				return 0, 0, fmt.Errorf("duplicate process_start_time column in header")
+			}
+			startIdx = i
+		}
+	}
+
+	if pidIdx < 0 {
+		return 0, 0, fmt.Errorf("missing process_pid column in samples.csv header")
+	}
+	if startIdx < 0 {
+		return 0, 0, fmt.Errorf("missing process_start_time column in samples.csv header")
+	}
+
+	// Parse data rows to get consistent PID and start time
+	var pid int
+	var startTime uint64
+	pidSet := false
+	startTimeSet := false
+
+	for i, row := range records[1:] {
+		if len(row) != len(header) {
+			return 0, 0, fmt.Errorf("row %d: field count %d does not match header field count %d", i+2, len(row), len(header))
+		}
+
+		pidStr := strings.TrimSpace(row[pidIdx])
+		startStr := strings.TrimSpace(row[startIdx])
+
+		if pidStr == "" {
+			return 0, 0, fmt.Errorf("row %d: empty process_pid", i+2)
+		}
+		if startStr == "" {
+			return 0, 0, fmt.Errorf("row %d: empty process_start_time", i+2)
+		}
+
+		rowPid, err := strconv.Atoi(pidStr)
+		if err != nil {
+			return 0, 0, fmt.Errorf("row %d: invalid process_pid: %w", i+2, err)
+		}
+
+		rowStart, err := strconv.ParseUint(startStr, 10, 64)
+		if err != nil {
+			return 0, 0, fmt.Errorf("row %d: invalid process_start_time: %w", i+2, err)
+		}
+
+		// Verify consistency across all data rows
+		if pidSet && rowPid != pid {
+			return 0, 0, fmt.Errorf("inconsistent PID across rows: %d vs %d", pid, rowPid)
+		}
+		if startTimeSet && rowStart != startTime {
+			return 0, 0, fmt.Errorf("inconsistent process_start_time across rows: %d vs %d", startTime, rowStart)
+		}
+
+		pid = rowPid
+		startTime = rowStart
+		pidSet = true
+		startTimeSet = true
+	}
+
+	if !pidSet || !startTimeSet {
+		return 0, 0, fmt.Errorf("no valid process identity found in samples.csv")
+	}
+
+	if pid <= 0 {
+		return 0, 0, fmt.Errorf("invalid PID: %d", pid)
+	}
+	if startTime == 0 {
+		return 0, 0, fmt.Errorf("invalid process start time: 0")
+	}
+
+	return pid, startTime, nil
+}
+
+// verifyContainerCleanup verifies no containers, networks, or subject processes remain.
+// Fail-closed: process cleanup verification is mandatory.
+func verifyContainerCleanup(client *dockerlab.Client, ctx context.Context, runID string, runPath string) error {
+	// Extract and verify process identity (fail-closed)
+	samplesPath := filepath.Join(runPath, "samples.csv")
+	pid, startTime, err := extractProcessIdentity(samplesPath)
+	if err != nil {
+		return fmt.Errorf("process cleanup verification failed for %s: %w", runID, err)
+	}
+
+	// Verify process cleanup (fail-closed)
+	processStatus, processErr := inspectProcessGone(pid, startTime)
+	processGone := processStatus == ProcessGone || processStatus == ProcessPIDReused
+	if !processGone {
+		if processErr != nil {
+			return fmt.Errorf("process cleanup verification failed for %s: %w", runID, processErr)
+		}
+		return fmt.Errorf("process still exists with PID %d (status=%v)", pid, processStatus)
+	}
+
+	// Verify container cleanup
 	containers, err := client.Client.ContainerList(ctx, types.ContainerListOptions{All: true})
 	if err != nil {
 		return err
@@ -739,4 +868,80 @@ func verifyMatrixCommand(args []string) error {
 	fmt.Printf("All Checks: PASS\n")
 
 	return nil
+}
+
+// ProcessCleanupStatus represents the conclusive state of process cleanup verification.
+type ProcessCleanupStatus int
+
+const (
+	ProcessGone        ProcessCleanupStatus = iota // Process confirmed gone
+	ProcessStillAlive                              // Process still running with same identity
+	ProcessPIDReused                               // PID reused by different process
+	ProcessUnavailable                             // Evidence unavailable (permission denied, etc.)
+)
+
+// parseProcStatStartTime extracts the start time (field 22) from /proc/<pid>/stat.
+// The comm field can contain spaces and parentheses, so we locate the closing ')'
+// and parse fields after it.
+func parseProcStatStartTime(data []byte) (uint64, error) {
+	commEnd := bytes.LastIndex(data, []byte{')'})
+	if commEnd < 0 {
+		return 0, fmt.Errorf("malformed /proc stat: missing closing parenthesis")
+	}
+
+	remaining := data[commEnd+2:]
+	fieldParts := bytes.Split(remaining, []byte{' '})
+
+	// After ')' fields: state(0) ppid(1) pgrp(2) session(3) tty_nr(4) tpgid(5)
+	// flags(6) minflt(7) cminflt(8) majflt(9) cmajflt(10) utime(11) stime(12)
+	// cutime(13) cstime(14) priority(15) nice(16) num_threads(17)
+	// itrealvalue(18) starttime(19) - global field 22
+	if len(fieldParts) < 20 {
+		return 0, fmt.Errorf("malformed /proc stat: insufficient fields")
+	}
+
+	startTimeStr := bytes.TrimSpace(fieldParts[19])
+	procStartTime, err := strconv.ParseUint(string(startTimeStr), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("malformed /proc stat: invalid starttime: %w", err)
+	}
+
+	return procStartTime, nil
+}
+
+// inspectProcessGone checks if the subject process with given PID and start time is gone.
+func inspectProcessGone(pid int, expectedStart uint64) (ProcessCleanupStatus, error) {
+	if pid <= 0 {
+		return ProcessUnavailable, fmt.Errorf("invalid PID: %d", pid)
+	}
+	if expectedStart == 0 {
+		return ProcessUnavailable, fmt.Errorf("invalid process start time: 0")
+	}
+
+	statPath := fmt.Sprintf("/proc/%d/stat", pid)
+	data, err := os.ReadFile(statPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return ProcessGone, nil
+		}
+		return ProcessUnavailable, fmt.Errorf("failed to read %s: %w", statPath, err)
+	}
+
+	actualStart, parseErr := parseProcStatStartTime(data)
+	if parseErr != nil {
+		return ProcessUnavailable, fmt.Errorf("failed to parse %s: %w", statPath, parseErr)
+	}
+
+	if actualStart == expectedStart {
+		return ProcessStillAlive, nil
+	}
+
+	return ProcessPIDReused, nil
+}
+
+// isProcessGone returns true if the subject process is confirmed gone.
+// PID reuse means original process is gone; treat same as not existing.
+func isProcessGone(pid int, startTime uint64) bool {
+	status, _ := inspectProcessGone(pid, startTime)
+	return status == ProcessGone || status == ProcessPIDReused
 }
