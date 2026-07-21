@@ -1,0 +1,6 @@
+superseded_reason:
+  - state_invariant_signal_observation_geometry_invalid
+  - verifier_ignored_manifest_thresholds
+  - fallback_not_gated_by_complete_scenario_invariant
+  - canary_image_source_identity_not_proven
+  - close_report_runtime_state_copied_from_fixture

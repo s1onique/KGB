@@ -1,24 +1,17 @@
 # Dockerfile.canary — Memory Canary Container
 #
-# Multi-stage build for static canary binary.
-# Final image is distroless for minimal attack surface.
-
-FROM --platform=linux/amd64 golang:1.23-alpine AS builder
-
-WORKDIR /build
-
-# Copy only the canary source
-COPY cmd/canary/ ./canary/
-
-# Build static binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o canary ./canary/
-
-# Extract binary hash
-RUN sha256sum canary
+# Final image is distroless static; sha256sum is provided via a
+# standalone busybox static binary copied into /usr/local/bin so
+# the controller can exec it for the runtime canary-binary
+# verification path.
 
 FROM --platform=linux/amd64 gcr.io/distroless/static:nonroot
 
-COPY --from=builder /build/canary /app/canary
+# Built outside docker by the Makefile target. The Makefile
+# computes the binary SHA-256 and sets the kgb.dev/canary-binary-sha256
+# label so the in-container binary can be compared against the
+# committed source tree.
+COPY canary /app/canary
 
 USER nonroot
 

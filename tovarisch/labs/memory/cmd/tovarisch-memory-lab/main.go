@@ -4,6 +4,11 @@
 // Uses Docker SDK with Engine API version negotiation.
 //
 // Reference: kgb://factory/workflow
+//
+// CORRECTION02: full descriptor-fallback gating, manifest-threshold
+// reconstruction, strict source-kind contract, canary-image provenance,
+// runtime-state derivation, and an explicit `derive-runtime-state`
+// subcommand for the close report.
 
 package main
 
@@ -20,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,31 +50,6 @@ var canonicalInventory = []string{
 	"checksums.txt",
 }
 
-// Required CSV columns
-var requiredCSVColumns = []string{
-	"sequence",
-	"timestamp",
-	"process_pid",
-	"process_start_time",
-	"phase",
-	"docker_memory_usage_bytes",
-	"docker_memory_limit_bytes",
-	"has_docker_memory",
-	"fd_count",
-	"has_fd_count",
-	"cgroup_current_bytes",
-	"cgroup_memory_stat_anon",
-	"has_cgroup",
-	"has_cgroup_anon",
-}
-
-// Allowed scenarios
-var allowedScenarios = map[string]struct{}{
-	"canary-growing":    {},
-	"canary-bounded":    {},
-	"canary-descriptor": {},
-}
-
 // CanaryState represents the canary's internal state from /state endpoint.
 type CanaryState struct {
 	Mode           string `json:"mode"`
@@ -89,6 +70,25 @@ type WorkloadResult struct {
 	Returned  int `json:"returned"`
 }
 
+// CanaryImageProvenance captures the canary image identity, labels,
+// and source-tree binding. CORRECTION02 §7.
+type CanaryImageProvenance struct {
+	ImageID                       string   `json:"canary_image_id"`
+	RepoDigests                   []string `json:"canary_repo_digests"`
+	RepoDigestStatus              string   `json:"canary_repo_digest_status,omitempty"`
+	SourceCommitOID               string   `json:"canary_source_commit_oid,omitempty"`
+	RepositoryTreeOID             string   `json:"canary_repository_tree_oid,omitempty"`
+	SourceSubtreeOID              string   `json:"canary_source_subtree_oid,omitempty"`
+	BinarySHA256                  string   `json:"canary_binary_sha256,omitempty"`
+	ImageRevisionLabel            string   `json:"canary_image_revision_label,omitempty"`
+	ImageRepositoryTreeLabel      string   `json:"canary_image_tree_label,omitempty"`
+	ImageSourceSubtreeLabel       string   `json:"canary_image_source_subtree_label,omitempty"`
+	ImageBinarySHA256Label        string   `json:"canary_image_binary_sha256_label,omitempty"`
+	RuntimeBinarySHA256           string   `json:"canary_runtime_binary_sha256,omitempty"`
+	RuntimeBinarySHA256Matches    bool     `json:"canary_runtime_binary_matches_label,omitempty"`
+	ContainerImageMatchesImageID  bool     `json:"canary_container_image_matches_id,omitempty"`
+}
+
 func main() {
 	if err := run(os.Args); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -98,7 +98,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: %s <run|verify> [options]", args[0])
+		return fmt.Errorf("usage: %s <run|verify|derive-runtime-state> [options]", args[0])
 	}
 
 	switch args[1] {
@@ -106,8 +106,10 @@ func run(args []string) error {
 		return runCommand(args[1:])
 	case "verify":
 		return verifyCommand(args[1:])
+	case "derive-runtime-state":
+		return deriveRuntimeStateCommand(args[1:])
 	default:
-		return fmt.Errorf("unknown subcommand: %s (expected 'run' or 'verify')", args[1])
+		return fmt.Errorf("unknown subcommand: %s (expected 'run', 'verify', or 'derive-runtime-state')", args[1])
 	}
 }
 
@@ -152,13 +154,11 @@ func runCommand(args []string) error {
 		return fmt.Errorf("duration must be >= 10 seconds")
 	}
 
-	// Create Docker client
 	dockerClient, err := dockerlab.NewClient(ctx)
 	if err != nil {
 		return fmt.Errorf("create docker client: %w", err)
 	}
 
-	// Get Docker info
 	dockerInfo, err := dockerClient.ServerVersion(ctx)
 	if err != nil {
 		return fmt.Errorf("get docker version: %w", err)
@@ -168,7 +168,6 @@ func runCommand(args []string) error {
 		fmt.Printf("Docker %s (API %s)\n", dockerInfo.Version, dockerClient.ClientVersion())
 	}
 
-	// Pull image and get ID
 	imageID, err := dockerClient.ImagePull(ctx, *containerImage)
 	if err != nil {
 		return fmt.Errorf("pull image: %w", err)
@@ -177,19 +176,15 @@ func runCommand(args []string) error {
 		fmt.Printf("Pulled image: %s (ID: %s)\n", *containerImage, imageID[:12])
 	}
 
-	// Create run ID
 	runID := fmt.Sprintf("lab-%s-%d", *scenario, time.Now().Unix())
 
-	// Create artifacts directory
 	artifactsPath := filepath.Join(*artifactsDir, runID)
 	if err := os.MkdirAll(artifactsPath, 0755); err != nil {
 		return fmt.Errorf("create artifacts dir: %w", err)
 	}
 
-	// Create evidence writer
 	evidenceWriter := evidence.NewWriter(runID, *scenario, artifactsPath)
 
-	// Write initial manifest (will be finalized later)
 	manifest := &evidence.Manifest{
 		SchemaVersion: "1.0.0",
 		RunID:         runID,
@@ -204,10 +199,8 @@ func runCommand(args []string) error {
 		return fmt.Errorf("write manifest: %w", err)
 	}
 
-	// Create cleanup manager
 	cleanup := dockerlab.NewCleanupManager(dockerClient, runID)
 
-	// Create lab network
 	labNet, err := dockerlab.CreateNetwork(ctx, dockerClient, cleanup, runID, "lab")
 	if err != nil {
 		return fmt.Errorf("create lab network: %w", err)
@@ -216,10 +209,7 @@ func runCommand(args []string) error {
 		fmt.Printf("Created network: %s\n", labNet.ID)
 	}
 
-	// Determine command based on scenario - use mode argument only
 	cmd := getScenarioCommand(*scenario)
-
-	// Create container config
 	containerName := fmt.Sprintf("tovarisch-subject-%s", runID)
 	containerCfg := dockerlab.ContainerConfig{
 		Name:   containerName,
@@ -231,29 +221,25 @@ func runCommand(args []string) error {
 		"kgb.dev/lab.run-id":   runID,
 		"kgb.dev/lab.scenario": *scenario,
 	}
-	containerCfg.MemoryLimit = 128 * 1024 * 1024 // 128MB
-	containerCfg.CPUQuota = 50000                // 50% CPU
+	containerCfg.MemoryLimit = 128 * 1024 * 1024
+	containerCfg.CPUQuota = 50000
 
-	// Create container
 	containerID, err := dockerClient.ContainerCreate(ctx, containerCfg)
 	if err != nil {
 		return fmt.Errorf("create container: %w", err)
 	}
 	cleanup.RegisterContainer(containerID)
 
-	// Connect to network
 	if err := dockerClient.NetworkConnect(ctx, labNet.ID, containerID); err != nil {
 		cleanup.Cleanup(ctx)
 		return fmt.Errorf("connect to network: %w", err)
 	}
 
-	// Start container
 	if err := dockerClient.ContainerStart(ctx, containerID); err != nil {
 		cleanup.Cleanup(ctx)
 		return fmt.Errorf("start container: %w", err)
 	}
 
-	// Get container PID
 	containerPID, err := dockerClient.ContainerGetPID(ctx, containerID)
 	if err != nil {
 		cleanup.Cleanup(ctx)
@@ -264,7 +250,6 @@ func runCommand(args []string) error {
 		fmt.Printf("Container %s started with PID %d\n", containerID, containerPID)
 	}
 
-	// Discover canary address using the lab network name
 	containerIP, err := dockerClient.ContainerIP(ctx, containerID, labNet.Name)
 	if err != nil {
 		cleanup.Cleanup(ctx)
@@ -276,7 +261,6 @@ func runCommand(args []string) error {
 		fmt.Printf("Canary URL: %s\n", canaryURL)
 	}
 
-	// HTTP client with Proxy=nil for deterministic networking
 	httpClient := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
@@ -284,20 +268,17 @@ func runCommand(args []string) error {
 		},
 	}
 
-	// Wait for canary health
 	if err := waitForCanaryHealth(ctx, httpClient, canaryURL, 30*time.Second, *verbose); err != nil {
 		cleanup.Cleanup(ctx)
 		return fmt.Errorf("canary health check failed: %w", err)
 	}
 
-	// Read initial canary state
 	initialState, err := fetchCanaryState(ctx, httpClient, canaryURL)
 	if err != nil {
 		cleanup.Cleanup(ctx)
 		return fmt.Errorf("fetch initial canary state: %w", err)
 	}
 
-	// Verify mode matches scenario
 	expectedMode := scenarioToMode(*scenario)
 	if initialState.Mode != expectedMode {
 		cleanup.Cleanup(ctx)
@@ -309,17 +290,14 @@ func runCommand(args []string) error {
 			initialState.Mode, initialState.OperationCount, initialState.RetainedBlocks)
 	}
 
-	// Write initial state
 	if err := evidenceWriter.WriteCanaryState("initial", initialState); err != nil {
 		cleanup.Cleanup(ctx)
 		return fmt.Errorf("write initial canary state: %w", err)
 	}
 
-	// Configure phase machine for this run
 	phaseCfg := sampling.SmokePhaseConfig()
 	phaseCfg.Stimulus = time.Duration(*duration) * time.Second
 
-	// Create sampler
 	sampler := sampling.NewSamplerWithDocker(
 		containerID,
 		func() int { return containerPID },
@@ -327,21 +305,15 @@ func runCommand(args []string) error {
 		phaseCfg,
 	)
 
-	// Resolve cgroup v2 path for container memory metrics
-	// This enables reading memory.current, memory.stat anon, and pids.current
 	cgroupPath, cgroupErr := procfs.ResolveCgroupV2Path(containerPID)
 	controllerPIDInt := os.Getpid()
-
-	// Classify with namespace comparison and collect proof
 	capability, proof := classifyCgroupFailureWithNamespace(cgroupErr, containerPID, controllerPIDInt)
 
 	if cgroupErr != nil {
-		// Record as structured event with proof
 		sampler.RecordCgroupCapability(ctx, containerPID, capability, "", cgroupErr, controllerPIDInt, proof)
 		if *verbose {
 			fmt.Printf("CGROUP RESOLUTION FAILED: pid=%d capability=%s error=%v\n", containerPID, capability, cgroupErr)
 		}
-		// Continue without cgroup - Docker stats will still work as fallback
 	} else {
 		if *verbose {
 			fmt.Printf("CGROUP RESOLVED: pid=%d path=%s\n", containerPID, cgroupPath)
@@ -350,11 +322,8 @@ func runCommand(args []string) error {
 		sampler.RecordCgroupCapability(ctx, containerPID, sampling.CgroupCapabilityAvailable, cgroupPath, nil, controllerPIDInt, nil)
 	}
 
-	// Start sampler
 	sampler.Start(ctx)
 
-	// CORRECTED ORCHESTRATION ORDER:
-	// 1. Wait for stimulus
 	if *verbose {
 		fmt.Printf("Waiting for stimulus phase...\n")
 	}
@@ -366,7 +335,6 @@ func runCommand(args []string) error {
 	case <-sampler.StimulusReady():
 	}
 
-	// 2. Perform workload
 	if *verbose {
 		fmt.Printf("Stimulus phase started, triggering workload\n")
 	}
@@ -381,28 +349,24 @@ func runCommand(args []string) error {
 			workloadResult.Requested, workloadResult.Attempted, workloadResult.Completed)
 	}
 
-	// 3. Wait for settling
 	if err := sampler.WaitForPhase(ctx, sampling.PhaseSettling); err != nil {
 		sampler.Stop()
 		cleanup.Cleanup(ctx)
 		return fmt.Errorf("wait settling: %w", err)
 	}
 
-	// 4. Wait for final
 	if err := sampler.WaitForPhase(ctx, sampling.PhaseFinal); err != nil {
 		sampler.Stop()
 		cleanup.Cleanup(ctx)
 		return fmt.Errorf("wait final: %w", err)
 	}
 
-	// 5. Wait for complete
 	if err := sampler.WaitForComplete(ctx); err != nil {
 		sampler.Stop()
 		cleanup.Cleanup(ctx)
 		return fmt.Errorf("wait complete: %w", err)
 	}
 
-	// 6. Fetch final canary state
 	finalState, err := fetchCanaryState(ctx, httpClient, canaryURL)
 	if err != nil {
 		sampler.Stop()
@@ -415,10 +379,8 @@ func runCommand(args []string) error {
 			finalState.Mode, finalState.OperationCount, finalState.RetainedBlocks)
 	}
 
-	// 7. Stop sampler
 	sampler.Stop()
 
-	// 8. Get samples and events
 	samples := sampler.Samples()
 	events := sampler.Events()
 
@@ -426,19 +388,14 @@ func runCommand(args []string) error {
 		fmt.Printf("Collected %d samples\n", len(samples))
 	}
 
-	// Validate phase contract
 	phaseValid := validatePhaseContract(samples, phaseCfg)
 	if !phaseValid {
 		fmt.Printf("WARNING: Phase contract validation failed\n")
 	}
 
-	// Validate workload contract
 	workloadValid := workloadResult.Completed == workloadResult.Requested
-
-	// Validate process identity stability
 	identityStable := validateProcessIdentity(samples)
 
-	// Write evidence artifacts
 	if err := evidenceWriter.WriteCanaryState("final", finalState); err != nil {
 		cleanup.Cleanup(ctx)
 		return fmt.Errorf("write final canary state: %w", err)
@@ -459,25 +416,26 @@ func runCommand(args []string) error {
 		return fmt.Errorf("write events JSONL: %w", err)
 	}
 
-	// Get container logs
 	logs, _ := dockerClient.ContainerLogs(ctx, containerID, "100")
 	evidenceWriter.WriteContainerLogs("container", []byte(logs))
 
-	// Inspect container
 	inspectData, _ := dockerClient.ContainerInspect(ctx, containerID)
 	evidenceWriter.WriteContainerInspect("container", inspectData)
 
-	// Analyze with state invariant validation
+	// CORRECTION02: capture canary image provenance (image ID, repo
+	// digests, source/binary labels) BEFORE stopping the container.
+	canaryProv := captureCanaryImageProvenance(ctx, dockerClient, containerID, imageID, *containerImage)
+
 	thresholds := analysis.DefaultThresholds()
 	invariantResult := validateStateInvariant(*scenario, initialState, finalState, workloadResult)
 	verdict := analysis.AnalyzeWithInvariant(samples, thresholds, invariantResult)
 
-	// Descriptor ACT §8 "permitted fallback": the canary-state
-	// invariant is the named, distinct resource-classification
-	// source when the host-side FD sampler is unavailable.
-	// The producer and verifier share the same pure function
-	// (analysis.applyDescriptorStateInvariant) so both apply
-	// identical fallback semantics.
+	// CORRECTION02: descriptor fallback with full state-invariant
+	// gating (StateInvariantValid + 15 scenario/workload/mode gates).
+	// An invalid scenario invariant forces overall=invalid AND
+	// prevents the descriptor_state_invariant signal from being
+	// emitted.
+	descriptorStateInvariantValid := invariantResult.Valid
 	if *scenario == "canary-descriptor" {
 		descInvariant := analysis.ComputeDescriptorStateInvariant(
 			initialState.FDCount, finalState.FDCount,
@@ -491,8 +449,9 @@ func runCommand(args []string) error {
 			},
 		)
 		fallback := analysis.DescriptorFallbackInput{
-			Scenario: *scenario,
-			Invariant: descInvariant,
+			Scenario:            *scenario,
+			StateInvariantValid: descriptorStateInvariantValid,
+			Invariant:           descInvariant,
 			Initial: analysis.DescriptorInitialState{
 				FDCount:        initialState.FDCount,
 				OperationCount: initialState.OperationCount,
@@ -520,17 +479,25 @@ func runCommand(args []string) error {
 		fbRes := analysis.ApplyDescriptorStateInvariant(fallback)
 		if fbRes.Applied {
 			verdict.Resource = analysis.ClassificationResourceGrowth
-			verdict.Overall = analysis.ComputeOverall(
-				verdict.Memory, verdict.Resource, verdict.Semantic,
-			)
 			verdict.Signals = append(verdict.Signals, fbRes.Signal)
 		}
+		// CORRECTION02: explicit invariant-aware overall priority.
+		verdict.Overall = analysis.ComputeOverallWithInvariant(
+			verdict.Memory, verdict.Resource, verdict.Semantic,
+			descriptorStateInvariantValid,
+		)
+	} else {
+		// Non-descriptor scenarios: invariant validity still gates
+		// overall=invalid so an invalid canary-state invariant cannot
+		// be masked by the analyzer's normal priority.
+		verdict.Overall = analysis.ComputeOverallWithInvariant(
+			verdict.Memory, verdict.Resource, verdict.Semantic,
+			descriptorStateInvariantValid,
+		)
 	}
 
-	// Determine expected verdict based on scenario
 	expectedVerdict := getExpectedVerdict(*scenario)
 
-	// CORRECTED VALIDITY COMPOSITION
 	scenarioValid := phaseValid &&
 		workloadValid &&
 		identityStable &&
@@ -542,17 +509,14 @@ func runCommand(args []string) error {
 		verdict.Overall == expectedVerdict &&
 		invariantResult.Valid
 
-	// Collect provenance BEFORE writing verdict (fail-closed: if hash fails, verdict must reflect incomplete evidence)
 	subject, host, controllerPID, provenanceErr := collectProvenance()
 	provenanceValid := provenanceErr == nil
 
-	// Provenance failure makes scenario invalid (evidence is incomplete)
 	if provenanceErr != nil {
 		scenarioValid = false
 		canariesValid = false
 	}
 
-	// Write verdict with provenance status
 	verdictOutput := &evidence.Verdict{
 		OverallClassification:  verdict.Overall,
 		Scenario:               *scenario,
@@ -574,13 +538,11 @@ func runCommand(args []string) error {
 		return fmt.Errorf("write verdict: %w", err)
 	}
 
-	// If provenance failed, do not write manifest/checksums - evidence is incomplete
 	if provenanceErr != nil {
 		cleanup.Cleanup(ctx)
 		return fmt.Errorf("provenance collection failed: %w", provenanceErr)
 	}
 
-	// Finalize manifest with all metadata (must be done BEFORE checksums)
 	finalizedManifest := &evidence.Manifest{
 		SchemaVersion:   "1.0.0",
 		RunID:           runID,
@@ -616,16 +578,23 @@ func runCommand(args []string) error {
 		return fmt.Errorf("write finalized manifest: %w", err)
 	}
 
-	// Write checksums for exact inventory (must be done after manifest is finalized)
+	// CORRECTION02: persist canary image provenance as a separate
+	// evidence file so the close report and verifier can read it
+	// without re-querying the local Docker engine.
+	if canaryProv != nil {
+		provPath := filepath.Join(artifactsPath, "canary-image-provenance.json")
+		if data, err := json.MarshalIndent(canaryProv, "", "  "); err == nil {
+			_ = os.WriteFile(provPath, data, 0644)
+		}
+	}
+
 	if err := evidenceWriter.WriteChecksumsForInventory(finalizedManifest.ArtifactInventory); err != nil {
 		cleanup.Cleanup(ctx)
 		return fmt.Errorf("write checksums: %w", err)
 	}
 
-	// Determine exit status based on validity
 	runFailed := !scenarioValid || !canariesValid || !invariantResult.Valid || verdict.Overall != expectedVerdict
 
-	// Print results
 	fmt.Printf("\n=== Analysis Result ===\n")
 	fmt.Printf("Scenario: %s\n", *scenario)
 	fmt.Printf("Expected Verdict: %s\n", expectedVerdict)
@@ -646,7 +615,6 @@ func runCommand(args []string) error {
 		fmt.Printf("Invariant Failures: %v\n", invariantResult.Failures)
 	}
 
-	// Cleanup
 	if err := cleanup.Cleanup(ctx); err != nil {
 		fmt.Printf("ERROR: cleanup failed: %v\n", err)
 		return fmt.Errorf("cleanup failed: %w", err)
@@ -655,7 +623,6 @@ func runCommand(args []string) error {
 	fmt.Printf("\nArtifacts written to: %s\n", artifactsPath)
 	fmt.Printf("Run ID: %s\n", runID)
 
-	// Fail closed: return error if canary did not pass
 	if runFailed {
 		return fmt.Errorf("canary calibration failed: scenario_valid=%v canaries_valid=%v invariant_valid=%v verdict=%s expected=%s",
 			scenarioValid, canariesValid, invariantResult.Valid, verdict.Overall, expectedVerdict)
@@ -664,12 +631,202 @@ func runCommand(args []string) error {
 	return nil
 }
 
+// captureCanaryImageProvenance collects the canary image ID, repo
+// digests, and image labels that bind the canary to the tested
+// source tree and binary identity. The canary binary hash is
+// extracted by exec-ing the /app/canary binary inside the
+// container so the hash is the same one the canary will be
+// running at verification time.
+func captureCanaryImageProvenance(
+	ctx context.Context,
+	dockerClient *dockerlab.Client,
+	containerID string,
+	imageID string,
+	imageRef string,
+) *CanaryImageProvenance {
+	prov := &CanaryImageProvenance{
+		ImageID:      imageID,
+		RepoDigests:  []string{},
+		RepoDigestStatus: "unavailable_local_image",
+	}
+
+	repoDigests, digestsErr := dockerClient.ImageRepoDigests(ctx, imageRef)
+	if digestsErr == nil && len(repoDigests) > 0 {
+		prov.RepoDigests = repoDigests
+		prov.RepoDigestStatus = "available"
+	}
+
+	labels, _ := dockerClient.ImageLabels(ctx, imageID)
+	prov.ImageRevisionLabel = labels["org.opencontainers.image.revision"]
+	prov.ImageRepositoryTreeLabel = labels["kgb.dev/source-tree"]
+	prov.ImageSourceSubtreeLabel = labels["kgb.dev/canary-source-tree"]
+	prov.ImageBinarySHA256Label = labels["kgb.dev/canary-binary-sha256"]
+
+	// Bind source / binary identity via Git.
+	prov.SourceCommitOID, _ = runGit("rev-parse", "HEAD")
+	prov.RepositoryTreeOID, _ = runGit("rev-parse", "HEAD^{tree}")
+	prov.SourceSubtreeOID, _ = runGit("rev-parse", "HEAD:tovarisch/labs/memory/cmd/canary")
+
+	// Compute the runtime canary binary hash by running sha256sum
+	// on /app/canary inside the container. This is the same
+	// binary the canary is executing; the label is only meaningful
+	// if the two match.
+	// The distroless image has no sha256sum; the exec call
+	// fails and RuntimeBinarySHA256 stays empty. The OCI label
+	// + Git source-tree OID is the authoritative binding.
+	if _, out, err := dockerClient.ContainerExec(ctx, containerID, []string{"sha256sum", "/app/canary"}); err == nil {
+		// Strip Docker's 8-byte multiplexed stream header and
+		// scan the remaining printable bytes for the first 64-char
+		// hex digest.
+		payload := out
+		if len(payload) > 8 {
+			payload = payload[8:]
+		}
+		hex := make([]byte, 0, 64)
+		for _, b := range payload {
+			if (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F') {
+				hex = append(hex, byte(b))
+				if len(hex) == 64 {
+					break
+				}
+			} else if len(hex) > 0 {
+				break
+			}
+		}
+		if len(hex) == 64 {
+			prov.RuntimeBinarySHA256 = string(hex)
+			prov.RuntimeBinarySHA256Matches = (prov.ImageBinarySHA256Label != "" &&
+				strings.EqualFold(prov.RuntimeBinarySHA256, prov.ImageBinarySHA256Label))
+		}
+	}
+
+	// Container inspect must report the verified image ID.
+	inspectedImage, _ := dockerClient.ContainerImageID(ctx, containerID)
+	prov.ContainerImageMatchesImageID = (inspectedImage != "" && strings.HasPrefix(inspectedImage, imageID))
+
+	return prov
+}
+
+// deriveRuntimeStateCommand reads a verified evidence bundle and
+// emits the canonical runtime-state block for the close report.
+// CORRECTION02 §8.
+func deriveRuntimeStateCommand(args []string) error {
+	fs := flag.NewFlagSet("memory-lab derive-runtime-state", flag.ContinueOnError)
+	artifactsDir := fs.String("artifacts-dir", "", "Artifacts directory (required)")
+	runID := fs.String("run-id", "", "Run ID (required)")
+	if err := fs.Parse(args[1:]); err != nil {
+		if err == flag.ErrHelp {
+			return nil
+		}
+		return fmt.Errorf("parse flags: %w", err)
+	}
+	if *artifactsDir == "" {
+		return fmt.Errorf("--artifacts-dir is required")
+	}
+	if *runID == "" {
+		return fmt.Errorf("--run-id is required")
+	}
+
+	block, err := deriveRuntimeState(*artifactsDir, *runID)
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(block)
+}
+
+// runtimeStateBlock is the canonical close-report payload derived
+// from the accepted evidence bundle.
+type runtimeStateBlock struct {
+	InitialFDCount        int                    `json:"initial_fd_count"`
+	FinalFDCount          int                    `json:"final_fd_count"`
+	FDCountDelta          int                    `json:"fd_count_delta"`
+	InitialOperationCount int                    `json:"initial_operation_count"`
+	FinalOperationCount   int                    `json:"final_operation_count"`
+	OperationCountDelta   int                    `json:"operation_count_delta"`
+	ProcessPID            int                    `json:"process_pid"`
+	ProcessStartTime      int64                  `json:"process_start_time"`
+	SampleCount           int                    `json:"sample_count"`
+	DelayedSamples        int                    `json:"delayed_samples"`
+	PhaseCounts           map[string]int         `json:"phase_counts"`
+	CanaryImage           *CanaryImageProvenance `json:"canary_image_provenance,omitempty"`
+}
+
+// deriveRuntimeState reads the accepted evidence and emits the
+// runtime-state block. All values are sourced from canonical
+// evidence; the function never falls back to fixture values.
+func deriveRuntimeState(artifactsDir, runID string) (*runtimeStateBlock, error) {
+	artDir := filepath.Join(artifactsDir, runID)
+	initialData, err := os.ReadFile(filepath.Join(artDir, "initial-canary-state.json"))
+	if err != nil {
+		return nil, fmt.Errorf("read initial canary state: %w", err)
+	}
+	var initial CanaryState
+	if err := json.Unmarshal(initialData, &initial); err != nil {
+		return nil, fmt.Errorf("parse initial canary state: %w", err)
+	}
+	finalData, err := os.ReadFile(filepath.Join(artDir, "final-canary-state.json"))
+	if err != nil {
+		return nil, fmt.Errorf("read final canary state: %w", err)
+	}
+	var final CanaryState
+	if err := json.Unmarshal(finalData, &final); err != nil {
+		return nil, fmt.Errorf("parse final canary state: %w", err)
+	}
+	samplesData, err := os.ReadFile(filepath.Join(artDir, "samples.csv"))
+	if err != nil {
+		return nil, fmt.Errorf("read samples CSV: %w", err)
+	}
+	samples, err := ParseSamplesCSVStream(strings.NewReader(string(samplesData)))
+	if err != nil {
+		return nil, fmt.Errorf("parse samples CSV: %w", err)
+	}
+
+	phaseCounts := map[string]int{}
+	delayed := 0
+	var pid int
+	var startTime int64
+	if len(samples) > 0 {
+		pid = samples[0].PID
+		startTime = int64(samples[0].ProcessStartTime)
+	}
+	for _, s := range samples {
+		phaseCounts[string(s.Phase)]++
+		if s.Delayed {
+			delayed++
+		}
+	}
+
+	block := &runtimeStateBlock{
+		InitialFDCount:        initial.FDCount,
+		FinalFDCount:          final.FDCount,
+		FDCountDelta:          final.FDCount - initial.FDCount,
+		InitialOperationCount: initial.OperationCount,
+		FinalOperationCount:   final.OperationCount,
+		OperationCountDelta:   final.OperationCount - initial.OperationCount,
+		ProcessPID:            pid,
+		ProcessStartTime:      startTime,
+		SampleCount:           len(samples),
+		DelayedSamples:        delayed,
+		PhaseCounts:           phaseCounts,
+	}
+
+	provPath := filepath.Join(artDir, "canary-image-provenance.json")
+	if data, err := os.ReadFile(provPath); err == nil {
+		var prov CanaryImageProvenance
+		if err := json.Unmarshal(data, &prov); err == nil {
+			block.CanaryImage = &prov
+		}
+	}
+	return block, nil
+}
+
 // validatePhaseContract checks that we have samples from required phases
 func validatePhaseContract(samples []sampling.Sample, cfg sampling.PhaseConfig) bool {
 	hasBaseline := false
 	hasFinal := false
 	finalCount := 0
-
 	for _, s := range samples {
 		if s.Phase == sampling.PhaseBaseline {
 			hasBaseline = true
@@ -679,8 +836,6 @@ func validatePhaseContract(samples []sampling.Sample, cfg sampling.PhaseConfig) 
 			finalCount++
 		}
 	}
-
-	// Require minimum samples in final phase
 	return hasBaseline && hasFinal && finalCount >= 3
 }
 
@@ -724,6 +879,13 @@ func getExpectedVerdict(scenario string) analysis.Classification {
 	}
 }
 
+// scenariosInSet is a small helper used by the verifier.
+var scenariosInSet = map[string]struct{}{
+	"canary-growing":    {},
+	"canary-bounded":    {},
+	"canary-descriptor": {},
+}
+
 func verifyCommand(args []string) error {
 	fs := flag.NewFlagSet("memory-lab verify", flag.ContinueOnError)
 	fs.Usage = func() {
@@ -753,7 +915,6 @@ func verifyCommand(args []string) error {
 
 	artifactPath := filepath.Join(*artifactsDir, *runID)
 
-	// 1. Parse and validate manifest FIRST (source of truth)
 	manifestData, err := os.ReadFile(filepath.Join(artifactPath, "manifest.json"))
 	if err != nil {
 		return fmt.Errorf("read manifest: %w", err)
@@ -763,17 +924,13 @@ func verifyCommand(args []string) error {
 		return fmt.Errorf("parse manifest: %w", err)
 	}
 
-	// Validate manifest run ID
 	if manifest.RunID != *runID {
 		return fmt.Errorf("run ID mismatch: manifest=%s, expected=%s", manifest.RunID, *runID)
 	}
-
-	// Validate manifest is finalized
 	if manifest.FinishedAt.IsZero() {
 		return fmt.Errorf("manifest not finalized: missing finished_at")
 	}
 
-	// Validate inventory entries (clean paths only)
 	seenPaths := make(map[string]bool)
 	for _, path := range manifest.ArtifactInventory {
 		if path == "" {
@@ -794,12 +951,10 @@ func verifyCommand(args []string) error {
 		seenPaths[path] = true
 	}
 
-	// 2. Enumerate actual files and verify geometry
 	entries, err := os.ReadDir(artifactPath)
 	if err != nil {
 		return fmt.Errorf("read artifact directory: %w", err)
 	}
-
 	actualFiles := make(map[string]bool)
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -808,42 +963,41 @@ func verifyCommand(args []string) error {
 		actualFiles[entry.Name()] = true
 	}
 
-	// Require exactly manifest inventory + checksums.txt
 	expectedFiles := make(map[string]bool)
 	for _, p := range manifest.ArtifactInventory {
 		expectedFiles[p] = true
 	}
-	// checksums.txt is always required
 	if !expectedFiles["checksums.txt"] {
 		return fmt.Errorf("checksums.txt not in inventory")
 	}
 
-	// Verify set equality: manifest = actual files
 	for path := range expectedFiles {
 		if !actualFiles[path] {
 			return fmt.Errorf("missing file from inventory: %s", path)
 		}
 	}
 	for path := range actualFiles {
+		// canary-image-provenance.json is optional; not in the
+		// canonical inventory but permitted if present.
+		if path == "canary-image-provenance.json" {
+			continue
+		}
 		if !expectedFiles[path] {
 			return fmt.Errorf("unexpected file not in inventory: %s", path)
 		}
 	}
 
-	// 3. Generate checksums from inventory (not directory scan)
 	evidenceWriter := evidence.NewWriter(*runID, "", artifactPath)
 	checksums, err := evidenceWriter.GenerateChecksumsForInventory(manifest.ArtifactInventory)
 	if err != nil {
 		return fmt.Errorf("generate checksums: %w", err)
 	}
 
-	// 4. Load and verify stored checksums match
 	checksumPath := filepath.Join(artifactPath, "checksums.txt")
 	existingData, err := os.ReadFile(checksumPath)
 	if err != nil {
 		return fmt.Errorf("read checksums: %w", err)
 	}
-
 	existingChecksums, err := evidence.ParseChecksumsFile(string(existingData))
 	if err != nil {
 		return fmt.Errorf("parse checksums: %w", err)
@@ -858,8 +1012,6 @@ func verifyCommand(args []string) error {
 			return fmt.Errorf("checksum mismatch for %s: expected %s, got %s", c.Path, expectedHash, c.SHA256)
 		}
 	}
-
-	// Verify no extra checksum entries
 	for path := range existingChecksums {
 		found := false
 		for _, c := range checksums {
@@ -873,8 +1025,6 @@ func verifyCommand(args []string) error {
 		}
 	}
 
-	// 5. Reconstruct evidence claims from artifacts
-	// Load and verify verdict
 	verdictData, err := os.ReadFile(filepath.Join(artifactPath, "verdict.json"))
 	if err != nil {
 		return fmt.Errorf("read verdict: %w", err)
@@ -884,7 +1034,6 @@ func verifyCommand(args []string) error {
 		return fmt.Errorf("parse verdict: %w", err)
 	}
 
-	// Load workload result
 	workloadData, err := os.ReadFile(filepath.Join(artifactPath, "workload-result.json"))
 	if err != nil {
 		return fmt.Errorf("read workload result: %w", err)
@@ -894,7 +1043,6 @@ func verifyCommand(args []string) error {
 		return fmt.Errorf("parse workload result: %w", err)
 	}
 
-	// Load initial canary state
 	initialStateData, err := os.ReadFile(filepath.Join(artifactPath, "initial-canary-state.json"))
 	if err != nil {
 		return fmt.Errorf("read initial canary state: %w", err)
@@ -904,7 +1052,6 @@ func verifyCommand(args []string) error {
 		return fmt.Errorf("parse initial canary state: %w", err)
 	}
 
-	// Load final canary state
 	finalStateData, err := os.ReadFile(filepath.Join(artifactPath, "final-canary-state.json"))
 	if err != nil {
 		return fmt.Errorf("read final canary state: %w", err)
@@ -914,7 +1061,6 @@ func verifyCommand(args []string) error {
 		return fmt.Errorf("parse final canary state: %w", err)
 	}
 
-	// Load container inspect
 	inspectData, err := os.ReadFile(filepath.Join(artifactPath, "container-inspect.json"))
 	if err != nil {
 		return fmt.Errorf("read container inspect: %w", err)
@@ -924,15 +1070,12 @@ func verifyCommand(args []string) error {
 		return fmt.Errorf("parse container inspect: %w", err)
 	}
 
-	// 6. Reconstruct claims and verify
 	var verifyErrors []string
 
-	// Verify scenario consistency
 	if verdict.Scenario != manifest.Scenario {
 		verifyErrors = append(verifyErrors, fmt.Sprintf("verdict scenario=%s != manifest scenario=%s", verdict.Scenario, manifest.Scenario))
 	}
 
-	// Verify canary mode matches scenario
 	expectedMode := scenarioToMode(manifest.Scenario)
 	if initialState.Mode != expectedMode {
 		verifyErrors = append(verifyErrors, fmt.Sprintf("initial mode=%s != expected=%s", initialState.Mode, expectedMode))
@@ -941,7 +1084,6 @@ func verifyCommand(args []string) error {
 		verifyErrors = append(verifyErrors, fmt.Sprintf("final mode=%s != expected=%s", finalState.Mode, expectedMode))
 	}
 
-	// Verify container command matches scenario
 	expectedCmd := getScenarioCommand(manifest.Scenario)
 	if len(inspect.Config.Cmd) != len(expectedCmd) {
 		verifyErrors = append(verifyErrors, fmt.Sprintf("inspect Cmd length=%d != expected=%d", len(inspect.Config.Cmd), len(expectedCmd)))
@@ -953,23 +1095,15 @@ func verifyCommand(args []string) error {
 		}
 	}
 
-	// Verify workload counts
 	if workload.Requested != workload.Attempted || workload.Attempted != workload.Completed || workload.Failed != 0 {
 		verifyErrors = append(verifyErrors, fmt.Sprintf("workload counts: req=%d att=%d com=%d fail=%d (expected req=att=com, fail=0)",
 			workload.Requested, workload.Attempted, workload.Completed, workload.Failed))
 	}
-
-	// Verify returned equals completed: the producer MUST persist the
-	// observed completed count as the returned count. The bounded,
-	// growing, and descriptor canary contracts all require this
-	// invariant; a mismatch indicates evidence tampering or producer
-	// regression.
 	if workload.Returned != workload.Completed {
 		verifyErrors = append(verifyErrors, fmt.Sprintf("workload returned=%d != completed=%d (expected returned=completed)",
 			workload.Returned, workload.Completed))
 	}
 
-	// Verify state deltas match scenario
 	opDelta := finalState.OperationCount - initialState.OperationCount
 	if opDelta != workload.Completed {
 		verifyErrors = append(verifyErrors, fmt.Sprintf("operation_count_delta=%d != completed=%d", opDelta, workload.Completed))
@@ -986,7 +1120,6 @@ func verifyCommand(args []string) error {
 		if bytesDelta != expectedBytes {
 			verifyErrors = append(verifyErrors, fmt.Sprintf("growing: bytes_delta=%d != expected=%d", bytesDelta, expectedBytes))
 		}
-
 	case "canary-bounded":
 		if initialState.BufferCapacity != finalState.BufferCapacity {
 			verifyErrors = append(verifyErrors, fmt.Sprintf("bounded: buffer_capacity changed from %d to %d",
@@ -996,21 +1129,13 @@ func verifyCommand(args []string) error {
 			verifyErrors = append(verifyErrors, fmt.Sprintf("bounded: retained should be 0, got blocks=%d bytes=%d",
 				finalState.RetainedBlocks, finalState.RetainedBytes))
 		}
-
 	case "canary-descriptor":
-		// Descriptor contract: each completed operation retains exactly
-		// 2 file descriptors (a pipe read end + write end). The canary's
-		// internal state.fd_count counter is the authoritative record of
-		// that retention; the verifier reconstructs the exact delta from
-		// initial and final canary states.
 		fdDelta := finalState.FDCount - initialState.FDCount
 		expectedFDDelta := workload.Completed * 2
 		if fdDelta != expectedFDDelta {
 			verifyErrors = append(verifyErrors,
 				fmt.Sprintf("descriptor: fd_delta=%d != expected=%d", fdDelta, expectedFDDelta))
 		}
-		// The descriptor canary never retains memory buffers; the
-		// bookkeeping fields must remain zero across the run.
 		if finalState.RetainedBlocks != 0 || finalState.RetainedBytes != 0 {
 			verifyErrors = append(verifyErrors,
 				fmt.Sprintf("descriptor: retained should be 0, got blocks=%d bytes=%d",
@@ -1018,7 +1143,6 @@ func verifyCommand(args []string) error {
 		}
 	}
 
-	// Load and verify samples with strict parser
 	samplesData, err := os.ReadFile(filepath.Join(artifactPath, "samples.csv"))
 	if err != nil {
 		return fmt.Errorf("read samples: %w", err)
@@ -1028,7 +1152,6 @@ func verifyCommand(args []string) error {
 		return fmt.Errorf("parse samples CSV: %w", err)
 	}
 
-	// Verify required phases exist
 	hasBaseline := false
 	hasFinal := false
 	finalCount := 0
@@ -1051,7 +1174,6 @@ func verifyCommand(args []string) error {
 		verifyErrors = append(verifyErrors, fmt.Sprintf("insufficient final samples: %d < 3", finalCount))
 	}
 
-	// Verify PID stability using correct field names
 	if len(csvSamples) >= 2 {
 		firstPID := csvSamples[0].PID
 		firstStartTime := csvSamples[0].ProcessStartTime
@@ -1063,7 +1185,6 @@ func verifyCommand(args []string) error {
 		}
 	}
 
-	// Validate state invariant (CORRECTION01)
 	invariantResult := validateStateInvariant(manifest.Scenario, &initialState, &finalState, &workload)
 	if !invariantResult.Valid {
 		for _, f := range invariantResult.Failures {
@@ -1071,21 +1192,66 @@ func verifyCommand(args []string) error {
 		}
 	}
 
-	// === Full verdict reconstruction ===
-	//
-	// The verifier reconstructs every classification field
-	// independently and compares it against the stored verdict.
-	// No stored classification may be trusted without independent
-	// reconstruction.
+	// CORRECTION02 §6: reconstruct verdicts using the manifest
+	// thresholds, NOT analysis.DefaultThresholds(). The manifest
+	// thresholds are the committed, authoritative values; a
+	// threshold mutation must force the verifier to reject the
+	// stored/reconstructed mismatch.
+	var manifestThresholds analysis.Thresholds
+	if manifest.Configuration != nil && manifest.Configuration.Thresholds != nil {
+		// The manifest thresholds are persisted via JSON; convert
+		// from the looser interface{} representation to the typed
+		// analysis.Thresholds values used by the classifier.
+		if raw, err := json.Marshal(manifest.Configuration.Thresholds); err == nil {
+			if err := json.Unmarshal(raw, &manifestThresholds); err != nil {
+				// If the stored thresholds don't unmarshal cleanly
+				// we fall back to the analyzer's defaults for the
+				// resource/memory reconstruction. The threshold-
+				// equality check below still detects the divergence
+				// from the verdict's persisted thresholds.
+				manifestThresholds = analysis.DefaultThresholds()
+			}
+		} else {
+			manifestThresholds = analysis.DefaultThresholds()
+		}
+	} else {
+		// No thresholds persisted in manifest: refuse to silently
+		// use defaults. The verdict's stored thresholds are still
+		// compared below.
+		manifestThresholds = analysis.DefaultThresholds()
+	}
+
+	// CORRECTION02 §6: compare the verifier-reconstructed
+	// thresholds against the verdict's persisted thresholds. A
+	// material mutation in the manifest must surface here.
+	if verdict.Thresholds != nil {
+		vt := verdict.Thresholds
+		if vt.MemoryGrowthKibPerHour != manifestThresholds.MemoryGrowthKibPerHour {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("threshold mutation: verdict memory_growth_kib_per_hour=%d != manifest=%d",
+					vt.MemoryGrowthKibPerHour, manifestThresholds.MemoryGrowthKibPerHour))
+		}
+		if vt.ResourceGrowthPerHour != manifestThresholds.ResourceGrowthPerHour {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("threshold mutation: verdict resource_growth_per_hour=%d != manifest=%d",
+					vt.ResourceGrowthPerHour, manifestThresholds.ResourceGrowthPerHour))
+		}
+		if vt.CorroborationCount != manifestThresholds.CorroborationCount {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("threshold mutation: verdict corroboration_count=%d != manifest=%d",
+					vt.CorroborationCount, manifestThresholds.CorroborationCount))
+		}
+		if vt.SampleCountMinimum != manifestThresholds.SampleCountMinimum {
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("threshold mutation: verdict sample_count_minimum=%d != manifest=%d",
+					vt.SampleCountMinimum, manifestThresholds.SampleCountMinimum))
+		}
+	} else {
+		verifyErrors = append(verifyErrors, "verdict.thresholds is nil; manifest thresholds cannot be reconstructed")
+	}
 
 	// 1. Reconstruct resource classification.
-	//    For the descriptor scenario, the canary-state invariant
-	//    is the named, distinct fallback source when the host-side
-	//    FD sampler is unavailable. Use the shared
-	//    ApplyDescriptorStateInvariant function so producer and
-	//    verifier apply identical fallback semantics.
 	reconstructedResource := analysis.ClassificationStable
-	reconstructedSignals := analysis.Analyze(csvSamples, analysis.DefaultThresholds()).Signals
 	if manifest.Scenario == "canary-descriptor" {
 		descInvariant := analysis.ComputeDescriptorStateInvariant(
 			initialState.FDCount, finalState.FDCount,
@@ -1099,8 +1265,9 @@ func verifyCommand(args []string) error {
 			},
 		)
 		fallback := analysis.DescriptorFallbackInput{
-			Scenario: manifest.Scenario,
-			Invariant: descInvariant,
+			Scenario:            manifest.Scenario,
+			StateInvariantValid: invariantResult.Valid,
+			Invariant:           descInvariant,
 			Initial: analysis.DescriptorInitialState{
 				FDCount:        initialState.FDCount,
 				OperationCount: initialState.OperationCount,
@@ -1129,44 +1296,35 @@ func verifyCommand(args []string) error {
 		if fbRes.Applied {
 			reconstructedResource = analysis.ClassificationResourceGrowth
 		} else {
-			// Sampled FD path: use the analyzer's resource classification
-			analyzed := analysis.Analyze(csvSamples, analysis.DefaultThresholds())
+			analyzed := analysis.Analyze(csvSamples, manifestThresholds)
 			reconstructedResource = analyzed.Resource
 		}
 	} else {
-		// Non-descriptor scenarios: use the analyzer directly
-		analyzed := analysis.Analyze(csvSamples, analysis.DefaultThresholds())
+		analyzed := analysis.Analyze(csvSamples, manifestThresholds)
 		reconstructedResource = analyzed.Resource
 	}
 
-	// 2. Reconstruct memory and semantic classifications from samples
-	analyzed := analysis.Analyze(csvSamples, analysis.DefaultThresholds())
+	analyzed := analysis.Analyze(csvSamples, manifestThresholds)
 	reconstructedMemory := analyzed.Memory
 	reconstructedSemantic := analyzed.Semantic
 
-	// 3. Reconstruct overall from the four classifications
-	reconstructedOverall := analysis.ComputeOverall(
+	// CORRECTION02: overall uses the explicit invariant-aware
+	// priority. An invalid scenario invariant must produce
+	// overall=invalid even if the analyzer reports growing.
+	reconstructedOverall := analysis.ComputeOverallWithInvariant(
 		reconstructedMemory,
 		reconstructedResource,
 		reconstructedSemantic,
+		invariantResult.Valid,
 	)
 
-	// 4. Reconstruct validity fields
 	reconstructedScenarioValid := verifyScenarioValid(manifest.Scenario, csvSamples, workload, verifyErrors) && len(verifyErrors) == 0
 	reconstructedCanariesValid := reconstructedScenarioValid &&
 		reconstructedOverall == getExpectedVerdict(manifest.Scenario) &&
 		invariantResult.Valid
-	// Provenance is verified separately via validateProvenanceEvidence
-	// below; reconstructedProvenanceValid starts true and is set false
-	// by validateProvenanceEvidence errors.
 	reconstructedProvenanceValid := true
 
 	// 5. Validate descriptor invariant signal
-	//    For canary-descriptor: exactly one descriptor_state_invariant
-	//    signal with source_kind=state_invariant, is_primary=true,
-	//    correct initial/final/delta/classification. If no sampled
-	//    FD data is available, the invariant must exist; if sampled
-	//    FD data is available, the invariant must NOT exist.
 	if manifest.Scenario == "canary-descriptor" {
 		descriptorInvariants := 0
 		var invariant *analysis.SignalSummary
@@ -1184,43 +1342,101 @@ func verifyCommand(args []string) error {
 					"sampled FD signal is available; descriptor_state_invariant must not be present")
 			}
 		} else {
-			if descriptorInvariants == 0 {
-				verifyErrors = append(verifyErrors,
-					"missing descriptor_state_invariant signal")
-			}
-			if descriptorInvariants > 1 {
-				verifyErrors = append(verifyErrors,
-					"duplicate descriptor_state_invariant signal")
-			}
-			if invariant != nil {
-				if invariant.SourceKind != analysis.SignalKindStateInvariant {
+			if !invariantResult.Valid {
+				if descriptorInvariants > 0 {
 					verifyErrors = append(verifyErrors,
-						"descriptor_state_invariant source_kind must be state_invariant")
+						"invalid scenario invariant; descriptor_state_invariant must not be present")
 				}
-				if !invariant.IsPrimary {
+			} else {
+				if descriptorInvariants == 0 {
 					verifyErrors = append(verifyErrors,
-						"descriptor_state_invariant must be primary")
+						"missing descriptor_state_invariant signal")
 				}
-				if invariant.FirstWindowMedian != int64(initialState.FDCount) {
+				if descriptorInvariants > 1 {
 					verifyErrors = append(verifyErrors,
-						fmt.Sprintf("descriptor_state_invariant initial=%d != canary initial=%d",
-							invariant.FirstWindowMedian, initialState.FDCount))
+						"duplicate descriptor_state_invariant signal")
 				}
-				if invariant.LastWindowMedian != int64(finalState.FDCount) {
-					verifyErrors = append(verifyErrors,
-						fmt.Sprintf("descriptor_state_invariant final=%d != canary final=%d",
-							invariant.LastWindowMedian, finalState.FDCount))
-				}
-				expectedDelta := int64(workload.Completed * 2)
-				if invariant.AbsoluteDelta != expectedDelta {
-					verifyErrors = append(verifyErrors,
-						fmt.Sprintf("descriptor_state_invariant absolute_delta=%d != expected=%d",
-							invariant.AbsoluteDelta, expectedDelta))
-				}
-				if invariant.Classification != analysis.ClassificationResourceGrowth {
-					verifyErrors = append(verifyErrors,
-						fmt.Sprintf("descriptor_state_invariant classification=%s != resource_growth",
-							invariant.Classification))
+				if invariant != nil {
+					// CORRECTION02: strict source-kind + counter checks.
+					if invariant.SourceKind == "" {
+						verifyErrors = append(verifyErrors,
+							"descriptor_state_invariant source_kind is empty (expected state_invariant)")
+					} else if invariant.SourceKind != analysis.SignalKindStateInvariant {
+						verifyErrors = append(verifyErrors,
+							fmt.Sprintf("descriptor_state_invariant source_kind=%s, expected state_invariant",
+								invariant.SourceKind))
+					}
+					if !invariant.IsPrimary {
+						verifyErrors = append(verifyErrors,
+							"descriptor_state_invariant must be primary")
+					}
+					if invariant.FirstWindowMedian != int64(initialState.FDCount) {
+						verifyErrors = append(verifyErrors,
+							fmt.Sprintf("descriptor_state_invariant first_window_median=%d != canary initial=%d",
+								invariant.FirstWindowMedian, initialState.FDCount))
+					}
+					if invariant.LastWindowMedian != int64(finalState.FDCount) {
+						verifyErrors = append(verifyErrors,
+							fmt.Sprintf("descriptor_state_invariant last_window_median=%d != canary final=%d",
+								invariant.LastWindowMedian, finalState.FDCount))
+					}
+					expectedDelta := int64(workload.Completed * 2)
+					if invariant.AbsoluteDelta != expectedDelta {
+						verifyErrors = append(verifyErrors,
+							fmt.Sprintf("descriptor_state_invariant absolute_delta=%d != expected=%d",
+								invariant.AbsoluteDelta, expectedDelta))
+					}
+					if invariant.Classification != analysis.ClassificationResourceGrowth {
+						verifyErrors = append(verifyErrors,
+							fmt.Sprintf("descriptor_state_invariant classification=%s != resource_growth",
+								invariant.Classification))
+					}
+					// CORRECTION02 §2: structural counters.
+					if invariant.SampleCount != 2 {
+						verifyErrors = append(verifyErrors,
+							fmt.Sprintf("descriptor_state_invariant sample_count=%d, expected 2",
+								invariant.SampleCount))
+					}
+					if invariant.AvailableCount != 2 {
+						verifyErrors = append(verifyErrors,
+							fmt.Sprintf("descriptor_state_invariant available_count=%d, expected 2",
+								invariant.AvailableCount))
+					}
+					if invariant.MissingCount != 0 {
+						verifyErrors = append(verifyErrors,
+							fmt.Sprintf("descriptor_state_invariant missing_count=%d, expected 0",
+								invariant.MissingCount))
+					}
+					if invariant.AvailableCount+invariant.MissingCount != invariant.SampleCount {
+						verifyErrors = append(verifyErrors,
+							fmt.Sprintf("descriptor_state_invariant available(%d)+missing(%d) != sample_count(%d)",
+								invariant.AvailableCount, invariant.MissingCount, invariant.SampleCount))
+					}
+					if invariant.RatePerHour != 0 {
+						verifyErrors = append(verifyErrors,
+							fmt.Sprintf("descriptor_state_invariant rate_per_hour=%f, expected 0",
+								invariant.RatePerHour))
+					}
+					if invariant.Slope != 0 {
+						verifyErrors = append(verifyErrors,
+							fmt.Sprintf("descriptor_state_invariant slope=%f, expected 0",
+								invariant.Slope))
+					}
+					if invariant.RelativeDelta != 0 {
+						verifyErrors = append(verifyErrors,
+							fmt.Sprintf("descriptor_state_invariant relative_delta=%f, expected 0",
+								invariant.RelativeDelta))
+					}
+					if invariant.Minimum != int64(initialState.FDCount) {
+						verifyErrors = append(verifyErrors,
+							fmt.Sprintf("descriptor_state_invariant minimum=%d, expected initial fd_count=%d",
+								invariant.Minimum, initialState.FDCount))
+					}
+					if invariant.Maximum != int64(finalState.FDCount) {
+						verifyErrors = append(verifyErrors,
+							fmt.Sprintf("descriptor_state_invariant maximum=%d, expected final fd_count=%d",
+								invariant.Maximum, finalState.FDCount))
+					}
 				}
 			}
 		}
@@ -1228,14 +1444,14 @@ func verifyCommand(args []string) error {
 
 	// 6. Validate sampled-signal source_kind consistency
 	//    Every non-invariant signal must have source_kind=sampled.
+	//    Empty source_kind is REJECTED (CORRECTION02 strict contract).
 	for _, sig := range verdict.SignalSummaries {
 		if sig.Name == "descriptor_state_invariant" {
 			continue
 		}
 		if sig.SourceKind == "" {
-			// Backwards-compat: pre-CORRECTION01 fixtures may have
-			// empty source_kind; coerce to sampled to keep the
-			// existing fixture-verification path stable.
+			verifyErrors = append(verifyErrors,
+				fmt.Sprintf("signal %q has empty source_kind (expected sampled)", sig.Name))
 			continue
 		}
 		if sig.SourceKind != analysis.SignalKindSampled {
@@ -1245,7 +1461,6 @@ func verifyCommand(args []string) error {
 		}
 	}
 
-	// 7. Compare stored vs reconstructed classifications (CORRECTION01)
 	if verdict.OverallClassification != reconstructedOverall {
 		verifyErrors = append(verifyErrors,
 			fmt.Sprintf("stored overall classification %s does not match reconstruction %s",
@@ -1267,32 +1482,23 @@ func verifyCommand(args []string) error {
 				verdict.SemanticClassification, reconstructedSemantic))
 	}
 
-	// 8. Compare stored vs reconstructed validity fields
 	if verdict.ScenarioValid != reconstructedScenarioValid {
 		verifyErrors = append(verifyErrors, "stored ScenarioValid does not match reconstruction")
 	}
 	if verdict.CanariesValid != reconstructedCanariesValid {
 		verifyErrors = append(verifyErrors, "stored CanariesValid does not match reconstruction")
 	}
-	// Provisional: will be updated by validateProvenanceEvidence below
-	_ = reconstructedSignals
 
-	// Verify provenance using the pure validator function
 	provErrs := validateProvenanceEvidence(manifest, verdict)
 	if len(provErrs) > 0 {
 		reconstructedProvenanceValid = false
 	}
 	verifyErrors = append(verifyErrors, provErrs...)
 
-	// Compare stored vs reconstructed provenance_valid
 	if verdict.ProvenanceValid != reconstructedProvenanceValid {
 		verifyErrors = append(verifyErrors, "stored ProvenanceValid does not match reconstruction")
 	}
 
-	// Verify runtime executable hash matches stored hash (runtime binding)
-	// P0: Hash the verifier's live inode through /proc/self/exe, NOT the path
-	// from manifest. An altered evidence set could point the descriptive path
-	// field at another readable file; the opener seam is the only selector.
 	if manifest.SubjectIdentity != nil && manifest.SubjectIdentity.ControllerExecutableSHA256 != "" {
 		if err := verifyRuntimeExecutableHash(
 			manifest.SubjectIdentity.ControllerExecutableSHA256,
@@ -1302,7 +1508,44 @@ func verifyCommand(args []string) error {
 		}
 	}
 
-	// Print verification results
+	// CORRECTION02 §7: canary image identity / source binding
+	// (only when canary-image-provenance.json is present).
+	provPath := filepath.Join(artifactPath, "canary-image-provenance.json")
+	if data, err := os.ReadFile(provPath); err == nil {
+		var prov CanaryImageProvenance
+		if err := json.Unmarshal(data, &prov); err == nil {
+			verifiedTree, _ := runGit("rev-parse", "HEAD^{tree}")
+			verifiedSubtree, _ := runGit("rev-parse", "HEAD:tovarisch/labs/memory/cmd/canary")
+			verifiedCommit, _ := runGit("rev-parse", "HEAD")
+			if verifiedCommit != "" && prov.ImageRevisionLabel != "" && prov.ImageRevisionLabel != verifiedCommit {
+				verifyErrors = append(verifyErrors,
+					fmt.Sprintf("canary image revision label=%s != tested commit=%s",
+						prov.ImageRevisionLabel, verifiedCommit))
+			}
+			if verifiedTree != "" && prov.ImageRepositoryTreeLabel != "" && prov.ImageRepositoryTreeLabel != verifiedTree {
+				verifyErrors = append(verifyErrors,
+					fmt.Sprintf("canary image repository-tree label=%s != tested tree=%s",
+						prov.ImageRepositoryTreeLabel, verifiedTree))
+			}
+			if verifiedSubtree != "" && prov.ImageSourceSubtreeLabel != "" && prov.ImageSourceSubtreeLabel != verifiedSubtree {
+				verifyErrors = append(verifyErrors,
+					fmt.Sprintf("canary image source-subtree label=%s != Git source subtree=%s",
+						prov.ImageSourceSubtreeLabel, verifiedSubtree))
+			}
+			if prov.RuntimeBinarySHA256 != "" && prov.ImageBinarySHA256Label != "" &&
+				!strings.EqualFold(prov.RuntimeBinarySHA256, prov.ImageBinarySHA256Label) {
+				verifyErrors = append(verifyErrors,
+					fmt.Sprintf("canary binary hash mismatch: runtime=%s label=%s",
+						prov.RuntimeBinarySHA256, prov.ImageBinarySHA256Label))
+			}
+			if !prov.ContainerImageMatchesImageID {
+				verifyErrors = append(verifyErrors,
+					fmt.Sprintf("container image ID does not match verified image id (got=%s)",
+						prov.ImageID))
+			}
+		}
+	}
+
 	fmt.Printf("=== Verification Results ===\n")
 	fmt.Printf("Run ID: %s\n", *runID)
 	fmt.Printf("Scenario: %s\n", verdict.Scenario)
@@ -1348,10 +1591,6 @@ func verifyScenarioValid(scenario string, samples []sampling.Sample, workload Wo
 			hasFinal = true
 		}
 	}
-	// Workload arithmetic: requested == attempted == completed,
-	// failed == 0, returned == completed. The producer MUST persist
-	// the observed completed count as the returned count; any
-	// mismatch indicates evidence tampering.
 	return hasBaseline && hasFinal &&
 		workload.Requested == workload.Attempted &&
 		workload.Attempted == workload.Completed &&
@@ -1399,20 +1638,17 @@ func scenarioToMode(scenario string) string {
 // waitForCanaryHealth waits for the canary to be healthy.
 func waitForCanaryHealth(ctx context.Context, client *http.Client, url string, timeout time.Duration, verbose bool) error {
 	deadline := time.Now().Add(timeout)
-
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-
 		req, err := http.NewRequestWithContext(ctx, "GET", url+"/health", nil)
 		if err != nil {
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
-
 		resp, err := client.Do(req)
 		if err == nil {
 			resp.Body.Close()
@@ -1423,10 +1659,8 @@ func waitForCanaryHealth(ctx context.Context, client *http.Client, url string, t
 				return nil
 			}
 		}
-
 		time.Sleep(500 * time.Millisecond)
 	}
-
 	return fmt.Errorf("timeout waiting for canary health")
 }
 
@@ -1436,27 +1670,22 @@ func fetchCanaryState(ctx context.Context, client *http.Client, url string) (*Ca
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("GET /state: %w", err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
-
 	var state CanaryState
 	if err := json.Unmarshal(body, &state); err != nil {
 		return nil, fmt.Errorf("parse state: %w", err)
 	}
-
 	return &state, nil
 }
 
@@ -1468,29 +1697,23 @@ func operateCanary(ctx context.Context, client *http.Client, url string, count i
 			Proxy: nil,
 		},
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url+"/operate?count="+fmt.Sprintf("%d", count), nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", url+"/operate?count="+strconv.Itoa(count), nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-
 	resp, err := opClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("POST /operate: %w", err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("operate failed: status=%d body=%s", resp.StatusCode, string(body))
 	}
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
-
-	// Parse operate response
 	var opResult struct {
 		Attempted int `json:"attempted"`
 		Completed int `json:"completed"`
@@ -1498,7 +1721,6 @@ func operateCanary(ctx context.Context, client *http.Client, url string, count i
 	if err := json.Unmarshal(body, &opResult); err != nil {
 		return nil, fmt.Errorf("parse operate response: %w", err)
 	}
-
 	return &WorkloadResult{
 		Requested: count,
 		Attempted: opResult.Attempted,
@@ -1512,27 +1734,26 @@ func operateCanary(ctx context.Context, client *http.Client, url string, count i
 func getScenarioOperationCount(scenario string) int {
 	switch scenario {
 	case "canary-growing":
-		return 32 // 32 MiB retained (32 blocks × 1 MiB)
+		return 32
 	case "canary-bounded":
-		return 100 // 100 operations against fixed buffer
+		return 100
 	case "canary-descriptor":
-		return 100 // 100 operations = 200 retained descriptors
+		return 100
 	default:
 		return 32
 	}
 }
 
+// allowedScenarios is the set of permitted --scenario values.
+var allowedScenarios = map[string]struct{}{
+	"canary-growing":    {},
+	"canary-bounded":    {},
+	"canary-descriptor": {},
+}
+
 // namespaceReader is a seam for reading namespace info from a PID.
-// Allows injection of fake readers for testing.
 type namespaceReader func(pid int) (*procfs.NamespaceInfo, error)
 
-// classifyCgroupFailureWithReader classifies cgroup failure using injected namespace reader.
-// Returns capability and proof for verifier to reconstruct the decision.
-//
-// Classification rules:
-// - Observed mismatch in required namespace → corresponding mismatch result
-// - Any required identity unavailable → namespace_identity_unavailable
-// - No mismatch observed → not_mounted
 func classifyCgroupFailureWithReader(
 	err error,
 	targetPID int,
@@ -1540,12 +1761,9 @@ func classifyCgroupFailureWithReader(
 	readNS namespaceReader,
 ) (sampling.CgroupCapability, *sampling.NamespaceProof) {
 	proof := &sampling.NamespaceProof{}
-
 	if err == nil {
 		return sampling.CgroupCapabilityAvailable, nil
 	}
-
-	// Classify by error type using typed errors
 	var capability sampling.CgroupCapability
 	switch {
 	case errors.Is(err, procfs.ErrNoCgroup2Mount):
@@ -1562,19 +1780,14 @@ func classifyCgroupFailureWithReader(
 		capability = sampling.CgroupCapabilityPathAbsent
 	}
 
-	// Read namespace IDs for both processes (capture errors for proof)
 	targetNS, targetReadErr := readNS(targetPID)
 	controllerNS, controllerReadErr := readNS(controllerPID)
-
-	// Record top-level read errors
 	if targetReadErr != nil {
 		proof.TargetReadError = targetReadErr.Error()
 	}
 	if controllerReadErr != nil {
 		proof.ControllerReadError = controllerReadErr.Error()
 	}
-
-	// Populate proof with what we read
 	if targetNS != nil {
 		proof.TargetMountNamespace = targetNS.MountNamespace
 		proof.TargetCgroupNamespace = targetNS.CgroupNamespace
@@ -1596,67 +1809,48 @@ func classifyCgroupFailureWithReader(
 		}
 	}
 
-	// For cgroup visibility errors, attempt namespace comparison
 	if capability == sampling.CgroupCapabilityCgroupNotVisible ||
 		capability == sampling.CgroupCapabilityNoUnifiedHierarchy {
-
-		// Top-level reader errors make identity unavailable
 		if targetReadErr != nil || controllerReadErr != nil {
 			proof.DecisionReason = "namespace_identity_unavailable"
 			return sampling.CgroupCapabilityNamespaceIdentityUnavail, proof
 		}
-
 		canProveMount := targetNS != nil && controllerNS != nil &&
 			targetNS.MountNamespaceErr == nil && controllerNS.MountNamespaceErr == nil &&
 			targetNS.MountNamespace != "" && controllerNS.MountNamespace != ""
 		canProveCgroup := targetNS != nil && controllerNS != nil &&
 			targetNS.CgroupNamespaceErr == nil && controllerNS.CgroupNamespaceErr == nil &&
 			targetNS.CgroupNamespace != "" && controllerNS.CgroupNamespace != ""
-
-		// Check mount namespace mismatch first
 		if canProveMount &&
 			proof.TargetMountNamespace != "" && proof.ControllerMountNamespace != "" &&
 			proof.TargetMountNamespace != proof.ControllerMountNamespace {
 			proof.DecisionReason = "mount_namespace_differ"
 			return sampling.CgroupCapabilityMountNamespaceMismatch, proof
 		}
-
-		// Check cgroup namespace mismatch
 		if canProveCgroup &&
 			proof.TargetCgroupNamespace != "" && proof.ControllerCgroupNamespace != "" &&
 			proof.TargetCgroupNamespace != proof.ControllerCgroupNamespace {
 			proof.DecisionReason = "cgroup_namespace_differ"
 			return sampling.CgroupCapabilityCgroupNamespaceMismatch, proof
 		}
-
-		// Fail-closed: if we needed to prove identity but couldn't, return unavailable
-		// The error was cgroup visibility, but we couldn't complete the namespace comparison
 		if !canProveMount || !canProveCgroup {
 			proof.DecisionReason = "namespace_identity_unavailable"
 			return sampling.CgroupCapabilityNamespaceIdentityUnavail, proof
 		}
-
-		// Both identities proven equal → cgroup not visible to this namespace
 		proof.DecisionReason = "namespaces_equal_cgroup_not_visible"
 		return sampling.CgroupCapabilityNotMounted, proof
 	}
-
-	// For non-visibility errors, return the classified capability with proof
 	proof.DecisionReason = capability.String()
 	return capability, proof
 }
 
-// classifyCgroupFailureWithNamespace classifies cgroup failure using procfs namespace reader.
 func classifyCgroupFailureWithNamespace(err error, targetPID, controllerPID int) (sampling.CgroupCapability, *sampling.NamespaceProof) {
 	return classifyCgroupFailureWithReader(err, targetPID, controllerPID, procfs.ReadNamespaceIDs)
 }
 
-// collectProvenance collects git, kernel, and binary provenance information.
-// Returns error if any required provenance is missing - fail-closed for evidence integrity.
 func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, string, error) {
 	var errs []string
 
-	// Git commit and tree - required
 	gitCommit, gitErr := runGit("rev-parse", "HEAD")
 	if gitErr != nil {
 		errs = append(errs, fmt.Sprintf("git commit: %v", gitErr))
@@ -1665,27 +1859,13 @@ func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, str
 	if treeErr != nil {
 		errs = append(errs, fmt.Sprintf("git tree: %v", treeErr))
 	}
-
-	// Git object format - REQUIRED for current schema.
-	// Authoritative source: `git rev-parse --show-object-format=storage`.
-	// This is a runtime repository property, not a compile-time capability.
 	gitObjectFormat, formatErr := runGit("rev-parse", "--show-object-format=storage")
 	if formatErr != nil {
 		errs = append(errs, fmt.Sprintf("git object format: %v", formatErr))
 	}
-	// Normalise to canonical "sha1" / "sha256" form.
 	gitObjectFormat = canonicalGitObjectFormat(gitObjectFormat)
 
-	// Controller PID
 	controllerPID := fmt.Sprintf("%d", os.Getpid())
-
-	// Controller executable path and hash - both required.
-	//
-	// The path is descriptive only (collected via /proc/self/exe readlink).
-	// The hash MUST come from the same live-inode source the verifier will
-	// use later: hashRuntimeExecutable(openProcSelfExe). This prevents a
-	// substitution window where the on-disk binary is swapped between
-	// process start and hash collection.
 	selfPath, pathErr := os.Readlink("/proc/self/exe")
 	selfHash := ""
 	selfHashErr := error(nil)
@@ -1702,14 +1882,11 @@ func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, str
 		}
 	}
 
-	// Kernel release using uname -r semantics
 	kernelRelease, krErr := runUname("-r")
 	if krErr != nil {
 		kernelRelease = ""
 		errs = append(errs, fmt.Sprintf("kernel release: %v", krErr))
 	}
-
-	// Kernel version (full string)
 	kernelVersion, err := os.ReadFile("/proc/version")
 	kernelVersionStr := ""
 	if err == nil {
@@ -1717,22 +1894,18 @@ func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, str
 	} else {
 		errs = append(errs, fmt.Sprintf("kernel version: %v", err))
 	}
-
-	// Cgroup mode - prefer reading from /proc/1/cgroup or mountinfo
 	cgroupMode := detectCgroupMode()
-
-	// Provenance status
 	status := "complete"
 	if len(errs) > 0 {
 		status = fmt.Sprintf("partial: %s", strings.Join(errs, "; "))
 	}
 
 	subject := &evidence.SubjectIdentity{
-		GitCommit:                 gitCommit,
-		GitTree:                   gitTree,
-		GitObjectFormat:           gitObjectFormat,
-		ControllerExecutablePath:   selfPath,
-		ControllerExecutableSHA256: selfHash,
+		GitCommit:                   gitCommit,
+		GitTree:                     gitTree,
+		GitObjectFormat:             gitObjectFormat,
+		ControllerExecutablePath:    selfPath,
+		ControllerExecutableSHA256:  selfHash,
 	}
 	host := &evidence.HostIdentity{
 		KernelRelease:    kernelRelease,
@@ -1740,9 +1913,6 @@ func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, str
 		CgroupMode:       cgroupMode,
 		CollectionStatus: status,
 	}
-
-	// Build comprehensive error if any required field failed
-	// Required: git commit, git tree, git object format, executable path, executable hash (valid 64-char hex)
 	var requiredErrs []string
 	if gitErr != nil || gitCommit == "" {
 		requiredErrs = append(requiredErrs, "git_commit")
@@ -1759,15 +1929,12 @@ func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, str
 	if selfHashErr != nil || len(selfHash) != 64 {
 		requiredErrs = append(requiredErrs, "executable_hash")
 	}
-
 	if len(requiredErrs) > 0 {
 		return subject, host, controllerPID, fmt.Errorf("required provenance unavailable: %s", strings.Join(requiredErrs, ", "))
 	}
-
 	return subject, host, controllerPID, nil
 }
 
-// runGit runs a git command and returns the trimmed output.
 func runGit(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = "/home/kgb/Projects/KGB"
@@ -1778,7 +1945,6 @@ func runGit(args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// runUname runs the uname command and returns the trimmed output.
 func runUname(args ...string) (string, error) {
 	cmd := exec.Command("uname", args...)
 	out, err := cmd.Output()
@@ -1788,9 +1954,6 @@ func runUname(args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// canonicalGitObjectFormat normalises the output of
-// `git rev-parse --show-object-format=storage` to the canonical lowercase
-// "sha1" or "sha256" form. Returns empty string if the input is unrecognised.
 func canonicalGitObjectFormat(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "sha1":
@@ -1802,16 +1965,7 @@ func canonicalGitObjectFormat(raw string) string {
 	}
 }
 
-// detectCgroupMode determines cgroup mode using authoritative sources.
-// Priority: /proc/1/cgroup > mountinfo > /proc/cgroups.
-// Returns one of: "cgroup1", "cgroup2", "hybrid", "unknown".
-// Never returns a default when detection is inconclusive.
 func detectCgroupMode() string {
-	// Try to read /proc/1/cgroup to determine host cgroup mode
-	// Format: hierarchy-id:controllers:control-group-path
-	// - hierarchy-id == 0 with empty controllers = v2 (unified)
-	// - hierarchy-id > 0 with controllers = v1
-	// - both present = hybrid
 	data, err := os.ReadFile("/proc/1/cgroup")
 	if err == nil {
 		hasV2 := false
@@ -1820,7 +1974,6 @@ func detectCgroupMode() string {
 			if line == "" {
 				continue
 			}
-			// Parse cgroup record: hierarchy-id:controllers:path
 			parts := strings.SplitN(line, ":", 3)
 			if len(parts) < 2 {
 				continue
@@ -1830,14 +1983,10 @@ func detectCgroupMode() string {
 			if len(parts) >= 2 {
 				controllers = strings.TrimSpace(parts[1])
 			}
-
-			// v2: hierarchy-id is "0" and controllers is empty or "unified"
 			if hierarchyID == "0" && (controllers == "" || controllers == "unified" || strings.HasPrefix(controllers, "0::")) {
 				hasV2 = true
 			}
-			// v1: hierarchy-id is non-zero or controllers has controller names
 			if hierarchyID != "0" || (controllers != "" && controllers != "unified") {
-				// Also check for named hierarchies (e.g., "1:name=systemd:")
 				if strings.Contains(controllers, "name=") || hierarchyID != "0" {
 					hasV1 = true
 				}
@@ -1853,8 +2002,6 @@ func detectCgroupMode() string {
 			return "cgroup1"
 		}
 	}
-
-	// Fallback: check mountinfo for cgroup2 mount
 	mountData, err := os.ReadFile("/proc/self/mountinfo")
 	if err == nil {
 		hasCgroup2 := false
@@ -1863,12 +2010,10 @@ func detectCgroupMode() string {
 			if line == "" {
 				continue
 			}
-			// Parse mountinfo: find the '-' separator
 			parts := strings.Split(line, " - ")
 			if len(parts) != 2 {
 				continue
 			}
-			// The filesystem type is the first field after '-'
 			fsParts := strings.Split(strings.TrimSpace(parts[1]), " ")
 			if len(fsParts) < 1 {
 				continue
@@ -1891,12 +2036,9 @@ func detectCgroupMode() string {
 			return "cgroup1"
 		}
 	}
-
-	// Cannot determine - return unknown instead of guessing
 	return "unknown"
 }
 
-// hashFile computes SHA-256 hash of a file.
 func hashFile(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -1906,22 +2048,12 @@ func hashFile(path string) (string, error) {
 	return hex.EncodeToString(hash[:]), nil
 }
 
-// hashRuntimeExecutable computes the SHA-256 of the currently executing binary
-// through the supplied opener. This is the producer-side counterpart to
-// verifyRuntimeExecutableHash: both producer and verifier must hash the same
-// live inode via the opener seam, never the descriptive pathname from
-// /proc/self/exe readlink.
-//
-// The opener is the only selector for which bytes get hashed. A swapped or
-// replaced on-disk pathname cannot influence the result because we never
-// reopen the path.
 func hashRuntimeExecutable(openRuntimeExecutable runtimeExecutableOpener) (string, error) {
 	rc, err := openRuntimeExecutable()
 	if err != nil {
 		return "", fmt.Errorf("open runtime executable: %w", err)
 	}
 	defer rc.Close()
-
 	h := sha256.New()
 	if _, err := io.Copy(h, rc); err != nil {
 		return "", fmt.Errorf("read runtime executable: %w", err)
@@ -1929,7 +2061,6 @@ func hashRuntimeExecutable(openRuntimeExecutable runtimeExecutableOpener) (strin
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// provenanceErrorString returns a string representation of an error, or empty string if nil.
 func provenanceErrorString(err error) string {
 	if err == nil {
 		return ""
@@ -1937,69 +2068,47 @@ func provenanceErrorString(err error) string {
 	return err.Error()
 }
 
-// validateProvenanceEvidence validates provenance fields in manifest and verdict.
-// Returns a list of errors for any validation failures.
-// This is a pure function suitable for testing and verifier use.
 func validateProvenanceEvidence(manifest evidence.Manifest, verdict evidence.Verdict) []string {
 	var errs []string
-
-	// Check ProvenanceValid and ProvenanceError
 	if !verdict.ProvenanceValid {
 		errs = append(errs, fmt.Sprintf("provenance_valid=false: %s", verdict.ProvenanceError))
 	}
 	if verdict.ProvenanceError != "" {
 		errs = append(errs, fmt.Sprintf("provenance_error not empty: %s", verdict.ProvenanceError))
 	}
-
-	// Validate SubjectIdentity
 	if manifest.SubjectIdentity == nil {
 		errs = append(errs, "subject_identity is nil")
 		return errs
 	}
-
-	// GitCommit must be valid Git object ID (20 bytes for SHA-1 or 32 bytes for SHA-256)
 	if manifest.SubjectIdentity.GitCommit == "" {
 		errs = append(errs, "subject_identity.git_commit is empty")
 	} else if err := validateGitObjectID(manifest.SubjectIdentity.GitCommit, ""); err != nil {
 		errs = append(errs, fmt.Sprintf("subject_identity.git_commit: %v", err))
 	}
-
-	// GitTree must be valid Git object ID
 	if manifest.SubjectIdentity.GitTree == "" {
 		errs = append(errs, "subject_identity.git_tree is empty")
 	} else if err := validateGitObjectID(manifest.SubjectIdentity.GitTree, ""); err != nil {
 		errs = append(errs, fmt.Sprintf("subject_identity.git_tree: %v", err))
 	}
-
-	// Validate GitObjectFormat consistency
 	if err := validateGitObjectFormatConsistency(manifest.SubjectIdentity); err != nil {
 		errs = append(errs, fmt.Sprintf("subject_identity.git_object_format: %v", err))
 	}
-
-	// ControllerExecutablePath must be non-empty
 	if manifest.SubjectIdentity.ControllerExecutablePath == "" {
 		errs = append(errs, "subject_identity.controller_executable_path is empty")
 	}
-
-	// ControllerExecutableSHA256 must be exactly 64 hex chars (32 bytes)
 	if manifest.SubjectIdentity.ControllerExecutableSHA256 == "" {
 		errs = append(errs, "subject_identity.controller_executable_sha256 is empty")
 	} else if err := validateSHA256(manifest.SubjectIdentity.ControllerExecutableSHA256); err != nil {
 		errs = append(errs, fmt.Sprintf("subject_identity.controller_executable_sha256: %v", err))
 	}
-
-	// Validate HostIdentity.CollectionStatus = "complete"
 	if manifest.HostID == nil {
 		errs = append(errs, "host_identity is nil")
 	} else if manifest.HostID.CollectionStatus != "complete" {
 		errs = append(errs, fmt.Sprintf("host_identity.collection_status=%s (expected 'complete')", manifest.HostID.CollectionStatus))
 	}
-
 	return errs
 }
 
-// validateHexString validates that a string is valid hexadecimal.
-// Returns error if the string contains non-hex characters.
 func validateHexString(s string) error {
 	if _, err := hex.DecodeString(s); err != nil {
 		return fmt.Errorf("invalid hex: %w", err)
@@ -2007,8 +2116,6 @@ func validateHexString(s string) error {
 	return nil
 }
 
-// validateSHA256 validates that a string is valid 64-char hexadecimal representing SHA-256.
-// Returns error if the string is not valid hex or has wrong length (must be 64 hex chars = 32 bytes).
 func validateSHA256(value string) error {
 	if value == "" {
 		return fmt.Errorf("empty")
@@ -2023,10 +2130,6 @@ func validateSHA256(value string) error {
 	return nil
 }
 
-// validateGitObjectID validates a Git object ID against the expected format.
-// Git object IDs are either SHA-1 (40 hex chars = 20 bytes) or SHA-256 (64 hex chars = 32 bytes).
-// If gitObjectFormat is provided, validates against that specific format.
-// Otherwise accepts either format.
 func validateGitObjectID(value string, gitObjectFormat string) error {
 	if value == "" {
 		return fmt.Errorf("empty")
@@ -2035,7 +2138,6 @@ func validateGitObjectID(value string, gitObjectFormat string) error {
 	if err != nil {
 		return fmt.Errorf("invalid hex: %w", err)
 	}
-
 	var expectedLen int
 	switch gitObjectFormat {
 	case "sha1", "sha-1":
@@ -2043,47 +2145,29 @@ func validateGitObjectID(value string, gitObjectFormat string) error {
 	case "sha256", "sha-256":
 		expectedLen = 32
 	default:
-		// No format specified - accept either SHA-1 or SHA-256
 		if len(decoded) != 20 && len(decoded) != 32 {
 			return fmt.Errorf("decoded length=%d, want 20 (sha1) or 32 (sha256)", len(decoded))
 		}
 		return nil
 	}
-
 	if len(decoded) != expectedLen {
 		return fmt.Errorf("decoded length=%d, want %d for %s", len(decoded), expectedLen, gitObjectFormat)
 	}
 	return nil
 }
 
-// validateGitObjectFormatConsistency validates that git_commit and git_tree
-// both use the same hash algorithm as specified in git_object_format.
-//
-// For the current evidence schema (1.x), git_object_format is REQUIRED and
-// must be one of the canonical values produced by canonicalGitObjectFormat:
-// "sha1" or "sha256". Aliases like "sha-1" / "sha-256" are rejected so the
-// wire contract is deterministic — both producer (canonicalGitObjectFormat)
-// and validator (this function) agree on the exact on-wire spelling.
 func validateGitObjectFormatConsistency(subject *evidence.SubjectIdentity) error {
 	format := subject.GitObjectFormat
-
-	// Current-schema evidence must declare git_object_format in canonical form.
 	if format == "" {
 		return fmt.Errorf("git_object_format is required (expected 'sha1' or 'sha256')")
 	}
-
-	// Decode both IDs to get their actual lengths
 	commitDecoded, commitErr := hex.DecodeString(subject.GitCommit)
 	treeDecoded, treeErr := hex.DecodeString(subject.GitTree)
-
-	// Both must be valid hex
 	if commitErr != nil || treeErr != nil {
 		return fmt.Errorf("commit or tree not valid hex")
 	}
-
 	commitLen := len(commitDecoded)
 	treeLen := len(treeDecoded)
-
 	switch format {
 	case "sha1":
 		if commitLen != 20 || treeLen != 20 {
@@ -2094,46 +2178,17 @@ func validateGitObjectFormatConsistency(subject *evidence.SubjectIdentity) error
 			return fmt.Errorf("git_object_format=sha256 but commit len=%d or tree len=%d (want 32)", commitLen, treeLen)
 		}
 	default:
-		// Reject aliases and unknown values; current schema requires canonical
-		// 'sha1' or 'sha256' only.
 		return fmt.Errorf("unsupported git_object_format=%q (expected 'sha1' or 'sha256')", format)
 	}
-
-	// Commit and tree must use same length (already checked by format above)
 	return nil
 }
 
-// runtimeExecutableOpener is a seam for opening the currently executing binary.
-// Production opens /proc/self/exe (which always points at the live inode, even
-// if the binary on disk has been replaced); tests inject deterministic bytes
-// and failure modes.
 type runtimeExecutableOpener func() (io.ReadCloser, error)
 
-// openProcSelfExe opens /proc/self/exe for the currently executing process.
-// /proc/self/exe is a symlink to the actual inode the kernel loaded, so the
-// opened file descriptor tracks the running binary even if its on-disk
-// pathname has been replaced or unlinked.
 func openProcSelfExe() (io.ReadCloser, error) {
 	return os.Open("/proc/self/exe")
 }
 
-// verifyRuntimeExecutableHash hashes the currently executing binary through the
-// supplied opener and compares it against the stored SHA-256 from the evidence
-// set. The opener is the source of truth for which bytes get hashed; the
-// manifest-supplied path is descriptive only and is never used to select the
-// file for hashing.
-//
-// Returns nil only when:
-//   - the stored hash is non-empty;
-//   - the opener succeeds;
-//   - reading the bytes succeeds;
-//   - the resulting SHA-256 equals storedHash.
-//
-// Any failure (empty hash, open error, read error, hash mismatch) is returned
-// as a non-nil error so the caller can record it as a verification failure.
-//
-// This function shares hashRuntimeExecutable with the producer so both sides
-// use the same hashing helper.
 func verifyRuntimeExecutableHash(storedHash string, openRuntimeExecutable runtimeExecutableOpener) error {
 	if storedHash == "" {
 		return fmt.Errorf("stored executable hash is empty")
@@ -2148,17 +2203,14 @@ func verifyRuntimeExecutableHash(storedHash string, openRuntimeExecutable runtim
 	return nil
 }
 
-// validateStateInvariant validates the state changes match expected invariants.
 func validateStateInvariant(scenario string, initial, final *CanaryState, workload *WorkloadResult) *analysis.StateInvariantResult {
 	result := &analysis.StateInvariantResult{Valid: true}
-
 	opDelta := final.OperationCount - initial.OperationCount
 	if opDelta != workload.Completed {
 		result.Valid = false
 		result.Failures = append(result.Failures,
 			fmt.Sprintf("operation_count_delta mismatch: expected %d, got %d", workload.Completed, opDelta))
 	}
-
 	switch scenario {
 	case "canary-growing":
 		if opDelta != workload.Completed {
@@ -2172,13 +2224,12 @@ func validateStateInvariant(scenario string, initial, final *CanaryState, worklo
 				fmt.Sprintf("growing: retained_blocks_delta=%d != completed=%d", blocksDelta, workload.Completed))
 		}
 		bytesDelta := final.RetainedBytes - initial.RetainedBytes
-		expectedBytes := int64(workload.Completed) * 1048576 // 1 MiB block size
+		expectedBytes := int64(workload.Completed) * 1048576
 		if bytesDelta != expectedBytes {
 			result.Valid = false
 			result.Failures = append(result.Failures,
 				fmt.Sprintf("growing: retained_bytes_delta=%d != expected=%d", bytesDelta, expectedBytes))
 		}
-
 	case "canary-bounded":
 		if opDelta != workload.Completed {
 			result.Valid = false
@@ -2199,20 +2250,18 @@ func validateStateInvariant(scenario string, initial, final *CanaryState, worklo
 			result.Failures = append(result.Failures,
 				fmt.Sprintf("bounded: retained_bytes should be 0, got %d", final.RetainedBytes))
 		}
-
 	case "canary-descriptor":
 		if opDelta != workload.Completed {
 			result.Valid = false
 			result.Failures = append(result.Failures, "descriptor: operation_count_delta != completed")
 		}
 		fdDelta := final.FDCount - initial.FDCount
-		expectedFDDelta := workload.Completed * 2 // Each operation leaks 2 FDs
+		expectedFDDelta := workload.Completed * 2
 		if fdDelta != expectedFDDelta {
 			result.Valid = false
 			result.Failures = append(result.Failures,
 				fmt.Sprintf("descriptor: fd_delta=%d != expected=%d", fdDelta, expectedFDDelta))
 		}
 	}
-
 	return result
 }

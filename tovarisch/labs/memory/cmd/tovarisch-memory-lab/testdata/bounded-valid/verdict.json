@@ -21,7 +21,8 @@
       "Minimum": 0,
       "Maximum": 0,
       "Classification": "stable",
-      "IsPrimary": true
+      "IsPrimary": true,
+      "SourceKind": "sampled"
     },
     {
       "Name": "private_dirty_kib",
@@ -37,7 +38,8 @@
       "Minimum": 0,
       "Maximum": 0,
       "Classification": "stable",
-      "IsPrimary": true
+      "IsPrimary": true,
+      "SourceKind": "sampled"
     },
     {
       "Name": "anonymous_kib",
@@ -53,7 +55,8 @@
       "Minimum": 0,
       "Maximum": 0,
       "Classification": "stable",
-      "IsPrimary": true
+      "IsPrimary": true,
+      "SourceKind": "sampled"
     },
     {
       "Name": "cgroup_anon_kib",
@@ -69,7 +72,8 @@
       "Minimum": 0,
       "Maximum": 0,
       "Classification": "stable",
-      "IsPrimary": true
+      "IsPrimary": true,
+      "SourceKind": "sampled"
     },
     {
       "Name": "rss_kib",
@@ -85,7 +89,8 @@
       "Minimum": 0,
       "Maximum": 0,
       "Classification": "stable",
-      "IsPrimary": false
+      "IsPrimary": false,
+      "SourceKind": "sampled"
     },
     {
       "Name": "pss_kib",
@@ -101,7 +106,8 @@
       "Minimum": 0,
       "Maximum": 0,
       "Classification": "stable",
-      "IsPrimary": false
+      "IsPrimary": false,
+      "SourceKind": "sampled"
     },
     {
       "Name": "cgroup_current_kib",
@@ -117,7 +123,8 @@
       "Minimum": 0,
       "Maximum": 0,
       "Classification": "stable",
-      "IsPrimary": false
+      "IsPrimary": false,
+      "SourceKind": "sampled"
     },
     {
       "Name": "docker_memory_kib",
@@ -133,7 +140,8 @@
       "Minimum": 1696,
       "Maximum": 2720,
       "Classification": "growing",
-      "IsPrimary": false
+      "IsPrimary": false,
+      "SourceKind": "sampled"
     },
     {
       "Name": "fd_count",
@@ -149,7 +157,8 @@
       "Minimum": 0,
       "Maximum": 0,
       "Classification": "inconclusive",
-      "IsPrimary": false
+      "IsPrimary": false,
+      "SourceKind": "sampled"
     },
     {
       "Name": "socket_fd_count",
@@ -165,7 +174,8 @@
       "Minimum": 0,
       "Maximum": 0,
       "Classification": "inconclusive",
-      "IsPrimary": false
+      "IsPrimary": false,
+      "SourceKind": "sampled"
     },
     {
       "Name": "thread_count",
@@ -181,7 +191,8 @@
       "Minimum": 0,
       "Maximum": 0,
       "Classification": "inconclusive",
-      "IsPrimary": false
+      "IsPrimary": false,
+      "SourceKind": "sampled"
     },
     {
       "Name": "vma_count",
@@ -197,7 +208,8 @@
       "Minimum": 0,
       "Maximum": 0,
       "Classification": "inconclusive",
-      "IsPrimary": false
+      "IsPrimary": false,
+      "SourceKind": "sampled"
     },
     {
       "Name": "pid_count",
@@ -213,7 +225,8 @@
       "Minimum": 0,
       "Maximum": 0,
       "Classification": "inconclusive",
-      "IsPrimary": false
+      "IsPrimary": false,
+      "SourceKind": "sampled"
     }
   ],
   "thresholds": {

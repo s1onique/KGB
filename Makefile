@@ -706,6 +706,12 @@ hulk-uvb76-artifact-producer-gate:
 
 MEMORY_LAB := .factory/bin/tovarisch-memory-lab
 
+
+# Build the canary image with immutable OCI + kgb.dev labels
+# CORRECTION02 §7: bind the canary binary to the tested source tree.
+tovarisch-memory-lab-canary-image:
+	@bash scripts/build_tovarisch_canary_image.sh
+
 tovarisch-memory-lab-build:
 	@mkdir -p .factory/bin
 	cd tovarisch/labs/memory && go build -o ../../../.factory/bin/tovarisch-memory-lab ./cmd/tovarisch-memory-lab

@@ -421,7 +421,7 @@ func TestDescriptorSamples_AllFDUnavailable_MalformedInvariant(t *testing.T) {
 				}
 			}
 		})
-	}, "source_kind must be state_invariant")
+	}, "source_kind=sampled, expected state_invariant")
 }
 
 // TestDescriptorSamples_AllFDUnavailable_DuplicateInvariant rejects
