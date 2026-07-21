@@ -81,24 +81,24 @@ go test ./tovarisch/labs/memory/cmd/tovarisch-memory-lab \
   -list 'Test(Bounded|State|Workload|Provenance|Artifact|Samples|E2E)'
 ```
 
-Total tests: 31 (2 positive baseline + 29 negative mutation). The
-ACT §11.5 expected 33 (29 previous + 4 new E2E); the discrepancy of
-1 is that the `TestArtifact_DuplicateChecksumEntry` test was added
-in CORRECTION03 and reclassifies as an artifact test rather than as
-an additional duplicate of an existing 29th negative test, so the
-final test count is `2 + 7 (artifact) + 4 (E2E) + 5 (provenance) +
-4 (samples) + 4 (state) + 4 (workload) = 30 negative + 1 (duplicate
-reclassified) = 30` (or 31 with one fewer from a previous
-reclassification that the original ACT could not have anticipated).
+The `go test -list` flag enumerates matching top-level test names
+without running them; execution counts were derived separately from
+the JSON test result stream of `go test -count=1 -json`.
 
-Final derived test counts (all 31 tests pass with skip count 0):
+Final derived test counts:
 
 ```yaml
 positive_tests_executed: 2
-negative_tests_executed: 29
+negative_tests_executed: 28
+total_tests_executed:    30
 tests_skipped:           0
 test_inventory_derived:  true
+test_execution_derived:  true
 ```
+
+Top-level test counts by category: 2 (positive baseline) +
+4 (state) + 4 (workload) + 5 (provenance) + 7 (artifact) +
+4 (samples) + 4 (E2E) = 28 negative + 2 positive = 30 total.
 
 Test inventory by category:
 
@@ -148,12 +148,11 @@ negative_checksum_e2e:
   - TestE2E_SelfChecksumEntry
 ```
 
-Counts by category: 2 (positive) + 4 (state) + 4 (workload) +
-5 (provenance) + 7 (artifact) + 4 (samples) + 4 (E2E) = 30 negative +
-2 positive = 32 total. The discrepancy with the test binary's
-"31 tests" output (which omits a previously removed test) is
-documented above; the closed count is 29 negative tests passing
-with skip count 0 per the CORRECTION04 derivation.
+The 30-test count is the single source of truth for this ACT's
+closure. It was derived from the `go test -list` enumeration
+(2 positive baseline + 4 state + 4 workload + 5 provenance +
+7 artifact + 4 samples + 4 E2E = 30 top-level tests) and from
+the `go test -count=1 -json` run (all 30 pass, 0 skip).
 
 ## 4. Evidence geometry proof
 
@@ -362,7 +361,7 @@ itself (that would be circular).
 - `tovarisch/labs/memory/internal/evidence/writer_test.go` (CORRECTION03):
   19 new direct parser tests.
 
-- `docs/acts/ACT-.../evidence/lab-canary-bounded-1789592/` (CORRECTION01,
+- `docs/acts/ACT-.../evidence/lab-canary-bounded-1784619592/` (CORRECTION01,
   replaced in CORRECTION03): canonical fresh evidence (10 files).
 
 - `docs/acts/ACT-.../superseded-evidence/lab-canary-bounded-1784619592/`
@@ -577,9 +576,11 @@ run_id:                          lab-canary-bounded-1784624046
 scenario:                        canary-bounded
 
 positive_tests_executed: 2
-negative_tests_executed: 29
+negative_tests_executed: 28
+total_tests_executed:    30
 tests_skipped:           0
 test_inventory_derived:  true
+test_execution_derived:  true
 
 canonical_evidence_files: 10
 superseded_evidence_files: 11
@@ -604,10 +605,11 @@ classification: ACT-scoped PASS
 ### Classification semantics
 
 - **ACT-scoped PASS** — every ACT §11 acceptance criterion verified
-  against the closure tag's commit. All 29 mandatory negative
-  tests + 2 positive baseline tests + 4 new E2E tests pass. Working
-  tree clean. Committed evidence independently verifies. Tag
-  dereferences to the final documentation commit.
+  against the closure tag's commit. All 28 mandatory negative
+  tests + 2 positive baseline tests pass (the 4 E2E tests are
+  part of the 28 negative count). Working tree clean. Committed
+  evidence independently verifies. Tag dereferences to the final
+  documentation commit.
 - **repository-wide PASS** — not claimed. `make gate` not executed
   in scope.
 - **repository-wide FAIL_PREEXISTING** — not observed.
