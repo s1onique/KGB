@@ -88,7 +88,7 @@ Only the fresh CORRECTION01 run remains canonical.
 ```yaml
 pre_correction_commit_oid: 1b9862314f5c8a41d6ae0675419344c3663c63b6
 
-implementation_commit_oid: 2a9f7705345b01004746f49fa7127420d87ffa1b
+implementation_commit_oid: d2638c044ac4ee54f060970d0f51af32e0cee86b
 implementation_tree_oid:   6bbbe1b623690dac0a4cbced8cd0fd8e35357ab6
 
 tested_commit_oid:         2a9f7705345b01004746f49fa7127420d87ffa1b
