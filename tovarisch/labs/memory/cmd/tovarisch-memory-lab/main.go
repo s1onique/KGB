@@ -551,7 +551,7 @@ func runCommand(args []string) error {
 	}
 
 	finalizedManifest := &evidence.Manifest{
-		SchemaVersion:   "1.0.0",
+		SchemaVersion:   "1.1.0",
 		RunID:           runID,
 		Scenario:        *scenario,
 		StartedAt:       manifest.StartedAt,
