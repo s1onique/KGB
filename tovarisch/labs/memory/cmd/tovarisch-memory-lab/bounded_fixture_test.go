@@ -38,7 +38,7 @@ const boundedFixtureDir = "testdata/bounded-valid"
 // boundedFixtureRunID is the run_id recorded inside the committed
 // fixture's manifest.json. All tests copy the fixture into a temp
 // dir with this exact name and pass this exact run_id to the verifier.
-const boundedFixtureRunID = "lab-canary-bounded-1784618515"
+const boundedFixtureRunID = "lab-canary-bounded-1784619592"
 
 // requireBoundedFixture fails the test if the committed fixture is
 // absent. Per ACT §5.2 a missing fixture must be a test failure.

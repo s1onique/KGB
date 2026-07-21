@@ -1,0 +1,25 @@
+rejected_reason:
+  provenance_identity_mismatch: |
+    Manifest git_commit (f23e0cd) did not match the tested commit
+    (04fb913) recorded in the parent ACT close report. The bounded
+    negative test suite depended on .factory scratch state, and the
+    raw range digest introduced whitespace defects that broke
+    git diff --check on the complete bounded range.
+  non_hermetic_mutation_test_fixture: |
+    bounded_negative_test.go (now removed) read the accepted
+    fixture from .factory/tovarisch-memory-lab via a hard-coded
+    run_id constant, silently skipped when absent, and rewrote
+    manifest.run_id on every copy.
+  checksum_masked_negative_tests: |
+    Multiple negative tests relied on the fixture-copy helper
+    invalidating the manifest checksum before any targeted check
+    could fire, so the intended rejection path was never
+    independently proved.
+
+canonical_accepted_evidence:
+  path: ../evidence/lab-canary-bounded-1784619592/
+  run_id: lab-canary-bounded-1784619592
+  commit_oid: c566263ae1d151298018cb22a5e5827360c6e3b2
+  controller_executable_sha256: |
+    See lab-canary-bounded-1784619592/manifest.json — runtime
+    build hash, recorded by the producer at run time.
