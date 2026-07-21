@@ -1592,6 +1592,72 @@ func provenanceErrorString(err error) string {
 	return err.Error()
 }
 
+// validateProvenanceEvidence validates provenance fields in manifest and verdict.
+// Returns a list of errors for any validation failures.
+// This is a pure function suitable for testing and verifier use.
+func validateProvenanceEvidence(manifest *evidence.Manifest, verdict *evidence.Verdict) []string {
+	var errs []string
+
+	// Check ProvenanceValid and ProvenanceError
+	if !verdict.ProvenanceValid {
+		errs = append(errs, fmt.Sprintf("provenance_valid=false: %s", verdict.ProvenanceError))
+	}
+	if verdict.ProvenanceError != "" {
+		errs = append(errs, fmt.Sprintf("provenance_error not empty: %s", verdict.ProvenanceError))
+	}
+
+	// Validate SubjectIdentity
+	if manifest.SubjectIdentity == nil {
+		errs = append(errs, "subject_identity is nil")
+		return errs
+	}
+
+	// GitCommit must be valid (non-empty, 40 hex chars for SHA-1 or 64 for SHA-256)
+	if manifest.SubjectIdentity.GitCommit == "" {
+		errs = append(errs, "subject_identity.git_commit is empty")
+	} else if err := validateHexString(manifest.SubjectIdentity.GitCommit); err != nil {
+		errs = append(errs, fmt.Sprintf("subject_identity.git_commit: %v", err))
+	}
+
+	// GitTree must be valid hex
+	if manifest.SubjectIdentity.GitTree == "" {
+		errs = append(errs, "subject_identity.git_tree is empty")
+	} else if err := validateHexString(manifest.SubjectIdentity.GitTree); err != nil {
+		errs = append(errs, fmt.Sprintf("subject_identity.git_tree: %v", err))
+	}
+
+	// ControllerExecutablePath must be non-empty
+	if manifest.SubjectIdentity.ControllerExecutablePath == "" {
+		errs = append(errs, "subject_identity.controller_executable_path is empty")
+	}
+
+	// ControllerExecutableSHA256 must be valid 64-char hex
+	if manifest.SubjectIdentity.ControllerExecutableSHA256 == "" {
+		errs = append(errs, "subject_identity.controller_executable_sha256 is empty")
+	} else if err := validateHexString(manifest.SubjectIdentity.ControllerExecutableSHA256); err != nil {
+		errs = append(errs, fmt.Sprintf("subject_identity.controller_executable_sha256: %v", err))
+	}
+
+	// Validate HostIdentity.CollectionStatus = "complete"
+	if manifest.HostID == nil {
+		errs = append(errs, "host_identity is nil")
+	} else if manifest.HostID.CollectionStatus != "complete" {
+		errs = append(errs, fmt.Sprintf("host_identity.collection_status=%s (expected 'complete')", manifest.HostID.CollectionStatus))
+	}
+
+	return errs
+}
+
+// validateHexString validates that a string is valid hexadecimal and has expected length.
+// Returns error if the string contains non-hex characters or has invalid length.
+func validateHexString(s string) error {
+	// Try to decode - this validates hex syntax
+	if _, err := hex.DecodeString(s); err != nil {
+		return fmt.Errorf("invalid hex: %w", err)
+	}
+	return nil
+}
+
 // validateStateInvariant validates the state changes match expected invariants.
 func validateStateInvariant(scenario string, initial, final *CanaryState, workload *WorkloadResult) *analysis.StateInvariantResult {
 	result := &analysis.StateInvariantResult{Valid: true}

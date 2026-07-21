@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/evidence"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/procfs"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/sampling"
 )
@@ -176,97 +177,184 @@ func TestCollectProvenance_AllFieldsRequired(t *testing.T) {
 	}
 }
 
-// TestVerifierEnforcesProvenance verifies the verifyErrors logic
-func TestVerifierEnforcesProvenance(t *testing.T) {
-	// Create temporary artifact directory
-	tmpDir, err := os.MkdirTemp("", "provenance-test")
-	if err != nil {
-		t.Fatalf("create temp dir: %v", err)
+// TestValidateHexString tests hex string validation
+func TestValidateHexString(t *testing.T) {
+	validCases := []string{
+		"abcd1234abcd1234abcd1234abcd1234abcd1234",                                          // 40 hex (git commit)
+		"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",                 // 64 hex (SHA256)
+		"DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF",                 // uppercase
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123",            // mixed
 	}
-	defer os.RemoveAll(tmpDir)
 
-	runID := "test-run"
+	for _, input := range validCases {
+		if err := validateHexString(input); err != nil {
+			t.Errorf("expected valid hex for %q, got error: %v", input, err)
+		}
+	}
 
-	// Create minimal valid manifest with correct lengths
-	manifest := map[string]interface{}{
-		"run_id": runID,
-		"subject_identity": map[string]string{
-			"git_commit":                    "abcd1234abcd1234abcd1234abcd1234abcd1234", // 40 chars
-			"git_tree":                     "abc123def456abc123",
-			"controller_executable_path":    "/some/path",
-			"controller_executable_sha256":  "abcd1234567890efabcd1234567890efabcd1234567890efabcd1234567890ef", // 64 chars
+	invalidCases := []string{
+		"xyz12345xyz12345xyz12345xyz12345xyz12345",  // non-hex chars
+		"gggggggggggggggggggggggggggggggggggggggg",   // invalid hex chars
+		"abcd-1234-abcd-1234-abcd-1234-abcd-1234-abcd", // dashes
+	}
+
+	for _, input := range invalidCases {
+		if err := validateHexString(input); err == nil {
+			t.Errorf("expected error for %q", input)
+		}
+	}
+	// Note: empty string is valid hex (empty is decodeable), but we check empty separately in validateProvenanceEvidence
+}
+
+// TestValidateProvenanceEvidence tests the pure validation function
+func TestValidateProvenanceEvidence(t *testing.T) {
+	// Valid manifest and verdict
+	validManifest := &evidence.Manifest{
+		SubjectIdentity: &evidence.SubjectIdentity{
+			GitCommit:                 "abcd1234abcd1234abcd1234abcd1234abcd1234",
+			GitTree:                   "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+			ControllerExecutablePath:  "/some/path",
+			ControllerExecutableSHA256: "abcd1234567890efabcd1234567890efabcd1234567890efabcd1234567890ef",
 		},
-		"host_identity": map[string]string{
-			"collection_status": "complete",
+		HostID: &evidence.HostIdentity{
+			CollectionStatus: "complete",
 		},
 	}
-
-	// Verify verifier logic rejects invalid provenance
-	verifyErrors := []string{}
-
-	// Simulate verifier checks for provenance
-	if subject, ok := manifest["subject_identity"].(map[string]string); ok {
-		if subject["git_commit"] == "" {
-			verifyErrors = append(verifyErrors, "subject_identity.git_commit is empty")
-		} else if len(subject["git_commit"]) != 40 {
-			verifyErrors = append(verifyErrors, fmt.Sprintf("subject_identity.git_commit invalid length: %d (expected 40)", len(subject["git_commit"])))
-		}
-		if subject["git_tree"] == "" {
-			verifyErrors = append(verifyErrors, "subject_identity.git_tree is empty")
-		}
-		if subject["controller_executable_path"] == "" {
-			verifyErrors = append(verifyErrors, "subject_identity.controller_executable_path is empty")
-		}
-		if subject["controller_executable_sha256"] == "" {
-			verifyErrors = append(verifyErrors, "subject_identity.controller_executable_sha256 is empty")
-		} else if len(subject["controller_executable_sha256"]) != 64 {
-			verifyErrors = append(verifyErrors, fmt.Sprintf("subject_identity.controller_executable_sha256 invalid length: %d (expected 64)", len(subject["controller_executable_sha256"])))
-		}
+	validVerdict := &evidence.Verdict{
+		ProvenanceValid: true,
+		ProvenanceError: "",
 	}
 
-	if host, ok := manifest["host_identity"].(map[string]string); ok {
-		if host["collection_status"] != "complete" {
-			verifyErrors = append(verifyErrors, fmt.Sprintf("host_identity.collection_status=%s (expected 'complete')", host["collection_status"]))
-		}
-	}
-
-	if len(verifyErrors) > 0 {
-		t.Errorf("expected no verify errors, got: %v", verifyErrors)
+	errs := validateProvenanceEvidence(validManifest, validVerdict)
+	if len(errs) > 0 {
+		t.Errorf("expected no errors for valid evidence, got: %v", errs)
 	}
 }
 
-// TestVerifierRejectsProvenanceValidFalse verifies verifier rejects invalid provenance
-func TestVerifierRejectsProvenanceValidFalse(t *testing.T) {
-	verifyErrors := []string{}
-
-	// Simulate provenance_valid=false
-	provenanceValid := false
-	provenanceError := "required provenance unavailable: git_commit"
-
-	if !provenanceValid {
-		verifyErrors = append(verifyErrors, fmt.Sprintf("provenance_valid=false: %s", provenanceError))
+// TestValidateProvenanceEvidence_RejectsInvalidFields tests validation of invalid fields
+func TestValidateProvenanceEvidence_RejectsInvalidFields(t *testing.T) {
+	testCases := []struct {
+		name     string
+		manifest *evidence.Manifest
+		verdict  *evidence.Verdict
+		wantErrs int
+	}{
+		{
+			name: "empty git_commit",
+			manifest: &evidence.Manifest{
+				SubjectIdentity: &evidence.SubjectIdentity{
+					GitCommit:                 "",
+					GitTree:                   "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+					ControllerExecutablePath:  "/some/path",
+					ControllerExecutableSHA256: "abcd1234567890efabcd1234567890efabcd1234567890efabcd1234567890ef",
+				},
+				HostID: &evidence.HostIdentity{CollectionStatus: "complete"},
+			},
+			verdict:  &evidence.Verdict{ProvenanceValid: true, ProvenanceError: ""},
+			wantErrs: 1,
+		},
+		{
+			name: "non-hex git_commit",
+			manifest: &evidence.Manifest{
+				SubjectIdentity: &evidence.SubjectIdentity{
+					GitCommit:                 "xyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyz",
+					GitTree:                   "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+					ControllerExecutablePath:  "/some/path",
+					ControllerExecutableSHA256: "abcd1234567890efabcd1234567890efabcd1234567890efabcd1234567890ef",
+				},
+				HostID: &evidence.HostIdentity{CollectionStatus: "complete"},
+			},
+			verdict:  &evidence.Verdict{ProvenanceValid: true, ProvenanceError: ""},
+			wantErrs: 1,
+		},
+		{
+			name: "wrong length git_commit",
+			manifest: &evidence.Manifest{
+				SubjectIdentity: &evidence.SubjectIdentity{
+					GitCommit:                 "abc1234",
+					GitTree:                   "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+					ControllerExecutablePath:  "/some/path",
+					ControllerExecutableSHA256: "abcd1234567890efabcd1234567890efabcd1234567890efabcd1234567890ef",
+				},
+				HostID: &evidence.HostIdentity{CollectionStatus: "complete"},
+			},
+			verdict:  &evidence.Verdict{ProvenanceValid: true, ProvenanceError: ""},
+			wantErrs: 1,
+		},
+		{
+			name: "non-hex sha256",
+			manifest: &evidence.Manifest{
+				SubjectIdentity: &evidence.SubjectIdentity{
+					GitCommit:                 "abcd1234abcd1234abcd1234abcd1234abcd1234",
+					GitTree:                   "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+					ControllerExecutablePath:  "/some/path",
+					ControllerExecutableSHA256: "xyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyz",
+				},
+				HostID: &evidence.HostIdentity{CollectionStatus: "complete"},
+			},
+			verdict:  &evidence.Verdict{ProvenanceValid: true, ProvenanceError: ""},
+			wantErrs: 1,
+		},
+		{
+			name: "nil subject_identity",
+			manifest: &evidence.Manifest{
+				SubjectIdentity: nil,
+				HostID:          &evidence.HostIdentity{CollectionStatus: "complete"},
+			},
+			verdict:  &evidence.Verdict{ProvenanceValid: true, ProvenanceError: ""},
+			wantErrs: 1,
+		},
+		{
+			name: "nil host_identity",
+			manifest: &evidence.Manifest{
+				SubjectIdentity: &evidence.SubjectIdentity{
+					GitCommit:                 "abcd1234abcd1234abcd1234abcd1234abcd1234",
+					GitTree:                   "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+					ControllerExecutablePath:  "/some/path",
+					ControllerExecutableSHA256: "abcd1234567890efabcd1234567890efabcd1234567890efabcd1234567890ef",
+				},
+				HostID: nil,
+			},
+			verdict:  &evidence.Verdict{ProvenanceValid: true, ProvenanceError: ""},
+			wantErrs: 1,
+		},
+		{
+			name: "incomplete collection_status",
+			manifest: &evidence.Manifest{
+				SubjectIdentity: &evidence.SubjectIdentity{
+					GitCommit:                 "abcd1234abcd1234abcd1234abcd1234abcd1234",
+					GitTree:                   "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+					ControllerExecutablePath:  "/some/path",
+					ControllerExecutableSHA256: "abcd1234567890efabcd1234567890efabcd1234567890efabcd1234567890ef",
+				},
+				HostID: &evidence.HostIdentity{CollectionStatus: "partial"},
+			},
+			verdict:  &evidence.Verdict{ProvenanceValid: true, ProvenanceError: ""},
+			wantErrs: 1,
+		},
+		{
+			name: "provenance_valid_false",
+			manifest: &evidence.Manifest{
+				SubjectIdentity: &evidence.SubjectIdentity{
+					GitCommit:                 "abcd1234abcd1234abcd1234abcd1234abcd1234",
+					GitTree:                   "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+					ControllerExecutablePath:  "/some/path",
+					ControllerExecutableSHA256: "abcd1234567890efabcd1234567890efabcd1234567890efabcd1234567890ef",
+				},
+				HostID: &evidence.HostIdentity{CollectionStatus: "complete"},
+			},
+			verdict:  &evidence.Verdict{ProvenanceValid: false, ProvenanceError: "git_commit unavailable"},
+			wantErrs: 2,
+		},
 	}
-	if provenanceError != "" {
-		verifyErrors = append(verifyErrors, fmt.Sprintf("provenance_error not empty: %s", provenanceError))
-	}
 
-	if len(verifyErrors) != 2 {
-		t.Errorf("expected 2 errors for provenance_valid=false, got %d", len(verifyErrors))
-	}
-}
-
-// TestVerifierRejectsMutatedHash verifies verifier rejects mutated hash
-func TestVerifierRejectsMutatedHash(t *testing.T) {
-	verifyErrors := []string{}
-
-	// Simulate mutated hash (wrong length)
-	mutatedHash := "deadbeef12345678"
-	if len(mutatedHash) != 64 {
-		verifyErrors = append(verifyErrors, fmt.Sprintf("subject_identity.controller_executable_sha256 invalid length: %d (expected 64)", len(mutatedHash)))
-	}
-
-	if len(verifyErrors) != 1 {
-		t.Errorf("expected 1 error for mutated hash, got %d", len(verifyErrors))
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			errs := validateProvenanceEvidence(tc.manifest, tc.verdict)
+			if len(errs) != tc.wantErrs {
+				t.Errorf("expected %d errors, got %d: %v", tc.wantErrs, len(errs), errs)
+			}
+		})
 	}
 }
 
