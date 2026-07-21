@@ -1,10 +1,13 @@
 // capabilities.go — Cgroup capability classification constants and proof structures
 //
 // Reference: kgb://doctrine/embedded-memory-frugality
+//
+// Note: Sentinel errors (ErrNoCgroup2Mount, ErrNoUnifiedCgroup, ErrPathTraversal)
+// are defined in procfs/cgroup.go and imported via the procfs package.
 
 package sampling
 
-import "errors"
+import "github.com/s1onique/KGB/tovarisch/labs/memory/internal/procfs"
 
 // CgroupCapability classifies the result of cgroup v2 resolution attempts.
 type CgroupCapability string
@@ -37,7 +40,21 @@ const (
 	// CgroupCapabilityNamespaceIdentityUnavail means namespace comparison could not
 	// be performed due to read failures.
 	CgroupCapabilityNamespaceIdentityUnavail CgroupCapability = "namespace_identity_unavailable"
+
+	// CgroupCapabilityCgroupNotVisible means cgroup2 is not visible from this namespace.
+	CgroupCapabilityCgroupNotVisible CgroupCapability = "cgroup_not_visible"
+
+	// CgroupCapabilityNoUnifiedHierarchy means cgroup v2 unified hierarchy not found.
+	CgroupCapabilityNoUnifiedHierarchy CgroupCapability = "no_unified_hierarchy"
+
+	// CgroupCapabilityPathTraversal means path would escape mount root.
+	CgroupCapabilityPathTraversal CgroupCapability = "path_traversal"
 )
+
+// String returns the string representation of a CgroupCapability.
+func (c CgroupCapability) String() string {
+	return string(c)
+}
 
 // NamespaceProof captures evidence for cgroup capability classification.
 // This enables independent verification of classification decisions.
@@ -73,11 +90,11 @@ type CgroupCapabilityEvent struct {
 	Proof           *NamespaceProof  `json:"proof,omitempty"`
 }
 
-// ErrNoUnifiedCgroup indicates cgroup v2 unified hierarchy not found.
-var ErrNoUnifiedCgroup = errors.New("no unified cgroup hierarchy")
-
-// ErrNoCgroup2Mount indicates cgroup2 not mounted.
-var ErrNoCgroup2Mount = errors.New("cgroup2 mount not found")
-
-// ErrPathTraversal indicates path would escape mount root.
-var ErrPathTraversal = errors.New("path traversal detected")
+// Re-export errors from procfs for convenience in error classification.
+// Callers should use procfs.ErrNoCgroup2Mount, procfs.ErrNoUnifiedCgroup, etc.
+// These are type-compatible for errors.Is() checks.
+var (
+	_ = procfs.ErrNoCgroup2Mount
+	_ = procfs.ErrNoUnifiedCgroup
+	_ = procfs.ErrPathTraversal
+)

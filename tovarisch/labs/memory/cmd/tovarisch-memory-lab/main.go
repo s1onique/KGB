@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -1178,29 +1179,14 @@ func getScenarioOperationCount(scenario string) int {
 	}
 }
 
-// classifyCgroupFailure classifies the cgroup resolution error into a structured capability.
-func classifyCgroupFailure(err error) sampling.CgroupCapability {
-	if err == nil {
-		return sampling.CgroupCapabilityAvailable
-	}
-	errStr := err.Error()
-	switch {
-	case contains(errStr, "permission denied"):
-		return sampling.CgroupCapabilityPermissionDenied
-	case contains(errStr, "cgroup2 mount not found"):
-		return sampling.CgroupCapabilityMountNamespaceMismatch
-	case contains(errStr, "cgroup2"):
-		return sampling.CgroupCapabilityNotMounted
-	case contains(errStr, "parse"):
-		return sampling.CgroupCapabilityParseFailure
-	default:
-		return sampling.CgroupCapabilityPathAbsent
-	}
-}
-
 // classifyCgroupFailureWithNamespace classifies cgroup failure with namespace comparison.
 // Returns capability and proof for verifier to reconstruct the decision.
-// Uses separate outcomes for mount vs cgroup namespace mismatch.
+// Uses typed errors for reliable classification.
+//
+// Classification rules:
+// - Observed mismatch in required namespace → corresponding mismatch result
+// - Any required identity unavailable → namespace_identity_unavailable
+// - No mismatch observed → not_mounted
 func classifyCgroupFailureWithNamespace(err error, targetPID, controllerPID int) (sampling.CgroupCapability, *sampling.NamespaceProof) {
 	proof := &sampling.NamespaceProof{}
 
@@ -1208,7 +1194,26 @@ func classifyCgroupFailureWithNamespace(err error, targetPID, controllerPID int)
 		return sampling.CgroupCapabilityAvailable, nil
 	}
 
-	errStr := err.Error()
+	// Classify by error type using typed errors
+	var capability sampling.CgroupCapability
+	switch {
+	case errors.Is(err, procfs.ErrNoCgroup2Mount):
+		capability = sampling.CgroupCapabilityCgroupNotVisible
+	case errors.Is(err, procfs.ErrNoUnifiedCgroup):
+		capability = sampling.CgroupCapabilityNoUnifiedHierarchy
+	case errors.Is(err, procfs.ErrPathTraversal):
+		capability = sampling.CgroupCapabilityPathTraversal
+	default:
+		// Check for permission/parse errors
+		errStr := err.Error()
+		if strings.Contains(errStr, "permission denied") || strings.Contains(errStr, "permission") {
+			capability = sampling.CgroupCapabilityPermissionDenied
+		} else if strings.Contains(errStr, "parse") {
+			capability = sampling.CgroupCapabilityParseFailure
+		} else {
+			capability = sampling.CgroupCapabilityPathAbsent
+		}
+	}
 
 	// Read namespace IDs for both processes
 	targetNS, _ := procfs.ReadNamespaceIDs(targetPID)
@@ -1218,7 +1223,6 @@ func classifyCgroupFailureWithNamespace(err error, targetPID, controllerPID int)
 	if targetNS != nil {
 		proof.TargetMountNamespace = targetNS.MountNamespace
 		proof.TargetCgroupNamespace = targetNS.CgroupNamespace
-		// Record per-field errors
 		if targetNS.MountNamespaceErr != nil {
 			proof.TargetMountNamespaceErr = targetNS.MountNamespaceErr.Error()
 		}
@@ -1229,7 +1233,6 @@ func classifyCgroupFailureWithNamespace(err error, targetPID, controllerPID int)
 	if controllerNS != nil {
 		proof.ControllerMountNamespace = controllerNS.MountNamespace
 		proof.ControllerCgroupNamespace = controllerNS.CgroupNamespace
-		// Record per-field errors
 		if controllerNS.MountNamespaceErr != nil {
 			proof.ControllerMountNamespaceErr = controllerNS.MountNamespaceErr.Error()
 		}
@@ -1238,21 +1241,16 @@ func classifyCgroupFailureWithNamespace(err error, targetPID, controllerPID int)
 		}
 	}
 
-	// Check for cgroup2-related errors
-	if contains(errStr, "cgroup2 mount not found") || contains(errStr, "cgroup2") {
-		// If we can't read either namespace, we cannot prove mismatch
+	// For cgroup visibility errors, attempt namespace comparison
+	if capability == sampling.CgroupCapabilityCgroupNotVisible ||
+		capability == sampling.CgroupCapabilityNoUnifiedHierarchy {
+		
 		canProveMount := targetNS != nil && targetNS.MountNamespaceErr == nil &&
 			controllerNS != nil && controllerNS.MountNamespaceErr == nil
 		canProveCgroup := targetNS != nil && targetNS.CgroupNamespaceErr == nil &&
 			controllerNS != nil && controllerNS.CgroupNamespaceErr == nil
 
-		// If neither namespace can be proven, return unavailable
-		if !canProveMount && !canProveCgroup {
-			proof.DecisionReason = "namespace_identity_unavailable"
-			return sampling.CgroupCapabilityNamespaceIdentityUnavail, proof
-		}
-
-		// Check mount namespace mismatch
+		// Check mount namespace mismatch first
 		if canProveMount &&
 			proof.TargetMountNamespace != "" && proof.ControllerMountNamespace != "" &&
 			proof.TargetMountNamespace != proof.ControllerMountNamespace {
@@ -1268,23 +1266,21 @@ func classifyCgroupFailureWithNamespace(err error, targetPID, controllerPID int)
 			return sampling.CgroupCapabilityCgroupNamespaceMismatch, proof
 		}
 
-		// Namespaces match or unavailable - cgroup not visible to this namespace
-		proof.DecisionReason = "namespaces_match_or_unavailable"
+		// Fail-closed: if we needed to prove identity but couldn't, return unavailable
+		// The error was cgroup visibility, but we couldn't complete the namespace comparison
+		if !canProveMount || !canProveCgroup {
+			proof.DecisionReason = "namespace_identity_unavailable"
+			return sampling.CgroupCapabilityNamespaceIdentityUnavail, proof
+		}
+
+		// Both identities proven equal → cgroup not visible to this namespace
+		proof.DecisionReason = "namespaces_equal_cgroup_not_visible"
 		return sampling.CgroupCapabilityNotMounted, proof
 	}
 
-	// Other error types
-	switch {
-	case contains(errStr, "permission denied"):
-		proof.DecisionReason = "permission_denied"
-		return sampling.CgroupCapabilityPermissionDenied, proof
-	case contains(errStr, "parse"):
-		proof.DecisionReason = "parse_failure"
-		return sampling.CgroupCapabilityParseFailure, proof
-	default:
-		proof.DecisionReason = "path_absent"
-		return sampling.CgroupCapabilityPathAbsent, proof
-	}
+	// For non-visibility errors, return the classified capability with proof
+	proof.DecisionReason = capability.String()
+	return capability, proof
 }
 
 func contains(s, substr string) bool {
