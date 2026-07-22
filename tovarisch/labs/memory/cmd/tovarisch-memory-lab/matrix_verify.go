@@ -562,6 +562,7 @@ func validateRunCleanupRecord(rec RunCleanupRecord, run *VerifiedRun) bool {
 // - Rejects nil manifest, cleanup, or verifyChild
 // - Rejects nil child bundles or bundles with ChecksVerified=false
 // - Validates declaration-to-child binding (RunID and scenario)
+// - Validates matrix geometry (run count, order, indices, paths)
 //
 // This ensures the helper cannot be called with invalid state or produce
 // partially-verified results that later fail at matrix level.
@@ -580,6 +581,52 @@ func VerifyDeclaredChildRuns(
 	}
 	if verifyChild == nil {
 		return nil, errors.New("child verifier is nil")
+	}
+
+	// FAIL-CLOSED: Matrix geometry validation
+	// Validate run count
+	if len(manifest.Runs) == 0 {
+		return nil, errors.New("manifest has zero declared runs")
+	}
+	if len(manifest.Runs) != len(cleanup.Runs) {
+		return nil, fmt.Errorf(
+			"cleanup run count %d != manifest run count %d",
+			len(cleanup.Runs),
+			len(manifest.Runs),
+		)
+	}
+
+	// Validate run order, indices, and paths
+	expectedOrder := []string{"canary-growing", "canary-bounded", "canary-descriptor"}
+	seenRunIDs := make(map[string]bool)
+	for i, decl := range manifest.Runs {
+		if decl.Scenario != expectedOrder[i] {
+			return nil, fmt.Errorf(
+				"run[%d] has wrong scenario %q, expected %q",
+				i, decl.Scenario, expectedOrder[i],
+			)
+		}
+		if decl.Index != i+1 {
+			return nil, fmt.Errorf(
+				"run[%d] has wrong index %d, expected %d",
+				i, decl.Index, i+1,
+			)
+		}
+		if decl.RunID == "" {
+			return nil, fmt.Errorf("run[%d] has empty run_id", i)
+		}
+		if seenRunIDs[decl.RunID] {
+			return nil, fmt.Errorf("duplicate run_id %q in declaration", decl.RunID)
+		}
+		seenRunIDs[decl.RunID] = true
+		// Validate declaration path follows canonical pattern
+		expectedPath := filepath.Join("runs", decl.RunID)
+		if decl.Path != expectedPath {
+			return nil, fmt.Errorf(
+				"run[%d] has wrong path %q, expected %q",
+				i, decl.Path, expectedPath,
+			)
+		}
 	}
 
 	runsDir := filepath.Join(matrixDir, "runs")
