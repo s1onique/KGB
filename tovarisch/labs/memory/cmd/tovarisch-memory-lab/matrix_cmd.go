@@ -328,8 +328,33 @@ func matrixCommand(args []string) error {
 		return fmt.Errorf("write cleanup evidence: %w", err)
 	}
 
-	// Step 9: Use single authority VerifyMatrixBundle for complete verification
-	// CORRECTION03: Producer MUST verify before declaring success
+	// Step 9: Use ReconstructMatrixVerdict for initial verdict (writes don't exist yet)
+	// CORRECTION03: Reconstruct from observed state first
+	verdict, err := ReconstructMatrixVerdict(matrixManifest, preliminaryRuns, cleanupEvidence)
+	if err != nil {
+		return fmt.Errorf("reconstruct matrix verdict: %w", err)
+	}
+
+	// Write matrix verdict using shared authority
+	verdictJSON, err := json.MarshalIndent(verdict, "",  "  ")
+	if err != nil {
+		return fmt.Errorf("marshal matrix verdict: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(matrixDir, "matrix-verdict.json"), verdictJSON, 0644); err != nil {
+		return fmt.Errorf("write matrix verdict: %w", err)
+	}
+
+	// Step 10: Write matrix checksums including all artifacts
+	checksumContent, err := ComputeMatrixChecksums(matrixDir)
+	if err != nil {
+		return fmt.Errorf("compute matrix checksums: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(matrixDir, "matrix-checksums.txt"), []byte(checksumContent), 0644); err != nil {
+		return fmt.Errorf("write matrix checksums: %w", err)
+	}
+
+	// Step 11: Final verification of complete bundle
+	// P0-1 FIX: Verify AFTER all files are written
 	verifyResult, err := VerifyMatrixBundle(matrixDir, MatrixVerificationDeps{
 		VerifyChildRun: verifyChildRunBundle,
 	})
@@ -345,28 +370,6 @@ func matrixCommand(args []string) error {
 	// Fail-closed: if cleanup not valid, matrix fails
 	if !verifyResult.CleanupValid {
 		return fmt.Errorf("cleanup validation failed")
-	}
-
-	// Use the reconstructed verdict from complete verification
-	verdict := verifyResult.ReconstructedVerdict
-
-	// Write matrix verdict using shared authority
-	verdictJSON, err := json.MarshalIndent(verdict, "",  "  ")
-	if err != nil {
-		return fmt.Errorf("marshal matrix verdict: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(matrixDir, "matrix-verdict.json"), verdictJSON, 0644); err != nil {
-		return fmt.Errorf("write matrix verdict: %w", err)
-	}
-
-	// Step 9: Write matrix checksums including cleanup evidence
-	// CORRECTION02: Use shared authority for checksums
-	checksumContent, err := ComputeMatrixChecksums(matrixDir)
-	if err != nil {
-		return fmt.Errorf("compute matrix checksums: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(matrixDir, "matrix-checksums.txt"), []byte(checksumContent), 0644); err != nil {
-		return fmt.Errorf("write matrix checksums: %w", err)
 	}
 
 	// Fail-closed: exit non-zero if reconstructed matrix is invalid

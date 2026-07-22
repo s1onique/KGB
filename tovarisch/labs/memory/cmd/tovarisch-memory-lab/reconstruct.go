@@ -776,12 +776,36 @@ func ReconstructScenarioResults(verifiedRuns []*VerifiedRun) (map[string]*Scenar
 // SINGLE AUTHORITATIVE RECONSTRUCTION FUNCTION
 // =============================================================================
 
-// ExpectedScenarioClassifications defines the required overall classification for each scenario.
-// P0-4 FIX: Matrix validity must verify expected scenario outcomes.
-var ExpectedScenarioClassifications = map[string]string{
-	"canary-growing":    "growing",
-	"canary-bounded":    "stable",
-	"canary-descriptor": "resource_growth",
+// ExpectedScenarioClassification defines the required four-field classification for each scenario.
+// P0-9 FIX: All four classification fields must match expected values.
+type ExpectedScenarioClassification struct {
+	Overall  string
+	Memory   string
+	Resource string
+	Semantic string
+}
+
+// ExpectedScenarioClassifications defines the required classifications for each scenario.
+// P0-9 FIX: Matrix validity requires all four fields to match.
+var ExpectedScenarioClassifications = map[string]ExpectedScenarioClassification{
+	"canary-growing": {
+		Overall:  "growing",
+		Memory:   "growing",
+		Resource: "stable",
+		Semantic: "stable",
+	},
+	"canary-bounded": {
+		Overall:  "stable",
+		Memory:   "stable",
+		Resource: "stable",
+		Semantic: "stable",
+	},
+	"canary-descriptor": {
+		Overall:  "resource_growth",
+		Memory:   "stable",
+		Resource: "resource_growth",
+		Semantic: "stable",
+	},
 }
 
 // ReconstructMatrixVerdict is the SINGLE authoritative function for reconstructing
@@ -804,13 +828,13 @@ func ReconstructMatrixVerdict(
 		return nil, fmt.Errorf("reconstruct scenario results: %w", err)
 	}
 
-	// P0-4 FIX: Verify expected scenario classifications
-	scenarioClassificationsValid := verifyExpectedClassifications(scenarioResults)
+	// P0-9 FIX: Verify all four classification fields for each scenario
+	scenarioClassificationsValid := verifyFourFieldClassifications(scenarioResults)
 
 	// Compute check counts from canonical projection
 	checksTotal, checksPassed, checksFailed := CountCanonicalChecks(crossRunChecks)
 
-	// P0-4 FIX: Matrix valid if ALL checks pass AND scenario classifications match
+	// P0-9 FIX: Matrix valid if ALL checks pass AND all four classification fields match
 	matrixValid := checksFailed == 0 && scenarioClassificationsValid
 
 	verdict := &MatrixVerdict{
@@ -826,15 +850,25 @@ func ReconstructMatrixVerdict(
 	return verdict, nil
 }
 
-// verifyExpectedClassifications checks that each scenario has its expected overall classification.
-func verifyExpectedClassifications(results map[string]*ScenarioResult) bool {
-	for scenario, expectedOverall := range ExpectedScenarioClassifications {
+// verifyFourFieldClassifications checks that each scenario has its expected four-field classification.
+// P0-9 FIX: All four fields (overall, memory, resource, semantic) must match.
+func verifyFourFieldClassifications(results map[string]*ScenarioResult) bool {
+	for scenario, expected := range ExpectedScenarioClassifications {
 		result, ok := results[scenario]
 		if !ok {
 			return false // Scenario missing
 		}
-		if result.Overall != expectedOverall {
-			return false // Wrong classification
+		if result.Overall != expected.Overall {
+			return false // Wrong overall classification
+		}
+		if result.Memory != expected.Memory {
+			return false // Wrong memory classification
+		}
+		if result.Resource != expected.Resource {
+			return false // Wrong resource classification
+		}
+		if result.Semantic != expected.Semantic {
+			return false // Wrong semantic classification
 		}
 	}
 	return true

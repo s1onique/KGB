@@ -660,9 +660,9 @@ func TestReconstructMatrixVerdict_MemoryClassificationStored(t *testing.T) {
 		t.Fatalf("ReconstructMatrixVerdict failed: %v", err)
 	}
 
-	// CORRECTION03: Memory classification doesn't affect matrix validity
-	if !verdict.MatrixValid {
-		t.Error("CORRECTION03: matrix should still be valid (memory doesn't affect validity)")
+	// P0-9 FIX: Memory classification DOES affect matrix validity (four-field validation)
+	if verdict.MatrixValid {
+		t.Error("P0-9: matrix should be invalid when memory classification doesn't match")
 	}
 
 	// But the mutated value should be stored
@@ -704,9 +704,9 @@ func TestReconstructMatrixVerdict_ResourceClassificationStored(t *testing.T) {
 		t.Fatalf("ReconstructMatrixVerdict failed: %v", err)
 	}
 
-	// CORRECTION03: Resource classification doesn't affect matrix validity
-	if !verdict.MatrixValid {
-		t.Error("CORRECTION03: matrix should still be valid (resource doesn't affect validity)")
+	// P0-9 FIX: Resource classification DOES affect matrix validity (four-field validation)
+	if verdict.MatrixValid {
+		t.Error("P0-9: matrix should be invalid when resource classification doesn't match")
 	}
 
 	// But the mutated value should be stored
@@ -1464,9 +1464,9 @@ func TestReconstructMatrixVerdict_SemanticClassificationStored(t *testing.T) {
 		t.Fatalf("ReconstructMatrixVerdict failed: %v", err)
 	}
 
-	// CORRECTION03: Semantic classification doesn't affect matrix validity
-	if !verdict.MatrixValid {
-		t.Error("CORRECTION03: matrix should still be valid (semantic doesn't affect validity)")
+	// P0-9 FIX: Semantic classification DOES affect matrix validity (four-field validation)
+	if verdict.MatrixValid {
+		t.Error("P0-9: matrix should be invalid when semantic classification doesn't match")
 	}
 
 	// But the mutated value should be stored

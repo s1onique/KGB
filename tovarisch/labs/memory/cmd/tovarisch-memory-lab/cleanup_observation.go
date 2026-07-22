@@ -49,8 +49,8 @@ func (o *CleanupObserver) ObserveContainerCleanup(ctx context.Context, container
 		return nil, errors.New("container ID is empty")
 	}
 
-	// Use docker container inspect --type=container for exact match
-	args := []string{"container", "inspect", "--type=container", containerID}
+	// P0-2 FIX: Use docker container inspect (--type is not valid on object-specific command)
+	args := []string{"container", "inspect", containerID}
 	result, err := o.runDockerCommand(ctx, args)
 	if err != nil {
 		// Docker daemon error, network failure, etc.
@@ -121,8 +121,8 @@ func (o *CleanupObserver) ObserveNetworkCleanup(ctx context.Context, networkID s
 		return nil, errors.New("network ID is empty")
 	}
 
-	// Use docker network inspect --type=network for exact match
-	args := []string{"network", "inspect", "--type=network", networkID}
+	// P0-2 FIX: Use docker inspect --type=network (--type only valid on generic inspect)
+	args := []string{"inspect", "--type=network", networkID}
 	result, err := o.runDockerCommand(ctx, args)
 	if err != nil {
 		// Docker daemon error, network failure, etc.
@@ -196,9 +196,11 @@ func (o *CleanupObserver) ObserveProcessCleanup(ctx context.Context, pid int, ex
 	data, err := os.ReadFile(statPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			// P0-3 FIX: Preserve expected start time for gone process
+			// This allows validation to succeed when process is actually gone
 			return &ProcessIdentityObservation{
 				PID:       pid,
-				StartTime: 0,
+				StartTime: expectedStart,
 				Status:    ProcessGoneCode,
 			}, nil
 		}
