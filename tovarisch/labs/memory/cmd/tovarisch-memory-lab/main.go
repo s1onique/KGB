@@ -111,8 +111,8 @@ func run(args []string) error {
 	case "matrix":
 		return matrixCommand(args[1:])
 	case "verify-matrix":
-		// CORRECTION02: Use shared authority for verdict reconstruction
-		return verifyMatrixCommandCORRECTION02(args[1:])
+		// CORRECTION03: Uses VerifyMatrixBundle as single authority
+		return verifyMatrixCommand(args[1:])
 	default:
 		return fmt.Errorf("unknown subcommand: %s (expected 'run', 'verify', 'derive-runtime-state', 'matrix', or 'verify-matrix')", args[1])
 	}

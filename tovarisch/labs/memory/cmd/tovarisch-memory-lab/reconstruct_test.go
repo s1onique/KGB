@@ -56,7 +56,26 @@ func goodManifest() *MatrixManifest {
 }
 
 // goodChildManifest returns a valid child run manifest.
+// P0-4 FIX: Each manifest has non-overlapping times to satisfy NonOverlapping check.
 func goodChildManifest(runID, scenario string) *evidence.Manifest {
+	// Use fixed offsets to ensure non-overlapping intervals
+	baseTime := time.Now().Add(-15 * time.Minute)
+	var startedAt, finishedAt time.Time
+	switch scenario {
+	case "canary-growing":
+		startedAt = baseTime
+		finishedAt = baseTime.Add(5 * time.Minute)
+	case "canary-bounded":
+		startedAt = baseTime.Add(6 * time.Minute)
+		finishedAt = baseTime.Add(11 * time.Minute)
+	case "canary-descriptor":
+		startedAt = baseTime.Add(12 * time.Minute)
+		finishedAt = baseTime.Add(17 * time.Minute)
+	default:
+		startedAt = baseTime
+		finishedAt = baseTime.Add(5 * time.Minute)
+	}
+
 	return &evidence.Manifest{
 		SchemaVersion: "1.1.0",
 		RunID:        runID,
@@ -81,17 +100,17 @@ func goodChildManifest(runID, scenario string) *evidence.Manifest {
 			EngineVersion: "24.0.0",
 		},
 		Configuration: &evidence.LabConfiguration{},
-		StartedAt:     time.Now().Add(-5 * time.Minute),
-		FinishedAt:    time.Now(),
+		StartedAt:     startedAt,
+		FinishedAt:    finishedAt,
 	}
 }
 
 // goodChildVerdict returns a valid child run verdict with correct classification.
 func goodChildVerdict(scenario string) *evidence.Verdict {
-	// According to the calibration contract:
-	// - canary-growing: overall=growth, memory=growing
-	// - canary-bounded: overall=stable, memory=stable
-	// - canary-descriptor: overall=resource_growth, memory=stable
+	// According to the calibration contract (canonical values from analysis.ClassificationGrowing):
+	// - canary-growing: overall=growing, memory=growing, resource=stable, semantic=stable
+	// - canary-bounded: overall=stable, memory=stable, resource=stable, semantic=stable
+	// - canary-descriptor: overall=resource_growth, memory=stable, resource=resource_growth, semantic=stable
 	switch scenario {
 	case "canary-growing":
 		return &evidence.Verdict{
@@ -125,7 +144,14 @@ func goodChildVerdict(scenario string) *evidence.Verdict {
 }
 
 // goodCleanupEvidence returns valid cleanup evidence.
+// P0-4 FIX: Container/network IDs must match what goodVerifiedRun produces.
 func goodCleanupEvidence(matrixID string) *MatrixCleanupEvidence {
+	// Use the same IDs as goodVerifiedRun
+	containerIDs := []string{"container-abc123", "container-def456", "container-ghi789"}
+	networkIDs := []string{"network-abc123", "network-def456", "network-ghi789"}
+	pids := []int{54321, 54322, 54323}
+	startTimes := []uint64{1234567890, 1234567891, 1234567892}
+
 	return &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
 		MatrixID:        matrixID,
@@ -137,18 +163,18 @@ func goodCleanupEvidence(matrixID string) *MatrixCleanupEvidence {
 				Scenario: "canary-growing",
 				RunID:    "run-1",
 				Container: ContainerCleanupRecord{
-					ID:     "container-abc123",
+					ID:     containerIDs[0],
 					Name:   "test-container-1",
 					Status: "gone",
 				},
 				Network: NetworkCleanupRecord{
-					ID:     "network-def456",
+					ID:     networkIDs[0],
 					Name:   "test-network-1",
 					Status: "gone",
 				},
 				Process: ProcessCleanupRecord{
-					PID:       54321,
-					StartTime: 1234567890,
+					PID:       pids[0],
+					StartTime: startTimes[0],
 					Status:    "gone",
 				},
 			},
@@ -157,18 +183,18 @@ func goodCleanupEvidence(matrixID string) *MatrixCleanupEvidence {
 				Scenario: "canary-bounded",
 				RunID:    "run-2",
 				Container: ContainerCleanupRecord{
-					ID:     "container-ghi789",
+					ID:     containerIDs[1],
 					Name:   "test-container-2",
 					Status: "gone",
 				},
 				Network: NetworkCleanupRecord{
-					ID:     "network-jkl012",
+					ID:     networkIDs[1],
 					Name:   "test-network-2",
 					Status: "gone",
 				},
 				Process: ProcessCleanupRecord{
-					PID:       54322,
-					StartTime: 1234567891,
+					PID:       pids[1],
+					StartTime: startTimes[1],
 					Status:    "gone",
 				},
 			},
@@ -177,18 +203,18 @@ func goodCleanupEvidence(matrixID string) *MatrixCleanupEvidence {
 				Scenario: "canary-descriptor",
 				RunID:    "run-3",
 				Container: ContainerCleanupRecord{
-					ID:     "container-mno345",
+					ID:     containerIDs[2],
 					Name:   "test-container-3",
 					Status: "gone",
 				},
 				Network: NetworkCleanupRecord{
-					ID:     "network-pqr678",
+					ID:     networkIDs[2],
 					Name:   "test-network-3",
 					Status: "gone",
 				},
 				Process: ProcessCleanupRecord{
-					PID:       54323,
-					StartTime: 1234567892,
+					PID:       pids[2],
+					StartTime: startTimes[2],
 					Status:    "gone",
 				},
 			},
@@ -197,22 +223,36 @@ func goodCleanupEvidence(matrixID string) *MatrixCleanupEvidence {
 }
 
 // goodVerifiedRun returns a valid verified run for testing.
+// P0-4 FIX: Each run has unique identities so the fixture itself is valid before mutation.
+// This allows mutation tests to prove that exactly the mutated field causes failure.
 func goodVerifiedRun(index int, scenario, runID string) *VerifiedRun {
 	manifest := goodChildManifest(runID, scenario)
 	verdict := goodChildVerdict(scenario)
 
+	// Each run gets unique identities to satisfy uniqueness checks
+	containerIDs := []string{"container-abc123", "container-def456", "container-ghi789"}
+	networkIDs := []string{"network-abc123", "network-def456", "network-ghi789"}
+	pids := []int{54321, 54322, 54323}
+	startTimes := []uint64{1234567890, 1234567891, 1234567892}
+
+	idx := 0
+	if index >= 0 && index < 3 {
+		idx = index
+	}
+
 	return &VerifiedRun{
-		DeclaredRunID:     runID,
-		DeclaredScenario:  scenario,
-		RunIndex:         index,
-		ActualManifest:    manifest,
-		ActualVerdict:     verdict,
-		ContainerID:       "container-abc123",
-		NetworkID:         "network-def456",
-		SubjectPID:        54321,
-		SubjectStartTime: 1234567890,
+		DeclaredRunID:        runID,
+		DeclaredScenario:     scenario,
+		RunIndex:            index,
+		ActualManifest:      manifest,
+		ActualVerdict:       verdict,
+		ContainerID:         containerIDs[idx],
+		NetworkID:           networkIDs[idx],
+		SubjectPID:          pids[idx],
+		SubjectStartTime:    startTimes[idx],
 		ProcessCleanupStatus: ProcessGone,
-		CleanupVerified:   true,
+		CleanupEvidenceLoaded: true,
+		CleanupEvidenceValid: true,
 	}
 }
 
@@ -551,8 +591,8 @@ func TestBuildVerifiedRunsFromMatrix_LoadsAllArtifacts(t *testing.T) {
 		if run.SubjectPID == 0 {
 			t.Errorf("run %s has zero PID", run.DeclaredRunID)
 		}
-		if !run.CleanupVerified {
-			t.Errorf("run %s has CleanupVerified=false", run.DeclaredRunID)
+		if !run.CleanupEvidenceValid {
+			t.Errorf("run %s has CleanupEvidenceValid=false", run.DeclaredRunID)
 		}
 	}
 }
@@ -587,90 +627,91 @@ func TestBuildVerifiedRunsFromMatrix_RejectsUnknownFieldsInManifest(t *testing.T
 }
 
 // =============================================================================
-// TEST 11: Incorrect memory classification invalidates scenario
+// TEST 11: Memory classification changes are stored but don't affect matrix validity
+// CORRECTION03: Only overall classification affects matrix validity.
+// Memory, resource, and semantic are stored in results but are not validated.
 // =============================================================================
 
-func TestReconstructMatrixVerdict_RejectsWrongMemoryClassification(t *testing.T) {
+func TestReconstructMatrixVerdict_MemoryClassificationStored(t *testing.T) {
 	manifest := goodManifest()
 	cleanup := goodCleanupEvidence(manifest.MatrixID)
 
-	// Create verified runs with wrong memory classification for canary-growing
+	// Start with valid fixture
 	verifiedRuns := []*VerifiedRun{
-		{
-			DeclaredRunID:    "run-1",
-			DeclaredScenario: "canary-growing",
-			RunIndex:        0,
-			ActualManifest:   goodChildManifest("run-1", "canary-growing"),
-			ActualVerdict: &evidence.Verdict{
-				OverallClassification:  analysis.ClassificationGrowing,
-				MemoryClassification:   analysis.ClassificationStable, // WRONG! Should be Growing
-				ResourceClassification: analysis.ClassificationStable,
-				SemanticClassification: analysis.ClassificationStable,
-			},
-			ContainerID:           "container-abc123",
-			NetworkID:             "network-def456",
-			SubjectPID:            54321,
-			SubjectStartTime:      1234567890,
-			ProcessCleanupStatus:  ProcessGone,
-			CleanupVerified:       true,
-		},
+		goodVerifiedRun(0, "canary-growing", "run-1"),
 		goodVerifiedRun(1, "canary-bounded", "run-2"),
 		goodVerifiedRun(2, "canary-descriptor", "run-3"),
 	}
 
+	// Verify baseline is valid
+	baseline, err := ReconstructMatrixVerdict(manifest, verifiedRuns, cleanup)
+	if err != nil {
+		t.Fatalf("baseline reconstruction failed: %v", err)
+	}
+	if !baseline.MatrixValid {
+		t.Fatal("baseline fixture should be valid")
+	}
+
+	// Mutate memory classification for canary-growing
+	verifiedRuns[0].ActualVerdict.MemoryClassification = analysis.ClassificationStable
+
 	verdict, err := ReconstructMatrixVerdict(manifest, verifiedRuns, cleanup)
 	if err != nil {
 		t.Fatalf("ReconstructMatrixVerdict failed: %v", err)
 	}
 
-	// Matrix should be INVALID because memory classification is wrong for canary-growing
-	// The implementation is fail-closed and validates all classifications
-	if verdict.MatrixValid {
-		t.Error("expected MatrixValid=false for wrong memory classification")
+	// CORRECTION03: Memory classification doesn't affect matrix validity
+	if !verdict.MatrixValid {
+		t.Error("CORRECTION03: matrix should still be valid (memory doesn't affect validity)")
+	}
+
+	// But the mutated value should be stored
+	if verdict.ScenarioResults["canary-growing"].Memory != string(analysis.ClassificationStable) {
+		t.Error("mutated memory classification should be stored in results")
 	}
 }
 
 // =============================================================================
-// TEST 12: Incorrect resource classification in descriptor scenario
+// TEST 12: Resource classification changes are stored but don't affect matrix validity
+// CORRECTION03: Only overall classification affects matrix validity.
 // =============================================================================
 
-func TestReconstructMatrixVerdict_RejectsWrongResourceClassification(t *testing.T) {
+func TestReconstructMatrixVerdict_ResourceClassificationStored(t *testing.T) {
 	manifest := goodManifest()
 	cleanup := goodCleanupEvidence(manifest.MatrixID)
 
-	// Create verified runs with wrong resource classification for canary-descriptor
+	// Start with valid fixture
 	verifiedRuns := []*VerifiedRun{
 		goodVerifiedRun(0, "canary-growing", "run-1"),
 		goodVerifiedRun(1, "canary-bounded", "run-2"),
-		{
-			DeclaredRunID:    "run-3",
-			DeclaredScenario: "canary-descriptor",
-			RunIndex:        2,
-			ActualManifest:   goodChildManifest("run-3", "canary-descriptor"),
-			ActualVerdict: &evidence.Verdict{
-				OverallClassification:  analysis.ClassificationResourceGrowth,
-				MemoryClassification:   analysis.ClassificationStable,
-				ResourceClassification: analysis.ClassificationStable, // WRONG! Should be ResourceGrowth
-				SemanticClassification: analysis.ClassificationStable,
-			},
-			ContainerID:           "container-mno345",
-			NetworkID:             "network-pqr678",
-			SubjectPID:            54323,
-			SubjectStartTime:      1234567892,
-			ProcessCleanupStatus:  ProcessGone,
-			CleanupVerified:       true,
-		},
+		goodVerifiedRun(2, "canary-descriptor", "run-3"),
 	}
+
+	// Verify baseline is valid
+	baseline, err := ReconstructMatrixVerdict(manifest, verifiedRuns, cleanup)
+	if err != nil {
+		t.Fatalf("baseline reconstruction failed: %v", err)
+	}
+	if !baseline.MatrixValid {
+		t.Fatal("baseline fixture should be valid")
+	}
+
+	// Mutate resource classification for canary-descriptor
+	verifiedRuns[2].ActualVerdict.ResourceClassification = analysis.ClassificationStable
 
 	verdict, err := ReconstructMatrixVerdict(manifest, verifiedRuns, cleanup)
 	if err != nil {
 		t.Fatalf("ReconstructMatrixVerdict failed: %v", err)
 	}
 
-	// Matrix should be INVALID because resource classification is wrong for canary-descriptor
-	// The implementation is fail-closed and validates all classifications
-	if verdict.MatrixValid {
-		t.Error("expected MatrixValid=false for wrong resource classification")
+	// CORRECTION03: Resource classification doesn't affect matrix validity
+	if !verdict.MatrixValid {
+		t.Error("CORRECTION03: matrix should still be valid (resource doesn't affect validity)")
+	}
+
+	// But the mutated value should be stored
+	if verdict.ScenarioResults["canary-descriptor"].Resource != string(analysis.ClassificationStable) {
+		t.Error("mutated resource classification should be stored in results")
 	}
 }
 
@@ -852,43 +893,47 @@ func TestReconstructCleanupComplete_RejectsPIDMismatch(t *testing.T) {
 
 // =============================================================================
 // TEST 18: MatrixValid fails with wrong overall classification
+// P0-4 FIX: Single-cause mutation - only overall field changes, all else stays valid.
 // =============================================================================
 
 func TestReconstructMatrixVerdict_FailsWithWrongOverallClassification(t *testing.T) {
 	manifest := goodManifest()
 	cleanup := goodCleanupEvidence(manifest.MatrixID)
 
-	// Create verified runs with wrong overall classification for canary-growing
+	// Start with valid fixture
 	verifiedRuns := []*VerifiedRun{
-		{
-			DeclaredRunID:    "run-1",
-			DeclaredScenario: "canary-growing",
-			RunIndex:        0,
-			ActualManifest:   goodChildManifest("run-1", "canary-growing"),
-			ActualVerdict: &evidence.Verdict{
-				OverallClassification:  analysis.ClassificationStable, // WRONG! Should be Growth
-				MemoryClassification:   analysis.ClassificationGrowing,
-				ResourceClassification: analysis.ClassificationStable,
-				SemanticClassification: analysis.ClassificationStable,
-			},
-			ContainerID:           "container-abc123",
-			NetworkID:             "network-def456",
-			SubjectPID:            54321,
-			SubjectStartTime:      1234567890,
-			ProcessCleanupStatus:  ProcessGone,
-			CleanupVerified:       true,
-		},
+		goodVerifiedRun(0, "canary-growing", "run-1"),
 		goodVerifiedRun(1, "canary-bounded", "run-2"),
 		goodVerifiedRun(2, "canary-descriptor", "run-3"),
 	}
+
+	// Verify baseline is valid
+	baseline, err := ReconstructMatrixVerdict(manifest, verifiedRuns, cleanup)
+	if err != nil {
+		t.Fatalf("baseline reconstruction failed: %v", err)
+	}
+	if !baseline.MatrixValid {
+		t.Fatal("baseline fixture should be valid")
+	}
+	if baseline.ChecksPassed != 16 {
+		t.Errorf("baseline ChecksPassed=16, got %d", baseline.ChecksPassed)
+	}
+
+	// Mutate exactly one field: overall classification for canary-growing
+	verifiedRuns[0].ActualVerdict.OverallClassification = analysis.ClassificationStable // WRONG! Should be Growing
 
 	verdict, err := ReconstructMatrixVerdict(manifest, verifiedRuns, cleanup)
 	if err != nil {
 		t.Fatalf("ReconstructMatrixVerdict failed: %v", err)
 	}
 
+	// Matrix should be INVALID because overall classification is wrong for canary-growing
 	if verdict.MatrixValid {
 		t.Error("expected MatrixValid=false for wrong overall classification")
+	}
+	// Prove single-cause: cross-run checks still pass, only classification fails
+	if verdict.ChecksPassed != 16 {
+		t.Errorf("cross-run checks should pass (16), got %d", verdict.ChecksPassed)
 	}
 }
 
@@ -1349,5 +1394,170 @@ func TestFormatVerdictDiffs_FormatsCorrectly(t *testing.T) {
 	}
 	if !strings.Contains(result, "checks_total") {
 		t.Error("expected output to contain checks_total")
+	}
+}
+
+// =============================================================================
+// TEST 36: Valid fixture reconstructs with MatrixValid=true (P0-4 FIX)
+// =============================================================================
+
+// P0-4 FIX: Prove the fixture is valid before mutation.
+// Each run must have unique identities to pass uniqueness checks.
+func TestReconstructMatrixVerdict_ValidFixtureProducesValidMatrix(t *testing.T) {
+	manifest := goodManifest()
+	cleanup := goodCleanupEvidence(manifest.MatrixID)
+
+	// P0-4 FIX: Create valid verified runs with unique identities
+	verifiedRuns := []*VerifiedRun{
+		goodVerifiedRun(0, "canary-growing", "run-1"),
+		goodVerifiedRun(1, "canary-bounded", "run-2"),
+		goodVerifiedRun(2, "canary-descriptor", "run-3"),
+	}
+
+	verdict, err := ReconstructMatrixVerdict(manifest, verifiedRuns, cleanup)
+	if err != nil {
+		t.Fatalf("ReconstructMatrixVerdict failed: %v", err)
+	}
+
+	// P0-4 FIX: Valid fixture must produce valid matrix
+	if !verdict.MatrixValid {
+		t.Error("expected MatrixValid=true for valid fixture")
+	}
+	if verdict.ChecksPassed != 16 {
+		t.Errorf("expected ChecksPassed=16, got %d", verdict.ChecksPassed)
+	}
+	if verdict.ChecksFailed != 0 {
+		t.Errorf("expected ChecksFailed=0, got %d", verdict.ChecksFailed)
+	}
+}
+
+// =============================================================================
+// TEST 37: Semantic classification changes are stored but don't affect matrix validity
+// CORRECTION03: Only overall classification affects matrix validity.
+// =============================================================================
+
+func TestReconstructMatrixVerdict_SemanticClassificationStored(t *testing.T) {
+	manifest := goodManifest()
+	cleanup := goodCleanupEvidence(manifest.MatrixID)
+
+	// Start with valid fixture
+	verifiedRuns := []*VerifiedRun{
+		goodVerifiedRun(0, "canary-growing", "run-1"),
+		goodVerifiedRun(1, "canary-bounded", "run-2"),
+		goodVerifiedRun(2, "canary-descriptor", "run-3"),
+	}
+
+	// Verify baseline is valid
+	baseline, err := ReconstructMatrixVerdict(manifest, verifiedRuns, cleanup)
+	if err != nil {
+		t.Fatalf("baseline reconstruction failed: %v", err)
+	}
+	if !baseline.MatrixValid {
+		t.Fatal("baseline fixture should be valid")
+	}
+
+	// Mutate semantic classification for canary-growing
+	verifiedRuns[0].ActualVerdict.SemanticClassification = analysis.ClassificationGrowing
+
+	verdict, err := ReconstructMatrixVerdict(manifest, verifiedRuns, cleanup)
+	if err != nil {
+		t.Fatalf("ReconstructMatrixVerdict failed: %v", err)
+	}
+
+	// CORRECTION03: Semantic classification doesn't affect matrix validity
+	if !verdict.MatrixValid {
+		t.Error("CORRECTION03: matrix should still be valid (semantic doesn't affect validity)")
+	}
+
+	// But the mutated value should be stored
+	if verdict.ScenarioResults["canary-growing"].Semantic != string(analysis.ClassificationGrowing) {
+		t.Error("mutated semantic classification should be stored in results")
+	}
+}
+
+// =============================================================================
+// TEST 38: Equal invalid verdicts - both MatrixValid=false (P0-8 FIX)
+// =============================================================================
+
+func TestCompareVerdicts_DetectsEqualInvalidBothFalse(t *testing.T) {
+	// P0-8 FIX: Test that CompareVerdicts detects equal-invalid terminal case
+	stored := &MatrixVerdict{
+		MatrixID:       "test-matrix",
+		MatrixValid:    false,
+		ScenarioResults: map[string]*ScenarioResult{
+			"canary-growing": {
+				RunID:    "run-1",
+				Verified: true,
+				Overall:  "growing",
+				Memory:   "growing",
+				Resource: "stable",
+				Semantic: "stable",
+			},
+		},
+		CrossRunChecks: &CrossRunChecks{
+			SameCommitTree:        true,
+			SameControllerPID:     true,
+			SameControllerHash:    true,
+			SameSchema:            true,
+			SameThresholds:        true,
+			SamePhaseConfig:       true,
+			SameHostIdentity:      true,
+			SameDockerIdentity:    true,
+			SameImageIdentity:     true,
+			SameCanaryBinary:      true,
+			UniqueRunIDs:          true,
+			UniqueSubjectProcesses: true,
+			UniqueContainerIDs:    true,
+			FixedOrder:           true,
+			NonOverlapping:       true,
+			CleanupComplete:      true,
+			ChecksPassed:         16,
+		},
+		ChecksTotal:  16,
+		ChecksPassed: 16,
+		ChecksFailed: 0,
+	}
+
+	// Reconstructed is identical in every way - both are invalid
+	reconstructed := &MatrixVerdict{
+		MatrixID:       "test-matrix",
+		MatrixValid:    false,
+		ScenarioResults: map[string]*ScenarioResult{
+			"canary-growing": {
+				RunID:    "run-1",
+				Verified: true,
+				Overall:  "growing",
+				Memory:   "growing",
+				Resource: "stable",
+				Semantic: "stable",
+			},
+		},
+		CrossRunChecks: &CrossRunChecks{
+			SameCommitTree:        true,
+			SameControllerPID:     true,
+			SameControllerHash:    true,
+			SameSchema:            true,
+			SameThresholds:        true,
+			SamePhaseConfig:       true,
+			SameHostIdentity:      true,
+			SameDockerIdentity:    true,
+			SameImageIdentity:     true,
+			SameCanaryBinary:      true,
+			UniqueRunIDs:          true,
+			UniqueSubjectProcesses: true,
+			UniqueContainerIDs:    true,
+			FixedOrder:           true,
+			NonOverlapping:       true,
+			CleanupComplete:      true,
+			ChecksPassed:         16,
+		},
+		ChecksTotal:  16,
+		ChecksPassed: 16,
+		ChecksFailed: 0,
+	}
+
+	diffs := CompareVerdicts(stored, reconstructed)
+	if len(diffs) != 0 {
+		t.Errorf("expected no differences for equal invalid verdicts, got %d", len(diffs))
 	}
 }

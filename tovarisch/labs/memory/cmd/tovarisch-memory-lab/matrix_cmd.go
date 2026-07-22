@@ -328,22 +328,30 @@ func matrixCommand(args []string) error {
 		return fmt.Errorf("write cleanup evidence: %w", err)
 	}
 
-	// Step 9: Re-read artifacts using shared builder
-	// P0-6 FIX: Producer and verifier use same builder path
-	verifiedRuns, err := BuildVerifiedRunsFromMatrix(matrixDir, matrixManifest, cleanupEvidence)
+	// Step 9: Use single authority VerifyMatrixBundle for complete verification
+	// CORRECTION03: Producer MUST verify before declaring success
+	verifyResult, err := VerifyMatrixBundle(matrixDir, MatrixVerificationDeps{
+		VerifyChildRun: verifyChildRunBundle,
+	})
 	if err != nil {
-		return fmt.Errorf("build verified runs from artifacts: %w", err)
+		return fmt.Errorf("verify matrix bundle: %w", err)
 	}
 
-	// Step 10: Use single authority for verdict reconstruction
-	// CORRECTION03: Use ReconstructMatrixVerdict as single source of truth
-	verdict, err := ReconstructMatrixVerdict(matrixManifest, verifiedRuns, cleanupEvidence)
-	if err != nil {
-		return fmt.Errorf("reconstruct matrix verdict: %w", err)
+	// Fail-closed: if children not verified, matrix fails
+	if !verifyResult.AllChildrenVerified {
+		return fmt.Errorf("child verification failed")
 	}
+
+	// Fail-closed: if cleanup not valid, matrix fails
+	if !verifyResult.CleanupValid {
+		return fmt.Errorf("cleanup validation failed")
+	}
+
+	// Use the reconstructed verdict from complete verification
+	verdict := verifyResult.ReconstructedVerdict
 
 	// Write matrix verdict using shared authority
-	verdictJSON, err := json.MarshalIndent(verdict, "", "  ")
+	verdictJSON, err := json.MarshalIndent(verdict, "",  "  ")
 	if err != nil {
 		return fmt.Errorf("marshal matrix verdict: %w", err)
 	}
@@ -783,6 +791,7 @@ func sha256Hash(data []byte) string {
 }
 
 // verifyMatrixCommand implements the `verify-matrix` subcommand.
+// CORRECTION03: Uses VerifyMatrixBundle as single authority.
 func verifyMatrixCommand(args []string) error {
 	fs := flag.NewFlagSet("memory-lab verify-matrix", flag.ContinueOnError)
 	fs.Usage = func() {
@@ -805,96 +814,46 @@ func verifyMatrixCommand(args []string) error {
 
 	fmt.Printf("Verifying matrix at: %s\n", *matrixDir)
 
-	// 1. Verify matrix root geometry
-	fmt.Printf("  Checking root geometry...\n")
-	if err := ValidateMatrixRootGeometry(*matrixDir); err != nil {
-		return fmt.Errorf("root geometry: %w", err)
-	}
-	fmt.Printf("  Root geometry: PASS\n")
-
-	// 2. Load matrix manifest
-	fmt.Printf("  Loading matrix manifest...\n")
-	manifest, err := LoadMatrixManifest(filepath.Join(*matrixDir, "matrix-manifest.json"))
+	// Use single authority VerifyMatrixBundle for complete verification
+	verifyResult, err := VerifyMatrixBundle(*matrixDir, MatrixVerificationDeps{
+		VerifyChildRun: verifyChildRunBundle,
+	})
 	if err != nil {
-		return fmt.Errorf("load manifest: %w", err)
+		return fmt.Errorf("verify matrix bundle: %w", err)
 	}
 
-	// 3. Load matrix verdict
-	fmt.Printf("  Loading matrix verdict...\n")
-	verdict, err := LoadMatrixVerdict(filepath.Join(*matrixDir, "matrix-verdict.json"))
-	if err != nil {
-		return fmt.Errorf("load verdict: %w", err)
-	}
-
-	// 4. Verify matrix-level checksums
-	fmt.Printf("  Checking matrix checksums...\n")
-	if err := ValidateMatrixChecksums(*matrixDir); err != nil {
-		return fmt.Errorf("matrix checksums: %w", err)
-	}
-	fmt.Printf("  Matrix checksums: PASS\n")
-
-	// 5. Verify child checksums bound to manifest
-	fmt.Printf("  Checking child checksums bound to manifest...\n")
-	if err := ValidateChildChecksums(*matrixDir, manifest); err != nil {
-		return fmt.Errorf("child checksums: %w", err)
-	}
-	fmt.Printf("  Child checksums: PASS\n")
-
-	// 6. Verify each child run independently
-	fmt.Printf("  Verifying child runs...\n")
-	runsDir := filepath.Join(*matrixDir, "runs")
-	for _, decl := range manifest.Runs {
-		runPath := filepath.Join(runsDir, decl.RunID)
-		fmt.Printf("    Verifying %s...\n", decl.Scenario)
-		if err := verifyChildRun(runPath, decl.Scenario, decl.RunID); err != nil {
-			return fmt.Errorf("child verification for %s: %w", decl.Scenario, err)
-		}
-		fmt.Printf("    %s: PASS\n", decl.Scenario)
-	}
-
-	// 7. Verify cross-run identity
-	fmt.Printf("  Verifying cross-run identity...\n")
-	runManifests := make([]*evidence.Manifest, len(manifest.Runs))
-	for i, decl := range manifest.Runs {
-		runPath := filepath.Join(runsDir, decl.RunID)
-		manifestData, err := os.ReadFile(filepath.Join(runPath, "manifest.json"))
-		if err != nil {
-			return fmt.Errorf("read manifest for %s: %w", decl.RunID, err)
-		}
-		var m evidence.Manifest
-		if err := json.Unmarshal(manifestData, &m); err != nil {
-			return fmt.Errorf("parse manifest for %s: %w", decl.RunID, err)
-		}
-		runManifests[i] = &m
-	}
-
-	crossRunChecks := verifyCrossRunIdentity(runManifests)
-	if !crossRunChecks.AllTrue() {
-		return fmt.Errorf("cross-run identity check failed")
-	}
-	fmt.Printf("  Cross-run identity: PASS\n")
-
-	// 8. Verify timing and ordering
-	fmt.Printf("  Verifying timing and ordering...\n")
-	for i := 0; i < len(runManifests)-1; i++ {
-		if runManifests[i].FinishedAt.After(runManifests[i+1].StartedAt) {
-			return fmt.Errorf("run intervals overlap: %s finishes after %s starts",
-				runManifests[i].RunID, runManifests[i+1].RunID)
-		}
-	}
-	fmt.Printf("  Timing and ordering: PASS\n")
-
-	// 9. Compare reconstructed verdict with stored verdict
-	fmt.Printf("  Comparing reconstructed vs stored verdict...\n")
-	if verdict.MatrixID != manifest.MatrixID {
-		return fmt.Errorf("verdict matrix_id %s != manifest matrix_id %s", verdict.MatrixID, manifest.MatrixID)
-	}
-
+	// Report results
 	fmt.Printf("\n=== Matrix Verification Results ===\n")
-	fmt.Printf("Matrix ID: %s\n", manifest.MatrixID)
-	fmt.Printf("Matrix Valid: %v\n", verdict.MatrixValid)
-	fmt.Printf("All Checks: PASS\n")
+	fmt.Printf("Matrix ID: %s\n", verifyResult.Manifest.MatrixID)
+	fmt.Printf("Matrix Valid: %v\n", verifyResult.ReconstructedVerdict.MatrixValid)
+	fmt.Printf("Checks Total: %d\n", verifyResult.ReconstructedVerdict.ChecksTotal)
+	fmt.Printf("Checks Passed: %d\n", verifyResult.ReconstructedVerdict.ChecksPassed)
+	fmt.Printf("Checks Failed: %d\n", verifyResult.ReconstructedVerdict.ChecksFailed)
+	fmt.Printf("Children Verified: %v\n", verifyResult.AllChildrenVerified)
+	fmt.Printf("Cleanup Valid: %v\n", verifyResult.CleanupValid)
 
+	// Fail-closed: exit non-zero if verification failed
+	if !verifyResult.AllChildrenVerified {
+		return fmt.Errorf("child verification failed")
+	}
+	if !verifyResult.CleanupValid {
+		return fmt.Errorf("cleanup validation failed")
+	}
+	if !verifyResult.ReconstructedVerdict.MatrixValid {
+		return fmt.Errorf("reconstructed verdict is invalid")
+	}
+
+	// Compare reconstructed vs stored verdict
+	diffs := CompareVerdicts(verifyResult.StoredVerdict, verifyResult.ReconstructedVerdict)
+	if len(diffs) > 0 {
+		fmt.Printf("\nVERDICT MISMATCH:\n")
+		for _, d := range diffs {
+			fmt.Printf("  %s: stored=%s reconstructed=%s\n", d.Path, d.Stored, d.Reconstructed)
+		}
+		return fmt.Errorf("stored verdict does not match reconstruction: %d differences", len(diffs))
+	}
+
+	fmt.Printf("\nAll Checks: PASS\n")
 	return nil
 }
 
@@ -907,37 +866,6 @@ const (
 	ProcessPIDReused                               // PID reused by different process
 	ProcessUnavailable                             // Evidence unavailable (permission denied, etc.)
 )
-
-// parseProcStatStartTime extracts the start time (field 22) from /proc/<pid>/stat.
-// The comm field can contain spaces and parentheses, so we locate the closing ')'
-// and parse fields after it.
-func parseProcStatStartTime(data []byte) (uint64, error) {
-	commEnd := bytes.LastIndex(data, []byte{')'})
-	if commEnd < 0 {
-		return 0, fmt.Errorf("malformed /proc stat: missing closing parenthesis")
-	}
-
-	remaining := data[commEnd+2:]
-	fieldParts := bytes.Split(remaining, []byte{' '})
-
-	// After ')' fields: state(0) ppid(1) pgrp(2) session(3) tty_nr(4) tpgid(5)
-	// flags(6) minflt(7) cminflt(8) majflt(9) cmajflt(10) utime(11) stime(12)
-	// cutime(13) cstime(14) priority(15) nice(16) num_threads(17)
-	// itrealvalue(18) starttime(19) - global field 22
-	if len(fieldParts) < 20 {
-		return 0, fmt.Errorf("malformed /proc stat: insufficient fields")
-	}
-
-	startTimeStr := bytes.TrimSpace(fieldParts[19])
-	procStartTime, err := strconv.ParseUint(string(startTimeStr), 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("malformed /proc stat: invalid starttime: %w", err)
-	}
-
-	return procStartTime, nil
-}
-
-// inspectProcessGone checks if the subject process with given PID and start time is gone.
 func inspectProcessGone(pid int, expectedStart uint64) (ProcessCleanupStatus, error) {
 	if pid <= 0 {
 		return ProcessUnavailable, fmt.Errorf("invalid PID: %d", pid)
@@ -1028,7 +956,9 @@ func buildVerifiedRunsFromRunData(
 			run.SubjectPID = pid
 			run.SubjectStartTime = startTime
 			run.ProcessCleanupStatus = ProcessGone // Producer verifies cleanup after each run
-			run.CleanupVerified = true
+			// P0-7 FIX: Use explicit cleanup fields
+			run.CleanupEvidenceLoaded = true
+			run.CleanupEvidenceValid = true
 		}
 
 		runs = append(runs, run)
@@ -1084,114 +1014,4 @@ func buildCleanupEvidence(runsDir string, declarations []MatrixRunDeclaration) *
 		NetworkOwnership: "per_run",
 		Runs:            records,
 	}
-}
-
-// verifyMatrixCommandCORRECTION02 implements the CORRECTION02 verify-matrix command.
-// This version uses ReconstructMatrixVerdict as single authority and compares
-// the reconstructed verdict against the stored verdict.
-func verifyMatrixCommandCORRECTION02(args []string) error {
-	fs := flag.NewFlagSet("memory-lab verify-matrix", flag.ContinueOnError)
-	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s verify-matrix [options]\n\nOptions:\n", args[0])
-		fs.PrintDefaults()
-	}
-
-	matrixDir := fs.String("matrix-dir", "", "Matrix directory (required)")
-
-	if err := fs.Parse(args[1:]); err != nil {
-		if err == flag.ErrHelp {
-			return nil
-		}
-		return fmt.Errorf("parse flags: %w", err)
-	}
-
-	if *matrixDir == "" {
-		return fmt.Errorf("--matrix-dir is required")
-	}
-
-	fmt.Printf("Verifying matrix at: %s\n", *matrixDir)
-
-	// 1. Verify matrix root geometry
-	fmt.Printf("  Checking root geometry...\n")
-	if err := ValidateMatrixRootGeometry(*matrixDir); err != nil {
-		return fmt.Errorf("root geometry: %w", err)
-	}
-	fmt.Printf("  Root geometry: PASS\n")
-
-	// 2. Load matrix manifest
-	fmt.Printf("  Loading matrix manifest...\n")
-	manifest, err := LoadMatrixManifest(filepath.Join(*matrixDir, "matrix-manifest.json"))
-	if err != nil {
-		return fmt.Errorf("load manifest: %w", err)
-	}
-
-	// 3. Load stored matrix verdict
-	fmt.Printf("  Loading stored matrix verdict...\n")
-	storedVerdict, err := LoadMatrixVerdict(filepath.Join(*matrixDir, "matrix-verdict.json"))
-	if err != nil {
-		return fmt.Errorf("load verdict: %w", err)
-	}
-
-	// 4. Load cleanup evidence
-	fmt.Printf("  Loading cleanup evidence...\n")
-	cleanup, err := LoadMatrixCleanupEvidence(filepath.Join(*matrixDir, "matrix-cleanup.json"))
-	if err != nil {
-		return fmt.Errorf("load cleanup evidence: %w", err)
-	}
-
-	// 5. Verify matrix-level checksums
-	fmt.Printf("  Checking matrix checksums...\n")
-	if err := ValidateMatrixChecksums(*matrixDir); err != nil {
-		return fmt.Errorf("matrix checksums: %w", err)
-	}
-	fmt.Printf("  Matrix checksums: PASS\n")
-
-	// 6. Build verified runs from matrix directory
-	// P0-1 FIX: Pass cleanup evidence so CleanupVerified and ProcessCleanupStatus are hydrated
-	fmt.Printf("  Building verified runs...\n")
-	verifiedRuns, err := BuildVerifiedRunsFromMatrix(*matrixDir, manifest, cleanup)
-	if err != nil {
-		return fmt.Errorf("build verified runs: %w", err)
-	}
-
-	// 7. Verify child checksums bound to manifest
-	fmt.Printf("  Checking child checksums bound to manifest...\n")
-	if err := ValidateChildChecksums(*matrixDir, manifest); err != nil {
-		return fmt.Errorf("child checksums: %w", err)
-	}
-	fmt.Printf("  Child checksums: PASS\n")
-
-	// 8. Reconstruct verdict using single authority
-	fmt.Printf("  Reconstructing verdict from artifacts...\n")
-	reconstructedVerdict, err := ReconstructMatrixVerdict(manifest, verifiedRuns, cleanup)
-	if err != nil {
-		return fmt.Errorf("reconstruct verdict: %w", err)
-	}
-
-	// 9. Compare reconstructed vs stored verdict
-	fmt.Printf("  Comparing reconstructed vs stored verdict...\n")
-	diffs := CompareVerdicts(storedVerdict, reconstructedVerdict)
-	if len(diffs) > 0 {
-		fmt.Printf("  VERDICT MISMATCH:\n")
-		for _, d := range diffs {
-			fmt.Printf("    %s: stored=%s reconstructed=%s\n", d.Path, d.Stored, d.Reconstructed)
-		}
-		return fmt.Errorf("stored verdict does not match reconstruction: %d differences found", len(diffs))
-	}
-	fmt.Printf("  Verdict comparison: PASS\n")
-
-	// 10. Fail-closed: reject if reconstructed verdict is invalid
-	if !reconstructedVerdict.MatrixValid {
-		return fmt.Errorf("reconstructed verdict is invalid: matrix validation failed")
-	}
-
-	fmt.Printf("\n=== Matrix Verification Results ===\n")
-	fmt.Printf("Matrix ID: %s\n", manifest.MatrixID)
-	fmt.Printf("Matrix Valid: %v\n", reconstructedVerdict.MatrixValid)
-	fmt.Printf("Checks Total: %d\n", reconstructedVerdict.ChecksTotal)
-	fmt.Printf("Checks Passed: %d\n", reconstructedVerdict.ChecksPassed)
-	fmt.Printf("Checks Failed: %d\n", reconstructedVerdict.ChecksFailed)
-	fmt.Printf("All Checks: PASS\n")
-
-	return nil
 }

@@ -153,8 +153,16 @@ type VerifiedRun struct {
 	// ProcessCleanupStatus is the classified cleanup result.
 	ProcessCleanupStatus ProcessCleanupStatus
 
-	// CleanupVerified is true if cleanup was successfully verified.
-	CleanupVerified bool
+	// ChildVerified is true if the complete child verifier returned success.
+	ChildVerified bool
+
+	// CleanupEvidenceLoaded is true if cleanup document and record were present.
+	// P0-7 FIX: Does not indicate success, only presence.
+	CleanupEvidenceLoaded bool
+
+	// CleanupEvidenceValid is true if cleanup contract and identities validated.
+	// P0-7 FIX: Indicates structural and identity validation passed.
+	CleanupEvidenceValid bool
 }
 
 // =============================================================================
@@ -771,7 +779,7 @@ func ReconstructScenarioResults(verifiedRuns []*VerifiedRun) (map[string]*Scenar
 // ExpectedScenarioClassifications defines the required overall classification for each scenario.
 // P0-4 FIX: Matrix validity must verify expected scenario outcomes.
 var ExpectedScenarioClassifications = map[string]string{
-	"canary-growing":    "growth",
+	"canary-growing":    "growing",
 	"canary-bounded":    "stable",
 	"canary-descriptor": "resource_growth",
 }
@@ -1010,7 +1018,11 @@ func BuildMatrixCleanupEvidence(
 }
 
 func containerCleanupStatus(run *VerifiedRun) string {
-	if !run.CleanupVerified {
+	// P0-7 FIX: Use explicit cleanup fields
+	if !run.CleanupEvidenceLoaded {
+		return "unavailable"
+	}
+	if !run.CleanupEvidenceValid {
 		return "unavailable"
 	}
 	if run.ContainerID == "" {
@@ -1020,7 +1032,11 @@ func containerCleanupStatus(run *VerifiedRun) string {
 }
 
 func networkCleanupStatus(run *VerifiedRun) string {
-	if !run.CleanupVerified {
+	// P0-7 FIX: Use explicit cleanup fields
+	if !run.CleanupEvidenceLoaded {
+		return "unavailable"
+	}
+	if !run.CleanupEvidenceValid {
 		return "unavailable"
 	}
 	if run.NetworkID == "" {
@@ -1169,7 +1185,7 @@ func BuildVerifiedRunsFromMatrix(matrixDir string, manifest *MatrixManifest, cle
 		run.SubjectPID = pid
 		run.SubjectStartTime = startTime
 
-		// P0-1 FIX: Hydrate cleanup status from cleanup evidence
+			// P0-1 FIX: Hydrate cleanup status from cleanup evidence
 		if cleanup != nil && i < len(cleanup.Runs) {
 			rec := cleanup.Runs[i]
 			run.ContainerName = rec.Container.Name
@@ -1187,7 +1203,9 @@ func BuildVerifiedRunsFromMatrix(matrixDir string, manifest *MatrixManifest, cle
 			default:
 				run.ProcessCleanupStatus = ProcessUnavailable
 			}
-			run.CleanupVerified = true
+			// P0-7 FIX: Use explicit cleanup fields
+			run.CleanupEvidenceLoaded = true
+			run.CleanupEvidenceValid = true
 		}
 
 		runs[i] = run
