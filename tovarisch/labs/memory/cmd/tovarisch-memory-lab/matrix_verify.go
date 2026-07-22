@@ -591,6 +591,75 @@ func validateRunCleanupRecord(rec RunCleanupRecord, run *VerifiedRun) bool {
 	return true
 }
 
+// =============================================================================
+// SHARED CHILD VERIFICATION HELPER
+// =============================================================================
+
+// VerifyDeclaredChildRuns authoritatively verifies all child bundles.
+// This is the single authority for child verification used by both:
+// - The matrix producer (before writing matrix-verdict.json)
+// - The matrix verifier (VerifyMatrixBundle)
+//
+// Returns verified runs with ChildVerified set from authoritative verification.
+// P0-8 FIX: ChildVerified must come from successful verification, not assertion.
+func VerifyDeclaredChildRuns(
+	matrixDir string,
+	manifest *MatrixManifest,
+	cleanup *MatrixCleanupEvidence,
+	verifyChild func(runDir string) (*VerifiedChildBundle, error),
+) ([]*VerifiedRun, error) {
+	runsDir := filepath.Join(matrixDir, "runs")
+	verifiedRuns := make([]*VerifiedRun, len(manifest.Runs))
+
+	for i, decl := range manifest.Runs {
+		runPath := filepath.Join(runsDir, decl.RunID)
+
+		// Authoritative child verification
+		child, err := verifyChild(runPath)
+		if err != nil {
+			return nil, fmt.Errorf("child verification for %s: %w", decl.Scenario, err)
+		}
+
+		// Build VerifiedRun from VerifiedChildBundle
+		vr := &VerifiedRun{
+			DeclaredRunID:     decl.RunID,
+			DeclaredScenario:  decl.Scenario,
+			RunIndex:          i,
+			ActualManifest:    child.Manifest,
+			ActualVerdict:    child.Verdict,
+			ContainerID:      child.ContainerID,
+			ContainerName:    child.ContainerName,
+			NetworkID:        child.NetworkID,
+			NetworkName:      child.NetworkName,
+			SubjectPID:       child.SubjectPID,
+			SubjectStartTime: child.SubjectStart,
+			ChildVerified:    child.ChecksVerified, // P0-8 FIX: From authoritative verification
+		}
+
+		// Hydrate cleanup status from cleanup evidence
+		if i < len(cleanup.Runs) {
+			rec := cleanup.Runs[i]
+			vr.CleanupEvidenceLoaded = true
+			vr.CleanupEvidenceValid = validateRunCleanupRecord(rec, vr)
+
+			switch rec.Process.Status {
+			case "gone":
+				vr.ProcessCleanupStatus = ProcessGone
+			case "pid_reused":
+				vr.ProcessCleanupStatus = ProcessPIDReused
+			case "still_alive":
+				vr.ProcessCleanupStatus = ProcessStillAlive
+			default:
+				vr.ProcessCleanupStatus = ProcessUnavailable
+			}
+		}
+
+		verifiedRuns[i] = vr
+	}
+
+	return verifiedRuns, nil
+}
+
 // validateCompleteCleanupEvidence performs full cleanup validation.
 func validateCompleteCleanupEvidence(manifest *MatrixManifest, runs []*VerifiedRun, cleanup *MatrixCleanupEvidence) error {
 	// 1. Schema version

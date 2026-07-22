@@ -10,6 +10,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1565,5 +1566,220 @@ func TestCompareVerdicts_DetectsEqualInvalidBothFalse(t *testing.T) {
 	diffs := CompareVerdicts(stored, reconstructed)
 	if len(diffs) != 0 {
 		t.Errorf("expected no differences for equal invalid verdicts, got %d", len(diffs))
+	}
+}
+
+// =============================================================================
+// TEST 39: Producer without child verification cannot produce valid verdict (P0-8 FIX)
+// =============================================================================
+
+// P0-8 FIX: Regression test proving producer must verify children before writing verdict.
+func TestProducerRequiresChildVerification_ForValidVerdict(t *testing.T) {
+	manifest := goodManifest()
+	cleanup := goodCleanupEvidence(manifest.MatrixID)
+
+	// Producer's preliminary runs (without authoritative child verification)
+	// P0-8 FIX: ChildVerified=false when NOT verified through VerifyDeclaredChildRuns
+	preliminaryRuns := []*VerifiedRun{
+		goodVerifiedRun(0, "canary-growing", "run-1"),
+		goodVerifiedRun(1, "canary-bounded", "run-2"),
+		goodVerifiedRun(2, "canary-descriptor", "run-3"),
+	}
+
+	// Simulate producer forgetting to verify children
+	for _, run := range preliminaryRuns {
+		run.ChildVerified = false // P0-8 FIX: This is what happens without VerifyDeclaredChildRuns
+	}
+
+	// Preliminary runs with ChildVerified=false cannot produce valid verdict
+	verdict, err := ReconstructMatrixVerdict(manifest, preliminaryRuns, cleanup)
+	if err != nil {
+		t.Fatalf("ReconstructMatrixVerdict failed: %v", err)
+	}
+
+	// P0-8 FIX: MatrixValid=false when children are not verified
+	if verdict.MatrixValid {
+		t.Error("P0-8: matrix should be INVALID when ChildVerified=false")
+	}
+}
+
+// =============================================================================
+// TEST 40: Producer with verified children produces valid verdict (P0-8 FIX)
+// =============================================================================
+
+// P0-8 FIX: Regression test proving verified children enable valid verdict.
+func TestProducerWithVerifiedChildren_ProducesValidVerdict(t *testing.T) {
+	manifest := goodManifest()
+	cleanup := goodCleanupEvidence(manifest.MatrixID)
+
+	// Producer's verified runs (after calling VerifyDeclaredChildRuns)
+	// P0-8 FIX: ChildVerified=true when verified through VerifyDeclaredChildRuns
+	verifiedRuns := []*VerifiedRun{
+		goodVerifiedRun(0, "canary-growing", "run-1"),
+		goodVerifiedRun(1, "canary-bounded", "run-2"),
+		goodVerifiedRun(2, "canary-descriptor", "run-3"),
+	}
+
+	// All children verified (as if from VerifyDeclaredChildRuns)
+	for _, run := range verifiedRuns {
+		run.ChildVerified = true
+	}
+
+	// Verified runs with ChildVerified=true can produce valid verdict
+	verdict, err := ReconstructMatrixVerdict(manifest, verifiedRuns, cleanup)
+	if err != nil {
+		t.Fatalf("ReconstructMatrixVerdict failed: %v", err)
+	}
+
+	// P0-8 FIX: MatrixValid=true when all children are verified
+	if !verdict.MatrixValid {
+		t.Error("P0-8: matrix should be VALID when all children verified")
+	}
+
+	// Verify all scenario results have Verified=true
+	for scenario, result := range verdict.ScenarioResults {
+		if !result.Verified {
+			t.Errorf("P0-8: scenario %s should have Verified=true", scenario)
+		}
+	}
+}
+
+// =============================================================================
+// TEST 41: One child verification failure prevents valid verdict (P0-8 FIX)
+// =============================================================================
+
+// P0-8 FIX: Regression test proving partial verification fails.
+func TestOneChildVerificationFailure_InvalidatesVerdict(t *testing.T) {
+	manifest := goodManifest()
+	cleanup := goodCleanupEvidence(manifest.MatrixID)
+
+	// Producer's verified runs with one child failing verification
+	verifiedRuns := []*VerifiedRun{
+		goodVerifiedRun(0, "canary-growing", "run-1"),
+		goodVerifiedRun(1, "canary-bounded", "run-2"),
+		goodVerifiedRun(2, "canary-descriptor", "run-3"),
+	}
+
+	// One child fails verification (as if from failed VerifyDeclaredChildRuns)
+	verifiedRuns[1].ChildVerified = false // canary-bounded failed
+
+	verdict, err := ReconstructMatrixVerdict(manifest, verifiedRuns, cleanup)
+	if err != nil {
+		t.Fatalf("ReconstructMatrixVerdict failed: %v", err)
+	}
+
+	// P0-8 FIX: MatrixValid=false when not all children are verified
+	if verdict.MatrixValid {
+		t.Error("P0-8: matrix should be INVALID when one child not verified")
+	}
+
+	// canary-bounded should have Verified=false
+	if verdict.ScenarioResults["canary-bounded"].Verified {
+		t.Error("P0-8: canary-bounded should have Verified=false")
+	}
+}
+
+// =============================================================================
+// TEST 42: Stored verdict matches reconstructed verdict (P0-8 FIX)
+// =============================================================================
+
+// P0-8 FIX: Regression test proving stored and reconstructed verdicts converge.
+func TestStoredVerdictMatchesReconstructed_AfterChildVerification(t *testing.T) {
+	manifest := goodManifest()
+	cleanup := goodCleanupEvidence(manifest.MatrixID)
+
+	// Verified runs (from VerifyDeclaredChildRuns)
+	verifiedRuns := []*VerifiedRun{
+		goodVerifiedRun(0, "canary-growing", "run-1"),
+		goodVerifiedRun(1, "canary-bounded", "run-2"),
+		goodVerifiedRun(2, "canary-descriptor", "run-3"),
+	}
+
+	// Reconstruct verdict (simulates producer writing matrix-verdict.json)
+	storedVerdict, err := ReconstructMatrixVerdict(manifest, verifiedRuns, cleanup)
+	if err != nil {
+		t.Fatalf("ReconstructMatrixVerdict failed: %v", err)
+	}
+
+	// Re-reconstruct verdict (simulates VerifyMatrixBundle)
+	reconstructedVerdict, err := ReconstructMatrixVerdict(manifest, verifiedRuns, cleanup)
+	if err != nil {
+		t.Fatalf("ReconstructMatrixVerdict failed: %v", err)
+	}
+
+	// P0-8 FIX: No differences between stored and reconstructed
+	diffs := CompareVerdicts(storedVerdict, reconstructedVerdict)
+	if len(diffs) > 0 {
+		t.Errorf("P0-8: expected no differences, got %d: %v", len(diffs), diffs)
+	}
+
+	// Both should be valid
+	if !storedVerdict.MatrixValid {
+		t.Error("P0-8: stored verdict should be valid")
+	}
+	if !reconstructedVerdict.MatrixValid {
+		t.Error("P0-8: reconstructed verdict should be valid")
+	}
+}
+
+// =============================================================================
+// TEST 43: VerifyDeclaredChildRuns sets ChildVerified from verification (P0-8 FIX)
+// =============================================================================
+
+// P0-8 FIX: Test that VerifyDeclaredChildRuns properly propagates ChildVerified.
+func TestVerifyDeclaredChildRuns_SetsChildVerifiedCorrectly(t *testing.T) {
+	// Create a mock verification function that succeeds
+	successVerify := func(runDir string) (*VerifiedChildBundle, error) {
+		return &VerifiedChildBundle{
+			Manifest: &evidence.Manifest{
+				SchemaVersion: "1.1.0",
+				RunID:        "test-run",
+				Scenario:     "canary-growing",
+			},
+			Verdict:        &evidence.Verdict{},
+			ContainerID:    "test-container",
+			SubjectPID:     12345,
+			SubjectStart:   1234567890,
+			ChecksVerified: true,
+		}, nil
+	}
+
+	// Create a mock verification function that fails
+	failVerify := func(runDir string) (*VerifiedChildBundle, error) {
+		return nil, fmt.Errorf("verification failed")
+	}
+
+	// Test with all-succeeding verification
+	manifest := &MatrixManifest{
+		MatrixID: "test-matrix",
+		Runs: []MatrixRunDeclaration{
+			{Index: 1, Scenario: "canary-growing", RunID: "run-1", Path: "runs/run-1"},
+		},
+	}
+	cleanup := &MatrixCleanupEvidence{
+		SchemaVersion:    "1.0.0",
+		MatrixID:        "test-matrix",
+		NetworkOwnership: "per_run",
+		Runs: []RunCleanupRecord{
+			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
+		},
+	}
+
+	// Test with succeeding verification
+	runs, err := VerifyDeclaredChildRuns("/tmp", manifest, cleanup, successVerify)
+	if err != nil {
+		t.Fatalf("VerifyDeclaredChildRuns failed: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
+	}
+	if !runs[0].ChildVerified {
+		t.Error("P0-8: ChildVerified should be true for successful verification")
+	}
+
+	// Test with failing verification
+	_, err = VerifyDeclaredChildRuns("/tmp", manifest, cleanup, failVerify)
+	if err == nil {
+		t.Error("P0-8: VerifyDeclaredChildRuns should fail when child verification fails")
 	}
 }

@@ -328,9 +328,17 @@ func matrixCommand(args []string) error {
 		return fmt.Errorf("write cleanup evidence: %w", err)
 	}
 
-	// Step 9: Use ReconstructMatrixVerdict for initial verdict (writes don't exist yet)
-	// CORRECTION03: Reconstruct from observed state first
-	verdict, err := ReconstructMatrixVerdict(matrixManifest, preliminaryRuns, cleanupEvidence)
+	// Step 9: Authoritatively verify all child bundles BEFORE writing verdict
+	// P0-8 FIX: ChildVerified must come from authoritative verification, not assertion.
+	// This ensures the stored verdict matches what VerifyMatrixBundle will reconstruct.
+	verifiedRuns, err := VerifyDeclaredChildRuns(matrixDir, matrixManifest, cleanupEvidence, verifyChildRunBundle)
+	if err != nil {
+		return fmt.Errorf("authoritative child verification: %w", err)
+	}
+
+	// Step 10: Use ReconstructMatrixVerdict for initial verdict (now with verified children)
+	// CORRECTION03: Reconstruct from verified state - all children are now verified
+	verdict, err := ReconstructMatrixVerdict(matrixManifest, verifiedRuns, cleanupEvidence)
 	if err != nil {
 		return fmt.Errorf("reconstruct matrix verdict: %w", err)
 	}
