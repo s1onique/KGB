@@ -251,6 +251,7 @@ func goodVerifiedRun(index int, scenario, runID string) *VerifiedRun {
 		SubjectPID:          pids[idx],
 		SubjectStartTime:    startTimes[idx],
 		ProcessCleanupStatus: ProcessGone,
+		ChildVerified:      true, // P0-8 FIX: Valid runs are verified
 		CleanupEvidenceLoaded: true,
 		CleanupEvidenceValid: true,
 	}
@@ -716,28 +717,32 @@ func TestReconstructMatrixVerdict_ResourceClassificationStored(t *testing.T) {
 }
 
 // =============================================================================
-// TEST 13: ScenarioResult.Verified based on schema version
+// TEST 13: ScenarioResult.Verified based on ChildVerified flag (P0-8 FIX)
 // =============================================================================
 
-func TestReconstructScenarioResults_SetsVerifiedFromSchemaVersion(t *testing.T) {
+func TestReconstructScenarioResults_SetsVerifiedFromChildVerified(t *testing.T) {
+	// P0-8 FIX: Verified field now comes from ChildVerified, not schema version.
 	verifiedRuns := []*VerifiedRun{
 		{
 			DeclaredRunID:    "run-1",
 			DeclaredScenario: "canary-growing",
 			ActualManifest:   &evidence.Manifest{SchemaVersion: "1.1.0"},
 			ActualVerdict:    &evidence.Verdict{},
+			ChildVerified:   true, // Verified via complete child bundle verification
 		},
 		{
 			DeclaredRunID:    "run-2",
 			DeclaredScenario: "canary-bounded",
-			ActualManifest:   &evidence.Manifest{SchemaVersion: "1.0.0"}, // Wrong version
+			ActualManifest:   &evidence.Manifest{SchemaVersion: "1.0.0"},
 			ActualVerdict:    &evidence.Verdict{},
+			ChildVerified:   false, // Failed child verification
 		},
 		{
 			DeclaredRunID:    "run-3",
 			DeclaredScenario: "canary-descriptor",
 			ActualManifest:   &evidence.Manifest{SchemaVersion: "1.1.0"},
 			ActualVerdict:    &evidence.Verdict{},
+			ChildVerified:   true, // Verified via complete child bundle verification
 		},
 	}
 
@@ -746,14 +751,15 @@ func TestReconstructScenarioResults_SetsVerifiedFromSchemaVersion(t *testing.T) 
 		t.Fatalf("ReconstructScenarioResults failed: %v", err)
 	}
 
+	// Verified is based on ChildVerified flag, not schema version
 	if results["canary-growing"].Verified != true {
-		t.Error("canary-growing should be verified (schema 1.1.0)")
+		t.Error("canary-growing should be verified (ChildVerified=true)")
 	}
 	if results["canary-bounded"].Verified != false {
-		t.Error("canary-bounded should not be verified (schema 1.0.0)")
+		t.Error("canary-bounded should not be verified (ChildVerified=false)")
 	}
 	if results["canary-descriptor"].Verified != true {
-		t.Error("canary-descriptor should be verified (schema 1.1.0)")
+		t.Error("canary-descriptor should be verified (ChildVerified=true)")
 	}
 }
 

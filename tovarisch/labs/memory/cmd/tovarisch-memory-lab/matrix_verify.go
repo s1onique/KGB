@@ -521,13 +521,8 @@ func VerifyMatrixBundle(
 		return nil, errors.New("reconstructed matrix verdict is invalid")
 	}
 
-	// P0-8 FIX: Wire ChildVerified into scenario result
-	// 11. Update scenario results with ChildVerified flag
-	for i, vr := range verifiedRuns {
-		if i < len(result.ReconstructedVerdict.ScenarioResults) {
-			result.ReconstructedVerdict.ScenarioResults[vr.DeclaredScenario].Verified = vr.ChildVerified
-		}
-	}
+	// P0-8 FIX: ChildVerified is now set during ReconstructScenarioResults.
+	// NO post-comparison mutation - the reconstructed verdict is immutable after comparison.
 
 	return result, nil
 }

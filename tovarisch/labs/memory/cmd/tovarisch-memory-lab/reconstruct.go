@@ -752,14 +752,12 @@ func ReconstructScenarioResults(verifiedRuns []*VerifiedRun) (map[string]*Scenar
 			return nil, fmt.Errorf("run %s has no verdict for result reconstruction", run.DeclaredRunID)
 		}
 
-		// CORRECTION02: Store the child's OVERALL classification, not memory.
-		// The contract specifies:
-		// - canary-growing: overall=growth
-		// - canary-bounded: overall=stable
-		// - canary-descriptor: overall=resource_growth
+		// P0-8 FIX: Verified field comes from authoritative child verification.
+		// The ChildVerified flag is set by the complete child bundle verifier,
+		// not derived from schema version (which is not authoritative).
 		result := &ScenarioResult{
 			RunID:    run.DeclaredRunID,
-			Verified: run.ActualManifest.SchemaVersion == "1.1.0",
+			Verified: run.ChildVerified,
 			Overall:  string(run.ActualVerdict.OverallClassification),
 			Memory:   string(run.ActualVerdict.MemoryClassification),
 			Resource: string(run.ActualVerdict.ResourceClassification),
@@ -834,8 +832,21 @@ func ReconstructMatrixVerdict(
 	// Compute check counts from canonical projection
 	checksTotal, checksPassed, checksFailed := CountCanonicalChecks(crossRunChecks)
 
-	// P0-9 FIX: Matrix valid if ALL checks pass AND all four classification fields match
-	matrixValid := checksFailed == 0 && scenarioClassificationsValid
+	// P0-8 FIX: All children must be verified for matrix to be valid.
+	// ScenarioResult.Verified is set during reconstruction from ChildVerified.
+	allChildrenVerified := true
+	for _, run := range verifiedRuns {
+		if !run.ChildVerified {
+			allChildrenVerified = false
+			break
+		}
+	}
+
+	// P0-8/9 FIX: Matrix valid if ALL conditions met:
+	// 1. All children verified (child verification authority)
+	// 2. All cross-run checks pass
+	// 3. All four classification fields match expected values
+	matrixValid := allChildrenVerified && checksFailed == 0 && scenarioClassificationsValid
 
 	verdict := &MatrixVerdict{
 		MatrixID:        matrixManifest.MatrixID,
