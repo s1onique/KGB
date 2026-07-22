@@ -2308,3 +2308,19 @@ func TestVerifyDeclaredChildRuns_PanicGuard_FourRuns(t *testing.T) {
 		t.Errorf("P0-8: expected 'expected exactly 3' error, got: %v", err)
 	}
 }
+
+// =============================================================================
+// PACKAGE INVARIANTS - P1 Authority Convergence
+// =============================================================================
+
+// TestCanonicalScenarioOrderHasThreeEntries documents the package contract.
+// This test ensures VerifyDeclaredChildRuns cannot drift from the canonical scenario count.
+// If CanonicalScenarioOrder changes, this test will fail and force a review of all geometry-dependent code.
+func TestCanonicalScenarioOrderHasThreeEntries(t *testing.T) {
+	if got := len(CanonicalScenarioOrder); got != 3 {
+		t.Fatalf(
+			"canonical scenario count = %d, expected 3",
+			got,
+		)
+	}
+}

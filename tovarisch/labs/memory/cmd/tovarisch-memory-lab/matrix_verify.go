@@ -585,9 +585,9 @@ func VerifyDeclaredChildRuns(
 	}
 
 	// FAIL-CLOSED: Matrix geometry validation
-	// P0-8 FIX: Require exactly 3 runs BEFORE indexing CanonicalScenarioOrder (panic guard)
-	// P1 FIX: Use package-level CanonicalScenarioOrder for single authority
-	const expectedRunCount = 3
+	// P0-8 FIX: Require exactly CanonicalScenarioOrder entries BEFORE indexing (panic guard)
+	// P1 FIX: Derive count from slice itself - single authority for count and order
+	expectedRunCount := len(CanonicalScenarioOrder)
 
 	// Validate manifest run count
 	if len(manifest.Runs) != expectedRunCount {
@@ -608,7 +608,7 @@ func VerifyDeclaredChildRuns(
 	}
 
 	// Validate run order, indices, and paths
-	// P1 FIX: Use package-level CanonicalScenarioOrder for single authority
+	// P1 FIX: Use package-level CanonicalScenarioOrder for single authority (count and order)
 	seenRunIDs := make(map[string]bool)
 	for i, decl := range manifest.Runs {
 		expectedScenario := CanonicalScenarioOrder[i]
