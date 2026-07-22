@@ -973,6 +973,28 @@ func CompareVerdicts(stored, reconstructed *MatrixVerdict) []VerdictDiff {
 				Reconstructed: rr.Overall,
 			})
 		}
+		// P0-9 FIX: Compare all four classification fields
+		if sr.Memory != rr.Memory {
+			diffs = append(diffs, VerdictDiff{
+				Path:          fmt.Sprintf("scenario_results.%s.memory", s),
+				Stored:        sr.Memory,
+				Reconstructed: rr.Memory,
+			})
+		}
+		if sr.Resource != rr.Resource {
+			diffs = append(diffs, VerdictDiff{
+				Path:          fmt.Sprintf("scenario_results.%s.resource", s),
+				Stored:        sr.Resource,
+				Reconstructed: rr.Resource,
+			})
+		}
+		if sr.Semantic != rr.Semantic {
+			diffs = append(diffs, VerdictDiff{
+				Path:          fmt.Sprintf("scenario_results.%s.semantic", s),
+				Stored:        sr.Semantic,
+				Reconstructed: rr.Semantic,
+			})
+		}
 	}
 
 	// Cross-run checks - compare every canonical boolean

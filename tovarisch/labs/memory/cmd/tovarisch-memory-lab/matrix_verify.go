@@ -499,6 +499,36 @@ func VerifyMatrixBundle(
 	}
 	result.ReconstructedVerdict = reconstructed
 
+	// P0-5 FIX: Complete terminal enforcement inside VerifyMatrixBundle
+	// 7. Compare stored and reconstructed verdicts - reject any difference
+	diffs := CompareVerdicts(result.StoredVerdict, result.ReconstructedVerdict)
+	if len(diffs) > 0 {
+		return nil, fmt.Errorf("stored verdict does not match reconstruction:\n%s", FormatVerdictDiffs(diffs))
+	}
+
+	// 8. Fail-closed: reject if not all children verified
+	if !result.AllChildrenVerified {
+		return nil, errors.New("not all child bundles verified")
+	}
+
+	// 9. Fail-closed: reject if cleanup invalid
+	if !result.CleanupValid {
+		return nil, errors.New("cleanup evidence invalid")
+	}
+
+	// 10. Fail-closed: reject if reconstructed verdict is invalid
+	if !result.ReconstructedVerdict.MatrixValid {
+		return nil, errors.New("reconstructed matrix verdict is invalid")
+	}
+
+	// P0-8 FIX: Wire ChildVerified into scenario result
+	// 11. Update scenario results with ChildVerified flag
+	for i, vr := range verifiedRuns {
+		if i < len(result.ReconstructedVerdict.ScenarioResults) {
+			result.ReconstructedVerdict.ScenarioResults[vr.DeclaredScenario].Verified = vr.ChildVerified
+		}
+	}
+
 	return result, nil
 }
 
