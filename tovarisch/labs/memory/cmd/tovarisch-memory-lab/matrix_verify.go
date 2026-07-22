@@ -585,32 +585,33 @@ func VerifyDeclaredChildRuns(
 	}
 
 	// FAIL-CLOSED: Matrix geometry validation
-	// P0-8 FIX: Require exactly 3 runs BEFORE indexing expectedOrder (panic guard)
-	canonicalScenarioOrder := []string{"canary-growing", "canary-bounded", "canary-descriptor"}
+	// P0-8 FIX: Require exactly 3 runs BEFORE indexing CanonicalScenarioOrder (panic guard)
+	// P1 FIX: Use package-level CanonicalScenarioOrder for single authority
+	const expectedRunCount = 3
 
 	// Validate manifest run count
-	if len(manifest.Runs) != len(canonicalScenarioOrder) {
+	if len(manifest.Runs) != expectedRunCount {
 		return nil, fmt.Errorf(
 			"expected exactly %d declared runs, got %d",
-			len(canonicalScenarioOrder),
+			expectedRunCount,
 			len(manifest.Runs),
 		)
 	}
 
 	// Validate cleanup run count
-	if len(cleanup.Runs) != len(canonicalScenarioOrder) {
+	if len(cleanup.Runs) != expectedRunCount {
 		return nil, fmt.Errorf(
 			"expected exactly %d cleanup records, got %d",
-			len(canonicalScenarioOrder),
+			expectedRunCount,
 			len(cleanup.Runs),
 		)
 	}
 
 	// Validate run order, indices, and paths
-	// Safe to index canonicalScenarioOrder now that count is validated
+	// P1 FIX: Use package-level CanonicalScenarioOrder for single authority
 	seenRunIDs := make(map[string]bool)
 	for i, decl := range manifest.Runs {
-		expectedScenario := canonicalScenarioOrder[i]
+		expectedScenario := CanonicalScenarioOrder[i]
 		if decl.Scenario != expectedScenario {
 			return nil, fmt.Errorf(
 				"run[%d] has wrong scenario %q, expected %q",
