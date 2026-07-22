@@ -1733,10 +1733,10 @@ func TestVerifyDeclaredChildRuns_SetsChildVerifiedCorrectly(t *testing.T) {
 		return &VerifiedChildBundle{
 			Manifest: &evidence.Manifest{
 				SchemaVersion: "1.1.0",
-				RunID:        "test-run",
+				RunID:        "run-1",
 				Scenario:     "canary-growing",
 			},
-			Verdict:        &evidence.Verdict{},
+			Verdict:        &evidence.Verdict{Scenario: "canary-growing"},
 			ContainerID:    "test-container",
 			SubjectPID:     12345,
 			SubjectStart:   1234567890,
@@ -1781,5 +1781,200 @@ func TestVerifyDeclaredChildRuns_SetsChildVerifiedCorrectly(t *testing.T) {
 	_, err = VerifyDeclaredChildRuns("/tmp", manifest, cleanup, failVerify)
 	if err == nil {
 		t.Error("P0-8: VerifyDeclaredChildRuns should fail when child verification fails")
+	}
+}
+
+// =============================================================================
+// TEST 44: VerifyDeclaredChildRuns rejects nil manifest (P0-8 FIX)
+// =============================================================================
+
+func TestVerifyDeclaredChildRuns_RejectsNilManifest(t *testing.T) {
+	verifyFn := func(runDir string) (*VerifiedChildBundle, error) {
+		return &VerifiedChildBundle{}, nil
+	}
+	cleanup := &MatrixCleanupEvidence{}
+
+	_, err := VerifyDeclaredChildRuns("/tmp", nil, cleanup, verifyFn)
+	if err == nil {
+		t.Error("P0-8: should reject nil manifest")
+	}
+	if err != nil && err.Error() != "matrix manifest is nil" {
+		t.Errorf("P0-8: expected 'matrix manifest is nil' error, got: %v", err)
+	}
+}
+
+// =============================================================================
+// TEST 45: VerifyDeclaredChildRuns rejects nil cleanup (P0-8 FIX)
+// =============================================================================
+
+func TestVerifyDeclaredChildRuns_RejectsNilCleanup(t *testing.T) {
+	verifyFn := func(runDir string) (*VerifiedChildBundle, error) {
+		return &VerifiedChildBundle{}, nil
+	}
+	manifest := &MatrixManifest{}
+
+	_, err := VerifyDeclaredChildRuns("/tmp", manifest, nil, verifyFn)
+	if err == nil {
+		t.Error("P0-8: should reject nil cleanup")
+	}
+	if err != nil && err.Error() != "cleanup evidence is nil" {
+		t.Errorf("P0-8: expected 'cleanup evidence is nil' error, got: %v", err)
+	}
+}
+
+// =============================================================================
+// TEST 46: VerifyDeclaredChildRuns rejects nil verifier (P0-8 FIX)
+// =============================================================================
+
+func TestVerifyDeclaredChildRuns_RejectsNilVerifier(t *testing.T) {
+	manifest := &MatrixManifest{}
+	cleanup := &MatrixCleanupEvidence{}
+
+	_, err := VerifyDeclaredChildRuns("/tmp", manifest, cleanup, nil)
+	if err == nil {
+		t.Error("P0-8: should reject nil verifier")
+	}
+	if err != nil && err.Error() != "child verifier is nil" {
+		t.Errorf("P0-8: expected 'child verifier is nil' error, got: %v", err)
+	}
+}
+
+// =============================================================================
+// TEST 47: VerifyDeclaredChildRuns rejects nil child bundle (P0-8 FIX)
+// =============================================================================
+
+func TestVerifyDeclaredChildRuns_RejectsNilChildBundle(t *testing.T) {
+	nilBundleVerify := func(runDir string) (*VerifiedChildBundle, error) {
+		return nil, nil // Returns nil with no error
+	}
+
+	manifest := &MatrixManifest{
+		Runs: []MatrixRunDeclaration{
+			{Index: 1, Scenario: "canary-growing", RunID: "run-1"},
+		},
+	}
+	cleanup := &MatrixCleanupEvidence{
+		Runs: []RunCleanupRecord{
+			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
+		},
+	}
+
+	_, err := VerifyDeclaredChildRuns("/tmp", manifest, cleanup, nilBundleVerify)
+	if err == nil {
+		t.Error("P0-8: should reject nil child bundle")
+	}
+	if err != nil && !strings.Contains(err.Error(), "nil bundle") {
+		t.Errorf("P0-8: expected nil bundle error, got: %v", err)
+	}
+}
+
+// =============================================================================
+// TEST 48: VerifyDeclaredChildRuns rejects ChecksVerified=false (P0-8 FIX)
+// =============================================================================
+
+func TestVerifyDeclaredChildRuns_RejectsUnverifiedBundle(t *testing.T) {
+	unverifiedVerify := func(runDir string) (*VerifiedChildBundle, error) {
+		return &VerifiedChildBundle{
+			Manifest: &evidence.Manifest{
+				SchemaVersion: "1.1.0",
+				RunID:        "run-1",
+				Scenario:     "canary-growing",
+			},
+			Verdict:        &evidence.Verdict{Scenario: "canary-growing"},
+			ChecksVerified: false, // NOT verified
+		}, nil
+	}
+
+	manifest := &MatrixManifest{
+		Runs: []MatrixRunDeclaration{
+			{Index: 1, Scenario: "canary-growing", RunID: "run-1"},
+		},
+	}
+	cleanup := &MatrixCleanupEvidence{
+		Runs: []RunCleanupRecord{
+			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
+		},
+	}
+
+	_, err := VerifyDeclaredChildRuns("/tmp", manifest, cleanup, unverifiedVerify)
+	if err == nil {
+		t.Error("P0-8: should reject bundle with ChecksVerified=false")
+	}
+	if err != nil && !strings.Contains(err.Error(), "not verified") {
+		t.Errorf("P0-8: expected not verified error, got: %v", err)
+	}
+}
+
+// =============================================================================
+// TEST 49: VerifyDeclaredChildRuns validates RunID binding (P0-8 FIX)
+// =============================================================================
+
+func TestVerifyDeclaredChildRuns_RejectsRunIDMismatch(t *testing.T) {
+	mismatchVerify := func(runDir string) (*VerifiedChildBundle, error) {
+		return &VerifiedChildBundle{
+			Manifest: &evidence.Manifest{
+				SchemaVersion: "1.1.0",
+				RunID:        "wrong-run-id", // Does NOT match declaration
+				Scenario:     "canary-growing",
+			},
+			Verdict:        &evidence.Verdict{Scenario: "canary-growing"},
+			ChecksVerified: true,
+		}, nil
+	}
+
+	manifest := &MatrixManifest{
+		Runs: []MatrixRunDeclaration{
+			{Index: 1, Scenario: "canary-growing", RunID: "run-1"}, // Expects run-1
+		},
+	}
+	cleanup := &MatrixCleanupEvidence{
+		Runs: []RunCleanupRecord{
+			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
+		},
+	}
+
+	_, err := VerifyDeclaredChildRuns("/tmp", manifest, cleanup, mismatchVerify)
+	if err == nil {
+		t.Error("P0-8: should reject RunID mismatch")
+	}
+	if err != nil && !strings.Contains(err.Error(), "RunID mismatch") {
+		t.Errorf("P0-8: expected RunID mismatch error, got: %v", err)
+	}
+}
+
+// =============================================================================
+// TEST 50: VerifyDeclaredChildRuns validates scenario binding (P0-8 FIX)
+// =============================================================================
+
+func TestVerifyDeclaredChildRuns_RejectsScenarioMismatch(t *testing.T) {
+	mismatchVerify := func(runDir string) (*VerifiedChildBundle, error) {
+		return &VerifiedChildBundle{
+			Manifest: &evidence.Manifest{
+				SchemaVersion: "1.1.0",
+				RunID:        "run-1",
+				Scenario:     "wrong-scenario", // Does NOT match declaration
+			},
+			Verdict:        &evidence.Verdict{Scenario: "wrong-scenario"},
+			ChecksVerified: true,
+		}, nil
+	}
+
+	manifest := &MatrixManifest{
+		Runs: []MatrixRunDeclaration{
+			{Index: 1, Scenario: "canary-growing", RunID: "run-1"},
+		},
+	}
+	cleanup := &MatrixCleanupEvidence{
+		Runs: []RunCleanupRecord{
+			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
+		},
+	}
+
+	_, err := VerifyDeclaredChildRuns("/tmp", manifest, cleanup, mismatchVerify)
+	if err == nil {
+		t.Error("P0-8: should reject scenario mismatch")
+	}
+	if err != nil && !strings.Contains(err.Error(), "scenario mismatch") {
+		t.Errorf("P0-8: expected scenario mismatch error, got: %v", err)
 	}
 }

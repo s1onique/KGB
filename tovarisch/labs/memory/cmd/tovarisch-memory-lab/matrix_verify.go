@@ -426,65 +426,20 @@ func VerifyMatrixBundle(
 	}
 	result.Cleanup = &cleanup
 
-	// 4. Authoritative verification of every child bundle
-	runsDir := filepath.Join(matrixDir, "runs")
-	verifiedRuns := make([]*VerifiedRun, len(manifest.Runs))
-	allVerified := true
-
+	// 4. Authoritative verification of every child bundle using shared helper
+	// P0-8 FIX: Use VerifyDeclaredChildRuns for single authority
 	verifyFn := deps.VerifyChildRun
 	if verifyFn == nil {
 		verifyFn = verifyChildRunBundle
 	}
 
-	for i, decl := range manifest.Runs {
-		runPath := filepath.Join(runsDir, decl.RunID)
-		child, err := verifyFn(runPath)
-		if err != nil {
-			return nil, fmt.Errorf("child verification for %s: %w", decl.Scenario, err)
-		}
-
-		// Construct VerifiedRun from VerifiedChildBundle
-		vr := &VerifiedRun{
-			DeclaredRunID:     decl.RunID,
-			DeclaredScenario:  decl.Scenario,
-			RunIndex:          i,
-			ActualManifest:    child.Manifest,
-			ActualVerdict:    child.Verdict,
-			ContainerID:      child.ContainerID,
-			ContainerName:    child.ContainerName,
-			NetworkID:        child.NetworkID,
-			NetworkName:      child.NetworkName,
-			SubjectPID:       child.SubjectPID,
-			SubjectStartTime: child.SubjectStart,
-			ChildVerified:    child.ChecksVerified,
-		}
-
-		// Hydrate cleanup status from cleanup evidence
-		if i < len(cleanup.Runs) {
-			rec := cleanup.Runs[i]
-			vr.CleanupEvidenceLoaded = true
-			vr.CleanupEvidenceValid = validateRunCleanupRecord(rec, vr)
-
-			switch rec.Process.Status {
-			case "gone":
-				vr.ProcessCleanupStatus = ProcessGone
-			case "pid_reused":
-				vr.ProcessCleanupStatus = ProcessPIDReused
-			case "still_alive":
-				vr.ProcessCleanupStatus = ProcessStillAlive
-			default:
-				vr.ProcessCleanupStatus = ProcessUnavailable
-			}
-		}
-
-		if !vr.ChildVerified {
-			allVerified = false
-		}
-
-		verifiedRuns[i] = vr
+	verifiedRuns, err := VerifyDeclaredChildRuns(matrixDir, &manifest, &cleanup, verifyFn)
+	if err != nil {
+		return nil, fmt.Errorf("child bundle verification: %w", err)
 	}
+
 	result.VerifiedRuns = verifiedRuns
-	result.AllChildrenVerified = allVerified
+	result.AllChildrenVerified = true // VerifyDeclaredChildRuns ensures all pass
 
 	// 5. Validate cleanup evidence against manifest and verified runs
 	if err := validateCompleteCleanupEvidence(&manifest, verifiedRuns, &cleanup); err != nil {
@@ -602,12 +557,31 @@ func validateRunCleanupRecord(rec RunCleanupRecord, run *VerifiedRun) bool {
 //
 // Returns verified runs with ChildVerified set from authoritative verification.
 // P0-8 FIX: ChildVerified must come from successful verification, not assertion.
+//
+// FAIL-CLOSED INPUT VALIDATION:
+// - Rejects nil manifest, cleanup, or verifyChild
+// - Rejects nil child bundles or bundles with ChecksVerified=false
+// - Validates declaration-to-child binding (RunID and scenario)
+//
+// This ensures the helper cannot be called with invalid state or produce
+// partially-verified results that later fail at matrix level.
 func VerifyDeclaredChildRuns(
 	matrixDir string,
 	manifest *MatrixManifest,
 	cleanup *MatrixCleanupEvidence,
 	verifyChild func(runDir string) (*VerifiedChildBundle, error),
 ) ([]*VerifiedRun, error) {
+	// FAIL-CLOSED: Input validation
+	if manifest == nil {
+		return nil, errors.New("matrix manifest is nil")
+	}
+	if cleanup == nil {
+		return nil, errors.New("cleanup evidence is nil")
+	}
+	if verifyChild == nil {
+		return nil, errors.New("child verifier is nil")
+	}
+
 	runsDir := filepath.Join(matrixDir, "runs")
 	verifiedRuns := make([]*VerifiedRun, len(manifest.Runs))
 
@@ -618,6 +592,45 @@ func VerifyDeclaredChildRuns(
 		child, err := verifyChild(runPath)
 		if err != nil {
 			return nil, fmt.Errorf("child verification for %s: %w", decl.Scenario, err)
+		}
+
+		// FAIL-CLOSED: Reject nil bundle
+		if child == nil {
+			return nil, fmt.Errorf("child verifier returned nil bundle for %s", decl.Scenario)
+		}
+
+		// FAIL-CLOSED: Reject unverified bundle
+		// A successful return means ALL children verified
+		if !child.ChecksVerified {
+			return nil, fmt.Errorf("child bundle %s was not verified (ChecksVerified=false)", decl.Scenario)
+		}
+
+		// FAIL-CLOSED: Reject nil manifest or verdict in bundle
+		if child.Manifest == nil {
+			return nil, fmt.Errorf("child bundle %s has nil manifest", decl.Scenario)
+		}
+		if child.Verdict == nil {
+			return nil, fmt.Errorf("child bundle %s has nil verdict", decl.Scenario)
+		}
+
+		// DECLARATION-TO-CHILD BINDING: Verify RunID and scenario match
+		if child.Manifest.RunID != decl.RunID {
+			return nil, fmt.Errorf(
+				"child bundle RunID mismatch: manifest has %q, declaration expects %q",
+				child.Manifest.RunID, decl.RunID,
+			)
+		}
+		if child.Manifest.Scenario != decl.Scenario {
+			return nil, fmt.Errorf(
+				"child bundle scenario mismatch: manifest has %q, declaration expects %q",
+				child.Manifest.Scenario, decl.Scenario,
+			)
+		}
+		if child.Verdict.Scenario != decl.Scenario {
+			return nil, fmt.Errorf(
+				"child verdict scenario mismatch: verdict has %q, declaration expects %q",
+				child.Verdict.Scenario, decl.Scenario,
+			)
 		}
 
 		// Build VerifiedRun from VerifiedChildBundle
