@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/evidence"
@@ -584,26 +585,36 @@ func VerifyDeclaredChildRuns(
 	}
 
 	// FAIL-CLOSED: Matrix geometry validation
-	// Validate run count
-	if len(manifest.Runs) == 0 {
-		return nil, errors.New("manifest has zero declared runs")
-	}
-	if len(manifest.Runs) != len(cleanup.Runs) {
+	// P0-8 FIX: Require exactly 3 runs BEFORE indexing expectedOrder (panic guard)
+	canonicalScenarioOrder := []string{"canary-growing", "canary-bounded", "canary-descriptor"}
+
+	// Validate manifest run count
+	if len(manifest.Runs) != len(canonicalScenarioOrder) {
 		return nil, fmt.Errorf(
-			"cleanup run count %d != manifest run count %d",
-			len(cleanup.Runs),
+			"expected exactly %d declared runs, got %d",
+			len(canonicalScenarioOrder),
 			len(manifest.Runs),
 		)
 	}
 
+	// Validate cleanup run count
+	if len(cleanup.Runs) != len(canonicalScenarioOrder) {
+		return nil, fmt.Errorf(
+			"expected exactly %d cleanup records, got %d",
+			len(canonicalScenarioOrder),
+			len(cleanup.Runs),
+		)
+	}
+
 	// Validate run order, indices, and paths
-	expectedOrder := []string{"canary-growing", "canary-bounded", "canary-descriptor"}
+	// Safe to index canonicalScenarioOrder now that count is validated
 	seenRunIDs := make(map[string]bool)
 	for i, decl := range manifest.Runs {
-		if decl.Scenario != expectedOrder[i] {
+		expectedScenario := canonicalScenarioOrder[i]
+		if decl.Scenario != expectedScenario {
 			return nil, fmt.Errorf(
 				"run[%d] has wrong scenario %q, expected %q",
-				i, decl.Scenario, expectedOrder[i],
+				i, decl.Scenario, expectedScenario,
 			)
 		}
 		if decl.Index != i+1 {
@@ -620,7 +631,8 @@ func VerifyDeclaredChildRuns(
 		}
 		seenRunIDs[decl.RunID] = true
 		// Validate declaration path follows canonical pattern
-		expectedPath := filepath.Join("runs", decl.RunID)
+		// P1 FIX: Use path.Join for wire path (always uses forward slash)
+		expectedPath := path.Join("runs", decl.RunID)
 		if decl.Path != expectedPath {
 			return nil, fmt.Errorf(
 				"run[%d] has wrong path %q, expected %q",

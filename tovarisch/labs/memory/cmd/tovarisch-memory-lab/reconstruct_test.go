@@ -1728,15 +1728,27 @@ func TestStoredVerdictMatchesReconstructed_AfterChildVerification(t *testing.T) 
 
 // P0-8 FIX: Test that VerifyDeclaredChildRuns properly propagates ChildVerified.
 func TestVerifyDeclaredChildRuns_SetsChildVerifiedCorrectly(t *testing.T) {
-	// Create a mock verification function that succeeds
+	// Create a mock verification function that succeeds for all 3 runs
+	// P0-8 FIX: Must return correct RunID/Scenario based on runDir
 	successVerify := func(runDir string) (*VerifiedChildBundle, error) {
+		// Determine which run based on path
+		runID := "run-1"
+		scenario := "canary-growing"
+		if strings.Contains(runDir, "run-2") {
+			runID = "run-2"
+			scenario = "canary-bounded"
+		} else if strings.Contains(runDir, "run-3") {
+			runID = "run-3"
+			scenario = "canary-descriptor"
+		}
+
 		return &VerifiedChildBundle{
 			Manifest: &evidence.Manifest{
 				SchemaVersion: "1.1.0",
-				RunID:        "run-1",
-				Scenario:     "canary-growing",
+				RunID:        runID,
+				Scenario:     scenario,
 			},
-			Verdict:        &evidence.Verdict{Scenario: "canary-growing"},
+			Verdict:        &evidence.Verdict{Scenario: scenario},
 			ContainerID:    "test-container",
 			SubjectPID:     12345,
 			SubjectStart:   1234567890,
@@ -1749,11 +1761,13 @@ func TestVerifyDeclaredChildRuns_SetsChildVerifiedCorrectly(t *testing.T) {
 		return nil, fmt.Errorf("verification failed")
 	}
 
-	// Test with all-succeeding verification
+	// P0-8 FIX: Must use exactly 3 runs
 	manifest := &MatrixManifest{
 		MatrixID: "test-matrix",
 		Runs: []MatrixRunDeclaration{
 			{Index: 1, Scenario: "canary-growing", RunID: "run-1", Path: "runs/run-1"},
+			{Index: 2, Scenario: "canary-bounded", RunID: "run-2", Path: "runs/run-2"},
+			{Index: 3, Scenario: "canary-descriptor", RunID: "run-3", Path: "runs/run-3"},
 		},
 	}
 	cleanup := &MatrixCleanupEvidence{
@@ -1762,6 +1776,8 @@ func TestVerifyDeclaredChildRuns_SetsChildVerifiedCorrectly(t *testing.T) {
 		NetworkOwnership: "per_run",
 		Runs: []RunCleanupRecord{
 			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
+			{Index: 1, Scenario: "canary-bounded", RunID: "run-2"},
+			{Index: 2, Scenario: "canary-descriptor", RunID: "run-3"},
 		},
 	}
 
@@ -1770,11 +1786,13 @@ func TestVerifyDeclaredChildRuns_SetsChildVerifiedCorrectly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("VerifyDeclaredChildRuns failed: %v", err)
 	}
-	if len(runs) != 1 {
-		t.Fatalf("expected 1 run, got %d", len(runs))
+	if len(runs) != 3 {
+		t.Fatalf("expected 3 runs, got %d", len(runs))
 	}
-	if !runs[0].ChildVerified {
-		t.Error("P0-8: ChildVerified should be true for successful verification")
+	for _, run := range runs {
+		if !run.ChildVerified {
+			t.Error("P0-8: ChildVerified should be true for successful verification")
+		}
 	}
 
 	// Test with failing verification
@@ -1848,14 +1866,19 @@ func TestVerifyDeclaredChildRuns_RejectsNilChildBundle(t *testing.T) {
 		return nil, nil // Returns nil with no error
 	}
 
+	// P0-8 FIX: Must use exactly 3 runs
 	manifest := &MatrixManifest{
 		Runs: []MatrixRunDeclaration{
 			{Index: 1, Scenario: "canary-growing", RunID: "run-1", Path: "runs/run-1"},
+			{Index: 2, Scenario: "canary-bounded", RunID: "run-2", Path: "runs/run-2"},
+			{Index: 3, Scenario: "canary-descriptor", RunID: "run-3", Path: "runs/run-3"},
 		},
 	}
 	cleanup := &MatrixCleanupEvidence{
 		Runs: []RunCleanupRecord{
 			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
+			{Index: 1, Scenario: "canary-bounded", RunID: "run-2"},
+			{Index: 2, Scenario: "canary-descriptor", RunID: "run-3"},
 		},
 	}
 
@@ -1885,14 +1908,19 @@ func TestVerifyDeclaredChildRuns_RejectsUnverifiedBundle(t *testing.T) {
 		}, nil
 	}
 
+	// P0-8 FIX: Must use exactly 3 runs
 	manifest := &MatrixManifest{
 		Runs: []MatrixRunDeclaration{
 			{Index: 1, Scenario: "canary-growing", RunID: "run-1", Path: "runs/run-1"},
+			{Index: 2, Scenario: "canary-bounded", RunID: "run-2", Path: "runs/run-2"},
+			{Index: 3, Scenario: "canary-descriptor", RunID: "run-3", Path: "runs/run-3"},
 		},
 	}
 	cleanup := &MatrixCleanupEvidence{
 		Runs: []RunCleanupRecord{
 			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
+			{Index: 1, Scenario: "canary-bounded", RunID: "run-2"},
+			{Index: 2, Scenario: "canary-descriptor", RunID: "run-3"},
 		},
 	}
 
@@ -1922,14 +1950,19 @@ func TestVerifyDeclaredChildRuns_RejectsRunIDMismatch(t *testing.T) {
 		}, nil
 	}
 
+	// P0-8 FIX: Must use exactly 3 runs
 	manifest := &MatrixManifest{
 		Runs: []MatrixRunDeclaration{
 			{Index: 1, Scenario: "canary-growing", RunID: "run-1", Path: "runs/run-1"},
+			{Index: 2, Scenario: "canary-bounded", RunID: "run-2", Path: "runs/run-2"},
+			{Index: 3, Scenario: "canary-descriptor", RunID: "run-3", Path: "runs/run-3"},
 		},
 	}
 	cleanup := &MatrixCleanupEvidence{
 		Runs: []RunCleanupRecord{
 			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
+			{Index: 1, Scenario: "canary-bounded", RunID: "run-2"},
+			{Index: 2, Scenario: "canary-descriptor", RunID: "run-3"},
 		},
 	}
 
@@ -1959,14 +1992,19 @@ func TestVerifyDeclaredChildRuns_RejectsScenarioMismatch(t *testing.T) {
 		}, nil
 	}
 
+	// P0-8 FIX: Must use exactly 3 runs
 	manifest := &MatrixManifest{
 		Runs: []MatrixRunDeclaration{
 			{Index: 1, Scenario: "canary-growing", RunID: "run-1", Path: "runs/run-1"},
+			{Index: 2, Scenario: "canary-bounded", RunID: "run-2", Path: "runs/run-2"},
+			{Index: 3, Scenario: "canary-descriptor", RunID: "run-3", Path: "runs/run-3"},
 		},
 	}
 	cleanup := &MatrixCleanupEvidence{
 		Runs: []RunCleanupRecord{
 			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
+			{Index: 1, Scenario: "canary-bounded", RunID: "run-2"},
+			{Index: 2, Scenario: "canary-descriptor", RunID: "run-3"},
 		},
 	}
 
@@ -1988,6 +2026,7 @@ func TestVerifyDeclaredChildRuns_RejectsZeroDeclaredRuns(t *testing.T) {
 		return &VerifiedChildBundle{}, nil
 	}
 
+	// P0-8 FIX: Must have exactly 3 runs - zero runs should be rejected
 	manifest := &MatrixManifest{
 		Runs: []MatrixRunDeclaration{}, // Zero runs
 	}
@@ -1999,8 +2038,8 @@ func TestVerifyDeclaredChildRuns_RejectsZeroDeclaredRuns(t *testing.T) {
 	if err == nil {
 		t.Error("P0-8: should reject zero declared runs")
 	}
-	if err != nil && !strings.Contains(err.Error(), "zero declared runs") {
-		t.Errorf("P0-8: expected zero declared runs error, got: %v", err)
+	if err != nil && !strings.Contains(err.Error(), "expected exactly 3") {
+		t.Errorf("P0-8: expected 'expected exactly 3' error, got: %v", err)
 	}
 }
 
@@ -2013,6 +2052,7 @@ func TestVerifyDeclaredChildRuns_RejectsRunCountMismatch(t *testing.T) {
 		return &VerifiedChildBundle{}, nil
 	}
 
+	// P0-8 FIX: Must have exactly 3 runs - 2 runs should be rejected
 	manifest := &MatrixManifest{
 		Runs: []MatrixRunDeclaration{
 			{Index: 1, Scenario: "canary-growing", RunID: "run-1"},
@@ -2020,17 +2060,18 @@ func TestVerifyDeclaredChildRuns_RejectsRunCountMismatch(t *testing.T) {
 		},
 	}
 	cleanup := &MatrixCleanupEvidence{
-		Runs: []RunCleanupRecord{ // Only 1 cleanup record
+		Runs: []RunCleanupRecord{
 			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
+			{Index: 1, Scenario: "canary-bounded", RunID: "run-2"},
 		},
 	}
 
 	_, err := VerifyDeclaredChildRuns("/tmp", manifest, cleanup, verifyFn)
 	if err == nil {
-		t.Error("P0-8: should reject cleanup/run count mismatch")
+		t.Error("P0-8: should reject 2 runs (requires exactly 3)")
 	}
-	if err != nil && !strings.Contains(err.Error(), "run count") {
-		t.Errorf("P0-8: expected run count mismatch error, got: %v", err)
+	if err != nil && !strings.Contains(err.Error(), "expected exactly 3") {
+		t.Errorf("P0-8: expected 'expected exactly 3' error, got: %v", err)
 	}
 }
 
@@ -2043,16 +2084,19 @@ func TestVerifyDeclaredChildRuns_RejectsDuplicateRunIDs(t *testing.T) {
 		return &VerifiedChildBundle{}, nil
 	}
 
+	// P0-8 FIX: Must use exactly 3 runs
 	manifest := &MatrixManifest{
 		Runs: []MatrixRunDeclaration{
 			{Index: 1, Scenario: "canary-growing", RunID: "run-1", Path: "runs/run-1"},
-			{Index: 2, Scenario: "canary-bounded", RunID: "run-1", Path: "runs/run-1"}, // Duplicate!
+			{Index: 2, Scenario: "canary-bounded", RunID: "run-2", Path: "runs/run-2"},
+			{Index: 3, Scenario: "canary-descriptor", RunID: "run-1", Path: "runs/run-1"}, // Duplicate!
 		},
 	}
 	cleanup := &MatrixCleanupEvidence{
 		Runs: []RunCleanupRecord{
 			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
-			{Index: 1, Scenario: "canary-bounded", RunID: "run-1"},
+			{Index: 1, Scenario: "canary-bounded", RunID: "run-2"},
+			{Index: 2, Scenario: "canary-descriptor", RunID: "run-1"},
 		},
 	}
 
@@ -2074,14 +2118,19 @@ func TestVerifyDeclaredChildRuns_RejectsEmptyRunID(t *testing.T) {
 		return &VerifiedChildBundle{}, nil
 	}
 
+	// P0-8 FIX: Must use exactly 3 runs
 	manifest := &MatrixManifest{
 		Runs: []MatrixRunDeclaration{
-			{Index: 1, Scenario: "canary-growing", RunID: ""}, // Empty!
+			{Index: 1, Scenario: "canary-growing", RunID: "", Path: "runs/"},
+			{Index: 2, Scenario: "canary-bounded", RunID: "run-2", Path: "runs/run-2"},
+			{Index: 3, Scenario: "canary-descriptor", RunID: "run-3", Path: "runs/run-3"},
 		},
 	}
 	cleanup := &MatrixCleanupEvidence{
 		Runs: []RunCleanupRecord{
 			{Index: 0, Scenario: "canary-growing", RunID: ""},
+			{Index: 1, Scenario: "canary-bounded", RunID: "run-2"},
+			{Index: 2, Scenario: "canary-descriptor", RunID: "run-3"},
 		},
 	}
 
@@ -2103,14 +2152,19 @@ func TestVerifyDeclaredChildRuns_RejectsWrongIndex(t *testing.T) {
 		return &VerifiedChildBundle{}, nil
 	}
 
+	// P0-8 FIX: Must use exactly 3 runs
 	manifest := &MatrixManifest{
 		Runs: []MatrixRunDeclaration{
-			{Index: 99, Scenario: "canary-growing", RunID: "run-1"}, // Wrong index!
+			{Index: 99, Scenario: "canary-growing", RunID: "run-1", Path: "runs/run-1"}, // Wrong index!
+			{Index: 2, Scenario: "canary-bounded", RunID: "run-2", Path: "runs/run-2"},
+			{Index: 3, Scenario: "canary-descriptor", RunID: "run-3", Path: "runs/run-3"},
 		},
 	}
 	cleanup := &MatrixCleanupEvidence{
 		Runs: []RunCleanupRecord{
 			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
+			{Index: 1, Scenario: "canary-bounded", RunID: "run-2"},
+			{Index: 2, Scenario: "canary-descriptor", RunID: "run-3"},
 		},
 	}
 
@@ -2132,9 +2186,44 @@ func TestVerifyDeclaredChildRuns_RejectsWrongPath(t *testing.T) {
 		return &VerifiedChildBundle{}, nil
 	}
 
+	// P0-8 FIX: Must use exactly 3 runs
 	manifest := &MatrixManifest{
 		Runs: []MatrixRunDeclaration{
 			{Index: 1, Scenario: "canary-growing", RunID: "run-1", Path: "wrong/path"}, // Wrong path!
+			{Index: 2, Scenario: "canary-bounded", RunID: "run-2", Path: "runs/run-2"},
+			{Index: 3, Scenario: "canary-descriptor", RunID: "run-3", Path: "runs/run-3"},
+		},
+	}
+	cleanup := &MatrixCleanupEvidence{
+		Runs: []RunCleanupRecord{
+			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
+			{Index: 1, Scenario: "canary-bounded", RunID: "run-2"},
+			{Index: 2, Scenario: "canary-descriptor", RunID: "run-3"},
+		},
+	}
+
+	_, err := VerifyDeclaredChildRuns("/tmp", manifest, cleanup, verifyFn)
+	if err == nil {
+		t.Error("P0-8: should reject wrong path")
+	}
+	if err != nil && !strings.Contains(err.Error(), "wrong path") {
+		t.Errorf("P0-8: expected wrong path error, got: %v", err)
+	}
+}
+
+// =============================================================================
+// TEST 57: VerifyDeclaredChildRuns panic guard - 1 run (P0-8 FIX)
+// =============================================================================
+
+func TestVerifyDeclaredChildRuns_PanicGuard_OneRun(t *testing.T) {
+	verifyFn := func(runDir string) (*VerifiedChildBundle, error) {
+		return &VerifiedChildBundle{}, nil
+	}
+
+	// P0-8 FIX: Exactly 1 run should panic without count guard
+	manifest := &MatrixManifest{
+		Runs: []MatrixRunDeclaration{
+			{Index: 1, Scenario: "canary-growing", RunID: "run-1", Path: "runs/run-1"},
 		},
 	}
 	cleanup := &MatrixCleanupEvidence{
@@ -2145,9 +2234,77 @@ func TestVerifyDeclaredChildRuns_RejectsWrongPath(t *testing.T) {
 
 	_, err := VerifyDeclaredChildRuns("/tmp", manifest, cleanup, verifyFn)
 	if err == nil {
-		t.Error("P0-8: should reject wrong path")
+		t.Error("P0-8: should reject 1 run (requires exactly 3)")
 	}
-	if err != nil && !strings.Contains(err.Error(), "wrong path") {
-		t.Errorf("P0-8: expected wrong path error, got: %v", err)
+	if err != nil && !strings.Contains(err.Error(), "expected exactly 3") {
+		t.Errorf("P0-8: expected 'expected exactly 3' error, got: %v", err)
+	}
+}
+
+// =============================================================================
+// TEST 58: VerifyDeclaredChildRuns panic guard - 2 runs (P0-8 FIX)
+// =============================================================================
+
+func TestVerifyDeclaredChildRuns_PanicGuard_TwoRuns(t *testing.T) {
+	verifyFn := func(runDir string) (*VerifiedChildBundle, error) {
+		return &VerifiedChildBundle{}, nil
+	}
+
+	// P0-8 FIX: Exactly 2 runs should panic without count guard
+	manifest := &MatrixManifest{
+		Runs: []MatrixRunDeclaration{
+			{Index: 1, Scenario: "canary-growing", RunID: "run-1", Path: "runs/run-1"},
+			{Index: 2, Scenario: "canary-bounded", RunID: "run-2", Path: "runs/run-2"},
+		},
+	}
+	cleanup := &MatrixCleanupEvidence{
+		Runs: []RunCleanupRecord{
+			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
+			{Index: 1, Scenario: "canary-bounded", RunID: "run-2"},
+		},
+	}
+
+	_, err := VerifyDeclaredChildRuns("/tmp", manifest, cleanup, verifyFn)
+	if err == nil {
+		t.Error("P0-8: should reject 2 runs (requires exactly 3)")
+	}
+	if err != nil && !strings.Contains(err.Error(), "expected exactly 3") {
+		t.Errorf("P0-8: expected 'expected exactly 3' error, got: %v", err)
+	}
+}
+
+// =============================================================================
+// TEST 59: VerifyDeclaredChildRuns panic guard - 4 runs (P0-8 FIX)
+// =============================================================================
+
+func TestVerifyDeclaredChildRuns_PanicGuard_FourRuns(t *testing.T) {
+	verifyFn := func(runDir string) (*VerifiedChildBundle, error) {
+		return &VerifiedChildBundle{}, nil
+	}
+
+	// P0-8 FIX: Exactly 4 runs should panic without count guard (would index beyond bounds)
+	manifest := &MatrixManifest{
+		Runs: []MatrixRunDeclaration{
+			{Index: 1, Scenario: "canary-growing", RunID: "run-1", Path: "runs/run-1"},
+			{Index: 2, Scenario: "canary-bounded", RunID: "run-2", Path: "runs/run-2"},
+			{Index: 3, Scenario: "canary-descriptor", RunID: "run-3", Path: "runs/run-3"},
+			{Index: 4, Scenario: "canary-extra", RunID: "run-4", Path: "runs/run-4"}, // Extra!
+		},
+	}
+	cleanup := &MatrixCleanupEvidence{
+		Runs: []RunCleanupRecord{
+			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
+			{Index: 1, Scenario: "canary-bounded", RunID: "run-2"},
+			{Index: 2, Scenario: "canary-descriptor", RunID: "run-3"},
+			{Index: 3, Scenario: "canary-extra", RunID: "run-4"},
+		},
+	}
+
+	_, err := VerifyDeclaredChildRuns("/tmp", manifest, cleanup, verifyFn)
+	if err == nil {
+		t.Error("P0-8: should reject 4 runs (requires exactly 3)")
+	}
+	if err != nil && !strings.Contains(err.Error(), "expected exactly 3") {
+		t.Errorf("P0-8: expected 'expected exactly 3' error, got: %v", err)
 	}
 }
