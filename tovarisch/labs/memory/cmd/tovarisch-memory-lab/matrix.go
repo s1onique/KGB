@@ -39,6 +39,16 @@ import (
 // Matrix schema version
 const MatrixSchemaVersion = "1.0.0"
 
+// canonicalMatrixArtifactInventory is the single source of truth for the three
+// required matrix-level artifacts. P0-1 FIX: All validation, checksum writing,
+// and fixture generation derive from this constant. Unexported array prevents
+// accidental append/replacement mutation.
+var canonicalMatrixArtifactInventory = [...]string{
+	"matrix-manifest.json",
+	"matrix-cleanup.json",
+	"matrix-verdict.json",
+}
+
 // Required scenario order
 var matrixScenarioOrder = []string{
 	"canary-growing",
@@ -224,17 +234,21 @@ func LoadMatrixVerdict(path string) (*MatrixVerdict, error) {
 }
 
 // ValidateMatrixRootGeometry verifies the matrix root has exactly the required files.
+// P0-1 FIX: Derives expected artifact files from canonicalMatrixArtifactInventory.
 func ValidateMatrixRootGeometry(matrixDir string) error {
 	entries, err := os.ReadDir(matrixDir)
 	if err != nil {
 		return fmt.Errorf("read matrix directory: %w", err)
 	}
 
+	// P0-1 FIX: Build expected files from canonical inventory + checksums.txt
 	expectedFiles := map[string]bool{
-		"matrix-manifest.json": false,
-		"matrix-verdict.json":  false,
-		"matrix-checksums.txt": false,
+		"matrix-checksums.txt": false, // Always required
 	}
+	for _, name := range canonicalMatrixArtifactInventory {
+		expectedFiles[name] = false
+	}
+
 	var unexpectedFiles []string
 	var runsFound bool
 
@@ -359,6 +373,7 @@ func ValidateChildChecksums(matrixDir string, manifest *MatrixManifest) error {
 }
 
 // ValidateMatrixChecksums verifies matrix-level checksums.
+// P0-1 FIX: Uses canonicalMatrixArtifactInventory for single source of truth.
 func ValidateMatrixChecksums(matrixDir string) error {
 	checksumPath := filepath.Join(matrixDir, "matrix-checksums.txt")
 	data, err := os.ReadFile(checksumPath)
@@ -371,34 +386,61 @@ func ValidateMatrixChecksums(matrixDir string) error {
 		return fmt.Errorf("parse matrix-checksums.txt: %w", err)
 	}
 
-	manifestHash, ok := entries["matrix-manifest.json"]
-	if !ok {
-		return fmt.Errorf("missing checksum for matrix-manifest.json")
+	// P0-1 FIX: Use single canonical inventory authority
+	requiredArtifacts := canonicalMatrixArtifactInventory[:]
+
+	// Check for missing entries
+	var missing []string
+	entrySet := make(map[string]bool)
+	for name := range entries {
+		entrySet[name] = true
+	}
+	for _, name := range requiredArtifacts {
+		if !entrySet[name] {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing checksums for: %v", missing)
 	}
 
-	verdictHash, ok := entries["matrix-verdict.json"]
-	if !ok {
-		return fmt.Errorf("missing checksum for matrix-verdict.json")
+	// P0-1 FIX: Use separate canonical set for extra detection
+	canonicalSet := make(map[string]struct{})
+	for _, name := range requiredArtifacts {
+		canonicalSet[name] = struct{}{}
 	}
 
-	manifestData, err := os.ReadFile(filepath.Join(matrixDir, "matrix-manifest.json"))
-	if err != nil {
-		return fmt.Errorf("read matrix-manifest.json: %w", err)
+	// Check for extra entries (reject unknown artifacts)
+	var extra []string
+	for name := range entries {
+		if _, isCanonical := canonicalSet[name]; !isCanonical {
+			extra = append(extra, name)
+		}
 	}
-	if computeSHA256Hex(manifestData) != manifestHash {
-		return fmt.Errorf("matrix-manifest.json checksum mismatch")
-	}
-
-	verdictData, err := os.ReadFile(filepath.Join(matrixDir, "matrix-verdict.json"))
-	if err != nil {
-		return fmt.Errorf("read matrix-verdict.json: %w", err)
-	}
-	if computeSHA256Hex(verdictData) != verdictHash {
-		return fmt.Errorf("matrix-verdict.json checksum mismatch")
+	if len(extra) > 0 {
+		return fmt.Errorf("unexpected artifacts in checksums: %v", extra)
 	}
 
-	if len(entries) != 2 {
-		return fmt.Errorf("matrix-checksums.txt contains %d entries, expected 2", len(entries))
+	// P0-1 FIX: Require exactly three entries (no more, no less)
+	if len(entries) != len(requiredArtifacts) {
+		return fmt.Errorf("expected exactly %d checksums, got %d", len(requiredArtifacts), len(entries))
+	}
+
+	// Verify each artifact's checksum
+	for _, name := range requiredArtifacts {
+		expectedHash, ok := entries[name]
+		if !ok {
+			// Already checked above, but compiler doesn't know that
+			return fmt.Errorf("missing checksum for %s", name)
+		}
+
+		data, err := os.ReadFile(filepath.Join(matrixDir, name))
+		if err != nil {
+			return fmt.Errorf("read %s: %w", name, err)
+		}
+		if computeSHA256Hex(data) != expectedHash {
+			return fmt.Errorf("%s checksum mismatch", name)
+		}
 	}
 
 	return nil

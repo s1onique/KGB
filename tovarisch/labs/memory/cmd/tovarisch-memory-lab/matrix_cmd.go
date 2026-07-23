@@ -55,8 +55,46 @@ type ScenarioRunOptions struct {
 	ControllerHash string
 }
 
+// MatrixCommandDeps defines dependencies for the matrix command.
+// Used by tests to inject deterministic observers and clocks.
+type MatrixCommandDeps struct {
+	// ObserveCleanup observes cleanup state for verified runs.
+	// If nil, uses the real Docker-based observer.
+	ObserveCleanup func(context.Context, []*VerifiedRun) ([]RunCleanupObservation, error)
+
+	// Now returns the current time.
+	// If nil, uses time.Now.
+	Now func() time.Time
+}
+
+// DefaultMatrixCommandDeps returns real production dependencies.
+func DefaultMatrixCommandDeps() MatrixCommandDeps {
+	return MatrixCommandDeps{
+		ObserveCleanup: func(ctx context.Context, runs []*VerifiedRun) ([]RunCleanupObservation, error) {
+			observer := NewCleanupObserver()
+			return ObserveDeclaredRunCleanup(ctx, runs, observer)
+		},
+		Now: time.Now,
+	}
+}
+
 // matrixCommand implements the `matrix` subcommand.
 func matrixCommand(args []string) error {
+	return matrixCommandWithDeps(args, DefaultMatrixCommandDeps())
+}
+
+// matrixCommandWithDeps executes the matrix command with injected dependencies.
+// Used by tests to inject deterministic observers.
+// Fail-closed: nil dependencies are rejected rather than silently defaulted.
+func matrixCommandWithDeps(args []string, deps MatrixCommandDeps) error {
+	// P0 FIX: Fail-closed - reject nil dependencies instead of silently defaulting.
+	// Tests must supply complete deps or use DefaultMatrixCommandDeps().
+	if deps.ObserveCleanup == nil {
+		return fmt.Errorf("ObserveCleanup dependency is required (use DefaultMatrixCommandDeps or inject)")
+	}
+	if deps.Now == nil {
+		return fmt.Errorf("Now dependency is required (use DefaultMatrixCommandDeps or inject)")
+	}
 	fs := flag.NewFlagSet("memory-lab matrix", flag.ContinueOnError)
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s matrix [options]\n\nOptions:\n", args[0])
@@ -309,31 +347,41 @@ func matrixCommand(args []string) error {
 		return fmt.Errorf("write matrix manifest: %w", err)
 	}
 
-	// Step 5: Build preliminary verified runs (producer observed state)
-	// P0-6 FIX: Build runs from observed state first
-	preliminaryRuns := buildVerifiedRunsFromRunData(runsDir, runDeclarations, runManifests)
-
-	// Step 6: Collect cleanup evidence from all runs
-	// P0-2 FIX: Observe actual cleanup state, not assert
-	cleanupEvidence := BuildMatrixCleanupEvidence(matrixID, "per_run", preliminaryRuns, time.Now())
-
-	// Step 7: Validate cleanup evidence is bound correctly
-	// P0-6 FIX: Validate before writing
-	if err := ValidateCleanupEvidence(cleanupEvidence, matrixManifest); err != nil {
-		return fmt.Errorf("validate cleanup evidence: %w", err)
+	// Step 5: Build verified runs from child artifacts (before observation)
+	// P0 FIX: Two-phase authority - verify children WITHOUT requiring cleanup first.
+	// This enables correct producer authority order.
+	verifiedRuns, err := VerifyDeclaredChildBundles(matrixDir, matrixManifest, verifyChildRunBundle)
+	if err != nil {
+		return fmt.Errorf("authoritative child bundle verification: %w", err)
 	}
 
-	// Step 8: Write cleanup evidence artifact using shared authority
+	// Step 6: Observe cleanup using authoritatively verified run identities
+	// Only after child verification succeeds do we observe runtime cleanup state.
+	// P0-5 FIX: Do NOT write yet - binding validation must succeed first.
+	cleanupEvidence, err := produceObservedCleanupEvidence(
+		ctx,
+		matrixDir,
+		matrixID,
+		matrixManifest,
+		verifiedRuns,
+		deps,
+	)
+	if err != nil {
+		return err
+	}
+
+	// Step 7: Bind cleanup evidence to verified runs
+	// P0 FIX: Second phase of two-phase authority - bind cleanup to already-verified runs.
+	// P0-5 FIX: Validate binding BEFORE writing cleanup artifact.
+	verifiedRuns, err = BindVerifiedRunsToCleanup(matrixManifest, verifiedRuns, cleanupEvidence)
+	if err != nil {
+		return fmt.Errorf("bind cleanup to verified runs: %w", err)
+	}
+
+	// Step 8: Write cleanup artifact only AFTER successful binding
+	// P0-5 FIX: No cleanup artifact written if binding fails.
 	if err := WriteMatrixCleanupEvidence(matrixDir, cleanupEvidence); err != nil {
 		return fmt.Errorf("write cleanup evidence: %w", err)
-	}
-
-	// Step 9: Authoritatively verify all child bundles BEFORE writing verdict
-	// P0-8 FIX: ChildVerified must come from authoritative verification, not assertion.
-	// This ensures the stored verdict matches what VerifyMatrixBundle will reconstruct.
-	verifiedRuns, err := VerifyDeclaredChildRuns(matrixDir, matrixManifest, cleanupEvidence, verifyChildRunBundle)
-	if err != nil {
-		return fmt.Errorf("authoritative child verification: %w", err)
 	}
 
 	// Step 10: Use ReconstructMatrixVerdict for initial verdict (now with verified children)
@@ -976,6 +1024,51 @@ func buildVerifiedRunsFromRunData(
 	}
 
 	return runs
+}
+
+// produceObservedCleanupEvidence executes the cleanup observation stage of matrix production.
+// Extracted for testability: both production and tests call this function.
+func produceObservedCleanupEvidence(
+	ctx context.Context,
+	matrixDir string,
+	matrixID string,
+	manifest *MatrixManifest,
+	runs []*VerifiedRun,
+	deps MatrixCommandDeps,
+) (*MatrixCleanupEvidence, error) {
+	if deps.ObserveCleanup == nil {
+		return nil, fmt.Errorf("ObserveCleanup dependency is required")
+	}
+	if deps.Now == nil {
+		return nil, fmt.Errorf("Now dependency is required")
+	}
+
+	// Observe cleanup state via injected observer
+	observations, err := deps.ObserveCleanup(ctx, runs)
+	if err != nil {
+		return nil, fmt.Errorf("observe cleanup state: %w", err)
+	}
+
+	// Build cleanup evidence exclusively from observations
+	cleanupEvidence, err := BuildObservedMatrixCleanupEvidence(
+		matrixID,
+		"per_run",
+		observations,
+		deps.Now(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build cleanup evidence from observations: %w", err)
+	}
+
+	// Validate cleanup evidence is bound correctly
+	if err := ValidateCleanupEvidence(cleanupEvidence, manifest); err != nil {
+		return nil, fmt.Errorf("validate cleanup evidence: %w", err)
+	}
+
+	// NOTE: Do NOT write here - binding validation must succeed first (P0-5 FIX)
+	// Writing is done after BindVerifiedRunsToCleanup succeeds.
+
+	return cleanupEvidence, nil
 }
 
 // buildCleanupEvidence builds the canonical cleanup evidence from producer run data.

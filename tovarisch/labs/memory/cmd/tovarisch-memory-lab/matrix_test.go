@@ -271,7 +271,7 @@ func TestValidateMatrixRootGeometry(t *testing.T) {
 	}
 
 	// Create required files
-	for _, name := range []string{"matrix-manifest.json", "matrix-verdict.json", "matrix-checksums.txt"} {
+	for _, name := range []string{"matrix-manifest.json", "matrix-verdict.json", "matrix-cleanup.json", "matrix-checksums.txt"} {
 		f, err := os.Create(filepath.Join(tmpDir, name))
 		if err != nil {
 			t.Fatal(err)

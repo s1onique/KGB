@@ -17,7 +17,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,28 +44,6 @@ type VerifiedChildBundle struct {
 	SubjectPID     int
 	SubjectStart   uint64
 	ChecksVerified bool
-}
-
-// =============================================================================
-// DOCKER COMMAND SEAM
-// =============================================================================
-
-// DockerCommandResult represents the result of a Docker CLI command.
-type DockerCommandResult struct {
-	Stdout   []byte
-	Stderr   []byte
-	ExitCode int
-}
-
-// DockerRunner is a function type for executing Docker commands.
-// Used by tests to inject mock Docker runners.
-type DockerRunner func(ctx context.Context, args ...string) (DockerCommandResult, error)
-
-// DefaultDockerRunner is the real Docker command executor.
-func DefaultDockerRunner(ctx context.Context, args ...string) (DockerCommandResult, error) {
-	// This will be implemented with the actual Docker client in cleanup_observation.go
-	// For now, return error to indicate not implemented
-	return DockerCommandResult{}, errors.New("use real Docker client")
 }
 
 // =============================================================================
@@ -227,18 +204,14 @@ func verifyChildRunBundle(runDir string) (*VerifiedChildBundle, error) {
 	result.SubjectPID = pid
 	result.SubjectStart = startTime
 
-	// Network identity - look for network-identity.json
-	networkData, err := os.ReadFile(filepath.Join(runDir, "network-identity.json"))
-	if err == nil {
-		var networkIdentity struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		}
-		if err := matrixDecodeStrictJSON(networkData, &networkIdentity); err == nil {
-			result.NetworkID = networkIdentity.ID
-			result.NetworkName = networkIdentity.Name
-		}
+	// P0-9 FIX: Use ReadNetworkIdentity for authoritative network identity extraction.
+	// This replaces the anonymous decoder with a validated canonical reader.
+	networkID, networkName, err := ReadNetworkIdentity(runDir)
+	if err != nil {
+		return nil, fmt.Errorf("verify network identity: %w", err)
 	}
+	result.NetworkID = networkID
+	result.NetworkName = networkName
 
 	result.ChecksVerified = true
 	return result, nil
@@ -256,6 +229,7 @@ func validateChildGeometry(runDir string) error {
 		"initial-canary-state.json",
 		"final-canary-state.json",
 		"workload-result.json",
+		"network-identity.json",
 		"checksums.txt",
 	}
 
@@ -551,45 +525,38 @@ func validateRunCleanupRecord(rec RunCleanupRecord, run *VerifiedRun) bool {
 // SHARED CHILD VERIFICATION HELPER
 // =============================================================================
 
-// VerifyDeclaredChildRuns authoritatively verifies all child bundles.
-// This is the single authority for child verification used by both:
-// - The matrix producer (before writing matrix-verdict.json)
-// - The matrix verifier (VerifyMatrixBundle)
+// =============================================================================
+// TWO-PHASE AUTHORITY: CHILD VERIFICATION AND CLEANUP BINDING
+// =============================================================================
+
+// VerifyDeclaredChildBundles authoritatively verifies all child bundles WITHOUT
+// requiring cleanup evidence. This enables the correct producer authority order:
 //
-// Returns verified runs with ChildVerified set from authoritative verification.
-// P0-8 FIX: ChildVerified must come from successful verification, not assertion.
+//   1. verify child artifacts (checksums, inventory, manifests, identities)
+//   2. observe runtime cleanup state
+//   3. write cleanup evidence
+//   4. bind cleanup to verified runs
+//   5. reconstruct and verify matrix verdict
 //
-// FAIL-CLOSED INPUT VALIDATION:
-// - Rejects nil manifest, cleanup, or verifyChild
-// - Rejects nil child bundles or bundles with ChecksVerified=false
-// - Validates declaration-to-child binding (RunID and scenario)
-// - Validates matrix geometry (run count, order, indices, paths)
+// Returns verified runs with runtime identities populated from child artifacts.
+// Each VerifiedRun has ChildVerified=true on success.
 //
-// This ensures the helper cannot be called with invalid state or produce
-// partially-verified results that later fail at matrix level.
-func VerifyDeclaredChildRuns(
+// P0 FIX: Splits child verification from cleanup binding to enable authority order.
+func VerifyDeclaredChildBundles(
 	matrixDir string,
 	manifest *MatrixManifest,
-	cleanup *MatrixCleanupEvidence,
 	verifyChild func(runDir string) (*VerifiedChildBundle, error),
 ) ([]*VerifiedRun, error) {
 	// FAIL-CLOSED: Input validation
 	if manifest == nil {
 		return nil, errors.New("matrix manifest is nil")
 	}
-	if cleanup == nil {
-		return nil, errors.New("cleanup evidence is nil")
-	}
 	if verifyChild == nil {
 		return nil, errors.New("child verifier is nil")
 	}
 
 	// FAIL-CLOSED: Matrix geometry validation
-	// P0-8 FIX: Require exactly CanonicalScenarioOrder entries BEFORE indexing (panic guard)
-	// P1 FIX: Derive count from slice itself - single authority for count and order
 	expectedRunCount := len(CanonicalScenarioOrder)
-
-	// Validate manifest run count
 	if len(manifest.Runs) != expectedRunCount {
 		return nil, fmt.Errorf(
 			"expected exactly %d declared runs, got %d",
@@ -598,17 +565,7 @@ func VerifyDeclaredChildRuns(
 		)
 	}
 
-	// Validate cleanup run count
-	if len(cleanup.Runs) != expectedRunCount {
-		return nil, fmt.Errorf(
-			"expected exactly %d cleanup records, got %d",
-			expectedRunCount,
-			len(cleanup.Runs),
-		)
-	}
-
 	// Validate run order, indices, and paths
-	// P1 FIX: Use package-level CanonicalScenarioOrder for single authority (count and order)
 	seenRunIDs := make(map[string]bool)
 	for i, decl := range manifest.Runs {
 		expectedScenario := CanonicalScenarioOrder[i]
@@ -631,8 +588,6 @@ func VerifyDeclaredChildRuns(
 			return nil, fmt.Errorf("duplicate run_id %q in declaration", decl.RunID)
 		}
 		seenRunIDs[decl.RunID] = true
-		// Validate declaration path follows canonical pattern
-		// P1 FIX: Use path.Join for wire path (always uses forward slash)
 		expectedPath := path.Join("runs", decl.RunID)
 		if decl.Path != expectedPath {
 			return nil, fmt.Errorf(
@@ -660,7 +615,6 @@ func VerifyDeclaredChildRuns(
 		}
 
 		// FAIL-CLOSED: Reject unverified bundle
-		// A successful return means ALL children verified
 		if !child.ChecksVerified {
 			return nil, fmt.Errorf("child bundle %s was not verified (ChecksVerified=false)", decl.Scenario)
 		}
@@ -671,6 +625,38 @@ func VerifyDeclaredChildRuns(
 		}
 		if child.Verdict == nil {
 			return nil, fmt.Errorf("child bundle %s has nil verdict", decl.Scenario)
+		}
+
+		// P0-1 FIX: Reject independently verified identities that are empty.
+		// An empty container ID means no verification occurred - the bundle is incomplete.
+		if child.ContainerID == "" {
+			return nil, fmt.Errorf(
+				"child bundle %s has empty container identity",
+				decl.RunID,
+			)
+		}
+		// P0-1 FIX: Network identity is required for all child bundles.
+		// Both per_run and matrix_shared modes require a non-empty network ID.
+		if child.NetworkID == "" {
+			return nil, fmt.Errorf(
+				"child bundle %s has empty network identity",
+				decl.RunID,
+			)
+		}
+		// P0-1 FIX: Reject invalid subject PID - zero or negative is invalid.
+		if child.SubjectPID <= 0 {
+			return nil, fmt.Errorf(
+				"child bundle %s has invalid subject PID %d",
+				decl.RunID,
+				child.SubjectPID,
+			)
+		}
+		// P0-1 FIX: Reject zero start time - process identity requires valid start time.
+		if child.SubjectStart == 0 {
+			return nil, fmt.Errorf(
+				"child bundle %s has zero subject start time",
+				decl.RunID,
+			)
 		}
 
 		// DECLARATION-TO-CHILD BINDING: Verify RunID and scenario match
@@ -697,7 +683,7 @@ func VerifyDeclaredChildRuns(
 		vr := &VerifiedRun{
 			DeclaredRunID:     decl.RunID,
 			DeclaredScenario:  decl.Scenario,
-			RunIndex:          i,
+			RunIndex:         i,
 			ActualManifest:    child.Manifest,
 			ActualVerdict:    child.Verdict,
 			ContainerID:      child.ContainerID,
@@ -706,31 +692,374 @@ func VerifyDeclaredChildRuns(
 			NetworkName:      child.NetworkName,
 			SubjectPID:       child.SubjectPID,
 			SubjectStartTime: child.SubjectStart,
-			ChildVerified:    child.ChecksVerified, // P0-8 FIX: From authoritative verification
-		}
-
-		// Hydrate cleanup status from cleanup evidence
-		if i < len(cleanup.Runs) {
-			rec := cleanup.Runs[i]
-			vr.CleanupEvidenceLoaded = true
-			vr.CleanupEvidenceValid = validateRunCleanupRecord(rec, vr)
-
-			switch rec.Process.Status {
-			case "gone":
-				vr.ProcessCleanupStatus = ProcessGone
-			case "pid_reused":
-				vr.ProcessCleanupStatus = ProcessPIDReused
-			case "still_alive":
-				vr.ProcessCleanupStatus = ProcessStillAlive
-			default:
-				vr.ProcessCleanupStatus = ProcessUnavailable
-			}
+			ChildVerified:    child.ChecksVerified,
 		}
 
 		verifiedRuns[i] = vr
 	}
 
 	return verifiedRuns, nil
+}
+
+// ValidateCleanupBinding performs complete cleanup binding validation.
+// This is the canonical validator used by both BindVerifiedRunsToCleanup and final verification.
+// P0 FIX: Single authority for cleanup binding validation.
+func ValidateCleanupBinding(
+	manifest *MatrixManifest,
+	runs []*VerifiedRun,
+	cleanup *MatrixCleanupEvidence,
+) error {
+	// FAIL-CLOSED: Input validation
+	if manifest == nil {
+		return errors.New("cleanup manifest is nil")
+	}
+	if runs == nil {
+		return errors.New("verified runs is nil")
+	}
+	if cleanup == nil {
+		return errors.New("cleanup evidence is nil")
+	}
+
+	// FAIL-CLOSED: Count validation
+	expectedRunCount := len(CanonicalScenarioOrder)
+	if len(runs) != expectedRunCount {
+		return fmt.Errorf(
+			"expected exactly %d verified runs, got %d",
+			expectedRunCount,
+			len(runs),
+		)
+	}
+	if len(cleanup.Runs) != expectedRunCount {
+		return fmt.Errorf(
+			"expected exactly %d cleanup records, got %d",
+			expectedRunCount,
+			len(cleanup.Runs),
+		)
+	}
+
+	// FAIL-CLOSED: Top-level identity validation
+	if cleanup.SchemaVersion == "" {
+		return errors.New("cleanup has empty schema_version")
+	}
+	schemaValid := false
+	for _, v := range SupportedCleanupSchemaVersions {
+		if cleanup.SchemaVersion == v {
+			schemaValid = true
+			break
+		}
+	}
+	if !schemaValid {
+		return fmt.Errorf("unsupported cleanup schema version: %s", cleanup.SchemaVersion)
+	}
+	if cleanup.MatrixID != manifest.MatrixID {
+		return fmt.Errorf(
+			"cleanup matrix_id %q != manifest matrix_id %q",
+			cleanup.MatrixID,
+			manifest.MatrixID,
+		)
+	}
+	if cleanup.ObservedAt.IsZero() {
+		return errors.New("cleanup has zero observed_at timestamp")
+	}
+
+	// P0-4 FIX: Require cleanup observation occurs at or after matrix completion.
+	// This check must be in the canonical binding validator so direct calls
+	// to BindVerifiedRunsToCleanup are also protected.
+	if manifest.FinishedAt.After(cleanup.ObservedAt) {
+		return fmt.Errorf(
+			"cleanup observed_at %s precedes matrix finished_at %s",
+			cleanup.ObservedAt,
+			manifest.FinishedAt,
+		)
+	}
+
+	if cleanup.NetworkOwnership != "per_run" && cleanup.NetworkOwnership != "matrix_shared" {
+		return fmt.Errorf("invalid network_ownership: %s", cleanup.NetworkOwnership)
+	}
+
+	// FAIL-CLOSED: Manifest geometry validation
+	if len(manifest.Runs) != expectedRunCount {
+		return fmt.Errorf(
+			"manifest has %d runs, expected %d",
+			len(manifest.Runs),
+			expectedRunCount,
+		)
+	}
+
+	// Track network IDs for per_run mode
+	seenNetworkIDs := make(map[string]bool)
+	var sharedNetworkID string
+
+	// P0-2 FIX: Reject nil verified-run entries that could cause panic.
+	// A malformed slice containing a nil entry must produce a typed error, not panic.
+	for i := 0; i < expectedRunCount; i++ {
+		if runs[i] == nil {
+			return fmt.Errorf(
+				"verified run[%d] is nil",
+				i,
+			)
+		}
+	}
+
+	// P0-3 FIX: Bind verified runs back to manifest declarations.
+	// The exported binding authority must enforce its own contract.
+	for i := 0; i < expectedRunCount; i++ {
+		decl := manifest.Runs[i]
+		vr := runs[i]
+
+		// Verify run-to-manifest binding by index
+		if vr.DeclaredRunID != decl.RunID {
+			return fmt.Errorf(
+				"verified run[%d] DeclaredRunID=%q != manifest.RunID=%q",
+				i, vr.DeclaredRunID, decl.RunID,
+			)
+		}
+		if vr.DeclaredScenario != decl.Scenario {
+			return fmt.Errorf(
+				"verified run[%d] DeclaredScenario=%q != manifest.Scenario=%q",
+				i, vr.DeclaredScenario, decl.Scenario,
+			)
+		}
+		if vr.RunIndex != i {
+			return fmt.Errorf(
+				"verified run[%d] RunIndex=%d != index=%d",
+				i, vr.RunIndex, i,
+			)
+		}
+		if decl.Index != i+1 {
+			return fmt.Errorf(
+				"manifest.Runs[%d].Index=%d != expected %d",
+				i, decl.Index, i+1,
+			)
+		}
+		expectedPath := path.Join("runs", decl.RunID)
+		if decl.Path != expectedPath {
+			return fmt.Errorf(
+				"manifest.Runs[%d].Path=%q != expected %q",
+				i, decl.Path, expectedPath,
+			)
+		}
+	}
+
+	// FAIL-CLOSED: Per-record binding validation with field-specific diagnostics
+	for i := 0; i < expectedRunCount; i++ {
+		rec := cleanup.Runs[i]
+		vr := runs[i]
+		if rec.Index != i {
+			return fmt.Errorf(
+				"cleanup record[%d] has wrong index %d",
+				i, rec.Index,
+			)
+		}
+
+		// RunID binding validation
+		if rec.RunID != vr.DeclaredRunID {
+			return fmt.Errorf(
+				"cleanup record[%d] RunID mismatch: cleanup=%q, verified=%q",
+				i, rec.RunID, vr.DeclaredRunID,
+			)
+		}
+
+		// Scenario binding validation
+		if rec.Scenario != vr.DeclaredScenario {
+			return fmt.Errorf(
+				"cleanup record[%d] scenario mismatch: cleanup=%q, verified=%q",
+				i, rec.Scenario, vr.DeclaredScenario,
+			)
+		}
+
+		// Container ID binding validation
+		if rec.Container.ID != vr.ContainerID {
+			return fmt.Errorf(
+				"cleanup record[%d] container.id mismatch: cleanup=%q, verified=%q",
+				i, rec.Container.ID, vr.ContainerID,
+			)
+		}
+
+		// PID binding validation
+		if rec.Process.PID != vr.SubjectPID {
+			return fmt.Errorf(
+				"cleanup record[%d] process.pid mismatch: cleanup=%d, verified=%d",
+				i, rec.Process.PID, vr.SubjectPID,
+			)
+		}
+
+		// Process start time binding validation
+		if rec.Process.StartTime != vr.SubjectStartTime {
+			return fmt.Errorf(
+				"cleanup record[%d] process.start_time mismatch: cleanup=%d, verified=%d",
+				i, rec.Process.StartTime, vr.SubjectStartTime,
+			)
+		}
+
+		// Network ID binding validation (if present in verified run)
+		if vr.NetworkID != "" && rec.Network.ID != vr.NetworkID {
+			return fmt.Errorf(
+				"cleanup record[%d] network.id mismatch: cleanup=%q, verified=%q",
+				i, rec.Network.ID, vr.NetworkID,
+			)
+		}
+
+		// Cleanup status validation
+		validStatuses := map[string]bool{
+			"gone": true, "pid_reused": true, "still_alive": true,
+		}
+		if !validStatuses[rec.Process.Status] {
+			return fmt.Errorf(
+				"cleanup record[%d] has invalid process.status: %q",
+				i, rec.Process.Status,
+			)
+		}
+		if rec.Container.Status != "gone" {
+			return fmt.Errorf(
+				"cleanup record[%d] container.status is %q, expected gone",
+				i, rec.Container.Status,
+			)
+		}
+
+		// Network ownership mode validation
+		switch cleanup.NetworkOwnership {
+		case "per_run":
+			if rec.Network.ID == "" {
+				return fmt.Errorf("cleanup record[%d] has empty network.id in per_run mode", i)
+			}
+			if seenNetworkIDs[rec.Network.ID] {
+				return fmt.Errorf(
+					"cleanup has duplicate network.id %q in per_run mode",
+					rec.Network.ID,
+				)
+			}
+			seenNetworkIDs[rec.Network.ID] = true
+			if rec.Network.Status != "gone" {
+				return fmt.Errorf(
+					"cleanup record[%d] network.status is %q, expected gone",
+					i, rec.Network.Status,
+				)
+			}
+		case "matrix_shared":
+			if rec.Network.ID == "" {
+				return fmt.Errorf("cleanup record[%d] has empty network.id in matrix_shared mode", i)
+			}
+			if sharedNetworkID == "" {
+				sharedNetworkID = rec.Network.ID
+			} else if rec.Network.ID != sharedNetworkID {
+				return fmt.Errorf(
+					"cleanup record[%d] network.id %q != shared %q",
+					i, rec.Network.ID, sharedNetworkID,
+				)
+			}
+			// P1 FIX: Shared network status must also be "gone"
+			if rec.Network.Status != "gone" {
+				return fmt.Errorf(
+					"cleanup record[%d] shared network.status is %q, expected gone",
+					i, rec.Network.Status,
+				)
+			}
+		}
+	}
+
+	return nil
+}
+
+// BindVerifiedRunsToCleanup binds cleanup evidence to already-verified runs.
+// This is the second phase of the two-phase authority pattern.
+//
+// P0 FIX: Enables cleanup binding after child verification but before verdict reconstruction.
+// P0-2 FIX: Returns error on binding failure with field-specific diagnostics.
+// P0-4 FIX: Uses two-pass approach - validates ALL bindings before mutating any run.
+func BindVerifiedRunsToCleanup(
+	manifest *MatrixManifest,
+	runs []*VerifiedRun,
+	cleanup *MatrixCleanupEvidence,
+) ([]*VerifiedRun, error) {
+	// FAIL-CLOSED: Validate all bindings BEFORE mutating any run
+	if err := ValidateCleanupBinding(manifest, runs, cleanup); err != nil {
+		return nil, fmt.Errorf("cleanup binding validation failed: %w", err)
+	}
+
+	// PASS: All bindings valid - safe to hydrate
+	// Two-pass: validate first, then hydrate (no partial mutation)
+	expectedRunCount := len(CanonicalScenarioOrder)
+	hydrated := make([]*VerifiedRun, expectedRunCount)
+
+	for i := 0; i < expectedRunCount; i++ {
+		vr := runs[i]
+		rec := cleanup.Runs[i]
+
+		// Clone the VerifiedRun to avoid mutation
+		hydratedRun := &VerifiedRun{
+			DeclaredRunID:          vr.DeclaredRunID,
+			DeclaredScenario:       vr.DeclaredScenario,
+			RunIndex:              vr.RunIndex,
+			ActualManifest:        vr.ActualManifest,
+			ActualVerdict:         vr.ActualVerdict,
+			ContainerID:           vr.ContainerID,
+			ContainerName:         vr.ContainerName,
+			NetworkID:             vr.NetworkID,
+			NetworkName:           vr.NetworkName,
+			SubjectPID:            vr.SubjectPID,
+			SubjectStartTime:      vr.SubjectStartTime,
+			ChildVerified:         vr.ChildVerified,
+			CleanupEvidenceLoaded: true,
+			CleanupEvidenceValid:  true, // Validated above
+		}
+
+		switch rec.Process.Status {
+		case "gone":
+			hydratedRun.ProcessCleanupStatus = ProcessGone
+		case "pid_reused":
+			hydratedRun.ProcessCleanupStatus = ProcessPIDReused
+		case "still_alive":
+			hydratedRun.ProcessCleanupStatus = ProcessStillAlive
+		default:
+			hydratedRun.ProcessCleanupStatus = ProcessUnavailable
+		}
+
+		hydrated[i] = hydratedRun
+	}
+
+	return hydrated, nil
+}
+
+// VerifyDeclaredChildRuns is the single authoritative function for child verification.
+// It is a COMPOSITE wrapper that calls exactly two phases:
+//   1. VerifyDeclaredChildBundles - verifies child artifacts (no cleanup required)
+//   2. BindVerifiedRunsToCleanup  - binds cleanup evidence to verified runs
+//
+// Both producer and verifier MUST use this function for child verification.
+// No independent verification loop may remain inside this function.
+//
+// P0 FIX: This function is a literal composition, not an independent implementation.
+func VerifyDeclaredChildRuns(
+	matrixDir string,
+	manifest *MatrixManifest,
+	cleanup *MatrixCleanupEvidence,
+	verifyChild func(runDir string) (*VerifiedChildBundle, error),
+) ([]*VerifiedRun, error) {
+	// FAIL-CLOSED: Input validation
+	if manifest == nil {
+		return nil, errors.New("matrix manifest is nil")
+	}
+	if cleanup == nil {
+		return nil, errors.New("cleanup evidence is nil")
+	}
+	if verifyChild == nil {
+		return nil, errors.New("child verifier is nil")
+	}
+
+	// Phase 1: Verify child bundles (no cleanup required)
+	runs, err := VerifyDeclaredChildBundles(matrixDir, manifest, verifyChild)
+	if err != nil {
+		return nil, fmt.Errorf("phase 1 (verify children): %w", err)
+	}
+
+	// Phase 2: Bind cleanup evidence to verified runs
+	runs, err = BindVerifiedRunsToCleanup(manifest, runs, cleanup)
+	if err != nil {
+		return nil, fmt.Errorf("phase 2 (bind cleanup): %w", err)
+	}
+
+	return runs, nil
 }
 
 // validateCompleteCleanupEvidence performs full cleanup validation.
@@ -758,6 +1087,17 @@ func validateCompleteCleanupEvidence(manifest *MatrixManifest, runs []*VerifiedR
 	// 3. Observation timestamp
 	if cleanup.ObservedAt.IsZero() {
 		return errors.New("cleanup has zero observed_at timestamp")
+	}
+
+	// P0-4 FIX: Require cleanup observation occurs at or after matrix completion.
+	// The ACT explicitly requires post-cleanup observation, so temporal order
+	// is part of the evidence contract.
+	if cleanup.ObservedAt.Before(manifest.FinishedAt) {
+		return fmt.Errorf(
+			"cleanup observed_at %s precedes matrix finished_at %s",
+			cleanup.ObservedAt,
+			manifest.FinishedAt,
+		)
 	}
 
 	// 4. Network ownership mode

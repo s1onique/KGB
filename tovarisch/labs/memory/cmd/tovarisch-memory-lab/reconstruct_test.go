@@ -1731,15 +1731,21 @@ func TestVerifyDeclaredChildRuns_SetsChildVerifiedCorrectly(t *testing.T) {
 	// Create a mock verification function that succeeds for all 3 runs
 	// P0-8 FIX: Must return correct RunID/Scenario based on runDir
 	successVerify := func(runDir string) (*VerifiedChildBundle, error) {
-		// Determine which run based on path
+		// Determine which run based on path - return matching IDs for cleanup binding
 		runID := "run-1"
 		scenario := "canary-growing"
+		containerID := "test-container-1"
+		networkID := "test-network-1"
 		if strings.Contains(runDir, "run-2") {
 			runID = "run-2"
 			scenario = "canary-bounded"
+			containerID = "test-container-2"
+			networkID = "test-network-2"
 		} else if strings.Contains(runDir, "run-3") {
 			runID = "run-3"
 			scenario = "canary-descriptor"
+			containerID = "test-container-3"
+			networkID = "test-network-3"
 		}
 
 		return &VerifiedChildBundle{
@@ -1749,7 +1755,8 @@ func TestVerifyDeclaredChildRuns_SetsChildVerifiedCorrectly(t *testing.T) {
 				Scenario:     scenario,
 			},
 			Verdict:        &evidence.Verdict{Scenario: scenario},
-			ContainerID:    "test-container",
+			ContainerID:    containerID,
+			NetworkID:     networkID,
 			SubjectPID:     12345,
 			SubjectStart:   1234567890,
 			ChecksVerified: true,
@@ -1773,11 +1780,12 @@ func TestVerifyDeclaredChildRuns_SetsChildVerifiedCorrectly(t *testing.T) {
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
 		MatrixID:        "test-matrix",
+		ObservedAt:      time.Now(),
 		NetworkOwnership: "per_run",
 		Runs: []RunCleanupRecord{
-			{Index: 0, Scenario: "canary-growing", RunID: "run-1"},
-			{Index: 1, Scenario: "canary-bounded", RunID: "run-2"},
-			{Index: 2, Scenario: "canary-descriptor", RunID: "run-3"},
+			{Index: 0, Scenario: "canary-growing", RunID: "run-1", Container: ContainerCleanupRecord{ID: "test-container-1", Status: "gone"}, Network: NetworkCleanupRecord{ID: "test-network-1", Status: "gone"}, Process: ProcessCleanupRecord{PID: 12345, StartTime: 1234567890, Status: "gone"}},
+			{Index: 1, Scenario: "canary-bounded", RunID: "run-2", Container: ContainerCleanupRecord{ID: "test-container-2", Status: "gone"}, Network: NetworkCleanupRecord{ID: "test-network-2", Status: "gone"}, Process: ProcessCleanupRecord{PID: 12345, StartTime: 1234567890, Status: "gone"}},
+			{Index: 2, Scenario: "canary-descriptor", RunID: "run-3", Container: ContainerCleanupRecord{ID: "test-container-3", Status: "gone"}, Network: NetworkCleanupRecord{ID: "test-network-3", Status: "gone"}, Process: ProcessCleanupRecord{PID: 12345, StartTime: 1234567890, Status: "gone"}},
 		},
 	}
 
@@ -1939,6 +1947,7 @@ func TestVerifyDeclaredChildRuns_RejectsUnverifiedBundle(t *testing.T) {
 
 func TestVerifyDeclaredChildRuns_RejectsRunIDMismatch(t *testing.T) {
 	mismatchVerify := func(runDir string) (*VerifiedChildBundle, error) {
+		// P0-1 FIX: Must provide valid identities - all fields are required now
 		return &VerifiedChildBundle{
 			Manifest: &evidence.Manifest{
 				SchemaVersion: "1.1.0",
@@ -1947,6 +1956,11 @@ func TestVerifyDeclaredChildRuns_RejectsRunIDMismatch(t *testing.T) {
 			},
 			Verdict:        &evidence.Verdict{Scenario: "canary-growing"},
 			ChecksVerified: true,
+			// Required identity fields
+			ContainerID:  "container-abc123",
+			NetworkID:    "network-abc123",
+			SubjectPID:   54321,
+			SubjectStart: 1234567890,
 		}, nil
 	}
 
@@ -1981,6 +1995,7 @@ func TestVerifyDeclaredChildRuns_RejectsRunIDMismatch(t *testing.T) {
 
 func TestVerifyDeclaredChildRuns_RejectsScenarioMismatch(t *testing.T) {
 	mismatchVerify := func(runDir string) (*VerifiedChildBundle, error) {
+		// P0-1 FIX: Must provide valid identities - all fields are required now
 		return &VerifiedChildBundle{
 			Manifest: &evidence.Manifest{
 				SchemaVersion: "1.1.0",
@@ -1989,6 +2004,11 @@ func TestVerifyDeclaredChildRuns_RejectsScenarioMismatch(t *testing.T) {
 			},
 			Verdict:        &evidence.Verdict{Scenario: "wrong-scenario"},
 			ChecksVerified: true,
+			// Required identity fields
+			ContainerID:  "container-abc123",
+			NetworkID:    "network-abc123",
+			SubjectPID:   54321,
+			SubjectStart: 1234567890,
 		}, nil
 	}
 
@@ -2322,5 +2342,673 @@ func TestCanonicalScenarioOrderHasThreeEntries(t *testing.T) {
 			"canonical scenario count = %d, expected 3",
 			got,
 		)
+	}
+}
+
+// =============================================================================
+// TWO-PHASE AUTHORITY TESTS - P0 FIX
+// These tests verify the complete two-phase authority pattern:
+// Phase 1: VerifyDeclaredChildBundles (no cleanup required)
+// Phase 2: BindVerifiedRunsToCleanup (cleanup binding with validation)
+// Composite: VerifyDeclaredChildRuns (calls both phases)
+// =============================================================================
+
+// makeTestVerifiedRun creates a VerifiedRun for testing.
+func makeTestVerifiedRun(i int) *VerifiedRun {
+	return &VerifiedRun{
+		DeclaredRunID:    fmt.Sprintf("run-%d", i),
+		DeclaredScenario: CanonicalScenarioOrder[i],
+		RunIndex:        i,
+		ContainerID:     fmt.Sprintf("container-%d", i),
+		NetworkID:       fmt.Sprintf("network-%d", i),
+		SubjectPID:      1000 + i,
+		SubjectStartTime: uint64(5000 + i),
+		ChildVerified:   true,
+	}
+}
+
+// makeTestCleanupRecord creates a RunCleanupRecord for testing.
+func makeTestCleanupRecord(i int) RunCleanupRecord {
+	return RunCleanupRecord{
+		Index:    i,
+		Scenario: CanonicalScenarioOrder[i],
+		RunID:    fmt.Sprintf("run-%d", i),
+		Container: ContainerCleanupRecord{
+			ID:     fmt.Sprintf("container-%d", i),
+			Status: "gone",
+		},
+		Network: NetworkCleanupRecord{
+			ID:     fmt.Sprintf("network-%d", i),
+			Status: "gone",
+		},
+		Process: ProcessCleanupRecord{
+			PID:       1000 + i,
+			StartTime: uint64(5000 + i),
+			Status:    "gone",
+		},
+	}
+}
+
+// makeTestManifest creates a MatrixManifest for testing.
+func makeTestManifest() *MatrixManifest {
+	return &MatrixManifest{
+		SchemaVersion: MatrixSchemaVersion,
+		MatrixID:      "test-matrix-1",
+		StartedAt:     time.Now().Add(-10 * time.Minute),
+		FinishedAt:    time.Now(),
+		Runs: []MatrixRunDeclaration{
+			{Index: 1, Scenario: CanonicalScenarioOrder[0], RunID: "run-0", Path: "runs/run-0"},
+			{Index: 2, Scenario: CanonicalScenarioOrder[1], RunID: "run-1", Path: "runs/run-1"},
+			{Index: 3, Scenario: CanonicalScenarioOrder[2], RunID: "run-2", Path: "runs/run-2"},
+		},
+	}
+}
+
+// makeTestCleanup creates a MatrixCleanupEvidence for testing.
+func makeTestCleanup(matrixID string) *MatrixCleanupEvidence {
+	return &MatrixCleanupEvidence{
+		SchemaVersion:     "1.0.0",
+		MatrixID:         matrixID,
+		ObservedAt:       time.Now(),
+		NetworkOwnership: "per_run",
+		Runs: []RunCleanupRecord{
+			makeTestCleanupRecord(0),
+			makeTestCleanupRecord(1),
+			makeTestCleanupRecord(2),
+		},
+	}
+}
+
+// TEST 60: VerifyDeclaredChildBundles verifies exactly three canonical child paths.
+func TestVerifyDeclaredChildBundles_VerifiesCanonicalChildren(t *testing.T) {
+	manifest := makeTestManifest()
+	if len(manifest.Runs) != 3 {
+		t.Fatalf("test setup error: manifest must have 3 runs, got %d", len(manifest.Runs))
+	}
+	for i, scenario := range CanonicalScenarioOrder {
+		if manifest.Runs[i].Scenario != scenario {
+			t.Errorf("run[%d] scenario %q != canonical %q", i, manifest.Runs[i].Scenario, scenario)
+		}
+	}
+}
+
+// TEST 61: VerifyDeclaredChildBundles populates all independently verified identities.
+func TestVerifyDeclaredChildBundles_PopulatesIdentities(t *testing.T) {
+	manifest := makeTestManifest()
+	verifyFn := func(runDir string) (*VerifiedChildBundle, error) {
+		runID := filepath.Base(runDir)
+		i := 0
+		fmt.Sscanf(runID, "run-%d", &i)
+		return &VerifiedChildBundle{
+			Manifest: &evidence.Manifest{
+				RunID:    fmt.Sprintf("run-%d", i),
+				Scenario: CanonicalScenarioOrder[i],
+			},
+			Verdict:        &evidence.Verdict{Scenario: CanonicalScenarioOrder[i]},
+			ContainerID:    fmt.Sprintf("container-%d", i),
+			NetworkID:       fmt.Sprintf("network-%d", i),
+			SubjectPID:      1000 + i,
+			SubjectStart:   uint64(5000 + i),
+			ChecksVerified: true,
+		}, nil
+	}
+	tmpDir, err := os.MkdirTemp("", "two-phase-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	runsDir := filepath.Join(tmpDir, "runs")
+	os.MkdirAll(runsDir, 0755)
+	for i := 0; i < 3; i++ {
+		os.MkdirAll(filepath.Join(runsDir, fmt.Sprintf("run-%d", i)), 0755)
+	}
+	runs, err := VerifyDeclaredChildBundles(tmpDir, manifest, verifyFn)
+	if err != nil {
+		t.Fatalf("VerifyDeclaredChildBundles failed: %v", err)
+	}
+	for i, vr := range runs {
+		if vr.ContainerID == "" {
+			t.Errorf("run[%d] ContainerID is empty", i)
+		}
+		if vr.NetworkID == "" {
+			t.Errorf("run[%d] NetworkID is empty", i)
+		}
+		if vr.SubjectPID == 0 {
+			t.Errorf("run[%d] SubjectPID is zero", i)
+		}
+		if vr.SubjectStartTime == 0 {
+			t.Errorf("run[%d] SubjectStartTime is zero", i)
+		}
+		if !vr.ChildVerified {
+			t.Errorf("run[%d] ChildVerified is false", i)
+		}
+	}
+}
+
+// TEST 62: BindVerifiedRunsToCleanup accepts exact matching evidence.
+func TestBindVerifiedRunsToCleanup_AcceptsMatchingEvidence(t *testing.T) {
+	manifest := makeTestManifest()
+	runs := []*VerifiedRun{
+		makeTestVerifiedRun(0),
+		makeTestVerifiedRun(1),
+		makeTestVerifiedRun(2),
+	}
+	cleanup := makeTestCleanup("test-matrix-1")
+	bound, err := BindVerifiedRunsToCleanup(manifest, runs, cleanup)
+	if err != nil {
+		t.Fatalf("BindVerifiedRunsToCleanup failed: %v", err)
+	}
+	for i, vr := range bound {
+		if !vr.CleanupEvidenceLoaded {
+			t.Errorf("run[%d] CleanupEvidenceLoaded is false", i)
+		}
+		if !vr.CleanupEvidenceValid {
+			t.Errorf("run[%d] CleanupEvidenceValid is false", i)
+		}
+		if vr.ProcessCleanupStatus != ProcessGone {
+			t.Errorf("run[%d] ProcessCleanupStatus is %v, expected ProcessGone", i, vr.ProcessCleanupStatus)
+		}
+	}
+}
+
+// TEST 63: Container mismatch returns an error.
+func TestBindVerifiedRunsToCleanup_RejectsContainerMismatch(t *testing.T) {
+	manifest := makeTestManifest()
+	runs := []*VerifiedRun{
+		makeTestVerifiedRun(0),
+		makeTestVerifiedRun(1),
+		makeTestVerifiedRun(2),
+	}
+	cleanup := makeTestCleanup("test-matrix-1")
+	cleanup.Runs[1].Container.ID = "wrong-container"
+	_, err := BindVerifiedRunsToCleanup(manifest, runs, cleanup)
+	if err == nil {
+		t.Fatal("expected error for container mismatch, got nil")
+	}
+	if !strings.Contains(err.Error(), "container.id") {
+		t.Errorf("expected container.id error, got: %v", err)
+	}
+}
+
+// TEST 64: Network mismatch returns an error.
+func TestBindVerifiedRunsToCleanup_RejectsNetworkMismatch(t *testing.T) {
+	manifest := makeTestManifest()
+	runs := []*VerifiedRun{
+		makeTestVerifiedRun(0),
+		makeTestVerifiedRun(1),
+		makeTestVerifiedRun(2),
+	}
+	cleanup := makeTestCleanup("test-matrix-1")
+	cleanup.Runs[0].Network.ID = "wrong-network"
+	_, err := BindVerifiedRunsToCleanup(manifest, runs, cleanup)
+	if err == nil {
+		t.Fatal("expected error for network mismatch, got nil")
+	}
+	if !strings.Contains(err.Error(), "network.id") {
+		t.Errorf("expected network.id error, got: %v", err)
+	}
+}
+
+// TEST 65: PID mismatch returns an error.
+func TestBindVerifiedRunsToCleanup_RejectsPIDMismatch(t *testing.T) {
+	manifest := makeTestManifest()
+	runs := []*VerifiedRun{
+		makeTestVerifiedRun(0),
+		makeTestVerifiedRun(1),
+		makeTestVerifiedRun(2),
+	}
+	cleanup := makeTestCleanup("test-matrix-1")
+	cleanup.Runs[2].Process.PID = 9999
+	_, err := BindVerifiedRunsToCleanup(manifest, runs, cleanup)
+	if err == nil {
+		t.Fatal("expected error for PID mismatch, got nil")
+	}
+	if !strings.Contains(err.Error(), "process.pid") {
+		t.Errorf("expected process.pid error, got: %v", err)
+	}
+}
+
+// TEST 66: Start-time mismatch returns an error.
+func TestBindVerifiedRunsToCleanup_RejectsStartTimeMismatch(t *testing.T) {
+	manifest := makeTestManifest()
+	runs := []*VerifiedRun{
+		makeTestVerifiedRun(0),
+		makeTestVerifiedRun(1),
+		makeTestVerifiedRun(2),
+	}
+	cleanup := makeTestCleanup("test-matrix-1")
+	cleanup.Runs[0].Process.StartTime = 99999
+	_, err := BindVerifiedRunsToCleanup(manifest, runs, cleanup)
+	if err == nil {
+		t.Fatal("expected error for start time mismatch, got nil")
+	}
+	if !strings.Contains(err.Error(), "process.start_time") {
+		t.Errorf("expected process.start_time error, got: %v", err)
+	}
+}
+
+// TEST 67: RunID mismatch returns an error.
+func TestBindVerifiedRunsToCleanup_RejectsRunIDMismatch(t *testing.T) {
+	manifest := makeTestManifest()
+	runs := []*VerifiedRun{
+		makeTestVerifiedRun(0),
+		makeTestVerifiedRun(1),
+		makeTestVerifiedRun(2),
+	}
+	cleanup := makeTestCleanup("test-matrix-1")
+	cleanup.Runs[1].RunID = "wrong-run-id"
+	_, err := BindVerifiedRunsToCleanup(manifest, runs, cleanup)
+	if err == nil {
+		t.Fatal("expected error for RunID mismatch, got nil")
+	}
+	if !strings.Contains(err.Error(), "RunID") {
+		t.Errorf("expected RunID error, got: %v", err)
+	}
+}
+
+// TEST 68: Failed binding does not mutate any input run.
+func TestBindVerifiedRunsToCleanup_NoPartialMutation(t *testing.T) {
+	manifest := makeTestManifest()
+	runs := []*VerifiedRun{
+		makeTestVerifiedRun(0),
+		makeTestVerifiedRun(1),
+		makeTestVerifiedRun(2),
+	}
+	cleanup := makeTestCleanup("test-matrix-1")
+	originalLoaded := make([]bool, 3)
+	originalValid := make([]bool, 3)
+	for i, vr := range runs {
+		originalLoaded[i] = vr.CleanupEvidenceLoaded
+		originalValid[i] = vr.CleanupEvidenceValid
+	}
+	cleanup.Runs[2].Process.PID = 9999
+	_, err := BindVerifiedRunsToCleanup(manifest, runs, cleanup)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	for i, vr := range runs {
+		if vr.CleanupEvidenceLoaded != originalLoaded[i] {
+			t.Errorf("run[%d] CleanupEvidenceLoaded was mutated", i)
+		}
+		if vr.CleanupEvidenceValid != originalValid[i] {
+			t.Errorf("run[%d] CleanupEvidenceValid was mutated", i)
+		}
+	}
+}
+
+// TEST 69: VerifyDeclaredChildRuns is proven to call both shared phases.
+func TestVerifyDeclaredChildRuns_IsCompositeWrapper(t *testing.T) {
+	manifest := makeTestManifest()
+	cleanup := makeTestCleanup("test-matrix-1")
+	verifyFn := func(runDir string) (*VerifiedChildBundle, error) {
+		runID := filepath.Base(runDir)
+		i := 0
+		fmt.Sscanf(runID, "run-%d", &i)
+		return &VerifiedChildBundle{
+			Manifest: &evidence.Manifest{
+				RunID:    fmt.Sprintf("run-%d", i),
+				Scenario: CanonicalScenarioOrder[i],
+			},
+			Verdict:        &evidence.Verdict{Scenario: CanonicalScenarioOrder[i]},
+			ContainerID:    fmt.Sprintf("container-%d", i),
+			NetworkID:       fmt.Sprintf("network-%d", i),
+			SubjectPID:      1000 + i,
+			SubjectStart:   uint64(5000 + i),
+			ChecksVerified: true,
+		}, nil
+	}
+	tmpDir, err := os.MkdirTemp("", "composite-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	runsDir := filepath.Join(tmpDir, "runs")
+	os.MkdirAll(runsDir, 0755)
+	for i := 0; i < 3; i++ {
+		os.MkdirAll(filepath.Join(runsDir, fmt.Sprintf("run-%d", i)), 0755)
+	}
+	compositeRuns, err := VerifyDeclaredChildRuns(tmpDir, manifest, cleanup, verifyFn)
+	if err != nil {
+		t.Fatalf("VerifyDeclaredChildRuns failed: %v", err)
+	}
+	phase1Runs, err := VerifyDeclaredChildBundles(tmpDir, manifest, verifyFn)
+	if err != nil {
+		t.Fatalf("VerifyDeclaredChildBundles failed: %v", err)
+	}
+	phase2Runs, err := BindVerifiedRunsToCleanup(manifest, phase1Runs, cleanup)
+	if err != nil {
+		t.Fatalf("BindVerifiedRunsToCleanup failed: %v", err)
+	}
+	if len(compositeRuns) != len(phase2Runs) {
+		t.Fatalf("composite len=%d, phases len=%d", len(compositeRuns), len(phase2Runs))
+	}
+	for i := range compositeRuns {
+		if compositeRuns[i].DeclaredRunID != phase2Runs[i].DeclaredRunID {
+			t.Errorf("run[%d] DeclaredRunID mismatch", i)
+		}
+		if compositeRuns[i].ContainerID != phase2Runs[i].ContainerID {
+			t.Errorf("run[%d] ContainerID mismatch", i)
+		}
+		if compositeRuns[i].CleanupEvidenceLoaded != phase2Runs[i].CleanupEvidenceLoaded {
+			t.Errorf("run[%d] CleanupEvidenceLoaded mismatch", i)
+		}
+	}
+}
+
+// TEST 70: ValidateCleanupBinding rejects empty schema_version.
+func TestValidateCleanupBinding_RejectsEmptySchemaVersion(t *testing.T) {
+	manifest := makeTestManifest()
+	runs := []*VerifiedRun{makeTestVerifiedRun(0), makeTestVerifiedRun(1), makeTestVerifiedRun(2)}
+	cleanup := makeTestCleanup("test-matrix-1")
+	cleanup.SchemaVersion = ""
+	err := ValidateCleanupBinding(manifest, runs, cleanup)
+	if err == nil {
+		t.Fatal("expected error for empty schema_version, got nil")
+	}
+}
+
+// TEST 71: ValidateCleanupBinding rejects MatrixID mismatch.
+func TestValidateCleanupBinding_RejectsMatrixIDMismatch(t *testing.T) {
+	manifest := makeTestManifest()
+	runs := []*VerifiedRun{makeTestVerifiedRun(0), makeTestVerifiedRun(1), makeTestVerifiedRun(2)}
+	cleanup := makeTestCleanup("different-matrix-id")
+	err := ValidateCleanupBinding(manifest, runs, cleanup)
+	if err == nil {
+		t.Fatal("expected error for MatrixID mismatch, got nil")
+	}
+	if !strings.Contains(err.Error(), "matrix_id") {
+		t.Errorf("expected matrix_id error, got: %v", err)
+	}
+}
+
+// TEST 72: ValidateCleanupBinding rejects zero observed_at timestamp.
+func TestValidateCleanupBinding_RejectsZeroObservedAt(t *testing.T) {
+	manifest := makeTestManifest()
+	runs := []*VerifiedRun{makeTestVerifiedRun(0), makeTestVerifiedRun(1), makeTestVerifiedRun(2)}
+	cleanup := makeTestCleanup("test-matrix-1")
+	cleanup.ObservedAt = time.Time{}
+	err := ValidateCleanupBinding(manifest, runs, cleanup)
+	if err == nil {
+		t.Fatal("expected error for zero observed_at, got nil")
+	}
+}
+
+// TEST 73: ValidateCleanupBinding rejects invalid network_ownership.
+func TestValidateCleanupBinding_RejectsInvalidNetworkOwnership(t *testing.T) {
+	manifest := makeTestManifest()
+	runs := []*VerifiedRun{makeTestVerifiedRun(0), makeTestVerifiedRun(1), makeTestVerifiedRun(2)}
+	cleanup := makeTestCleanup("test-matrix-1")
+	cleanup.NetworkOwnership = "invalid-mode"
+	err := ValidateCleanupBinding(manifest, runs, cleanup)
+	if err == nil {
+		t.Fatal("expected error for invalid network_ownership, got nil")
+	}
+}
+
+// TEST 74: ValidateCleanupBinding rejects index mismatch.
+func TestValidateCleanupBinding_RejectsIndexMismatch(t *testing.T) {
+	manifest := makeTestManifest()
+	runs := []*VerifiedRun{makeTestVerifiedRun(0), makeTestVerifiedRun(1), makeTestVerifiedRun(2)}
+	cleanup := makeTestCleanup("test-matrix-1")
+	cleanup.Runs[1].Index = 99
+	err := ValidateCleanupBinding(manifest, runs, cleanup)
+	if err == nil {
+		t.Fatal("expected error for index mismatch, got nil")
+	}
+	if !strings.Contains(err.Error(), "index") {
+		t.Errorf("expected index error, got: %v", err)
+	}
+}
+
+// TEST 75: ValidateCleanupBinding rejects scenario mismatch.
+func TestValidateCleanupBinding_RejectsScenarioMismatch(t *testing.T) {
+	manifest := makeTestManifest()
+	runs := []*VerifiedRun{makeTestVerifiedRun(0), makeTestVerifiedRun(1), makeTestVerifiedRun(2)}
+	cleanup := makeTestCleanup("test-matrix-1")
+	cleanup.Runs[0].Scenario = "wrong-scenario"
+	err := ValidateCleanupBinding(manifest, runs, cleanup)
+	if err == nil {
+		t.Fatal("expected error for scenario mismatch, got nil")
+	}
+	if !strings.Contains(err.Error(), "scenario") {
+		t.Errorf("expected scenario error, got: %v", err)
+	}
+}
+
+// TEST 76: ValidateCleanupBinding rejects cleanup observed_at before matrix finished_at.
+func TestValidateCleanupBinding_RejectsObservedAtBeforeFinishedAt(t *testing.T) {
+	manifest := makeTestManifest()
+	runs := []*VerifiedRun{makeTestVerifiedRun(0), makeTestVerifiedRun(1), makeTestVerifiedRun(2)}
+	cleanup := makeTestCleanup("test-matrix-1")
+	// Set observed_at BEFORE finished_at
+	cleanup.ObservedAt = manifest.FinishedAt.Add(-1 * time.Hour)
+	err := ValidateCleanupBinding(manifest, runs, cleanup)
+	if err == nil {
+		t.Fatal("expected error for observed_at before finished_at, got nil")
+	}
+	if !strings.Contains(err.Error(), "observed_at") {
+		t.Errorf("expected observed_at error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "precedes") {
+		t.Errorf("expected 'precedes' error message, got: %v", err)
+	}
+}
+
+// TEST 77: VerifyDeclaredChildBundles records exact paths called on verifier (P0 FIX).
+func TestVerifyDeclaredChildBundles_RecordsCanonicalPaths(t *testing.T) {
+	manifest := makeTestManifest()
+
+	// Recording verifier that captures all paths called
+	var recordedPaths []string
+	recordVerify := func(runDir string) (*VerifiedChildBundle, error) {
+		recordedPaths = append(recordedPaths, runDir)
+		runID := filepath.Base(runDir)
+		i := 0
+		fmt.Sscanf(runID, "run-%d", &i)
+		return &VerifiedChildBundle{
+			Manifest: &evidence.Manifest{
+				RunID:    fmt.Sprintf("run-%d", i),
+				Scenario: CanonicalScenarioOrder[i],
+			},
+			Verdict:        &evidence.Verdict{Scenario: CanonicalScenarioOrder[i]},
+			ContainerID:    fmt.Sprintf("container-%d", i),
+			NetworkID:      fmt.Sprintf("network-%d", i),
+			SubjectPID:     1000 + i,
+			SubjectStart:   uint64(5000 + i),
+			ChecksVerified: true,
+		}, nil
+	}
+
+	tmpDir, err := os.MkdirTemp("", "recording-test")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	runsDir := filepath.Join(tmpDir, "runs")
+	os.MkdirAll(runsDir, 0755)
+	for i := 0; i < 3; i++ {
+		os.MkdirAll(filepath.Join(runsDir, fmt.Sprintf("run-%d", i)), 0755)
+	}
+
+	_, err = VerifyDeclaredChildBundles(tmpDir, manifest, recordVerify)
+	if err != nil {
+		t.Fatalf("VerifyDeclaredChildBundles failed: %v", err)
+	}
+
+	// P0 FIX: Verify exactly 3 calls in order
+	if len(recordedPaths) != 3 {
+		t.Fatalf("expected exactly 3 verifier calls, got %d", len(recordedPaths))
+	}
+
+	// Verify exact paths in canonical order
+	expectedPaths := []string{
+		filepath.Join(tmpDir, "runs", "run-0"),
+		filepath.Join(tmpDir, "runs", "run-1"),
+		filepath.Join(tmpDir, "runs", "run-2"),
+	}
+	for i, expected := range expectedPaths {
+		if recordedPaths[i] != expected {
+			t.Errorf("path[%d]: expected %q, got %q", i, expected, recordedPaths[i])
+		}
+	}
+}
+
+// TEST 78: ValidateCleanupBinding requires matrix_shared network status "gone" (P1 FIX).
+func TestValidateCleanupBinding_RequiresMatrixSharedNetworkGone(t *testing.T) {
+	manifest := makeTestManifest()
+	// Create VerifiedRuns with shared network ID for matrix_shared mode
+	runs := []*VerifiedRun{
+		makeTestVerifiedRun(0),
+		makeTestVerifiedRun(1),
+		makeTestVerifiedRun(2),
+	}
+	// Set all runs to use the same shared network ID
+	for _, vr := range runs {
+		vr.NetworkID = "shared-net"
+	}
+
+	// Create matrix_shared cleanup with network status "exists"
+	cleanup := &MatrixCleanupEvidence{
+		SchemaVersion:    "1.0.0",
+		MatrixID:        "test-matrix-1",
+		ObservedAt:      time.Now(),
+		NetworkOwnership: "matrix_shared",
+		Runs: []RunCleanupRecord{
+			{
+				Index:    0,
+				Scenario: "canary-growing",
+				RunID:    "run-0",
+				Container: ContainerCleanupRecord{ID: "container-0", Status: "gone"},
+				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "exists"}, // Should be gone!
+				Process:  ProcessCleanupRecord{PID: 1000, StartTime: 5000, Status: "gone"},
+			},
+			{
+				Index:    1,
+				Scenario: "canary-bounded",
+				RunID:    "run-1",
+				Container: ContainerCleanupRecord{ID: "container-1", Status: "gone"},
+				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "exists"}, // Should be gone!
+				Process:  ProcessCleanupRecord{PID: 1001, StartTime: 5001, Status: "gone"},
+			},
+			{
+				Index:    2,
+				Scenario: "canary-descriptor",
+				RunID:    "run-2",
+				Container: ContainerCleanupRecord{ID: "container-2", Status: "gone"},
+				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "exists"}, // Should be gone!
+				Process:  ProcessCleanupRecord{PID: 1002, StartTime: 5002, Status: "gone"},
+			},
+		},
+	}
+
+	err := ValidateCleanupBinding(manifest, runs, cleanup)
+	if err == nil {
+		t.Fatal("expected error for matrix_shared network.status='exists', got nil")
+	}
+	if !strings.Contains(err.Error(), "network.status") {
+		t.Errorf("expected network.status error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "expected gone") {
+		t.Errorf("expected 'expected gone' error message, got: %v", err)
+	}
+}
+
+// TEST 79: ValidateCleanupBinding accepts valid matrix_shared with status "gone".
+func TestValidateCleanupBinding_AcceptsMatrixSharedNetworkGone(t *testing.T) {
+	manifest := makeTestManifest()
+	runs := []*VerifiedRun{makeTestVerifiedRun(0), makeTestVerifiedRun(1), makeTestVerifiedRun(2)}
+	// Set all runs to use the same shared network ID
+	for _, vr := range runs {
+		vr.NetworkID = "shared-net"
+	}
+
+	// Create valid matrix_shared cleanup
+	cleanup := &MatrixCleanupEvidence{
+		SchemaVersion:    "1.0.0",
+		MatrixID:        "test-matrix-1",
+		ObservedAt:      time.Now(),
+		NetworkOwnership: "matrix_shared",
+		Runs: []RunCleanupRecord{
+			{
+				Index:    0,
+				Scenario: "canary-growing",
+				RunID:    "run-0",
+				Container: ContainerCleanupRecord{ID: "container-0", Status: "gone"},
+				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "gone"}, // Valid
+				Process:  ProcessCleanupRecord{PID: 1000, StartTime: 5000, Status: "gone"},
+			},
+			{
+				Index:    1,
+				Scenario: "canary-bounded",
+				RunID:    "run-1",
+				Container: ContainerCleanupRecord{ID: "container-1", Status: "gone"},
+				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "gone"}, // Valid
+				Process:  ProcessCleanupRecord{PID: 1001, StartTime: 5001, Status: "gone"},
+			},
+			{
+				Index:    2,
+				Scenario: "canary-descriptor",
+				RunID:    "run-2",
+				Container: ContainerCleanupRecord{ID: "container-2", Status: "gone"},
+				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "gone"}, // Valid
+				Process:  ProcessCleanupRecord{PID: 1002, StartTime: 5002, Status: "gone"},
+			},
+		},
+	}
+
+	err := ValidateCleanupBinding(manifest, runs, cleanup)
+	if err != nil {
+		t.Errorf("unexpected error for valid matrix_shared cleanup: %v", err)
+	}
+}
+
+// TEST 80: ValidateCleanupBinding rejects matrix_shared with unavailable network status.
+func TestValidateCleanupBinding_RejectsMatrixSharedNetworkUnavailable(t *testing.T) {
+	manifest := makeTestManifest()
+	runs := []*VerifiedRun{makeTestVerifiedRun(0), makeTestVerifiedRun(1), makeTestVerifiedRun(2)}
+	// Set all runs to use the same shared network ID
+	for _, vr := range runs {
+		vr.NetworkID = "shared-net"
+	}
+
+	cleanup := &MatrixCleanupEvidence{
+		SchemaVersion:     "1.0.0",
+		MatrixID:         "test-matrix-1",
+		ObservedAt:       time.Now(),
+		NetworkOwnership: "matrix_shared",
+		Runs: []RunCleanupRecord{
+			{
+				Index:    0,
+				Scenario: "canary-growing",
+				RunID:    "run-0",
+				Container: ContainerCleanupRecord{ID: "container-0", Status: "gone"},
+				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "unavailable"},
+				Process:  ProcessCleanupRecord{PID: 1000, StartTime: 5000, Status: "gone"},
+			},
+			{
+				Index:    1,
+				Scenario: "canary-bounded",
+				RunID:    "run-1",
+				Container: ContainerCleanupRecord{ID: "container-1", Status: "gone"},
+				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "gone"},
+				Process:  ProcessCleanupRecord{PID: 1001, StartTime: 5001, Status: "gone"},
+			},
+			{
+				Index:    2,
+				Scenario: "canary-descriptor",
+				RunID:    "run-2",
+				Container: ContainerCleanupRecord{ID: "container-2", Status: "gone"},
+				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "gone"},
+				Process:  ProcessCleanupRecord{PID: 1002, StartTime: 5002, Status: "gone"},
+			},
+		},
+	}
+
+	err := ValidateCleanupBinding(manifest, runs, cleanup)
+	if err == nil {
+		t.Fatal("expected error for matrix_shared network.status='unavailable', got nil")
+	}
+	if !strings.Contains(err.Error(), "network.status") {
+		t.Errorf("expected network.status error, got: %v", err)
 	}
 }
