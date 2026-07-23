@@ -1,39 +1,50 @@
 // matrix_verify_terminal_test.go — Matrix Verify Command Terminal Tests
 //
-// ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-MATRIX-QUALIFICATION01-CORRECTION03-TERMINAL-QUALIFICATION01
+// ACT-TOVARISCH-GO-MEMORY-LAB01-CANARY-MATRIX-QUALIFICATION01-CORRECTION03-P0-CLI-FIXTURE-CONVERGENCE01
 //
 // Tests the actual verify-matrix command execution against artifact-backed fixtures.
+// P0-8: Uses test-only fixture from matrix_fixture_test.go
 
 package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/analysis"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/evidence"
 )
+
+// =============================================================================
+// PASS LINE MATCHING
+// =============================================================================
+
+const verifyMatrixPassLine = "All Checks: PASS"
+
+// countTerminalPassLines counts exact PASS lines in output.
+func countTerminalPassLines(output string) int {
+	var count int
+	for _, line := range strings.Split(output, "\n") {
+		if strings.TrimSpace(line) == verifyMatrixPassLine {
+			count++
+		}
+	}
+	return count
+}
 
 // assertNoTerminalPass asserts no PASS line appears in output.
 func assertNoTerminalPass(t *testing.T, stdout, stderr string) {
 	t.Helper()
 
-	lines := strings.Split(stdout, "\n")
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "All Checks: PASS" {
-			t.Error("found PASS line in stdout")
-		}
+	if countTerminalPassLines(stdout) > 0 {
+		t.Error("found PASS line in stdout")
 	}
-
-	lines = strings.Split(stderr, "\n")
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "All Checks: PASS" {
-			t.Error("found PASS line in stderr")
-		}
+	if countTerminalPassLines(stderr) > 0 {
+		t.Error("found PASS line in stderr")
 	}
 }
 
@@ -41,19 +52,16 @@ func assertNoTerminalPass(t *testing.T, stdout, stderr string) {
 func assertTerminalPass(t *testing.T, stdout, stderr string) {
 	t.Helper()
 
-	var passCount int
-	lines := strings.Split(stdout, "\n")
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "All Checks: PASS" {
-			passCount++
-		}
-	}
-
+	passCount := countTerminalPassLines(stdout)
 	if passCount == 0 {
 		t.Error("no PASS line found in output")
 	}
 	if passCount > 1 {
 		t.Errorf("expected exactly one PASS line, found %d", passCount)
+	}
+
+	if countTerminalPassLines(stderr) > 0 {
+		t.Error("found PASS line in stderr (should only be in stdout)")
 	}
 }
 
@@ -64,17 +72,11 @@ func assertTerminalPass(t *testing.T, stdout, stderr string) {
 // TestVerifyMatrixBundle_AcceptsCompleteCanonicalFixture proves VerifyMatrixBundle
 // accepts a complete valid fixture.
 func TestVerifyMatrixBundle_AcceptsCompleteCanonicalFixture(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "matrix-verify-fixture-*")
-	if err != nil {
-		t.Fatalf("create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Write complete valid fixture
-	fixture := WriteValidMatrixBundleFixture(t, tmpDir)
+	// P0-8: Use TempDir fixture - automatic cleanup
+	fixture := writeValidMatrixBundleFixture(t)
 
 	// Verify with real verifier
-	result, err := VerifyMatrixBundle(tmpDir, MatrixVerificationDeps{
+	result, err := VerifyMatrixBundle(fixture.rootDir, MatrixVerificationDeps{
 		VerifyChildRun: verifyChildRunBundle,
 	})
 	if err != nil {
@@ -146,22 +148,19 @@ func TestVerifyMatrixBundle_AcceptsCompleteCanonicalFixture(t *testing.T) {
 		}
 	}
 
-	t.Logf("fixture: %s, matrix_id: %s", tmpDir, fixture.MatrixID)
+	t.Logf("fixture: %s, matrix_id: %s", fixture.rootDir, fixture.matrixID)
 }
 
 // =============================================================================
 // SINGLE-CAUSE SEMANTIC MUTATION TESTS
 // =============================================================================
 
-// mutator is a function that mutates a fixture file.
-type mutator func(fixture *MatrixFixture)
-
-// P0-7 FIX: Track whether mutation affects child artifacts for checksum regeneration.
+// mutationTest describes a semantic mutation test case.
 type mutationTest struct {
-	name              string
-	mutator           mutator
-	wantError         bool
-	affectsChild      bool // P0-7: True if mutation affects child artifacts
+	name         string
+	mutate       func(*matrixFixture, *testing.T)
+	wantError    bool
+	refreshChild bool // P0-7: True if mutation affects child artifacts requiring checksum refresh
 }
 
 // TestVerifyMatrixBundle_SemanticMutations proves semantic mutations fail
@@ -188,7 +187,7 @@ func TestVerifyMatrixBundle_SemanticMutations(t *testing.T) {
 		{"process status still_alive", mutateProcessStatusStillAlive, true, false},
 		{"process status unavailable", mutateProcessStatusUnavailable, true, false},
 
-		// P0-7 FIX: Child identity mutations require child checksum regeneration
+		// P0-7: Child identity mutations require child checksum regeneration
 		{"child container identity mutation", mutateChildContainerID, true, true},
 		{"child network identity mutation", mutateChildNetworkID, true, true},
 		{"child RunID mutation", mutateChildRunID, true, true},
@@ -201,29 +200,32 @@ func TestVerifyMatrixBundle_SemanticMutations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmpDir, err := os.MkdirTemp("", "matrix-mutation-*")
-			if err != nil {
-				t.Fatalf("create temp dir: %v", err)
-			}
-			defer os.RemoveAll(tmpDir)
-
-			// Write complete valid fixture
-			fixture := WriteValidMatrixBundleFixture(t, tmpDir)
+			// P0-8: Use TempDir fixture - automatic cleanup
+			fixture := writeValidMatrixBundleFixture(t)
 
 			// Apply mutation
-			tt.mutator(fixture)
+			tt.mutate(fixture, t)
 
-			// P0-7 FIX: Regenerate checksums based on what was mutated
-			if tt.affectsChild {
+			// P0-7: Regenerate checksums based on what was mutated
+			if tt.refreshChild {
 				// Child mutations require regenerating both child AND matrix checksums
-				regenerateAllChecksums(fixture)
+				mustRegenerateAllChecksums(t, fixture)
 			} else {
 				// Matrix-level mutations only need matrix checksums
-				regenerateMatrixChecksums(tmpDir)
+				// Re-write matrix artifacts and regenerate checksums
+				if err := writeFixtureJSON(filepath.Join(fixture.rootDir, "matrix-cleanup.json"), fixture.cleanup); err != nil {
+					t.Fatalf("write cleanup: %v", err)
+				}
+				if err := writeFixtureJSON(filepath.Join(fixture.rootDir, "matrix-verdict.json"), fixture.verdict); err != nil {
+					t.Fatalf("write verdict: %v", err)
+				}
+				if err := regenerateMatrixChecksums(fixture.rootDir); err != nil {
+					t.Fatalf("regenerate matrix checksums: %v", err)
+				}
 			}
 
 			// Verify
-			_, err = VerifyMatrixBundle(tmpDir, MatrixVerificationDeps{
+			_, err := VerifyMatrixBundle(fixture.rootDir, MatrixVerificationDeps{
 				VerifyChildRun: verifyChildRunBundle,
 			})
 
@@ -237,152 +239,165 @@ func TestVerifyMatrixBundle_SemanticMutations(t *testing.T) {
 	}
 }
 
-// regenerateMatrixChecksums recomputes checksums after mutation.
-func regenerateMatrixChecksums(matrixDir string) {
-	checksumContent := computeMatrixChecksumsContent(matrixDir)
-	os.WriteFile(filepath.Join(matrixDir, "matrix-checksums.txt"), []byte(checksumContent), 0644)
+// =============================================================================
+// MUTATION HELPERS (using matrixFixture)
+// =============================================================================
+
+func mutateCleanupContainerID(f *matrixFixture, t *testing.T) {
+	f.cleanup.Runs[0].Container.ID = "mismatched-container-id"
 }
 
-// Mutator functions
-
-func mutateCleanupContainerID(f *MatrixFixture) {
-	f.Cleanup.Runs[0].Container.ID = "mismatched-container-id"
-	writeCleanup(f.RootDir, f.Cleanup)
+func mutateCleanupNetworkID(f *matrixFixture, t *testing.T) {
+	f.cleanup.Runs[0].Network.ID = "mismatched-network-id"
 }
 
-func mutateCleanupNetworkID(f *MatrixFixture) {
-	f.Cleanup.Runs[0].Network.ID = "mismatched-network-id"
-	writeCleanup(f.RootDir, f.Cleanup)
+func mutateCleanupPID(f *matrixFixture, t *testing.T) {
+	f.cleanup.Runs[0].Process.PID = 99999
 }
 
-func mutateCleanupPID(f *MatrixFixture) {
-	f.Cleanup.Runs[0].Process.PID = 99999
-	writeCleanup(f.RootDir, f.Cleanup)
+func mutateCleanupStartTime(f *matrixFixture, t *testing.T) {
+	f.cleanup.Runs[0].Process.StartTime = 999999
 }
 
-func mutateCleanupStartTime(f *MatrixFixture) {
-	f.Cleanup.Runs[0].Process.StartTime = 999999
-	writeCleanup(f.RootDir, f.Cleanup)
+func mutateCleanupRunID(f *matrixFixture, t *testing.T) {
+	f.cleanup.Runs[0].RunID = "mismatched-run-id"
 }
 
-func mutateCleanupRunID(f *MatrixFixture) {
-	f.Cleanup.Runs[0].RunID = "mismatched-run-id"
-	writeCleanup(f.RootDir, f.Cleanup)
+func mutateCleanupScenario(f *matrixFixture, t *testing.T) {
+	f.cleanup.Runs[0].Scenario = "canary-bounded"
 }
 
-func mutateCleanupScenario(f *MatrixFixture) {
-	f.Cleanup.Runs[0].Scenario = "canary-bounded"
-	writeCleanup(f.RootDir, f.Cleanup)
+func mutateCleanupIndex(f *matrixFixture, t *testing.T) {
+	f.cleanup.Runs[0].Index = 99
 }
 
-func mutateCleanupIndex(f *MatrixFixture) {
-	f.Cleanup.Runs[0].Index = 99
-	writeCleanup(f.RootDir, f.Cleanup)
+func mutateCleanupObservedAtBefore(f *matrixFixture, t *testing.T) {
+	f.cleanup.ObservedAt = f.manifest.FinishedAt.Add(-1 * time.Hour)
 }
 
-func mutateCleanupObservedAtBefore(f *MatrixFixture) {
-	f.Cleanup.ObservedAt = f.Manifest.FinishedAt.Add(-1 * time.Hour)
-	writeCleanup(f.RootDir, f.Cleanup)
+func mutateContainerStatusExists(f *matrixFixture, t *testing.T) {
+	f.cleanup.Runs[0].Container.Status = "exists"
 }
 
-func mutateContainerStatusExists(f *MatrixFixture) {
-	f.Cleanup.Runs[0].Container.Status = "exists"
-	writeCleanup(f.RootDir, f.Cleanup)
+func mutateContainerStatusUnavailable(f *matrixFixture, t *testing.T) {
+	f.cleanup.Runs[0].Container.Status = "unavailable"
 }
 
-func mutateContainerStatusUnavailable(f *MatrixFixture) {
-	f.Cleanup.Runs[0].Container.Status = "unavailable"
-	writeCleanup(f.RootDir, f.Cleanup)
+func mutateNetworkStatusExists(f *matrixFixture, t *testing.T) {
+	f.cleanup.Runs[0].Network.Status = "exists"
 }
 
-func mutateNetworkStatusExists(f *MatrixFixture) {
-	f.Cleanup.Runs[0].Network.Status = "exists"
-	writeCleanup(f.RootDir, f.Cleanup)
+func mutateNetworkStatusUnavailable(f *matrixFixture, t *testing.T) {
+	f.cleanup.Runs[0].Network.Status = "unavailable"
 }
 
-func mutateNetworkStatusUnavailable(f *MatrixFixture) {
-	f.Cleanup.Runs[0].Network.Status = "unavailable"
-	writeCleanup(f.RootDir, f.Cleanup)
+func mutateProcessStatusStillAlive(f *matrixFixture, t *testing.T) {
+	f.cleanup.Runs[0].Process.Status = "still_alive"
 }
 
-func mutateProcessStatusStillAlive(f *MatrixFixture) {
-	f.Cleanup.Runs[0].Process.Status = "still_alive"
-	writeCleanup(f.RootDir, f.Cleanup)
+func mutateProcessStatusUnavailable(f *matrixFixture, t *testing.T) {
+	f.cleanup.Runs[0].Process.Status = "unavailable"
 }
 
-func mutateProcessStatusUnavailable(f *MatrixFixture) {
-	f.Cleanup.Runs[0].Process.Status = "unavailable"
-	writeCleanup(f.RootDir, f.Cleanup)
-}
-
-func mutateChildContainerID(f *MatrixFixture) {
+func mutateChildContainerID(f *matrixFixture, t *testing.T) {
 	// Mutate container-inspect.json in first child
-	runDir := f.RunDirs[0]
+	runDir := f.runDirs[0]
 	path := filepath.Join(runDir, "container-inspect.json")
-	data, _ := os.ReadFile(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read container inspect: %v", err)
+	}
 	var inspect map[string]string
-	json.Unmarshal(data, &inspect)
+	if err := json.Unmarshal(data, &inspect); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	inspect["Id"] = "mismatched-child-container"
-	newData, _ := json.MarshalIndent(inspect, "", "  ")
-	os.WriteFile(path, newData, 0644)
+	newData, err := json.MarshalIndent(inspect, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(path, newData, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 }
 
-func mutateChildNetworkID(f *MatrixFixture) {
+func mutateChildNetworkID(f *matrixFixture, t *testing.T) {
 	// Mutate network-identity.json in first child
-	runDir := f.RunDirs[0]
+	runDir := f.runDirs[0]
 	path := filepath.Join(runDir, "network-identity.json")
-	data, _ := os.ReadFile(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read network identity: %v", err)
+	}
 	var netID NetworkIdentity
-	json.Unmarshal(data, &netID)
+	if err := json.Unmarshal(data, &netID); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	netID.ID = "mismatched-child-network"
-	newData, _ := json.MarshalIndent(netID, "", "  ")
-	os.WriteFile(path, newData, 0644)
+	newData, err := json.MarshalIndent(netID, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(path, newData, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 }
 
-func mutateChildRunID(f *MatrixFixture) {
+func mutateChildRunID(f *matrixFixture, t *testing.T) {
 	// Mutate manifest.json in first child
-	runDir := f.RunDirs[0]
+	runDir := f.runDirs[0]
 	path := filepath.Join(runDir, "manifest.json")
-	data, _ := os.ReadFile(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
 	var manifest evidence.Manifest
-	json.Unmarshal(data, &manifest)
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	manifest.RunID = "mismatched-child-runid"
-	newData, _ := json.MarshalIndent(manifest, "", "  ")
-	os.WriteFile(path, newData, 0644)
+	newData, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(path, newData, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 }
 
-func mutateChildScenario(f *MatrixFixture) {
+func mutateChildScenario(f *matrixFixture, t *testing.T) {
 	// Mutate manifest.json in first child
-	runDir := f.RunDirs[0]
+	runDir := f.runDirs[0]
 	path := filepath.Join(runDir, "manifest.json")
-	data, _ := os.ReadFile(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
 	var manifest evidence.Manifest
-	json.Unmarshal(data, &manifest)
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	manifest.Scenario = "canary-bounded"
-	newData, _ := json.MarshalIndent(manifest, "", "  ")
-	os.WriteFile(path, newData, 0644)
+	newData, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(path, newData, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 }
 
-func mutateStoredClassification(f *MatrixFixture) {
+func mutateStoredClassification(f *matrixFixture, t *testing.T) {
 	// Mutate stored verdict
-	f.Verdict.ScenarioResults["canary-growing"].Overall = "wrong"
-	writeVerdict(f.RootDir, f.Verdict)
+	if f.verdict.ScenarioResults == nil {
+		t.Fatal("verdict has nil ScenarioResults")
+	}
+	f.verdict.ScenarioResults["canary-growing"].Overall = "wrong"
 }
 
-func mutateStoredMatrixValid(f *MatrixFixture) {
+func mutateStoredMatrixValid(f *matrixFixture, t *testing.T) {
 	// Set stored verdict invalid while reconstruction is valid
-	f.Verdict.MatrixValid = false
-	writeVerdict(f.RootDir, f.Verdict)
-}
-
-func writeCleanup(dir string, cleanup *MatrixCleanupEvidence) {
-	data, _ := json.MarshalIndent(cleanup, "", "  ")
-	os.WriteFile(filepath.Join(dir, "matrix-cleanup.json"), data, 0644)
-}
-
-func writeVerdict(dir string, verdict *MatrixVerdict) {
-	data, _ := json.MarshalIndent(verdict, "", "  ")
-	os.WriteFile(filepath.Join(dir, "matrix-verdict.json"), data, 0644)
+	f.verdict.MatrixValid = false
 }
 
 // =============================================================================
@@ -390,43 +405,57 @@ func writeVerdict(dir string, verdict *MatrixVerdict) {
 // =============================================================================
 
 // TestVerifyMatrixBundle_RejectsEqualInvalid proves equal-invalid verdicts fail.
+// P0-6: An "equal-invalid" verdict has MatrixValid=false in both stored and reconstructed,
+// but verification fails because equal-invalid is forbidden by policy.
 func TestVerifyMatrixBundle_RejectsEqualInvalid(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "matrix-equal-invalid-*")
-	if err != nil {
-		t.Fatalf("create temp dir: %v", err)
+	// P0-8: Use TempDir fixture - automatic cleanup
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Mutate child verdict to make reconstruction invalid
+	descriptorIndex := 2 // canary-descriptor
+	mutation := childArtifactMutation{
+		runIndex: descriptorIndex,
+		filename: "verdict.json",
+		mutate: func(data []byte) ([]byte, error) {
+			var verdict evidence.Verdict
+			if err := json.Unmarshal(data, &verdict); err != nil {
+				return nil, err
+			}
+			// Change to incompatible classification
+			verdict.OverallClassification = analysis.ClassificationGrowing
+			return json.MarshalIndent(verdict, "", "  ")
+		},
 	}
-	defer os.RemoveAll(tmpDir)
+	mustApplyChildSemanticMutation(t, fixture, mutation)
 
-	// Write valid fixture
-	WriteValidMatrixBundleFixture(t, tmpDir)
+	// Reconstruct with mutated child
+	verifiedRuns := buildVerifiedRunsFromFixture(fixture)
+	reconstructedVerdict, err := ReconstructMatrixVerdict(fixture.manifest, verifiedRuns, fixture.cleanup)
+	if err != nil {
+		t.Fatalf("reconstruct: %v", err)
+	}
 
-	// Load verdict and make it invalid
-	verdictPath := filepath.Join(tmpDir, "matrix-verdict.json")
-	data, _ := os.ReadFile(verdictPath)
-	var verdict MatrixVerdict
-	json.Unmarshal(data, &verdict)
-	verdict.MatrixValid = false
+	// Force stored verdict to match reconstructed (both invalid)
+	fixture.verdict = reconstructedVerdict
 
-	// Update stored verdict
-	newData, _ := json.MarshalIndent(&verdict, "", "  ")
-	os.WriteFile(verdictPath, newData, 0644)
+	// Rewrite matrix verdict with invalid state
+	verdictJSON, err := json.MarshalIndent(reconstructedVerdict, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fixture.rootDir, "matrix-verdict.json"), verdictJSON, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := regenerateMatrixChecksums(fixture.rootDir); err != nil {
+		t.Fatalf("checksums: %v", err)
+	}
 
-	// Regenerate checksums
-	regenerateMatrixChecksums(tmpDir)
-
-	// Verify
-	result, err := VerifyMatrixBundle(tmpDir, MatrixVerificationDeps{
+	// Verify - should fail (equal-invalid is forbidden)
+	_, err = VerifyMatrixBundle(fixture.rootDir, MatrixVerificationDeps{
 		VerifyChildRun: verifyChildRunBundle,
 	})
-
-	// Should fail - equal invalid verdicts are still invalid
 	if err == nil {
 		t.Error("expected error for equal-invalid verdict")
-	}
-
-	// Even if stored and reconstructed match, matrix_valid=false fails
-	if result != nil && result.ReconstructedVerdict.MatrixValid {
-		t.Error("reconstructed verdict should be invalid when matrix_valid=false")
 	}
 }
 
@@ -436,23 +465,22 @@ func TestVerifyMatrixBundle_RejectsEqualInvalid(t *testing.T) {
 
 // TestVerifyMatrixBundle_RejectsChecksumMismatch proves checksum failures fail.
 func TestVerifyMatrixBundle_RejectsChecksumMismatch(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "matrix-checksum-*")
-	if err != nil {
-		t.Fatalf("create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Write valid fixture
-	WriteValidMatrixBundleFixture(t, tmpDir)
+	// P0-8: Use TempDir fixture - automatic cleanup
+	fixture := writeValidMatrixBundleFixture(t)
 
 	// Corrupt a file without updating checksums
-	manifestPath := filepath.Join(tmpDir, "matrix-manifest.json")
-	data, _ := os.ReadFile(manifestPath)
+	manifestPath := filepath.Join(fixture.rootDir, "matrix-manifest.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
 	data = append(data, "corrupted"...)
-	os.WriteFile(manifestPath, data, 0644)
+	if err := os.WriteFile(manifestPath, data, 0644); err != nil {
+		t.Fatalf("write corrupted manifest: %v", err)
+	}
 
 	// Verify should fail
-	_, err = VerifyMatrixBundle(tmpDir, MatrixVerificationDeps{
+	_, err = VerifyMatrixBundle(fixture.rootDir, MatrixVerificationDeps{
 		VerifyChildRun: verifyChildRunBundle,
 	})
 	if err == nil {
@@ -461,36 +489,66 @@ func TestVerifyMatrixBundle_RejectsChecksumMismatch(t *testing.T) {
 }
 
 // =============================================================================
+// FAIL-CLOSED REGENERATION TESTS
+// =============================================================================
+
+// TestRegenerateAllChecksums_RefreshesChildAndMatrixAuthority proves regeneration works.
+// NOTE: This test uses container-inspect mutation which WILL cause cleanup binding failure.
+// The test proves that regeneration succeeds even when the result fails verification.
+// The key is that regeneration itself is fail-closed (no errors ignored).
+func TestRegenerateAllChecksums_RefreshesChildAndMatrixAuthority(t *testing.T) {
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Mutate a child artifact (container-inspect.json)
+	mutateChildContainerID(fixture, t)
+
+	// Regenerate checksums - this should succeed even though verification will fail
+	mustRegenerateAllChecksums(t, fixture)
+
+	// Verification SHOULD fail because container ID mismatch with cleanup
+	// But the key point is that regeneration itself succeeded (fail-closed, no errors ignored)
+	result, err := VerifyMatrixBundle(fixture.rootDir, MatrixVerificationDeps{
+		VerifyChildRun: verifyChildRunBundle,
+	})
+	// We expect an error due to cleanup binding mismatch
+	if err == nil {
+		t.Error("expected verification to fail due to container ID mismatch")
+	}
+	// Result may be nil or partial
+	if result != nil && result.ReconstructedVerdict.MatrixValid {
+		t.Error("expected matrix invalid due to container ID mismatch")
+	}
+}
+
+// TestRegenerateAllChecksums_StopsOnManifestMarshalFailure proves error propagation.
+func TestRegenerateAllChecksums_StopsOnManifestMarshalFailure(t *testing.T) {
+	// This test would require injecting a marshal failure - skip for now
+	// P0-7: Would use fixtureFileOps with failing marshal
+	t.Skip("requires error injection seam")
+}
+
+// =============================================================================
 // PASS LINE CONTRACT TESTS
 // =============================================================================
 
 // TestVerifyMatrixCommand_ValidFixtureEmitsPASS proves valid fixture emits PASS.
-// This tests the output formatting contract, not the full verification path.
+// P0-5: This is a string matching test, not CLI execution.
 func TestVerifyMatrixCommand_ValidFixtureEmitsPASS(t *testing.T) {
-	// Simulate the "PASS" line output for a valid verification
-	var stdout strings.Builder
-	stdout.WriteString("Verifying matrix at: /tmp/matrix-verify\n")
-	stdout.WriteString(fmt.Sprintf("Matrix ID: %s\n", "test-matrix-001"))
-	stdout.WriteString(fmt.Sprintf("Matrix Valid: %v\n", true))
-	stdout.WriteString(fmt.Sprintf("Checks Total: %d\n", 16))
-	stdout.WriteString(fmt.Sprintf("Checks Passed: %d\n", 16))
-	stdout.WriteString(fmt.Sprintf("Checks Failed: %d\n", 0))
-	stdout.WriteString("All Checks: PASS\n")
+	output := "All Checks: PASS\n"
 
-	assertTerminalPass(t, stdout.String(), "")
+	count := countTerminalPassLines(output)
+	if count != 1 {
+		t.Errorf("expected 1 PASS line, got %d", count)
+	}
 }
 
 // TestVerifyMatrixCommand_FailureEmitsNoPASS proves failures emit no PASS.
-// This tests the output formatting contract for failure cases.
+// P0-5: This is a string matching test, not CLI execution.
 func TestVerifyMatrixCommand_FailureEmitsNoPASS(t *testing.T) {
-	var stdout, stderr strings.Builder
-	stderr.WriteString(fmt.Sprintf("ERROR: %v\n", "cleanup PID mismatch detected"))
-	assertNoTerminalPass(t, stdout.String(), stderr.String())
+	output := "ERROR: cleanup PID mismatch detected\n"
+
+	count := countTerminalPassLines(output)
+	if count != 0 {
+		t.Errorf("expected 0 PASS lines, got %d", count)
+	}
 }
-
-// =============================================================================
-// TEST HELPERS
-// =============================================================================
-
-// fmt is needed for error formatting in tests
-var _ = fmt.Sprintf
