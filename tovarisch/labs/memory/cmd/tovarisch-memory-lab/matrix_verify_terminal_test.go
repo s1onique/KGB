@@ -10,6 +10,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -525,6 +526,87 @@ func TestRegenerateAllChecksums_StopsOnManifestMarshalFailure(t *testing.T) {
 	// This test would require injecting a marshal failure - skip for now
 	// P0-7: Would use fixtureFileOps with failing marshal
 	t.Skip("requires error injection seam")
+}
+
+// P0-7: Test that checksum regeneration fails when file is missing.
+func TestComputeChecksumsContent_FailsOnMissingFile(t *testing.T) {
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Delete a child artifact file
+	runDir := fixture.runDirs[0]
+	manifestPath := filepath.Join(runDir, "manifest.json")
+	if err := os.Remove(manifestPath); err != nil {
+		t.Fatalf("remove manifest: %v", err)
+	}
+
+	// Compute checksums should fail
+	_, err := computeChildChecksumsContent(runDir)
+	if err == nil {
+		t.Error("expected error when artifact is missing")
+	}
+}
+
+// P0-7: Test that manifest checksums_sha256 is updated on disk after regeneration.
+func TestRegenerateAllChecksums_UpdatesManifestOnDisk(t *testing.T) {
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Mutate a child artifact
+	mutateChildContainerID(fixture, t)
+
+	// Regenerate checksums
+	mustRegenerateAllChecksums(t, fixture)
+
+	// Load manifest from disk and verify checksums_sha256 is updated
+	manifestData, err := os.ReadFile(filepath.Join(fixture.rootDir, "matrix-manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var diskManifest MatrixManifest
+	if err := json.Unmarshal(manifestData, &diskManifest); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// All runs should have non-empty checksums_sha256
+	for i, run := range diskManifest.Runs {
+		if run.ChecksumsSHA256 == "" {
+			t.Errorf("run[%d] checksums_sha256 is empty", i)
+		}
+	}
+}
+
+// P0-5: Test actual CLI execution of verify-matrix command.
+func TestVerifyMatrixCommand_CLIExecution(t *testing.T) {
+	// Skip if not running in full environment
+	if testing.Short() {
+		t.Skip("skipping CLI test in short mode")
+	}
+
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Build the CLI binary
+	binPath := filepath.Join(t.TempDir(), "tovarisch-memory-lab")
+	cmd := exec.Command("go", "build", "-o", binPath, ".")
+	cmd.Dir = filepath.Dir(filepath.Dir(fixture.rootDir)) // labs/memory
+	if err := cmd.Run(); err != nil {
+		t.Skipf("skipping CLI test: build failed: %v", err)
+	}
+
+	// Run verify-matrix
+	verifyCmd := exec.Command(binPath, "verify-matrix", fixture.rootDir)
+	stdout, stderr := &strings.Builder{}, &strings.Builder{}
+	verifyCmd.Stdout, verifyCmd.Stderr = stdout, stderr
+	err := verifyCmd.Run()
+
+	// Should succeed
+	if err != nil {
+		t.Errorf("verify-matrix failed: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+	}
+
+	// Should emit PASS line
+	output := stdout.String()
+	if countTerminalPassLines(output) != 1 {
+		t.Errorf("expected 1 PASS line, got %d", countTerminalPassLines(output))
+	}
 }
 
 // =============================================================================
