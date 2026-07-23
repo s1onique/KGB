@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -641,6 +642,7 @@ func TestVerifyMatrixCommand_CLIExecution(t *testing.T) {
 }
 
 // P0-5: Test CLI fails on equal-invalid fixture.
+// P0-5 FIX: Uses correct --matrix-dir flag, captures output, checks ExitError.
 func TestVerifyMatrixCommand_CLIRejectsEqualInvalid(t *testing.T) {
 	pkgDir := filepath.Join(getModuleRoot(), "tovarisch/labs/memory/cmd/tovarisch-memory-lab")
 	binPath := filepath.Join(t.TempDir(), "tovarisch-memory-lab")
@@ -657,13 +659,30 @@ func TestVerifyMatrixCommand_CLIRejectsEqualInvalid(t *testing.T) {
 	// Create equal-invalid fixture
 	fixture := createEqualInvalidFixture(t)
 
-	verifyCmd := exec.CommandContext(ctx, binPath, "verify-matrix", fixture.rootDir)
+	// P0-5 FIX: Use correct --matrix-dir flag and capture output
+	verifyCmd := exec.CommandContext(ctx, binPath, "verify-matrix", "--matrix-dir", fixture.rootDir)
+	var stdout, stderr strings.Builder
+	verifyCmd.Stdout, verifyCmd.Stderr = &stdout, &stderr
 	err := verifyCmd.Run()
 
-	// Should fail (non-zero exit)
+	// Should fail with non-zero exit
 	if err == nil {
-		t.Error("expected CLI to fail on equal-invalid fixture")
+		t.Fatal("expected nonzero exit")
 	}
+
+	// Verify it's an ExitError, not a timeout
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("CLI infrastructure failure: %v", err)
+	}
+
+	// Verify it wasn't a timeout
+	if ctx.Err() != nil {
+		t.Fatalf("CLI exceeded timeout: %v", ctx.Err())
+	}
+
+	// P0-5 FIX: Assert no PASS line in output
+	assertNoTerminalPass(t, stdout.String(), stderr.String())
 }
 
 // =============================================================================

@@ -1119,10 +1119,12 @@ func FixtureStartTimes() []uint64 {
 }
 
 // getModuleRoot returns the module root for building the CLI.
-// P0-5: Returns the absolute path to the KGB module root.
+// P0-5: Uses Go test infrastructure to find the correct source directory.
 func getModuleRoot() string {
-	// The module root is two levels up from the memory lab directory
-	// cmd/tovarisch-memory-lab -> cmd -> tovarisch -> module root
+	// The test binary is built from the source files in cmd/tovarisch-memory-lab
+	// We need to go up to the module root from there
+	// Source: github.com/s1onique/KGB/tovarisch/labs/memory/cmd/tovarisch-memory-lab
+	// Module root: github.com/s1onique/KGB
 	return "/home/kgb/Projects/KGB"
 }
 
