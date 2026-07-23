@@ -890,6 +890,10 @@ func writeEqualInvalidMatrixBundleFixture(tb testing.TB) *matrixFixture {
 	}
 	mustApplyChildSemanticMutation(tb, fixture, mutation)
 
+	// P0-6 FIX: Rewrite manifest to disk with updated child checksums
+	// This must happen before reconstruction so the manifest has the new checksums
+	mustRegenerateAllChecksums(tb, fixture)
+
 	// Reconstruct the invalid verdict
 	// Load manifests and verdicts from disk
 	manifestData, err := os.ReadFile(filepath.Join(fixture.rootDir, "matrix-manifest.json"))
@@ -962,7 +966,12 @@ func writeEqualInvalidMatrixBundleFixture(tb testing.TB) *matrixFixture {
 		tb.Fatal("reconstructed verdict should be invalid")
 	}
 
-	// Write the exact reconstructed invalid verdict
+	// P0-6 FIX: Update fixture.verdict BEFORE regeneration so the invalid verdict is written to disk
+	fixture.verdict = reconstructedVerdict
+	fixture.manifest = &manifest
+	fixture.cleanup = &cleanup
+
+	// P0-6 FIX: Write the exact reconstructed invalid verdict to disk
 	verdictJSON, err := json.MarshalIndent(reconstructedVerdict, "", "  ")
 	if err != nil {
 		tb.Fatalf("marshal reconstructed verdict: %v", err)
@@ -971,21 +980,10 @@ func writeEqualInvalidMatrixBundleFixture(tb testing.TB) *matrixFixture {
 		tb.Fatalf("write reconstructed verdict: %v", err)
 	}
 
-	// Regenerate matrix checksums (last step)
+	// Regenerate all checksums - now fixture.verdict points to the invalid verdict
 	mustRegenerateAllChecksums(tb, fixture)
 
-	// Update fixture state
-	fixture.manifest = &manifest
-	fixture.verdict = reconstructedVerdict
-	fixture.cleanup = &cleanup
-
-	// Verify equality
-	_, err = VerifyMatrixBundle(fixture.rootDir, MatrixVerificationDeps{})
-	if err == nil {
-		tb.Fatal("VerifyMatrixBundle should reject equal-invalid fixture")
-	}
-
-	// Verify stored equals reconstructed
+	// Verify stored equals reconstructed (both from disk)
 	freshVerdictData, err := os.ReadFile(filepath.Join(fixture.rootDir, "matrix-verdict.json"))
 	if err != nil {
 		tb.Fatalf("read verdict for equality check: %v", err)
@@ -995,9 +993,20 @@ func writeEqualInvalidMatrixBundleFixture(tb testing.TB) *matrixFixture {
 		tb.Fatalf("unmarshal stored verdict: %v", err)
 	}
 
+	// Both should be invalid
+	if storedVerdict.MatrixValid {
+		tb.Fatal("stored verdict should be invalid")
+	}
+
 	diffs := CompareVerdicts(&storedVerdict, reconstructedVerdict)
 	if len(diffs) > 0 {
 		tb.Fatalf("stored and reconstructed verdicts should have zero differences, got:\n%s", FormatVerdictDiffs(diffs))
+	}
+
+	// Verify that the CLI would reject this
+	_, err = VerifyMatrixBundle(fixture.rootDir, MatrixVerificationDeps{})
+	if err == nil {
+		tb.Fatal("VerifyMatrixBundle should reject equal-invalid fixture")
 	}
 
 	return fixture
@@ -1107,4 +1116,19 @@ func FixturePIDs() []int {
 // FixtureStartTimes returns the deterministic start times for tests.
 func FixtureStartTimes() []uint64 {
 	return fixtureStartTimes
+}
+
+// getModuleRoot returns the module root for building the CLI.
+// P0-5: Returns the absolute path to the KGB module root.
+func getModuleRoot() string {
+	// The module root is two levels up from the memory lab directory
+	// cmd/tovarisch-memory-lab -> cmd -> tovarisch -> module root
+	return "/home/kgb/Projects/KGB"
+}
+
+// createEqualInvalidFixture creates a fixture with both stored and reconstructed
+// verdicts having MatrixValid=false. This is forbidden by policy.
+func createEqualInvalidFixture(tb testing.TB) *matrixFixture {
+	tb.Helper()
+	return writeEqualInvalidMatrixBundleFixture(tb)
 }

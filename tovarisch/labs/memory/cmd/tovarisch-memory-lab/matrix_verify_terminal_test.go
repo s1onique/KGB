@@ -8,6 +8,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -408,6 +409,7 @@ func mutateStoredMatrixValid(f *matrixFixture, t *testing.T) {
 // TestVerifyMatrixBundle_RejectsEqualInvalid proves equal-invalid verdicts fail.
 // P0-6: An "equal-invalid" verdict has MatrixValid=false in both stored and reconstructed,
 // but verification fails because equal-invalid is forbidden by policy.
+// P0-6 FIX: Uses mustRegenerateAllChecksums to rewrite manifest to disk before verification.
 func TestVerifyMatrixBundle_RejectsEqualInvalid(t *testing.T) {
 	// P0-8: Use TempDir fixture - automatic cleanup
 	fixture := writeValidMatrixBundleFixture(t)
@@ -429,11 +431,21 @@ func TestVerifyMatrixBundle_RejectsEqualInvalid(t *testing.T) {
 	}
 	mustApplyChildSemanticMutation(t, fixture, mutation)
 
-	// Reconstruct with mutated child
+	// P0-6 FIX: Rewrite manifest to disk with updated child checksums
+	// mustApplyChildSemanticMutation updates fixture.manifest in memory,
+	// but VerifyMatrixBundle reads from disk, so we must persist it.
+	mustRegenerateAllChecksums(t, fixture)
+
+	// Reconstruct with mutated child (from disk)
 	verifiedRuns := buildVerifiedRunsFromFixture(fixture)
 	reconstructedVerdict, err := ReconstructMatrixVerdict(fixture.manifest, verifiedRuns, fixture.cleanup)
 	if err != nil {
 		t.Fatalf("reconstruct: %v", err)
+	}
+
+	// P0-6 FIX: Assert reconstructed is invalid
+	if reconstructedVerdict.MatrixValid {
+		t.Fatal("reconstructed verdict should be invalid due to classification mismatch")
 	}
 
 	// Force stored verdict to match reconstructed (both invalid)
@@ -447,8 +459,27 @@ func TestVerifyMatrixBundle_RejectsEqualInvalid(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(fixture.rootDir, "matrix-verdict.json"), verdictJSON, 0644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if err := regenerateMatrixChecksums(fixture.rootDir); err != nil {
-		t.Fatalf("checksums: %v", err)
+
+	// P0-6 FIX: Use full regeneration to update manifest and all checksums
+	mustRegenerateAllChecksums(t, fixture)
+
+	// Load stored verdict from disk and assert zero differences with reconstructed
+	diskVerdictData, err := os.ReadFile(filepath.Join(fixture.rootDir, "matrix-verdict.json"))
+	if err != nil {
+		t.Fatalf("read stored verdict: %v", err)
+	}
+	var diskVerdict MatrixVerdict
+	if err := json.Unmarshal(diskVerdictData, &diskVerdict); err != nil {
+		t.Fatalf("unmarshal stored verdict: %v", err)
+	}
+	diffs := CompareVerdicts(&diskVerdict, reconstructedVerdict)
+	if len(diffs) > 0 {
+		t.Fatalf("stored and reconstructed should have zero differences:\n%s", FormatVerdictDiffs(diffs))
+	}
+
+	// P0-6 FIX: Assert stored verdict is also invalid
+	if diskVerdict.MatrixValid {
+		t.Fatal("stored verdict should be invalid")
 	}
 
 	// Verify - should fail (equal-invalid is forbidden)
@@ -575,24 +606,24 @@ func TestRegenerateAllChecksums_UpdatesManifestOnDisk(t *testing.T) {
 }
 
 // P0-5: Test actual CLI execution of verify-matrix command.
+// Fixed: Uses correct package directory, CommandContext, and --matrix-dir flag.
 func TestVerifyMatrixCommand_CLIExecution(t *testing.T) {
-	// Skip if not running in full environment
-	if testing.Short() {
-		t.Skip("skipping CLI test in short mode")
-	}
-
-	fixture := writeValidMatrixBundleFixture(t)
-
-	// Build the CLI binary
+	// Build the CLI binary from the actual package directory
+	pkgDir := filepath.Join(getModuleRoot(), "tovarisch/labs/memory/cmd/tovarisch-memory-lab")
 	binPath := filepath.Join(t.TempDir(), "tovarisch-memory-lab")
-	cmd := exec.Command("go", "build", "-o", binPath, ".")
-	cmd.Dir = filepath.Dir(filepath.Dir(fixture.rootDir)) // labs/memory
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", binPath, ".")
+	cmd.Dir = pkgDir
 	if err := cmd.Run(); err != nil {
-		t.Skipf("skipping CLI test: build failed: %v", err)
+		t.Fatalf("go build failed: %v", err)
 	}
 
-	// Run verify-matrix
-	verifyCmd := exec.Command(binPath, "verify-matrix", fixture.rootDir)
+	// Run verify-matrix with --matrix-dir flag
+	fixture := writeValidMatrixBundleFixture(t)
+	verifyCmd := exec.CommandContext(ctx, binPath, "verify-matrix", "--matrix-dir", fixture.rootDir)
 	stdout, stderr := &strings.Builder{}, &strings.Builder{}
 	verifyCmd.Stdout, verifyCmd.Stderr = stdout, stderr
 	err := verifyCmd.Run()
@@ -606,6 +637,32 @@ func TestVerifyMatrixCommand_CLIExecution(t *testing.T) {
 	output := stdout.String()
 	if countTerminalPassLines(output) != 1 {
 		t.Errorf("expected 1 PASS line, got %d", countTerminalPassLines(output))
+	}
+}
+
+// P0-5: Test CLI fails on equal-invalid fixture.
+func TestVerifyMatrixCommand_CLIRejectsEqualInvalid(t *testing.T) {
+	pkgDir := filepath.Join(getModuleRoot(), "tovarisch/labs/memory/cmd/tovarisch-memory-lab")
+	binPath := filepath.Join(t.TempDir(), "tovarisch-memory-lab")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", binPath, ".")
+	cmd.Dir = pkgDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("go build failed: %v", err)
+	}
+
+	// Create equal-invalid fixture
+	fixture := createEqualInvalidFixture(t)
+
+	verifyCmd := exec.CommandContext(ctx, binPath, "verify-matrix", fixture.rootDir)
+	err := verifyCmd.Run()
+
+	// Should fail (non-zero exit)
+	if err == nil {
+		t.Error("expected CLI to fail on equal-invalid fixture")
 	}
 }
 
