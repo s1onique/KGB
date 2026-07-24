@@ -350,6 +350,14 @@ func runCommand(args []string) error {
 			return fmt.Errorf("wait complete: %w", err)
 		}
 
+		// The bounded/growing/descriptor canaries run as long-lived
+		// HTTP servers; stop the container boundedly so the
+		// lifecycle terminal-state observer succeeds.
+		if stopErr := dockerClient.ContainerStop(workloadCtx, containerID, 10*time.Second); stopErr != nil {
+			sampler.Stop()
+			return fmt.Errorf("bounded stop: %w", stopErr)
+		}
+
 		finalState, err := fetchCanaryState(workloadCtx, httpClient, canaryURL)
 		if err != nil {
 			sampler.Stop()
