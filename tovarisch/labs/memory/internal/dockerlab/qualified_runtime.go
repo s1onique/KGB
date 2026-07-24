@@ -401,6 +401,10 @@ func ExecuteQualifiedDockerLifecycle(
 	if err != nil {
 		return nil, err
 	}
+	// The audit is always installed in the qualified lifecycle. Record
+	// the pull-observation availability signal on the observation
+	// object so the verifier can require it as a fail-closed signal.
+	obs.Pull.ObservationAvailable = true
 
 	// Start the container.
 	if err := audited.ContainerStart(ctx, obs.Container.ID, types.ContainerStartOptions{}); err != nil {
