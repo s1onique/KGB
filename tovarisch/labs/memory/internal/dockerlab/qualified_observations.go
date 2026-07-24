@@ -217,3 +217,11 @@ func (o *QualifiedExecutionObservations) SetReachabilityFailed(method Reachabili
 	o.Reachability.FailureReason = reason
 	o.Reachability.Success = false
 }
+
+// SetReachabilityUnknown records that reachability was not checked.
+// Used for smoke tests that validate lifecycle but not the canary HTTP.
+func (o *QualifiedExecutionObservations) SetReachabilityUnknown(networkID string) {
+	o.Reachability.Method = ReachabilityMethodUnknown
+	o.Reachability.NetworkID = networkID
+	o.Reachability.Success = false
+}
