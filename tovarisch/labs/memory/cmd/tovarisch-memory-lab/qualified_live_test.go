@@ -113,13 +113,17 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 	}
 
 	// Build provenance from the running controller binary.
-	repoDir, _ := os.Getwd()
-	// Walk up to the repo root by removing the trailing path until
-	// `.git` is found.
-	for dir := repoDir; dir != "/" && dir != "."; dir = parentDir(dir) {
-		if _, err := os.Stat(dir + "/.git"); err == nil {
-			repoDir = dir
-			break
+	// Prefer explicit repo root from environment (closure mode).
+	repoDir := os.Getenv("TOVARISCH_REPO_ROOT")
+	if repoDir == "" {
+		repoDir, _ = os.Getwd()
+		// Walk up to the repo root by removing the trailing path until
+		// `.git` is found.
+		for dir := repoDir; dir != "/" && dir != "."; dir = parentDir(dir) {
+			if _, err := os.Stat(dir + "/.git"); err == nil {
+				repoDir = dir
+				break
+			}
 		}
 	}
 	cp, err := evidence.CollectControllerProvenance(evidence.ProvenanceOptions{
