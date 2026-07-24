@@ -1,0 +1,6 @@
+S22=d62a1d72ea654d55a251999dc050cb06b40ffdeb
+ST22=c3c57afb02255187a0a2e39ef9cce236f15bba10
+E22=$(git rev-parse HEAD)  # recorded below after commit
+ET22=$(git rev-parse HEAD^{tree})  # recorded below after commit
+qualified_execution_evidence_sha256=c6ea9b0f2295fcf76b938f50c53f6bf1b23d9311142b90623d16dbba268830ae
+smoke_binary_sha256=6fcff2dca4698bed0b02ae10edf1734f4582aeb1148aa9cb70e4b3aabf285682

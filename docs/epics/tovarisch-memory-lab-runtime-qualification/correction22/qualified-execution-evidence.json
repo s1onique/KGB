@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-07-24T15:01:36.514808486Z",
+  "image": {
+    "requested_reference": "kgb-tovarisch-canary:latest",
+    "inspected_id_before_create": "sha256:318f3aa49873231d3b7fefed088202340dcdf7c3f3febfe628f51f6169d69aad",
+    "repo_digests": [
+      "kgb-tovarisch-canary@sha256:318f3aa49873231d3b7fefed088202340dcdf7c3f3febfe628f51f6169d69aad"
+    ],
+    "create_request_image": "sha256:318f3aa49873231d3b7fefed088202340dcdf7c3f3febfe628f51f6169d69aad",
+    "container_inspect_image_id": "sha256:318f3aa49873231d3b7fefed088202340dcdf7c3f3febfe628f51f6169d69aad",
+    "container_inspect_config_image": "sha256:318f3aa49873231d3b7fefed088202340dcdf7c3f3febfe628f51f6169d69aad"
+  },
+  "network": {
+    "requested_name": "kgb-lab-lab-canary-bounded-1784905296",
+    "create_response_id": "e8bc7fb230166576ea619b2695711c62e1bdaf71a63c0fb362f8f89666971a69",
+    "inspected_network_id": "e8bc7fb230166576ea619b2695711c62e1bdaf71a63c0fb362f8f89666971a69",
+    "container_endpoint_network_id": "e8bc7fb230166576ea619b2695711c62e1bdaf71a63c0fb362f8f89666971a69",
+    "removed": true
+  },
+  "pull": {
+    "observation_available": true,
+    "attempted": false,
+    "attempt_count": 0
+  },
+  "container": {
+    "id": "29943cc562e792b222215c7441dbc2dd939f36573a21ce94f4b9aab58149c5fa",
+    "created": true,
+    "inspected": true,
+    "started": true,
+    "terminal_state_observed": true,
+    "removed": true
+  },
+  "provenance": {
+    "source_commit": "01ae545e40e0e5726cdae552e861675cdd7e434b",
+    "source_tree": "1626f58349071e8f6d3f034edb0c19c49ee32246",
+    "git_object_format": "sha1",
+    "working_tree_dirty": false,
+    "source_commit_dirty": false,
+    "vcs_modified": false,
+    "docker_server_version": "29.6.2",
+    "producer_version": "tovarisch-memory-lab/1.0.0",
+    "executable_sha256": "20dc30a5a432209f2750c35b15e7005c90cf1e6ca8201ba6552be856368cc442"
+  },
+  "image_exact_id_match": true,
+  "network_exact_id_match": true,
+  "cleanup_complete": true,
+  "pass": true
+}
