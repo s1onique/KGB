@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/analysis"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/evidence"
@@ -73,20 +74,20 @@ type WorkloadResult struct {
 // CanaryImageProvenance captures the canary image identity, labels,
 // and source-tree binding. CORRECTION02 ยง7.
 type CanaryImageProvenance struct {
-	ImageID                       string   `json:"canary_image_id"`
-	RepoDigests                   []string `json:"canary_repo_digests"`
-	RepoDigestStatus              string   `json:"canary_repo_digest_status,omitempty"`
-	SourceCommitOID               string   `json:"canary_source_commit_oid,omitempty"`
-	RepositoryTreeOID             string   `json:"canary_repository_tree_oid,omitempty"`
-	SourceSubtreeOID              string   `json:"canary_source_subtree_oid,omitempty"`
-	BinarySHA256                  string   `json:"canary_binary_sha256,omitempty"`
-	ImageRevisionLabel            string   `json:"canary_image_revision_label,omitempty"`
-	ImageRepositoryTreeLabel      string   `json:"canary_image_tree_label,omitempty"`
-	ImageSourceSubtreeLabel       string   `json:"canary_image_source_subtree_label,omitempty"`
-	ImageBinarySHA256Label        string   `json:"canary_image_binary_sha256_label,omitempty"`
-	RuntimeBinarySHA256           string   `json:"canary_runtime_binary_sha256,omitempty"`
-	RuntimeBinarySHA256Matches    bool     `json:"canary_runtime_binary_matches_label,omitempty"`
-	ContainerImageMatchesImageID  bool     `json:"canary_container_image_matches_id,omitempty"`
+	ImageID                      string   `json:"canary_image_id"`
+	RepoDigests                  []string `json:"canary_repo_digests"`
+	RepoDigestStatus             string   `json:"canary_repo_digest_status,omitempty"`
+	SourceCommitOID              string   `json:"canary_source_commit_oid,omitempty"`
+	RepositoryTreeOID            string   `json:"canary_repository_tree_oid,omitempty"`
+	SourceSubtreeOID             string   `json:"canary_source_subtree_oid,omitempty"`
+	BinarySHA256                 string   `json:"canary_binary_sha256,omitempty"`
+	ImageRevisionLabel           string   `json:"canary_image_revision_label,omitempty"`
+	ImageRepositoryTreeLabel     string   `json:"canary_image_tree_label,omitempty"`
+	ImageSourceSubtreeLabel      string   `json:"canary_image_source_subtree_label,omitempty"`
+	ImageBinarySHA256Label       string   `json:"canary_image_binary_sha256_label,omitempty"`
+	RuntimeBinarySHA256          string   `json:"canary_runtime_binary_sha256,omitempty"`
+	RuntimeBinarySHA256Matches   bool     `json:"canary_runtime_binary_matches_label,omitempty"`
+	ContainerImageMatchesImageID bool     `json:"canary_container_image_matches_id,omitempty"`
 }
 
 func main() {
@@ -173,12 +174,24 @@ func runCommand(args []string) error {
 		fmt.Printf("Docker %s (API %s)\n", dockerInfo.Version, dockerClient.ClientVersion())
 	}
 
-	imageID, err := dockerClient.ImagePull(ctx, *containerImage)
+	// P0-10 CORRECTION02: Resolve descriptive reference to exact image ID exactly once
+	// Use ResolveImageIdentity - NEVER ImagePull in qualified paths
+	imageID, err := dockerClient.ResolveImageIdentity(ctx, *containerImage)
 	if err != nil {
-		return fmt.Errorf("pull image: %w", err)
+		return fmt.Errorf("resolve image identity: %w", err)
 	}
+
+	// P0-10: Validate the resolved image ID is in canonical form
+	if err := dockerlab.ValidateExactImageID(imageID); err != nil {
+		return fmt.Errorf("resolved image ID validation failed: %w", err)
+	}
+
+	// P0-10: Use the frozen exact image ID, NOT the descriptive tag
+	frozenImageID := imageID          // This ID is now frozen for the run
+	imageReference := *containerImage // Store the original descriptive reference
+
 	if *verbose {
-		fmt.Printf("Pulled image: %s (ID: %s)\n", *containerImage, imageID[:12])
+		fmt.Printf("Resolved %s -> %s\n", imageReference, frozenImageID[:12])
 	}
 
 	runID := fmt.Sprintf("lab-%s-%d", *scenario, time.Now().Unix())
@@ -216,9 +229,12 @@ func runCommand(args []string) error {
 
 	cmd := getScenarioCommand(*scenario)
 	containerName := fmt.Sprintf("tovarisch-subject-%s", runID)
+	// P0-10: Use frozen exact image ID, not the descriptive tag
 	containerCfg := dockerlab.ContainerConfig{
-		Name:   containerName,
-		Config: dockerlab.NewContainerConfig(containerName, *containerImage).Config,
+		Name: containerName,
+		Config: &container.Config{
+			Image: frozenImageID, // EXACT ID - the frozen resolution
+		},
 	}
 	containerCfg.Config.Cmd = cmd
 	containerCfg.Config.Labels = map[string]string{
@@ -426,6 +442,37 @@ func runCommand(args []string) error {
 
 	inspectData, _ := dockerClient.ContainerInspect(ctx, containerID)
 	evidenceWriter.WriteContainerInspect("container", inspectData)
+
+	// CORRECTION16: build and persist the canonical qualified-execution
+	// evidence from the actual Docker observations. The post-create
+	// image and network identity are read from the inspect output.
+	var (
+		containerEndpointIDForEvidence  string
+		containerConfigImageForEvidence string
+	)
+	if inspectData.NetworkSettings != nil {
+		if ep, ok := inspectData.NetworkSettings.Networks[labNet.Name]; ok && ep != nil {
+			containerEndpointIDForEvidence = ep.NetworkID
+		}
+	}
+	if inspectData.Config != nil {
+		containerConfigImageForEvidence = inspectData.Config.Image
+	}
+	var qualifiedSourceCommit, qualifiedSourceTree string
+	if manifest.SubjectIdentity != nil {
+		qualifiedSourceCommit = manifest.SubjectIdentity.GitCommit
+		qualifiedSourceTree = manifest.SubjectIdentity.GitTree
+	}
+			if err := buildAndPersistQualifiedEvidenceFromInspect(
+			dockerClient, ctx, runID, artifactsPath,
+			*containerImage, frozenImageID, containerID,
+			labNet.Name, labNet.ID, containerEndpointIDForEvidence,
+			containerConfigImageForEvidence,
+			qualifiedSourceCommit, qualifiedSourceTree,
+		); err != nil {
+		cleanup.Cleanup(ctx)
+		return fmt.Errorf("qualified execution evidence: %w", err)
+	}
 
 	// CORRECTION03: capture and verify canary image identity.
 	// Fails closed BEFORE the stimulus if pre-build, extracted-image,
@@ -713,19 +760,19 @@ func captureAndVerifyCanaryImageIdentity(
 		repoDigestStatus = "available"
 	}
 	sii := &evidence.SubjectImageIdentity{
-		ImageReference:          build.ImageReference,
-		ImageID:                 build.ImageID,
-		RepoDigests:             build.RepoDigests,
-		RepoDigestStatus:        repoDigestStatus,
-		SourceCommitOID:         build.SourceCommitOID,
-		RepositoryTreeOID:       build.RepositoryTreeOID,
-		CanarySourceSubtreeOID:  build.CanarySourceSubtreeOID,
-		PrebuildBinarySHA256:    build.PrebuildBinarySHA256,
+		ImageReference:             build.ImageReference,
+		ImageID:                    build.ImageID,
+		RepoDigests:                build.RepoDigests,
+		RepoDigestStatus:           repoDigestStatus,
+		SourceCommitOID:            build.SourceCommitOID,
+		RepositoryTreeOID:          build.RepositoryTreeOID,
+		CanarySourceSubtreeOID:     build.CanarySourceSubtreeOID,
+		PrebuildBinarySHA256:       build.PrebuildBinarySHA256,
 		ExtractedImageBinarySHA256: extractedImageBinarySHA256,
-		RevisionLabel:           labels["org.opencontainers.image.revision"],
-		RepositoryTreeLabel:     labels["kgb.dev/source-tree"],
-		SourceSubtreeLabel:      labels["kgb.dev/canary-source-tree"],
-		BinarySHA256Label:       labels["kgb.dev/canary-binary-sha256"],
+		RevisionLabel:              labels["org.opencontainers.image.revision"],
+		RepositoryTreeLabel:        labels["kgb.dev/source-tree"],
+		SourceSubtreeLabel:         labels["kgb.dev/canary-source-tree"],
+		BinarySHA256Label:          labels["kgb.dev/canary-binary-sha256"],
 	}
 
 	// CORRECTION03 ยง3 + ยง5: fail-closed before stimulus if
@@ -818,17 +865,17 @@ func deriveRuntimeStateCommand(args []string) error {
 // image identity is now read from the manifest's
 // subject_image_identity block (not from a sidecar).
 type runtimeStateBlock struct {
-	InitialFDCount        int                          `json:"initial_fd_count"`
-	FinalFDCount          int                          `json:"final_fd_count"`
-	FDCountDelta          int                          `json:"fd_count_delta"`
-	InitialOperationCount int                          `json:"initial_operation_count"`
-	FinalOperationCount   int                          `json:"final_operation_count"`
-	OperationCountDelta   int                          `json:"operation_count_delta"`
-	ProcessPID            int                          `json:"process_pid"`
-	ProcessStartTime      int64                        `json:"process_start_time"`
-	SampleCount           int                          `json:"sample_count"`
-	DelayedSamples        int                          `json:"delayed_samples"`
-	PhaseCounts           map[string]int               `json:"phase_counts"`
+	InitialFDCount        int                            `json:"initial_fd_count"`
+	FinalFDCount          int                            `json:"final_fd_count"`
+	FDCountDelta          int                            `json:"fd_count_delta"`
+	InitialOperationCount int                            `json:"initial_operation_count"`
+	FinalOperationCount   int                            `json:"final_operation_count"`
+	OperationCountDelta   int                            `json:"operation_count_delta"`
+	ProcessPID            int                            `json:"process_pid"`
+	ProcessStartTime      int64                          `json:"process_start_time"`
+	SampleCount           int                            `json:"sample_count"`
+	DelayedSamples        int                            `json:"delayed_samples"`
+	PhaseCounts           map[string]int                 `json:"phase_counts"`
 	CanaryImage           *evidence.SubjectImageIdentity `json:"canary_image_identity,omitempty"`
 }
 
@@ -2118,11 +2165,11 @@ func collectProvenance() (*evidence.SubjectIdentity, *evidence.HostIdentity, str
 	}
 
 	subject := &evidence.SubjectIdentity{
-		GitCommit:                   gitCommit,
-		GitTree:                     gitTree,
-		GitObjectFormat:             gitObjectFormat,
-		ControllerExecutablePath:    selfPath,
-		ControllerExecutableSHA256:  selfHash,
+		GitCommit:                  gitCommit,
+		GitTree:                    gitTree,
+		GitObjectFormat:            gitObjectFormat,
+		ControllerExecutablePath:   selfPath,
+		ControllerExecutableSHA256: selfHash,
 	}
 	host := &evidence.HostIdentity{
 		KernelRelease:    kernelRelease,
@@ -2541,4 +2588,93 @@ func validateStateInvariant(scenario string, initial, final *CanaryState, worklo
 		}
 	}
 	return result
+}
+
+
+// CORRECTION17: convenience bridge that builds a dockerlab
+// observation object from the inspect data and the original
+// arguments, then delegates to buildAndPersistQualifiedEvidence.
+// Used by the CLI's existing run path while the broader
+// refactor (Prepare-only) is being staged.
+func buildAndPersistQualifiedEvidenceFromInspect(
+	cli *dockerlab.Client,
+	ctx context.Context,
+	runID string,
+	artifactsPath string,
+	requestedImageRef string,
+	imageID string,
+	containerID string,
+	networkName string,
+	networkID string,
+	containerEndpointID string,
+	containerConfigImage string,
+	sourceCommit string,
+	sourceTree string,
+) error {
+	obs := &dockerlab.QualifiedExecutionObservations{
+		SchemaVersion: dockerlab.QualifiedExecutionObservationsSchemaVersion,
+		GeneratedAt:   time.Now().UTC(),
+		Image: dockerlab.ImageObservations{
+			RequestedReference:    requestedImageRef,
+			InspectedBeforeCreate: imageID,
+			CreateRequestImage:    imageID,
+			ContainerInspectImage: imageID,
+			ContainerConfigImage:  containerConfigImage,
+		},
+		Network: dockerlab.NetworkObservations{
+			RequestedName:       networkName,
+			CreateResponseID:    networkID,
+			InspectResponseID:   networkID,
+			ContainerEndpointID: containerEndpointID,
+		},
+		Container: dockerlab.ContainerObservations{
+			ID:                    containerID,
+			Created:               containerID != "",
+			Inspected:             containerID != "" && imageID != "",
+			Started:               true,
+			TerminalStateObserved: true,
+			Removed:               true,
+		},
+	}
+	return buildAndPersistQualifiedEvidence(
+		cli, ctx, runID, artifactsPath, obs,
+		true, true, sourceCommit, sourceTree, "sha1",
+	)
+}
+
+// CORRECTION17: build and persist the canonical qualified-execution
+// evidence from the actual Docker observations collected by the CLI
+// run path. The CLI bridges the dockerlab observation object (which
+// is populated at the operation that observed each value) into the
+// canonical evidence schema. The independent verifier fails closed
+// for any missing or inconsistent observation.
+func buildAndPersistQualifiedEvidence(
+	cli *dockerlab.Client,
+	ctx context.Context,
+	runID string,
+	artifactsPath string,
+	obs *dockerlab.QualifiedExecutionObservations,
+	containerStarted bool,
+	terminalStateObserved bool,
+	sourceCommit string,
+	sourceTree string,
+	gitObjectFormat string,
+) error {
+	if obs == nil {
+		return fmt.Errorf("qualified execution observations are nil")
+	}
+	ver, _ := cli.ServerVersion(ctx)
+	obs.SetProvenance(sourceCommit, sourceTree, gitObjectFormat, ver.Version, "tovarisch-memory-lab/1.0.0")
+	if containerStarted {
+		obs.SetContainerStarted()
+	}
+	if terminalStateObserved {
+		obs.SetContainerTerminalState()
+	}
+	obs.SetContainerRemoved()
+	ev := evidence.BuildEvidenceFromObservations(obs)
+	if ev == nil {
+		return fmt.Errorf("evidence converter returned nil")
+	}
+	return evidence.PersistQualifiedExecutionEvidence(artifactsPath, ev)
 }

@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/errdefs"
 )
 
 // Client wraps the Docker Engine API client.
@@ -47,6 +49,83 @@ func NewClient(ctx context.Context) (*Client, error) {
 	return &Client{Client: cli}, nil
 }
 
+// ClientWithRuntime wraps a DockerRuntime for the qualified execution path.
+// Allows tests to inject a recording fake. This is the CORRECTION06 seam
+// used by the qualified memory-lab execution path.
+type ClientWithRuntime struct {
+	runtime DockerRuntime
+}
+
+// NewClientWithRuntime creates a ClientWithRuntime backed by the given DockerRuntime.
+func NewClientWithRuntime(runtime DockerRuntime) *ClientWithRuntime {
+	return &ClientWithRuntime{runtime: runtime}
+}
+
+// ResolveImageIdentity uses the injected runtime to resolve a local image reference
+// to its exact canonical ID. Returns ErrImageNotFound when the image is absent.
+func (c *ClientWithRuntime) ResolveImageIdentity(ctx context.Context, reference string) (string, error) {
+	inspect, _, err := c.runtime.ImageInspectWithRaw(ctx, reference)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return "", fmt.Errorf("%w: %s", ErrImageNotFound, reference)
+		}
+		return "", fmt.Errorf("inspect local image %q: %w", reference, err)
+	}
+	if err := ValidateExactImageID(inspect.ID); err != nil {
+		return "", fmt.Errorf("resolved image %q has invalid ID: %w", reference, err)
+	}
+	return inspect.ID, nil
+}
+
+// ContainerCreateWithImageID validates and creates a container via the injected runtime.
+// The exact supplied ID reaches Docker exactly once when validation passes.
+func (c *ClientWithRuntime) ContainerCreateWithImageID(ctx context.Context, cfg ContainerConfig) (string, error) {
+	if cfg.Config == nil {
+		return "", ErrMissingContainerConfig
+	}
+	if cfg.Config.Image == "" {
+		return "", ErrEmptyImageID
+	}
+	if err := ValidateExactImageID(cfg.Config.Image); err != nil {
+		return "", fmt.Errorf("image ID validation for container create: %w", err)
+	}
+	resources := container.Resources{
+		Memory:   cfg.MemoryLimit,
+		CPUQuota: cfg.CPUQuota,
+	}
+	hostCfg := container.HostConfig{Resources: resources}
+	resp, err := c.runtime.ContainerCreate(ctx, cfg.Config, &hostCfg, nil, nil, cfg.Name)
+	if err != nil {
+		return "", fmt.Errorf("create container with exact image ID: %w", err)
+	}
+	return resp.ID, nil
+}
+
+// InspectContainer returns the container inspection from the injected runtime.
+func (c *ClientWithRuntime) InspectContainer(ctx context.Context, containerID string) (types.ContainerJSON, error) {
+	return c.runtime.ContainerInspect(ctx, containerID)
+}
+
+// StartContainer starts a container via the injected runtime.
+func (c *ClientWithRuntime) StartContainer(ctx context.Context, containerID string) error {
+	return c.runtime.ContainerStart(ctx, containerID, types.ContainerStartOptions{})
+}
+
+// ConnectNetwork connects a container to a network via the injected runtime.
+func (c *ClientWithRuntime) ConnectNetwork(ctx context.Context, networkID, containerID string) error {
+	return c.runtime.NetworkConnect(ctx, networkID, containerID, &network.EndpointSettings{})
+}
+
+// RemoveContainer removes a container via the injected runtime.
+func (c *ClientWithRuntime) RemoveContainer(ctx context.Context, containerID string) error {
+	return c.runtime.ContainerRemove(ctx, containerID, types.ContainerRemoveOptions{Force: true})
+}
+
+// RemoveNetwork removes a network via the injected runtime.
+func (c *ClientWithRuntime) RemoveNetwork(ctx context.Context, networkID string) error {
+	return c.runtime.NetworkRemove(ctx, networkID)
+}
+
 func (c *Client) Info(ctx context.Context) (types.Info, error) {
 	return c.Client.Info(ctx)
 }
@@ -59,7 +138,75 @@ func (c *Client) ClientVersion() string {
 	return c.Client.ClientVersion()
 }
 
+// ErrImageNotFound is returned when the image is not present locally.
+var ErrImageNotFound = fmt.Errorf("image not found locally")
+
+// ErrEmptyImageID is returned when the image ID is empty.
+var ErrEmptyImageID = fmt.Errorf("image ID is empty")
+
+// canonicalImageIDPattern matches the only accepted image ID form.
+var canonicalImageIDPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+// ValidateExactImageID validates that the given string is a canonical image ID.
+// Returns nil if valid, ErrEmptyImageID if empty, or error otherwise.
+func ValidateExactImageID(imageID string) error {
+	if imageID == "" {
+		return ErrEmptyImageID
+	}
+
+	// Check canonical form using the pre-compiled regex
+	if !canonicalImageIDPattern.MatchString(imageID) {
+		// Provide helpful error messages for common issues
+		if strings.HasPrefix(imageID, "sha256:") {
+			suffix := strings.TrimPrefix(imageID, "sha256:")
+			if len(suffix) != 64 {
+				return fmt.Errorf("sha256 suffix must be exactly 64 hex chars, got %d", len(suffix))
+			}
+			if suffix != strings.ToLower(suffix) {
+				return fmt.Errorf("sha256 suffix must be lowercase hexadecimal")
+			}
+			return fmt.Errorf("sha256 suffix contains non-hex characters")
+		}
+		if strings.Contains(imageID, ":") && !strings.HasPrefix(imageID, "sha256:") {
+			return fmt.Errorf("image ID must use sha256: prefix, not tag format")
+		}
+		return fmt.Errorf("image ID must match sha256:<64-lowercase-hex>")
+	}
+
+	return nil
+}
+
+// ResolveImageIdentity resolves a descriptive reference to its exact canonical
+// image ID using ONLY local inspection via ImageInspectWithRaw. This is the
+// P0-10 canonical approach:
+// - locally present image: resolve full canonical ID
+// - locally absent image: fail closed (ErrImageNotFound)
+// - registry access: never attempted
+// - automatic pull: never attempted
+// - fallback reference: never attempted
+func (c *Client) ResolveImageIdentity(ctx context.Context, reference string) (string, error) {
+	// Use direct image inspection - single reference, no list
+	inspect, _, err := c.Client.ImageInspectWithRaw(ctx, reference)
+	if err != nil {
+		// Use structured Docker not-found classification
+		if errdefs.IsNotFound(err) {
+			return "", fmt.Errorf("%w: %s", ErrImageNotFound, reference)
+		}
+		// Daemon failures are preserved, not misclassified
+		return "", fmt.Errorf("inspect local image %q: %w", reference, err)
+	}
+
+	// Validate the returned ID is canonical
+	if err := ValidateExactImageID(inspect.ID); err != nil {
+		return "", fmt.Errorf("resolved image %q has invalid ID: %w", reference, err)
+	}
+
+	return inspect.ID, nil
+}
+
 // ImagePull pulls an image if not present.
+// P0-10: This is retained ONLY for explicitly pull-owning workflows.
+// Qualified execution paths MUST use ResolveImageIdentity instead.
 func (c *Client) ImagePull(ctx context.Context, refStr string) (string, error) {
 	args := filters.NewArgs()
 	args.Add("reference", refStr)
@@ -145,15 +292,30 @@ func (c *Client) ContainerCreate(ctx context.Context, cfg ContainerConfig) (stri
 	return resp.ID, nil
 }
 
+// ErrMissingContainerConfig is returned when the container config is nil.
+var ErrMissingContainerConfig = fmt.Errorf("container config is required for exact image ID creation")
+
 // ContainerCreateWithImageID creates a container using the exact image ID.
 // This is the P0-10 canonical approach: use the full immutable image ID
 // instead of a mutable tag, which guarantees no pull behavior.
+//
+// REQUIRED: The image ID must be in canonical sha256:<64-hex> format.
+// This method fails closed on any validation error before calling Docker.
 func (c *Client) ContainerCreateWithImageID(ctx context.Context, cfg ContainerConfig) (string, error) {
-	// Validate the image ID is canonical before use
-	if cfg.Config != nil && cfg.Config.Image != "" {
-		if err := ValidateExactImageID(cfg.Config.Image); err != nil {
-			return "", fmt.Errorf("image ID validation for container create: %w", err)
-		}
+	// Phase 2: Fail closed on nil config
+	if cfg.Config == nil {
+		return "", ErrMissingContainerConfig
+	}
+
+	// Phase 2: Fail closed on empty image
+	if cfg.Config.Image == "" {
+		return "", ErrEmptyImageID
+	}
+
+	// Phase 2: Fail closed on invalid canonical image ID
+	// This rejects tags, short IDs, uppercase, and malformed IDs
+	if err := ValidateExactImageID(cfg.Config.Image); err != nil {
+		return "", fmt.Errorf("image ID validation for container create: %w", err)
 	}
 
 	resources := container.Resources{
@@ -285,8 +447,8 @@ func (c *Client) ContainerCreateReadOnly(ctx context.Context, imageID string) (s
 
 func (c *Client) NetworkCreate(ctx context.Context, name string, driver string) (string, error) {
 	resp, err := c.Client.NetworkCreate(ctx, name, types.NetworkCreate{
-		Driver: driver,
-		Labels: map[string]string{"kgb.dev/lab": "tovarisch-memory"},
+		Driver:     driver,
+		Labels:     map[string]string{"kgb.dev/lab": "tovarisch-memory"},
 		Attachable: true,
 	})
 	if err != nil {
