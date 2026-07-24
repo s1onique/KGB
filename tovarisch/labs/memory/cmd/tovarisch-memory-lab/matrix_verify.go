@@ -431,8 +431,13 @@ func VerifyMatrixBundle(
 
 	// P0-5 FIX: Complete terminal enforcement inside VerifyMatrixBundle
 	// 7. Compare stored and reconstructed verdicts - reject any difference
-	diffs := CompareVerdicts(result.StoredVerdict, result.ReconstructedVerdict)
-	if len(diffs) > 0 {
+	// P0-8 FIX: Use CompareVerdictsComplete which detects equal-invalid terminal case
+	diffs, equalInvalid := CompareVerdictsComplete(result.StoredVerdict, result.ReconstructedVerdict)
+	if len(diffs) > 0 || equalInvalid {
+		if equalInvalid {
+			// P0-8 FIX: Return result with error for equal-invalid case (both invalid with zero diffs)
+			return result, errors.New("equal-invalid verdict: both stored and reconstructed are invalid (forbidden by policy)")
+		}
 		return nil, fmt.Errorf("stored verdict does not match reconstruction:\n%s", FormatVerdictDiffs(diffs))
 	}
 
@@ -1203,6 +1208,15 @@ func CompareVerdictsComplete(stored, reconstructed *MatrixVerdict) ([]VerdictDif
 			Reconstructed:  reconstructed.MatrixID,
 		})
 	}
+	// P0-8 FIX: Check matrix_valid for normal mismatch (stored != reconstructed).
+	// The equal-invalid case (both false) is handled separately below.
+	if stored.MatrixValid != reconstructed.MatrixValid {
+		diffs = append(diffs, VerdictDiff{
+			Path:           "matrix_valid",
+			Stored:         fmt.Sprintf("%v", stored.MatrixValid),
+			Reconstructed:  fmt.Sprintf("%v", reconstructed.MatrixValid),
+		})
+	}
 	if stored.ChecksTotal != reconstructed.ChecksTotal {
 		diffs = append(diffs, VerdictDiff{
 			Path:           "checks_total",
@@ -1315,7 +1329,9 @@ func CompareVerdictsComplete(stored, reconstructed *MatrixVerdict) ([]VerdictDif
 	}
 
 	// P0-8 FIX: Check for equal but invalid terminal case
-	equalInvalid := len(diffs) == 0 && stored.MatrixValid != reconstructed.MatrixValid
+	// The bug: stored.MatrixValid != reconstructed.MatrixValid is FALSE when both are FALSE!
+	// Fixed: Check that BOTH are false (both invalid) when all other fields match.
+	equalInvalid := len(diffs) == 0 && stored.MatrixValid == false && reconstructed.MatrixValid == false
 
 	return diffs, equalInvalid
 }

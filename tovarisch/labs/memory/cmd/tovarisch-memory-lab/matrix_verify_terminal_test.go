@@ -9,8 +9,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -483,12 +486,44 @@ func TestVerifyMatrixBundle_RejectsEqualInvalid(t *testing.T) {
 		t.Fatal("stored verdict should be invalid")
 	}
 
-	// Verify - should fail (equal-invalid is forbidden)
-	_, err = VerifyMatrixBundle(fixture.rootDir, MatrixVerificationDeps{
+	// P0-6 FIX: Use authoritative VerifyChildRun dependency (not empty struct)
+	// P0-6 FIX: Assert exact terminal reason, exclude earlier failures
+	result, err := VerifyMatrixBundle(fixture.rootDir, MatrixVerificationDeps{
 		VerifyChildRun: verifyChildRunBundle,
 	})
+
+	// Verify should fail (equal-invalid is forbidden)
 	if err == nil {
-		t.Error("expected error for equal-invalid verdict")
+		t.Fatal("expected error for equal-invalid verdict")
+	}
+
+	// P0-6 FIX: Assert the error is specifically about matrix invalidity, not earlier failures
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "invalid") {
+		t.Fatalf("wrong rejection boundary: %v", err)
+	}
+
+	// P0-6 FIX: Exclude earlier failure boundaries
+	earlierBoundaries := []string{
+		"checksum mismatch",
+		"missing checksum",
+		"unexpected artifact",
+		"child verification",
+	}
+	for _, boundary := range earlierBoundaries {
+		if strings.Contains(errMsg, boundary) {
+			t.Fatalf("failed before equal-invalid policy: %v", err)
+		}
+	}
+
+	// P0-6 FIX: Verify result shows reconstructed invalid but stored also invalid (equal-invalid)
+	if result != nil {
+		if result.ReconstructedVerdict.MatrixValid {
+			t.Error("reconstructed verdict should be invalid")
+		}
+		if result.StoredVerdict != nil && result.StoredVerdict.MatrixValid {
+			t.Error("stored verdict should be invalid")
+		}
 	}
 }
 
@@ -554,10 +589,591 @@ func TestRegenerateAllChecksums_RefreshesChildAndMatrixAuthority(t *testing.T) {
 }
 
 // TestRegenerateAllChecksums_StopsOnManifestMarshalFailure proves error propagation.
+// P0-7 FIX: Uses fixtureFileOps with deterministic failing marshal.
 func TestRegenerateAllChecksums_StopsOnManifestMarshalFailure(t *testing.T) {
-	// This test would require injecting a marshal failure - skip for now
-	// P0-7: Would use fixtureFileOps with failing marshal
-	t.Skip("requires error injection seam")
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Inject a failing marshal function
+	failingOps := fixtureFileOps{
+		readFile: os.ReadFile,
+		writeFile: func(path string, data []byte, perm os.FileMode) error {
+			// Only fail on manifest writes
+			if strings.HasSuffix(path, "matrix-manifest.json") {
+				return errors.New("injected marshal failure")
+			}
+			return os.WriteFile(path, data, perm)
+		},
+		marshal: func(v any, prefix, indent string) ([]byte, error) {
+			return nil, errors.New("injected marshal failure")
+		},
+	}
+
+	// Apply a mutation that would require manifest rewrite
+	mutateChildContainerID(fixture, t)
+
+	// Attempt regeneration with failing ops - should fail
+	err := regenerateAllChecksumsWithOps(fixture, failingOps)
+	if err == nil {
+		t.Error("expected error when marshal fails")
+	}
+	if !strings.Contains(err.Error(), "marshal manifest") {
+		t.Errorf("expected marshal error, got: %v", err)
+	}
+}
+
+// P0-7: Test fail-closed when readFile fails during checksum computation.
+func TestComputeChecksumsContentWithOps_FailsOnReadError(t *testing.T) {
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Inject a failing readFile
+	failingOps := fixtureFileOps{
+		readFile: func(path string) ([]byte, error) {
+			if strings.HasSuffix(path, "manifest.json") {
+				return nil, errors.New("injected read failure")
+			}
+			return os.ReadFile(path)
+		},
+		writeFile: os.WriteFile,
+		marshal:   json.MarshalIndent,
+	}
+
+	runDir := fixture.runDirs[0]
+	_, err := computeChecksumsContentWithOps(runDir, canonicalChildArtifactInventory, failingOps)
+	if err == nil {
+		t.Error("expected error when readFile fails")
+	}
+	if !strings.Contains(err.Error(), "read artifact") {
+		t.Errorf("expected read error, got: %v", err)
+	}
+}
+
+// P0-7: Test fail-closed when writeFile fails for child checksums.
+func TestRegenerateAllChecksumsWithOps_FailsOnChildChecksumWrite(t *testing.T) {
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Inject a failing writeFile for child checksums
+	failingOps := fixtureFileOps{
+		readFile: os.ReadFile,
+		writeFile: func(path string, data []byte, perm os.FileMode) error {
+			if strings.HasSuffix(path, "checksums.txt") && !strings.Contains(path, "matrix-checksums") {
+				return errors.New("injected child checksum write failure")
+			}
+			return os.WriteFile(path, data, perm)
+		},
+		marshal: json.MarshalIndent,
+	}
+
+	err := regenerateAllChecksumsWithOps(fixture, failingOps)
+	if err == nil {
+		t.Error("expected error when child checksum write fails")
+	}
+	if !strings.Contains(err.Error(), "write child checksums") {
+		t.Errorf("expected write error, got: %v", err)
+	}
+}
+
+// P0-7: Test fail-closed when writeFile fails for matrix checksums.
+func TestRegenerateAllChecksumsWithOps_FailsOnMatrixChecksumWrite(t *testing.T) {
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Inject a failing writeFile for matrix checksums
+	failingOps := fixtureFileOps{
+		readFile: os.ReadFile,
+		writeFile: func(path string, data []byte, perm os.FileMode) error {
+			if strings.HasSuffix(path, "matrix-checksums.txt") {
+				return errors.New("injected matrix checksum write failure")
+			}
+			return os.WriteFile(path, data, perm)
+		},
+		marshal: json.MarshalIndent,
+	}
+
+	err := regenerateAllChecksumsWithOps(fixture, failingOps)
+	if err == nil {
+		t.Error("expected error when matrix checksum write fails")
+	}
+	if !strings.Contains(err.Error(), "write matrix checksums") {
+		t.Errorf("expected write error, got: %v", err)
+	}
+}
+
+// P0-7: Test fail-closed when writeFile fails for manifest.json.
+func TestRegenerateAllChecksumsWithOps_FailsOnManifestWrite(t *testing.T) {
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Inject a failing writeFile for manifest
+	failingOps := fixtureFileOps{
+		readFile: os.ReadFile,
+		writeFile: func(path string, data []byte, perm os.FileMode) error {
+			if strings.HasSuffix(path, "matrix-manifest.json") {
+				return errors.New("injected manifest write failure")
+			}
+			return os.WriteFile(path, data, perm)
+		},
+		marshal: json.MarshalIndent,
+	}
+
+	err := regenerateAllChecksumsWithOps(fixture, failingOps)
+	if err == nil {
+		t.Error("expected error when manifest write fails")
+	}
+	if !strings.Contains(err.Error(), "write manifest") {
+		t.Errorf("expected write error, got: %v", err)
+	}
+}
+
+// P0-7: Test fail-closed when writeFile fails for matrix-verdict.json.
+func TestRegenerateAllChecksumsWithOps_FailsOnVerdictWrite(t *testing.T) {
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Inject a failing writeFile for verdict
+	failingOps := fixtureFileOps{
+		readFile: os.ReadFile,
+		writeFile: func(path string, data []byte, perm os.FileMode) error {
+			if strings.HasSuffix(path, "matrix-verdict.json") {
+				return errors.New("injected verdict write failure")
+			}
+			return os.WriteFile(path, data, perm)
+		},
+		marshal: json.MarshalIndent,
+	}
+
+	err := regenerateAllChecksumsWithOps(fixture, failingOps)
+	if err == nil {
+		t.Error("expected error when verdict write fails")
+	}
+	if !strings.Contains(err.Error(), "write verdict") {
+		t.Errorf("expected write error, got: %v", err)
+	}
+}
+
+// P0-7: Test first-failure-order proof for cleanup marshal failure.
+// Verifies that child checksums and manifest marshal were called BEFORE cleanup marshal,
+// and that NO later operations were called after the failure.
+func TestRegenerateAllChecksumsWithOps_FirstFailureOrder_CleanupMarshal(t *testing.T) {
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Track call order
+	var calls []string
+	failingOps := fixtureFileOps{
+		readFile: os.ReadFile,
+		writeFile: func(path string, data []byte, perm os.FileMode) error {
+			calls = append(calls, "write:"+filepath.Base(path))
+			return os.WriteFile(path, data, perm)
+		},
+		marshal: func(v any, prefix, indent string) ([]byte, error) {
+			typeName := fmt.Sprintf("%T", v)
+			calls = append(calls, "marshal:"+typeName)
+			// Fail ONLY on cleanup marshal - %T returns *main.MatrixCleanupEvidence for pointers
+			if strings.Contains(typeName, "MatrixCleanup") {
+				return nil, errors.New("injected cleanup marshal failure")
+			}
+			return json.MarshalIndent(v, prefix, indent)
+		},
+	}
+
+	err := regenerateAllChecksumsWithOps(fixture, failingOps)
+	if err == nil {
+		t.Fatal("expected error when cleanup marshal fails")
+	}
+	if !strings.Contains(err.Error(), "marshal cleanup") {
+		t.Errorf("expected marshal cleanup error, got: %v", err)
+	}
+
+	// P0-7: Verify call order - child checksums must come BEFORE cleanup marshal
+	// Expected: write:checksums.txt (run 0), marshal:*main.MatrixManifest, marshal:*main.MatrixCleanup (FAILS here)
+	hasChildChecksumWrite := false
+	hasManifestMarshal := false
+	hasCleanupMarshal := false
+	cleanupMarshalIndex := -1
+
+	for i, call := range calls {
+		if call == "write:checksums.txt" {
+			hasChildChecksumWrite = true
+		}
+		if strings.Contains(call, "MatrixManifest") {
+			hasManifestMarshal = true
+		}
+		if strings.Contains(call, "MatrixCleanup") {
+			hasCleanupMarshal = true
+			cleanupMarshalIndex = i
+		}
+	}
+
+	if !hasChildChecksumWrite {
+		t.Error("child checksum write should have been called before cleanup marshal failure")
+	}
+	if !hasManifestMarshal {
+		t.Error("manifest marshal should have been called before cleanup marshal failure")
+	}
+	if !hasCleanupMarshal {
+		t.Fatal("cleanup marshal should have been called (and failed)")
+	}
+	if cleanupMarshalIndex <= 0 {
+		t.Error("cleanup marshal should have been called after earlier operations")
+	}
+
+	// P0-7 STRENGTHENED: Verify NO later operations were called
+	// After cleanup marshal fails, these should NOT appear:
+	// - write:matrix-cleanup.json
+	// - marshal:*MatrixVerdict
+	// - write:matrix-verdict.json
+	// - write:matrix-checksums.txt
+	for _, call := range calls {
+		if call == "write:matrix-cleanup.json" {
+			t.Error("cleanup write should NOT be called after cleanup marshal failure")
+		}
+		if strings.Contains(call, "MatrixVerdict") {
+			t.Error("verdict marshal should NOT be called after cleanup marshal failure")
+		}
+		if call == "write:matrix-verdict.json" {
+			t.Error("verdict write should NOT be called after cleanup marshal failure")
+		}
+		if call == "write:matrix-checksums.txt" {
+			t.Error("matrix checksums write should NOT be called after cleanup marshal failure")
+		}
+	}
+}
+
+// P0-7: Test first-failure-order proof for verdict marshal failure.
+// Verifies cleanup marshal was called BEFORE verdict marshal,
+// and that NO later operations were called after the failure.
+func TestRegenerateAllChecksumsWithOps_FirstFailureOrder_VerdictMarshal(t *testing.T) {
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Track call order
+	var calls []string
+	failingOps := fixtureFileOps{
+		readFile: os.ReadFile,
+		writeFile: func(path string, data []byte, perm os.FileMode) error {
+			calls = append(calls, "write:"+filepath.Base(path))
+			return os.WriteFile(path, data, perm)
+		},
+		marshal: func(v any, prefix, indent string) ([]byte, error) {
+			typeName := fmt.Sprintf("%T", v)
+			calls = append(calls, "marshal:"+typeName)
+			// Fail ONLY on verdict marshal - %T returns *main.MatrixVerdict for pointers
+			if strings.Contains(typeName, "MatrixVerdict") {
+				return nil, errors.New("injected verdict marshal failure")
+			}
+			return json.MarshalIndent(v, prefix, indent)
+		},
+	}
+
+	err := regenerateAllChecksumsWithOps(fixture, failingOps)
+	if err == nil {
+		t.Fatal("expected error when verdict marshal fails")
+	}
+	if !strings.Contains(err.Error(), "marshal verdict") {
+		t.Errorf("expected marshal verdict error, got: %v", err)
+	}
+
+	// P0-7: Verify call order
+	hasCleanupMarshal := false
+	hasVerdictMarshal := false
+	verdictMarshalIndex := -1
+
+	for i, call := range calls {
+		if strings.Contains(call, "MatrixCleanup") {
+			hasCleanupMarshal = true
+		}
+		if strings.Contains(call, "MatrixVerdict") {
+			hasVerdictMarshal = true
+			verdictMarshalIndex = i
+		}
+	}
+
+	if !hasCleanupMarshal {
+		t.Error("cleanup marshal should have been called before verdict marshal failure")
+	}
+	if !hasVerdictMarshal {
+		t.Fatal("verdict marshal should have been called (and failed)")
+	}
+	if verdictMarshalIndex <= 0 {
+		t.Error("verdict marshal should have been called after cleanup marshal")
+	}
+
+	// P0-7 STRENGTHENED: Verify NO later operations were called
+	// After verdict marshal fails, these should NOT appear:
+	// - write:matrix-verdict.json
+	// - write:matrix-checksums.txt
+	for _, call := range calls {
+		if call == "write:matrix-verdict.json" {
+			t.Error("verdict write should NOT be called after verdict marshal failure")
+		}
+		if call == "write:matrix-checksums.txt" {
+			t.Error("matrix checksums write should NOT be called after verdict marshal failure")
+		}
+	}
+}
+
+// P0-7: Test first-failure-order proof for cleanup write failure.
+// Verifies earlier operations complete before cleanup write fails.
+// NOTE: When cleanup write fails, verdict marshal is NOT called (we fail before reaching it).
+func TestRegenerateAllChecksumsWithOps_FirstFailureOrder_CleanupWrite(t *testing.T) {
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Track call order
+	var calls []string
+	failingOps := fixtureFileOps{
+		readFile: os.ReadFile,
+		writeFile: func(path string, data []byte, perm os.FileMode) error {
+			calls = append(calls, "write:"+filepath.Base(path))
+			// Fail ONLY on cleanup write
+			if filepath.Base(path) == "matrix-cleanup.json" {
+				return errors.New("injected cleanup write failure")
+			}
+			return os.WriteFile(path, data, perm)
+		},
+		marshal: func(v any, prefix, indent string) ([]byte, error) {
+			calls = append(calls, "marshal:"+fmt.Sprintf("%T", v))
+			return json.MarshalIndent(v, prefix, indent)
+		},
+	}
+
+	err := regenerateAllChecksumsWithOps(fixture, failingOps)
+	if err == nil {
+		t.Fatal("expected error when cleanup write fails")
+	}
+	if !strings.Contains(err.Error(), "write cleanup") {
+		t.Errorf("expected write cleanup error, got: %v", err)
+	}
+
+	// P0-7: Verify cleanup marshal was called before cleanup write fails
+	hasCleanupMarshal := false
+	hasManifestMarshal := false
+	hasCleanupWrite := false
+	cleanupMarshalIndex := -1
+
+	for i, call := range calls {
+		if strings.Contains(call, "MatrixManifest") {
+			hasManifestMarshal = true
+		}
+		if strings.Contains(call, "MatrixCleanup") {
+			hasCleanupMarshal = true
+			cleanupMarshalIndex = i
+		}
+		if call == "write:matrix-cleanup.json" {
+			hasCleanupWrite = true
+		}
+	}
+
+	if !hasManifestMarshal {
+		t.Error("manifest marshal should have been called before cleanup write failure")
+	}
+	if !hasCleanupMarshal {
+		t.Fatal("cleanup marshal should have been called before cleanup write fails")
+	}
+	if !hasCleanupWrite {
+		t.Fatal("cleanup write should have been called (and failed)")
+	}
+	if cleanupMarshalIndex <= 0 {
+		t.Error("cleanup marshal should have been called after manifest marshal")
+	}
+	// NOTE: Verdict marshal is NOT called when cleanup write fails - we fail before reaching it
+	hasVerdictMarshal := false
+	for _, call := range calls {
+		if strings.Contains(call, "MatrixVerdict") {
+			hasVerdictMarshal = true
+			break
+		}
+	}
+	if hasVerdictMarshal {
+		t.Error("verdict marshal should NOT be called when cleanup write fails (fail-closed)")
+	}
+}
+
+// P0-7: Test fail-closed when checksum file write fails due to permission error simulation.
+func TestRegenerateAllChecksumsWithOps_FailsOnPermissionDenied(t *testing.T) {
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Simulate permission denied error wrapped in PathError
+	failingOps := fixtureFileOps{
+		readFile: os.ReadFile,
+		writeFile: func(path string, data []byte, perm os.FileMode) error {
+			return &os.PathError{
+				Op:   "write",
+				Path: path,
+				Err:  errors.New("permission denied"),
+			}
+		},
+		marshal: json.MarshalIndent,
+	}
+
+	err := regenerateAllChecksumsWithOps(fixture, failingOps)
+	if err == nil {
+		t.Fatal("expected error when permission denied")
+	}
+	// Assert the error wraps the PathError boundary
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) {
+		t.Fatalf("expected PathError wrapper, got: %T", err)
+	}
+	if !strings.Contains(pathErr.Err.Error(), "permission denied") {
+		t.Errorf("expected 'permission denied' in PathError.Err, got: %v", pathErr.Err)
+	}
+}
+
+// P0-7: Test fail-closed when samples.csv read fails during child checksum computation.
+func TestComputeChecksumsContentWithOps_FailsOnSamplesRead(t *testing.T) {
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Fail on samples.csv read
+	failingOps := fixtureFileOps{
+		readFile: func(path string) ([]byte, error) {
+			if strings.HasSuffix(path, "samples.csv") {
+				return nil, errors.New("injected read failure for samples")
+			}
+			return os.ReadFile(path)
+		},
+		writeFile: os.WriteFile,
+		marshal:   json.MarshalIndent,
+	}
+
+	runDir := fixture.runDirs[0]
+	_, err := computeChecksumsContentWithOps(runDir, canonicalChildArtifactInventory, failingOps)
+	if err == nil {
+		t.Fatal("expected error when samples.csv read fails")
+	}
+	if !strings.Contains(err.Error(), "read artifact") {
+		t.Errorf("expected read error, got: %v", err)
+	}
+}
+
+// P0-7: Test fail-closed when network-identity.json read fails.
+func TestComputeChecksumsContentWithOps_FailsOnNetworkIdentityRead(t *testing.T) {
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Fail on network-identity.json read
+	failingOps := fixtureFileOps{
+		readFile: func(path string) ([]byte, error) {
+			if strings.HasSuffix(path, "network-identity.json") {
+				return nil, errors.New("injected network-identity read failure")
+			}
+			return os.ReadFile(path)
+		},
+		writeFile: os.WriteFile,
+		marshal:   json.MarshalIndent,
+	}
+
+	runDir := fixture.runDirs[0]
+	_, err := computeChecksumsContentWithOps(runDir, canonicalChildArtifactInventory, failingOps)
+	if err == nil {
+		t.Error("expected error when network-identity read fails")
+	}
+}
+
+// P0-7: Test fail-closed when container-inspect.json read fails.
+func TestComputeChecksumsContentWithOps_FailsOnContainerInspectRead(t *testing.T) {
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Fail on container-inspect.json read
+	failingOps := fixtureFileOps{
+		readFile: func(path string) ([]byte, error) {
+			if strings.HasSuffix(path, "container-inspect.json") {
+				return nil, errors.New("injected container-inspect read failure")
+			}
+			return os.ReadFile(path)
+		},
+		writeFile: os.WriteFile,
+		marshal:   json.MarshalIndent,
+	}
+
+	runDir := fixture.runDirs[0]
+	_, err := computeChecksumsContentWithOps(runDir, canonicalChildArtifactInventory, failingOps)
+	if err == nil {
+		t.Error("expected error when container-inspect read fails")
+	}
+}
+
+// P0-7: Test fail-closed when matrix-root artifact (matrix-cleanup.json) read fails during
+// matrix checksum computation. This proves the seam handles matrix-level artifact reads.
+func TestComputeMatrixChecksumsContentWithOps_FailsOnMatrixCleanupRead(t *testing.T) {
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Fail on matrix-cleanup.json read during matrix checksum computation
+	failingOps := fixtureFileOps{
+		readFile: func(path string) ([]byte, error) {
+			if strings.HasSuffix(path, "matrix-cleanup.json") {
+				return nil, errors.New("injected matrix-cleanup read failure")
+			}
+			return os.ReadFile(path)
+		},
+		writeFile: os.WriteFile,
+		marshal:   json.MarshalIndent,
+	}
+
+	_, err := computeMatrixChecksumsContentWithOps(fixture.rootDir, canonicalMatrixArtifactInventory[:], failingOps)
+	if err == nil {
+		t.Fatal("expected error when matrix-cleanup read fails during matrix checksum computation")
+	}
+	if !strings.Contains(err.Error(), "read artifact") {
+		t.Errorf("expected read error, got: %v", err)
+	}
+}
+
+// P0-7 FIX: Regenerate with injected file operations.
+// All file reads and writes go through ops for complete testability.
+func regenerateAllChecksumsWithOps(fixture *matrixFixture, ops fixtureFileOps) error {
+	// Step 1: Regenerate child checksums for all runs using ops
+	for i, runDir := range fixture.runDirs {
+		// P0-7 FIX: Use ops-injected checksum computation
+		childChecksumContent, err := computeChildChecksumsContentWithOps(runDir, canonicalChildArtifactInventory, ops)
+		if err != nil {
+			return fmt.Errorf("compute child checksums for %s: %w", fixtureRunIDs[i], err)
+		}
+
+		// P0-7 FIX: Write child checksums using ops
+		if err := ops.writeFile(filepath.Join(runDir, "checksums.txt"), []byte(childChecksumContent), 0644); err != nil {
+			return fmt.Errorf("write child checksums for %s: %w", fixtureRunIDs[i], err)
+		}
+
+		// Step 2: Update manifest's checksums_sha256 for this run
+		checksumHash := sha256.Sum256([]byte(childChecksumContent))
+		childDigest := hex.EncodeToString(checksumHash[:])
+		if err := updateDeclaredChildChecksum(fixture.manifest, i, childDigest); err != nil {
+			return fmt.Errorf("update child checksum digest: %w", err)
+		}
+	}
+
+	// Step 3: Rewrite matrix manifest with injected ops
+	manifestJSON, err := ops.marshal(fixture.manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal manifest: %w", err)
+	}
+	if err := ops.writeFile(filepath.Join(fixture.rootDir, "matrix-manifest.json"), manifestJSON, 0644); err != nil {
+		return fmt.Errorf("write manifest: %w", err)
+	}
+
+	// Step 4: Rewrite matrix cleanup with injected ops
+	cleanupJSON, err := ops.marshal(fixture.cleanup, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal cleanup: %w", err)
+	}
+	if err := ops.writeFile(filepath.Join(fixture.rootDir, "matrix-cleanup.json"), cleanupJSON, 0644); err != nil {
+		return fmt.Errorf("write cleanup: %w", err)
+	}
+
+	// Step 5: Rewrite matrix verdict with injected ops
+	verdictJSON, err := ops.marshal(fixture.verdict, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal verdict: %w", err)
+	}
+	if err := ops.writeFile(filepath.Join(fixture.rootDir, "matrix-verdict.json"), verdictJSON, 0644); err != nil {
+		return fmt.Errorf("write verdict: %w", err)
+	}
+
+	// Step 6: Regenerate matrix checksums using ops
+	// P0-7 FIX: Use ops-injected matrix checksum computation
+	matrixChecksumContent, err := computeMatrixChecksumsContentWithOps(fixture.rootDir, canonicalMatrixArtifactInventory[:], ops)
+	if err != nil {
+		return fmt.Errorf("compute matrix checksums: %w", err)
+	}
+	if err := ops.writeFile(filepath.Join(fixture.rootDir, "matrix-checksums.txt"), []byte(matrixChecksumContent), 0644); err != nil {
+		return fmt.Errorf("write matrix checksums: %w", err)
+	}
+
+	return nil
 }
 
 // P0-7: Test that checksum regeneration fails when file is missing.
@@ -609,8 +1225,10 @@ func TestRegenerateAllChecksums_UpdatesManifestOnDisk(t *testing.T) {
 // P0-5: Test actual CLI execution of verify-matrix command.
 // Fixed: Uses correct package directory, CommandContext, and --matrix-dir flag.
 func TestVerifyMatrixCommand_CLIExecution(t *testing.T) {
-	// Build the CLI binary from the actual package directory
-	pkgDir := filepath.Join(getModuleRoot(), "tovarisch/labs/memory/cmd/tovarisch-memory-lab")
+	// Build the CLI binary from the current package directory
+	// Tests run from: /home/kgb/Projects/KGB/tovarisch/labs/memory/cmd/tovarisch-memory-lab
+	// Use "." to build from current directory
+	pkgDir := "."
 	binPath := filepath.Join(t.TempDir(), "tovarisch-memory-lab")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -634,17 +1252,16 @@ func TestVerifyMatrixCommand_CLIExecution(t *testing.T) {
 		t.Errorf("verify-matrix failed: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
 	}
 
-	// Should emit PASS line
+	// Should emit PASS line - P0-5 FIX: Use combined assertion for both stdout and stderr
 	output := stdout.String()
-	if countTerminalPassLines(output) != 1 {
-		t.Errorf("expected 1 PASS line, got %d", countTerminalPassLines(output))
-	}
+	assertTerminalPass(t, output, stderr.String())
 }
 
 // P0-5: Test CLI fails on equal-invalid fixture.
 // P0-5 FIX: Uses correct --matrix-dir flag, captures output, checks ExitError.
 func TestVerifyMatrixCommand_CLIRejectsEqualInvalid(t *testing.T) {
-	pkgDir := filepath.Join(getModuleRoot(), "tovarisch/labs/memory/cmd/tovarisch-memory-lab")
+	// Build the CLI binary from the current package directory
+	pkgDir := "."
 	binPath := filepath.Join(t.TempDir(), "tovarisch-memory-lab")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -685,6 +1302,285 @@ func TestVerifyMatrixCommand_CLIRejectsEqualInvalid(t *testing.T) {
 	assertNoTerminalPass(t, stdout.String(), stderr.String())
 }
 
+// P0-5: Test CLI fails when container status is "exists".
+// P0-5 FIX: Uses actual CLI execution with file-based mutation.
+func TestVerifyMatrixCommand_CLIRejectsContainerStatusExists(t *testing.T) {
+	pkgDir := "."
+	binPath := filepath.Join(t.TempDir(), "tovarisch-memory-lab")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", binPath, ".")
+	cmd.Dir = pkgDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("go build failed: %v", err)
+	}
+
+	// Create valid fixture
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Mutate cleanup to have container status "exists" (should be "gone")
+	fixture.cleanup.Runs[0].Container.Status = "exists"
+	cleanupJSON, err := json.MarshalIndent(fixture.cleanup, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cleanup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fixture.rootDir, "matrix-cleanup.json"), cleanupJSON, 0644); err != nil {
+		t.Fatalf("write cleanup: %v", err)
+	}
+
+	// Regenerate matrix checksums
+	if err := regenerateMatrixChecksums(fixture.rootDir); err != nil {
+		t.Fatalf("regenerate checksums: %v", err)
+	}
+
+	// Run verify-matrix CLI
+	verifyCmd := exec.CommandContext(ctx, binPath, "verify-matrix", "--matrix-dir", fixture.rootDir)
+	var stdout, stderr strings.Builder
+	verifyCmd.Stdout, verifyCmd.Stderr = &stdout, &stderr
+	err = verifyCmd.Run()
+
+	// Should fail
+	if err == nil {
+		t.Fatal("expected nonzero exit")
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("CLI infrastructure failure: %v", err)
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("CLI exceeded timeout: %v", ctx.Err())
+	}
+
+	// No PASS line
+	assertNoTerminalPass(t, stdout.String(), stderr.String())
+
+	// P0-5 FIX: Assert field-specific diagnostic
+	output := stdout.String() + stderr.String()
+	assertCLIRejectedFor(t, output, "container", "exists")
+}
+
+// P0-5: Test CLI fails when network status is "exists".
+// P0-5 FIX: Uses actual CLI execution with file-based mutation.
+func TestVerifyMatrixCommand_CLIRejectsNetworkStatusExists(t *testing.T) {
+	pkgDir := "."
+	binPath := filepath.Join(t.TempDir(), "tovarisch-memory-lab")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", binPath, ".")
+	cmd.Dir = pkgDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("go build failed: %v", err)
+	}
+
+	// Create valid fixture
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Mutate cleanup to have network status "exists" (should be "gone")
+	fixture.cleanup.Runs[0].Network.Status = "exists"
+	cleanupJSON, err := json.MarshalIndent(fixture.cleanup, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cleanup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fixture.rootDir, "matrix-cleanup.json"), cleanupJSON, 0644); err != nil {
+		t.Fatalf("write cleanup: %v", err)
+	}
+
+	// Regenerate matrix checksums
+	if err := regenerateMatrixChecksums(fixture.rootDir); err != nil {
+		t.Fatalf("regenerate checksums: %v", err)
+	}
+
+	// Run verify-matrix CLI
+	verifyCmd := exec.CommandContext(ctx, binPath, "verify-matrix", "--matrix-dir", fixture.rootDir)
+	var stdout, stderr strings.Builder
+	verifyCmd.Stdout, verifyCmd.Stderr = &stdout, &stderr
+	err = verifyCmd.Run()
+
+	// Should fail
+	if err == nil {
+		t.Fatal("expected nonzero exit")
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("CLI infrastructure failure: %v", err)
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("CLI exceeded timeout: %v", ctx.Err())
+	}
+
+	// No PASS line
+	assertNoTerminalPass(t, stdout.String(), stderr.String())
+
+	// P0-5 FIX: Assert field-specific diagnostic
+	output := stdout.String() + stderr.String()
+	assertCLIRejectedFor(t, output, "network", "exists")
+}
+
+// P0-5: Test CLI fails when process status is "still_alive".
+// P0-5 FIX: Uses actual CLI execution with file-based mutation.
+func TestVerifyMatrixCommand_CLIRejectsProcessStatusStillAlive(t *testing.T) {
+	pkgDir := "."
+	binPath := filepath.Join(t.TempDir(), "tovarisch-memory-lab")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", binPath, ".")
+	cmd.Dir = pkgDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("go build failed: %v", err)
+	}
+
+	// Create valid fixture
+	fixture := writeValidMatrixBundleFixture(t)
+
+	// Mutate cleanup to have process status "still_alive" (should be "gone" or "pid_reused")
+	fixture.cleanup.Runs[0].Process.Status = "still_alive"
+	cleanupJSON, err := json.MarshalIndent(fixture.cleanup, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cleanup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fixture.rootDir, "matrix-cleanup.json"), cleanupJSON, 0644); err != nil {
+		t.Fatalf("write cleanup: %v", err)
+	}
+
+	// Regenerate matrix checksums
+	if err := regenerateMatrixChecksums(fixture.rootDir); err != nil {
+		t.Fatalf("regenerate checksums: %v", err)
+	}
+
+	// Run verify-matrix CLI
+	verifyCmd := exec.CommandContext(ctx, binPath, "verify-matrix", "--matrix-dir", fixture.rootDir)
+	var stdout, stderr strings.Builder
+	verifyCmd.Stdout, verifyCmd.Stderr = &stdout, &stderr
+	err = verifyCmd.Run()
+
+	// Should fail
+	if err == nil {
+		t.Fatal("expected nonzero exit")
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("CLI infrastructure failure: %v", err)
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("CLI exceeded timeout: %v", ctx.Err())
+	}
+
+	// No PASS line
+	assertNoTerminalPass(t, stdout.String(), stderr.String())
+
+	// P0-5 FIX: Assert field-specific diagnostic
+	output := stdout.String() + stderr.String()
+	assertCLIRejectedFor(t, output, "process", "still_alive")
+}
+
+// =============================================================================
+// CLI UNAVAILABLE STATUS TESTS (table-driven)
+// =============================================================================
+
+// cliUnavailableTest describes a CLI unavailable-status test case.
+type cliUnavailableTest struct {
+	name           string
+	runIndex       int
+	field          string
+	setUnavailable func(*MatrixCleanupEvidence, int)
+}
+
+// TestVerifyMatrixCommand_CLIRejectsUnavailableStatuses proves CLI rejects unavailable statuses.
+// P0-5: Table-driven tests for unavailable statuses to reduce duplication.
+func TestVerifyMatrixCommand_CLIRejectsUnavailableStatuses(t *testing.T) {
+	tests := []cliUnavailableTest{
+		{
+			name:     "container unavailable",
+			runIndex: 0,
+			field:    "container",
+			setUnavailable: func(c *MatrixCleanupEvidence, i int) {
+				c.Runs[i].Container.Status = "unavailable"
+			},
+		},
+		{
+			name:     "network unavailable",
+			runIndex: 0,
+			field:    "network",
+			setUnavailable: func(c *MatrixCleanupEvidence, i int) {
+				c.Runs[i].Network.Status = "unavailable"
+			},
+		},
+		{
+			name:     "process unavailable",
+			runIndex: 0,
+			field:    "process",
+			setUnavailable: func(c *MatrixCleanupEvidence, i int) {
+				c.Runs[i].Process.Status = "unavailable"
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pkgDir := "."
+			binPath := filepath.Join(t.TempDir(), "tovarisch-memory-lab")
+
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			cmd := exec.CommandContext(ctx, "go", "build", "-o", binPath, ".")
+			cmd.Dir = pkgDir
+			if err := cmd.Run(); err != nil {
+				t.Fatalf("go build failed: %v", err)
+			}
+
+			// Create valid fixture
+			fixture := writeValidMatrixBundleFixture(t)
+
+			// Set field to unavailable
+			tt.setUnavailable(fixture.cleanup, tt.runIndex)
+			cleanupJSON, err := json.MarshalIndent(fixture.cleanup, "", "  ")
+			if err != nil {
+				t.Fatalf("marshal cleanup: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(fixture.rootDir, "matrix-cleanup.json"), cleanupJSON, 0644); err != nil {
+				t.Fatalf("write cleanup: %v", err)
+			}
+
+			// Regenerate matrix checksums
+			if err := regenerateMatrixChecksums(fixture.rootDir); err != nil {
+				t.Fatalf("regenerate checksums: %v", err)
+			}
+
+			// Run verify-matrix CLI
+			verifyCmd := exec.CommandContext(ctx, binPath, "verify-matrix", "--matrix-dir", fixture.rootDir)
+			var stdout, stderr strings.Builder
+			verifyCmd.Stdout, verifyCmd.Stderr = &stdout, &stderr
+			err = verifyCmd.Run()
+
+			// Should fail
+			if err == nil {
+				t.Fatal("expected nonzero exit")
+			}
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) {
+				t.Fatalf("CLI infrastructure failure: %v", err)
+			}
+			if ctx.Err() != nil {
+				t.Fatalf("CLI exceeded timeout: %v", ctx.Err())
+			}
+
+			// No PASS line
+			assertNoTerminalPass(t, stdout.String(), stderr.String())
+
+			// P0-5: Assert field-specific diagnostic
+			output := stdout.String() + stderr.String()
+			assertCLIRejectedFor(t, output, tt.field, "unavailable")
+		})
+	}
+}
+
 // =============================================================================
 // PASS LINE CONTRACT TESTS
 // =============================================================================
@@ -708,5 +1604,20 @@ func TestVerifyMatrixCommand_FailureEmitsNoPASS(t *testing.T) {
 	count := countTerminalPassLines(output)
 	if count != 0 {
 		t.Errorf("expected 0 PASS lines, got %d", count)
+	}
+}
+
+// assertCLIRejectedFor asserts the CLI failed for the specific reason.
+// P0-5: Verifies the failure is at the expected boundary, not an unrelated error.
+func assertCLIRejectedFor(t *testing.T, output string, field, expected string) {
+	t.Helper()
+	// Check for the specific field and expected value in output
+	expectedLower := strings.ToLower(expected)
+	fieldLower := strings.ToLower(field)
+	if !strings.Contains(output, fieldLower) {
+		t.Errorf("expected output to contain %q, got: %s", fieldLower, output)
+	}
+	if !strings.Contains(output, expectedLower) {
+		t.Errorf("expected output to contain %q for %s, got: %s", expectedLower, fieldLower, output)
 	}
 }

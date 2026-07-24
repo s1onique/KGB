@@ -199,19 +199,19 @@ func buildFixtureManifest() *MatrixManifest {
 	execIdentity := &MatrixExecutionIdentity{
 		ImplementationCommitOID:    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		ImplementationTreeOID:      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-		GitObjectFormat:           "sha256",
-		ControllerPID:             12345,
+		GitObjectFormat:            "sha256",
+		ControllerPID:              12345,
 		ControllerExecutableSHA256: "cafebabe",
 		RunManifestSchemaVersion:   "1.1.0",
-		ImageReference:           "test-image:latest",
-		ImageID:                 "sha256:abcdef123456",
-		CanaryBinarySHA256:       "binaryhash",
-		HostKernelRelease:       "6.1.0",
-		HostKernelVersion:       "Linux 6.1.0",
-		HostCgroupMode:         "2",
-		DockerEngineVersion:    "24.0.0",
-		DockerAPIVersion:       "1.43",
-		Thresholds:             &analysis.Thresholds{},
+		ImageReference:             "test-image:latest",
+		ImageID:                    "sha256:abcdef123456",
+		CanaryBinarySHA256:         "binaryhash",
+		HostKernelRelease:          "6.1.0",
+		HostKernelVersion:          "Linux 6.1.0",
+		HostCgroupMode:             "2",
+		DockerEngineVersion:        "24.0.0",
+		DockerAPIVersion:           "1.43",
+		Thresholds:                 &analysis.Thresholds{},
 	}
 
 	runs := make([]MatrixRunDeclaration, 3)
@@ -227,11 +227,11 @@ func buildFixtureManifest() *MatrixManifest {
 
 	return &MatrixManifest{
 		SchemaVersion:     MatrixSchemaVersion,
-		MatrixID:         fixtureMatrixID,
-		StartedAt:        fixtureStartedAt,
-		FinishedAt:       fixtureFinishedAt,
+		MatrixID:          fixtureMatrixID,
+		StartedAt:         fixtureStartedAt,
+		FinishedAt:        fixtureFinishedAt,
 		ExecutionIdentity: execIdentity,
-		Runs:             runs,
+		Runs:              runs,
 	}
 }
 
@@ -242,23 +242,23 @@ func buildChildManifest(index int) *evidence.Manifest {
 
 	return &evidence.Manifest{
 		SchemaVersion: "1.1.0",
-		RunID:        fixtureRunIDs[index],
-		Scenario:     fixtureScenarios[index],
-		ControllerID: "12345",
+		RunID:         fixtureRunIDs[index],
+		Scenario:      fixtureScenarios[index],
+		ControllerID:  "12345",
 		SubjectIdentity: &evidence.SubjectIdentity{
-			GitCommit:                 "deadbeef",
-			GitTree:                  "0123456789",
-			GitObjectFormat:          "sha256",
+			GitCommit:                  "deadbeef",
+			GitTree:                    "0123456789",
+			GitObjectFormat:            "sha256",
 			ControllerExecutableSHA256: "cafebabe",
 		},
 		SubjectImageIdentity: &evidence.SubjectImageIdentity{
-			ImageReference:        "test-image:latest",
+			ImageReference:       "test-image:latest",
 			ImageID:              "sha256:abcdef123456",
 			PrebuildBinarySHA256: "binaryhash",
 		},
 		HostID: &evidence.HostIdentity{
 			KernelRelease: "6.1.0",
-			CgroupMode:   "2",
+			CgroupMode:    "2",
 		},
 		DockerID: &evidence.DockerIdentity{
 			EngineVersion: "24.0.0",
@@ -279,9 +279,9 @@ func buildChildVerdict(scenario string) *evidence.Verdict {
 			MemoryClassification:   analysis.ClassificationGrowing,
 			ResourceClassification: analysis.ClassificationStable,
 			SemanticClassification: analysis.ClassificationStable,
-			ScenarioValid:        true,
-			CanariesValid:       true,
-			ProvenanceValid:     true,
+			ScenarioValid:          true,
+			CanariesValid:          true,
+			ProvenanceValid:        true,
 		}
 	case "canary-bounded":
 		return &evidence.Verdict{
@@ -290,9 +290,9 @@ func buildChildVerdict(scenario string) *evidence.Verdict {
 			MemoryClassification:   analysis.ClassificationStable,
 			ResourceClassification: analysis.ClassificationStable,
 			SemanticClassification: analysis.ClassificationStable,
-			ScenarioValid:        true,
-			CanariesValid:       true,
-			ProvenanceValid:     true,
+			ScenarioValid:          true,
+			CanariesValid:          true,
+			ProvenanceValid:        true,
 		}
 	case "canary-descriptor":
 		return &evidence.Verdict{
@@ -301,14 +301,14 @@ func buildChildVerdict(scenario string) *evidence.Verdict {
 			MemoryClassification:   analysis.ClassificationStable,
 			ResourceClassification: analysis.ClassificationResourceGrowth,
 			SemanticClassification: analysis.ClassificationStable,
-			ScenarioValid:        true,
-			CanariesValid:       true,
-			ProvenanceValid:     true,
+			ScenarioValid:          true,
+			CanariesValid:          true,
+			ProvenanceValid:        true,
 		}
 	default:
 		return &evidence.Verdict{
-			Scenario:       scenario,
-			ScenarioValid:    true,
+			Scenario:        scenario,
+			ScenarioValid:   true,
 			CanariesValid:   true,
 			ProvenanceValid: true,
 		}
@@ -351,12 +351,12 @@ func writeChildArtifacts(tb testing.TB, runDir string, index int, manifest *evid
 	// network-identity.json - P0-7: checked errors
 	networkJSONData, err := json.MarshalIndent(struct {
 		SchemaVersion string `json:"schema_version"`
-		ID           string `json:"id"`
-		Name         string `json:"name"`
+		ID            string `json:"id"`
+		Name          string `json:"name"`
 	}{
 		SchemaVersion: "1.0.0",
-		ID:           fixtureNetworkIDs[index],
-		Name:         "test-network-" + fixtureRunIDs[index],
+		ID:            fixtureNetworkIDs[index],
+		Name:          "test-network-" + fixtureRunIDs[index],
 	}, "", "  ")
 	if err != nil {
 		tb.Fatalf("marshal network identity: %v", err)
@@ -426,11 +426,11 @@ func writeChildArtifacts(tb testing.TB, runDir string, index int, manifest *evid
 // buildCanaryState creates a canary state.
 func buildCanaryState(scenario string, phase int) CanaryState {
 	state := CanaryState{
-		Mode:            scenario,
-		BufferCapacity:  32 * 1024 * 1024,
-		RetainedBlocks:  0,
-		RetainedBytes:   0,
-		FDCount:         10,
+		Mode:           scenario,
+		BufferCapacity: 32 * 1024 * 1024,
+		RetainedBlocks: 0,
+		RetainedBytes:  0,
+		FDCount:        10,
 	}
 
 	switch scenario {
@@ -453,7 +453,7 @@ func buildCanaryState(scenario string, phase int) CanaryState {
 // buildWorkloadResult creates a workload result.
 func buildWorkloadResult(scenario string) WorkloadResult {
 	result := WorkloadResult{
-		Requested:  100,
+		Requested: 100,
 		Attempted: 100,
 		Completed: 100,
 		Failed:    0,
@@ -497,10 +497,10 @@ func buildFixtureCleanup() *MatrixCleanupEvidence {
 
 	return &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        fixtureMatrixID,
-		ObservedAt:      fixtureObservedAt,
+		MatrixID:         fixtureMatrixID,
+		ObservedAt:       fixtureObservedAt,
 		NetworkOwnership: "per_run",
-		Runs:            records,
+		Runs:             records,
 	}
 }
 
@@ -509,19 +509,19 @@ func buildVerifiedRuns(manifests []*evidence.Manifest, verdicts []*evidence.Verd
 	runs := make([]*VerifiedRun, 3)
 	for i := 0; i < 3; i++ {
 		runs[i] = &VerifiedRun{
-			DeclaredRunID:        fixtureRunIDs[i],
-			DeclaredScenario:     fixtureScenarios[i],
-			RunIndex:            i,
-			ActualManifest:      manifests[i],
-			ActualVerdict:       verdicts[i],
-			ContainerID:         fixtureContainerIDs[i],
-			NetworkID:           fixtureNetworkIDs[i],
-			SubjectPID:          fixturePIDs[i],
-			SubjectStartTime:    fixtureStartTimes[i],
-			ProcessCleanupStatus: ProcessGone,
-			ChildVerified:       true,
+			DeclaredRunID:         fixtureRunIDs[i],
+			DeclaredScenario:      fixtureScenarios[i],
+			RunIndex:              i,
+			ActualManifest:        manifests[i],
+			ActualVerdict:         verdicts[i],
+			ContainerID:           fixtureContainerIDs[i],
+			NetworkID:             fixtureNetworkIDs[i],
+			SubjectPID:            fixturePIDs[i],
+			SubjectStartTime:      fixtureStartTimes[i],
+			ProcessCleanupStatus:  ProcessGone,
+			ChildVerified:         true,
 			CleanupEvidenceLoaded: true,
-			CleanupEvidenceValid:   true,
+			CleanupEvidenceValid:  true,
 		}
 	}
 	return runs
@@ -554,19 +554,19 @@ func buildVerifiedRunsFromFixture(fixture *matrixFixture) []*VerifiedRun {
 		}
 
 		runs[i] = &VerifiedRun{
-			DeclaredRunID:        fixtureRunIDs[i],
-			DeclaredScenario:     fixtureScenarios[i],
-			RunIndex:            i,
-			ActualManifest:      &childManifest,
-			ActualVerdict:       &childVerdict,
-			ContainerID:         fixtureContainerIDs[i],
-			NetworkID:           fixtureNetworkIDs[i],
-			SubjectPID:          fixturePIDs[i],
-			SubjectStartTime:    fixtureStartTimes[i],
-			ProcessCleanupStatus: ProcessGone,
-			ChildVerified:       true,
+			DeclaredRunID:         fixtureRunIDs[i],
+			DeclaredScenario:      fixtureScenarios[i],
+			RunIndex:              i,
+			ActualManifest:        &childManifest,
+			ActualVerdict:         &childVerdict,
+			ContainerID:           fixtureContainerIDs[i],
+			NetworkID:             fixtureNetworkIDs[i],
+			SubjectPID:            fixturePIDs[i],
+			SubjectStartTime:      fixtureStartTimes[i],
+			ProcessCleanupStatus:  ProcessGone,
+			ChildVerified:         true,
 			CleanupEvidenceLoaded: true,
-			CleanupEvidenceValid:   true,
+			CleanupEvidenceValid:  true,
 		}
 	}
 	return runs
@@ -588,13 +588,31 @@ func computeMatrixChecksumsContent(matrixDir string) (string, error) {
 	return computeChecksumsContent(matrixDir, canonicalMatrixArtifactInventory[:])
 }
 
+// computeChildChecksumsContentWithOps computes checksums for child artifacts using injected ops.
+// P0-7: All file reads go through ops.readFile for testability.
+func computeChildChecksumsContentWithOps(runDir string, artifacts []string, ops fixtureFileOps) (string, error) {
+	return computeChecksumsContentWithOps(runDir, artifacts, ops)
+}
+
+// computeMatrixChecksumsContentWithOps computes checksums for matrix artifacts using injected ops.
+// P0-7: All file reads go through ops.readFile for testability.
+func computeMatrixChecksumsContentWithOps(matrixDir string, artifacts []string, ops fixtureFileOps) (string, error) {
+	return computeChecksumsContentWithOps(matrixDir, artifacts, ops)
+}
+
 // computeChecksumsContent computes SHA256 checksums for listed files.
 // P0-7: Returns error instead of panicking on missing artifacts.
 func computeChecksumsContent(dir string, artifacts []string) (string, error) {
+	return computeChecksumsContentWithOps(dir, artifacts, defaultFixtureFileOps)
+}
+
+// computeChecksumsContentWithOps computes SHA256 checksums using injected file operations.
+// P0-7: All file reads go through ops.readFile for testability.
+func computeChecksumsContentWithOps(dir string, artifacts []string, ops fixtureFileOps) (string, error) {
 	var content string
 	for _, name := range artifacts {
 		path := filepath.Join(dir, name)
-		data, err := os.ReadFile(path)
+		data, err := ops.readFile(path)
 		if err != nil {
 			return "", fmt.Errorf("read artifact %q: %w", name, err)
 		}
@@ -679,62 +697,10 @@ func regenerateMatrixChecksums(matrixDir string) error {
 }
 
 // regenerateAllChecksums regenerates both child and matrix checksums.
-// P0-7: Returns error on first failure. Proper dependency order:
-//   1. Regenerate child checksums for all runs
-//   2. Update manifest's checksums_sha256 for each run
-//   3. Rewrite matrix manifest
-//   4. Rewrite matrix cleanup
-//   5. Rewrite matrix verdict
-//   6. Regenerate matrix checksums (last)
+// P0-7 FIX: Delegates to regenerateAllChecksumsWithOps using defaultFixtureFileOps.
+// This ensures all operations go through the seam for testability.
 func regenerateAllChecksums(fixture *matrixFixture) error {
-	// Step 1: Regenerate child checksums for all runs
-	for i, runDir := range fixture.runDirs {
-		childChecksumContent, err := regenerateChildChecksums(runDir)
-		if err != nil {
-			return fmt.Errorf("regenerate child checksums for %s: %w", fixtureRunIDs[i], err)
-		}
-
-		// Step 2: Update manifest's checksums_sha256 for this run
-		checksumHash := sha256.Sum256([]byte(childChecksumContent))
-		childDigest := hex.EncodeToString(checksumHash[:])
-		if err := updateDeclaredChildChecksum(fixture.manifest, i, childDigest); err != nil {
-			return fmt.Errorf("update child checksum digest: %w", err)
-		}
-	}
-
-	// Step 3: Rewrite matrix manifest
-	manifestJSON, err := json.MarshalIndent(fixture.manifest, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal manifest: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(fixture.rootDir, "matrix-manifest.json"), manifestJSON, 0644); err != nil {
-		return fmt.Errorf("write manifest: %w", err)
-	}
-
-	// Step 4: Rewrite matrix cleanup
-	cleanupJSON, err := json.MarshalIndent(fixture.cleanup, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal cleanup: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(fixture.rootDir, "matrix-cleanup.json"), cleanupJSON, 0644); err != nil {
-		return fmt.Errorf("write cleanup: %w", err)
-	}
-
-	// Step 5: Rewrite matrix verdict
-	verdictJSON, err := json.MarshalIndent(fixture.verdict, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal verdict: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(fixture.rootDir, "matrix-verdict.json"), verdictJSON, 0644); err != nil {
-		return fmt.Errorf("write verdict: %w", err)
-	}
-
-	// Step 6: Regenerate matrix checksums (last)
-	if err := regenerateMatrixChecksums(fixture.rootDir); err != nil {
-		return fmt.Errorf("regenerate matrix checksums: %w", err)
-	}
-
-	return nil
+	return regenerateAllChecksumsWithOps(fixture, defaultFixtureFileOps)
 }
 
 // mustRegenerateAllChecksums is a convenience wrapper that fails on error.
@@ -894,69 +860,15 @@ func writeEqualInvalidMatrixBundleFixture(tb testing.TB) *matrixFixture {
 	// This must happen before reconstruction so the manifest has the new checksums
 	mustRegenerateAllChecksums(tb, fixture)
 
-	// Reconstruct the invalid verdict
-	// Load manifests and verdicts from disk
-	manifestData, err := os.ReadFile(filepath.Join(fixture.rootDir, "matrix-manifest.json"))
+	// P0-6 FIX: Use VerifyDeclaredChildRuns for authoritative verification.
+	// This replaces manual VerifiedRun construction with the single authoritative path.
+	verifiedRuns, err := VerifyDeclaredChildRuns(fixture.rootDir, fixture.manifest, fixture.cleanup, verifyChildRunBundle)
 	if err != nil {
-		tb.Fatalf("read manifest: %v", err)
-	}
-	var manifest MatrixManifest
-	if err := json.Unmarshal(manifestData, &manifest); err != nil {
-		tb.Fatalf("unmarshal manifest: %v", err)
-	}
-
-	// Load child verdicts (one is mutated)
-	verifiedRuns := make([]*VerifiedRun, 3)
-	for i := 0; i < 3; i++ {
-		runDir := fixture.runDirs[i]
-
-		verdictData, err := os.ReadFile(filepath.Join(runDir, "verdict.json"))
-		if err != nil {
-			tb.Fatalf("read verdict %d: %v", i, err)
-		}
-		var childVerdict evidence.Verdict
-		if err := json.Unmarshal(verdictData, &childVerdict); err != nil {
-			tb.Fatalf("unmarshal verdict %d: %v", i, err)
-		}
-
-		manifestData, err := os.ReadFile(filepath.Join(runDir, "manifest.json"))
-		if err != nil {
-			tb.Fatalf("read child manifest %d: %v", i, err)
-		}
-		var childManifest evidence.Manifest
-		if err := json.Unmarshal(manifestData, &childManifest); err != nil {
-			tb.Fatalf("unmarshal child manifest %d: %v", i, err)
-		}
-
-		verifiedRuns[i] = &VerifiedRun{
-			DeclaredRunID:        fixtureRunIDs[i],
-			DeclaredScenario:     fixtureScenarios[i],
-			RunIndex:            i,
-			ActualManifest:      &childManifest,
-			ActualVerdict:       &childVerdict,
-			ContainerID:         fixtureContainerIDs[i],
-			NetworkID:           fixtureNetworkIDs[i],
-			SubjectPID:          fixturePIDs[i],
-			SubjectStartTime:    fixtureStartTimes[i],
-			ProcessCleanupStatus: ProcessGone,
-			ChildVerified:       true,
-			CleanupEvidenceLoaded: true,
-			CleanupEvidenceValid:   true,
-		}
-	}
-
-	// Load cleanup
-	cleanupData, err := os.ReadFile(filepath.Join(fixture.rootDir, "matrix-cleanup.json"))
-	if err != nil {
-		tb.Fatalf("read cleanup: %v", err)
-	}
-	var cleanup MatrixCleanupEvidence
-	if err := json.Unmarshal(cleanupData, &cleanup); err != nil {
-		tb.Fatalf("unmarshal cleanup: %v", err)
+		tb.Fatalf("authoritative child verification failed: %v", err)
 	}
 
 	// Reconstruct verdict - should be invalid due to classification mismatch
-	reconstructedVerdict, err := ReconstructMatrixVerdict(&manifest, verifiedRuns, &cleanup)
+	reconstructedVerdict, err := ReconstructMatrixVerdict(fixture.manifest, verifiedRuns, fixture.cleanup)
 	if err != nil {
 		tb.Fatalf("reconstruct verdict: %v", err)
 	}
@@ -968,8 +880,8 @@ func writeEqualInvalidMatrixBundleFixture(tb testing.TB) *matrixFixture {
 
 	// P0-6 FIX: Update fixture.verdict BEFORE regeneration so the invalid verdict is written to disk
 	fixture.verdict = reconstructedVerdict
-	fixture.manifest = &manifest
-	fixture.cleanup = &cleanup
+	// NOTE: fixture.manifest and fixture.cleanup already point to the authoritative objects
+	// used by VerifyDeclaredChildRuns, so no need to reassign them
 
 	// P0-6 FIX: Write the exact reconstructed invalid verdict to disk
 	verdictJSON, err := json.MarshalIndent(reconstructedVerdict, "", "  ")
@@ -1003,10 +915,31 @@ func writeEqualInvalidMatrixBundleFixture(tb testing.TB) *matrixFixture {
 		tb.Fatalf("stored and reconstructed verdicts should have zero differences, got:\n%s", FormatVerdictDiffs(diffs))
 	}
 
-	// Verify that the CLI would reject this
-	_, err = VerifyMatrixBundle(fixture.rootDir, MatrixVerificationDeps{})
+	// P0-6 FIX: Use authoritative VerifyChildRun dependency and require non-nil result
+	result, err := VerifyMatrixBundle(fixture.rootDir, MatrixVerificationDeps{
+		VerifyChildRun: verifyChildRunBundle,
+	})
 	if err == nil {
 		tb.Fatal("VerifyMatrixBundle should reject equal-invalid fixture")
+	}
+
+	// P0-6 FIX: Result must be non-nil (we must reach the terminal rule)
+	if result == nil {
+		tb.Fatal("result must be non-nil when reaching equal-invalid terminal rule")
+	}
+
+	// P0-6 FIX: Assert both stored and reconstructed are invalid
+	if result.StoredVerdict == nil {
+		tb.Fatal("stored verdict must be present")
+	}
+	if result.ReconstructedVerdict == nil {
+		tb.Fatal("reconstructed verdict must be present")
+	}
+	if result.StoredVerdict.MatrixValid {
+		tb.Fatal("stored verdict should be invalid")
+	}
+	if result.ReconstructedVerdict.MatrixValid {
+		tb.Fatal("reconstructed verdict should be invalid")
 	}
 
 	return fixture
@@ -1118,14 +1051,17 @@ func FixtureStartTimes() []uint64 {
 	return fixtureStartTimes
 }
 
-// getModuleRoot returns the module root for building the CLI.
-// P0-5: Uses Go test infrastructure to find the correct source directory.
+// getModuleRoot returns the package directory for building the CLI.
+// P0-5 FIX: Uses os.Getwd to find the current package directory dynamically.
 func getModuleRoot() string {
-	// The test binary is built from the source files in cmd/tovarisch-memory-lab
-	// We need to go up to the module root from there
-	// Source: github.com/s1onique/KGB/tovarisch/labs/memory/cmd/tovarisch-memory-lab
-	// Module root: github.com/s1onique/KGB
-	return "/home/kgb/Projects/KGB"
+	// Tests are run from the package directory: /home/kgb/Projects/KGB/tovarisch/labs/memory/cmd/tovarisch-memory-lab
+	// We need to pass "." as the Dir to go build
+	wd, err := os.Getwd()
+	if err != nil {
+		// Fallback: use "." for current directory
+		return "."
+	}
+	return wd
 }
 
 // createEqualInvalidFixture creates a fixture with both stored and reconstructed
