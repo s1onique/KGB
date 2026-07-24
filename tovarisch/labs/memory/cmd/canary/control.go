@@ -3,7 +3,7 @@
 // Canonical control protocol using typed JSON envelopes.
 // Each command emits exactly one JSON document to stdout.
 //
-// CORRECTION29: Defines one canonical machine-readable protocol.
+// CORRECTION30: Presence-aware strict protocol with correct trailing rejection.
 
 package main
 
@@ -11,14 +11,26 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
+
+// DecodeError represents a decoding error with classification.
+type DecodeError struct {
+	ErrClass ErrorClass
+	Message  string
+}
+
+func (e *DecodeError) Error() string {
+	return e.Message
+}
 
 const (
 	// SchemaVersion is the canonical protocol version.
@@ -32,9 +44,6 @@ const (
 
 	// ControlResponseHeaderTimeout is the timeout for reading response headers.
 	ControlResponseHeaderTimeout = 5 * time.Second
-
-	// ControlReadTimeout is the total timeout for reading the response body.
-	ControlReadTimeout = 10 * time.Second
 )
 
 // ErrorClass defines stable error classification.
@@ -42,41 +51,57 @@ type ErrorClass string
 
 const (
 	ErrInvalidArguments       ErrorClass = "invalid_arguments"
-	ErrRequestCreateFailed    ErrorClass = "request_create_failed"
-	ErrConnectionFailed       ErrorClass = "connection_failed"
-	ErrRequestTimeout         ErrorClass = "request_timeout"
-	ErrResponseTooLarge       ErrorClass = "response_too_large"
-	ErrUnexpectedHTTPStatus   ErrorClass = "unexpected_http_status"
-	ErrMalformedJSON          ErrorClass = "malformed_json"
-	ErrUnknownJSONField       ErrorClass = "unknown_json_field"
-	ErrMissingRequiredField   ErrorClass = "missing_required_field"
+	ErrRequestCreateFailed   ErrorClass = "request_create_failed"
+	ErrConnectionFailed      ErrorClass = "connection_failed"
+	ErrRequestTimeout        ErrorClass = "request_timeout"
+	ErrResponseTooLarge      ErrorClass = "response_too_large"
+	ErrUnexpectedHTTPStatus  ErrorClass = "unexpected_http_status"
+	ErrMalformedJSON         ErrorClass = "malformed_json"
+	ErrUnknownJSONField      ErrorClass = "unknown_json_field"
+	ErrMissingRequiredField  ErrorClass = "missing_required_field"
 	ErrTrailingJSON          ErrorClass = "trailing_json"
 	ErrHealthNotReady        ErrorClass = "health_not_ready"
 	ErrStateInvalid          ErrorClass = "state_invalid"
 	ErrWorkloadCountMismatch ErrorClass = "workload_count_mismatch"
 )
 
+// AllowedErrorClasses is the set of valid error classes.
+var AllowedErrorClasses = map[ErrorClass]bool{
+	ErrInvalidArguments:      true,
+	ErrRequestCreateFailed:   true,
+	ErrConnectionFailed:     true,
+	ErrRequestTimeout:        true,
+	ErrResponseTooLarge:      true,
+	ErrUnexpectedHTTPStatus:  true,
+	ErrMalformedJSON:        true,
+	ErrUnknownJSONField:     true,
+	ErrMissingRequiredField:  true,
+	ErrTrailingJSON:         true,
+	ErrHealthNotReady:       true,
+	ErrStateInvalid:         true,
+	ErrWorkloadCountMismatch: true,
+}
+
 // ControlEnvelope is the canonical protocol envelope.
-// Exactly one envelope is emitted per command invocation.
 type ControlEnvelope struct {
 	SchemaVersion string           `json:"schema_version"`
-	Operation     string           `json:"operation"`
-	Success       bool             `json:"success"`
-	HTTPStatus   int              `json:"http_status"`
-	Health       *HealthResult   `json:"health,omitempty"`
-	State        *StateResult    `json:"state,omitempty"`
-	Workload     *WorkloadResult `json:"workload,omitempty"`
+	Operation    string           `json:"operation"`
+	Success      bool             `json:"success"`
+	HTTPStatus  int              `json:"http_status"`
+	Health       *HealthPayload  `json:"health,omitempty"`
+	State        *StatePayload   `json:"state,omitempty"`
+	Workload     *WorkloadPayload `json:"workload,omitempty"`
 	ErrorClass   ErrorClass      `json:"error_class,omitempty"`
 }
 
-// HealthResult represents the health check payload.
-type HealthResult struct {
+// HealthPayload represents health check result.
+type HealthPayload struct {
 	Ready bool   `json:"ready"`
 	Mode  string `json:"mode,omitempty"`
 }
 
-// StateResult represents the state payload.
-type StateResult struct {
+// StatePayload represents state result.
+type StatePayload struct {
 	Mode           string `json:"mode"`
 	RetainedBlocks int    `json:"retained_blocks"`
 	RetainedBytes  int64  `json:"retained_bytes"`
@@ -85,8 +110,8 @@ type StateResult struct {
 	Ready          bool   `json:"ready"`
 }
 
-// WorkloadResult represents the operate payload.
-type WorkloadResult struct {
+// WorkloadPayload represents operate result.
+type WorkloadPayload struct {
 	Requested int `json:"requested"`
 	Attempted int `json:"attempted"`
 	Completed int `json:"completed"`
@@ -127,24 +152,12 @@ func runHealth(args []string) int {
 	port := fs.Int("port", 8080, "Canary HTTP port")
 	timeout := fs.Duration("timeout", 5*time.Second, "Request timeout")
 	if err := fs.Parse(args); err != nil {
-		emitEnvelope(ControlEnvelope{
-			SchemaVersion: SchemaVersion,
-			Operation:     "health",
-			Success:       false,
-			HTTPStatus:    0,
-			ErrorClass:    ErrInvalidArguments,
-		})
+		emitFailureEnvelope("health", ErrInvalidArguments, 0)
 		return 1
 	}
 
-	if *timeout <= 0 {
-		emitEnvelope(ControlEnvelope{
-			SchemaVersion: SchemaVersion,
-			Operation:     "health",
-			Success:       false,
-			HTTPStatus:    0,
-			ErrorClass:    ErrInvalidArguments,
-		})
+	if *timeout <= 0 || *port <= 0 || *port > 65535 {
+		emitFailureEnvelope("health", ErrInvalidArguments, 0)
 		return 1
 	}
 
@@ -152,23 +165,12 @@ func runHealth(args []string) int {
 	result := doHealthCheck(context.Background(), url, *timeout)
 
 	if result.ErrorClass != "" {
-		emitEnvelope(ControlEnvelope{
-			SchemaVersion: SchemaVersion,
-			Operation:     "health",
-			Success:       false,
-			HTTPStatus:    result.HTTPStatus,
-			ErrorClass:    result.ErrorClass,
-		})
-	} else {
-		emitEnvelope(ControlEnvelope{
-			SchemaVersion: SchemaVersion,
-			Operation:     "health",
-			Success:       true,
-			HTTPStatus:    200,
-			Health:        result.Health,
-		})
+		emitFailureEnvelope("health", result.ErrorClass, result.HTTPStatus)
+		return 1
 	}
-	return result.ExitCode
+
+	emitSuccessEnvelope("health", 200, result.Health, nil, nil)
+	return 0
 }
 
 func runState(args []string) int {
@@ -176,24 +178,12 @@ func runState(args []string) int {
 	port := fs.Int("port", 8080, "Canary HTTP port")
 	timeout := fs.Duration("timeout", 5*time.Second, "Request timeout")
 	if err := fs.Parse(args); err != nil {
-		emitEnvelope(ControlEnvelope{
-			SchemaVersion: SchemaVersion,
-			Operation:     "state",
-			Success:       false,
-			HTTPStatus:    0,
-			ErrorClass:    ErrInvalidArguments,
-		})
+		emitFailureEnvelope("state", ErrInvalidArguments, 0)
 		return 1
 	}
 
-	if *timeout <= 0 {
-		emitEnvelope(ControlEnvelope{
-			SchemaVersion: SchemaVersion,
-			Operation:     "state",
-			Success:       false,
-			HTTPStatus:    0,
-			ErrorClass:    ErrInvalidArguments,
-		})
+	if *timeout <= 0 || *port <= 0 || *port > 65535 {
+		emitFailureEnvelope("state", ErrInvalidArguments, 0)
 		return 1
 	}
 
@@ -201,23 +191,12 @@ func runState(args []string) int {
 	result := doStateCheck(context.Background(), url, *timeout)
 
 	if result.ErrorClass != "" {
-		emitEnvelope(ControlEnvelope{
-			SchemaVersion: SchemaVersion,
-			Operation:     "state",
-			Success:       false,
-			HTTPStatus:    result.HTTPStatus,
-			ErrorClass:    result.ErrorClass,
-		})
-	} else {
-		emitEnvelope(ControlEnvelope{
-			SchemaVersion: SchemaVersion,
-			Operation:     "state",
-			Success:       true,
-			HTTPStatus:    200,
-			State:         result.State,
-		})
+		emitFailureEnvelope("state", result.ErrorClass, result.HTTPStatus)
+		return 1
 	}
-	return result.ExitCode
+
+	emitSuccessEnvelope("state", 200, nil, result.State, nil)
+	return 0
 }
 
 func runOperate(args []string) int {
@@ -226,35 +205,12 @@ func runOperate(args []string) int {
 	count := fs.Int("count", 1, "Number of operations")
 	timeout := fs.Duration("timeout", 30*time.Second, "Request timeout")
 	if err := fs.Parse(args); err != nil {
-		emitEnvelope(ControlEnvelope{
-			SchemaVersion: SchemaVersion,
-			Operation:     "operate",
-			Success:       false,
-			HTTPStatus:    0,
-			ErrorClass:    ErrInvalidArguments,
-		})
+		emitFailureEnvelope("operate", ErrInvalidArguments, 0)
 		return 1
 	}
 
-	if *count <= 0 {
-		emitEnvelope(ControlEnvelope{
-			SchemaVersion: SchemaVersion,
-			Operation:     "operate",
-			Success:       false,
-			HTTPStatus:    0,
-			ErrorClass:    ErrInvalidArguments,
-		})
-		return 1
-	}
-
-	if *timeout <= 0 {
-		emitEnvelope(ControlEnvelope{
-			SchemaVersion: SchemaVersion,
-			Operation:     "operate",
-			Success:       false,
-			HTTPStatus:    0,
-			ErrorClass:    ErrInvalidArguments,
-		})
+	if *timeout <= 0 || *port <= 0 || *port > 65535 || *count <= 0 {
+		emitFailureEnvelope("operate", ErrInvalidArguments, 0)
 		return 1
 	}
 
@@ -262,23 +218,38 @@ func runOperate(args []string) int {
 	result := doOperateCheck(context.Background(), url, *count, *timeout)
 
 	if result.ErrorClass != "" {
-		emitEnvelope(ControlEnvelope{
-			SchemaVersion: SchemaVersion,
-			Operation:     "operate",
-			Success:       false,
-			HTTPStatus:    result.HTTPStatus,
-			ErrorClass:    result.ErrorClass,
-		})
-	} else {
-		emitEnvelope(ControlEnvelope{
-			SchemaVersion: SchemaVersion,
-			Operation:     "operate",
-			Success:       true,
-			HTTPStatus:    200,
-			Workload:      result.Workload,
-		})
+		emitFailureEnvelope("operate", result.ErrorClass, result.HTTPStatus)
+		return 1
 	}
-	return result.ExitCode
+
+	emitSuccessEnvelope("operate", 200, nil, nil, result.Workload)
+	return 0
+}
+
+// emitSuccessEnvelope emits a successful control envelope.
+func emitSuccessEnvelope(operation string, httpStatus int, health *HealthPayload, state *StatePayload, workload *WorkloadPayload) {
+	env := ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:    operation,
+		Success:      true,
+		HTTPStatus:  httpStatus,
+		Health:      health,
+		State:       state,
+		Workload:    workload,
+	}
+	emitEnvelope(env)
+}
+
+// emitFailureEnvelope emits a failed control envelope.
+func emitFailureEnvelope(operation string, errClass ErrorClass, httpStatus int) {
+	env := ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:    operation,
+		Success:      false,
+		HTTPStatus:   httpStatus,
+		ErrorClass:    errClass,
+	}
+	emitEnvelope(env)
 }
 
 // emitEnvelope emits exactly one JSON envelope to stdout.
@@ -293,12 +264,16 @@ type HealthCheckResult struct {
 	ExitCode   int
 	HTTPStatus int
 	ErrorClass ErrorClass
-	Health     *HealthResult
+	Health     *HealthPayload
 }
 
 // doHealthCheck performs a health check using Go's HTTP client.
 func doHealthCheck(ctx context.Context, url string, timeout time.Duration) HealthCheckResult {
 	result := HealthCheckResult{ExitCode: 1, HTTPStatus: 0}
+
+	// Use bounded context for timeout classification
+	opCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -310,7 +285,7 @@ func doHealthCheck(ctx context.Context, url string, timeout time.Duration) Healt
 		Timeout: timeout,
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(opCtx, "GET", url, nil)
 	if err != nil {
 		result.ErrorClass = ErrRequestCreateFailed
 		return result
@@ -318,7 +293,11 @@ func doHealthCheck(ctx context.Context, url string, timeout time.Duration) Healt
 
 	resp, err := client.Do(req)
 	if err != nil {
-		if ctx.Err() != nil {
+		if opCtx.Err() == context.DeadlineExceeded {
+			result.ErrorClass = ErrRequestTimeout
+		} else if errors.Is(err, context.DeadlineExceeded) {
+			result.ErrorClass = ErrRequestTimeout
+		} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 			result.ErrorClass = ErrRequestTimeout
 		} else {
 			result.ErrorClass = ErrConnectionFailed
@@ -335,8 +314,7 @@ func doHealthCheck(ctx context.Context, url string, timeout time.Duration) Healt
 	}
 
 	// Read bounded response body
-	limited := io.LimitReader(resp.Body, MaxResponseBody+1)
-	body, err := io.ReadAll(limited)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBody+1))
 	if err != nil {
 		result.ErrorClass = ErrMalformedJSON
 		return result
@@ -347,19 +325,14 @@ func doHealthCheck(ctx context.Context, url string, timeout time.Duration) Healt
 		return result
 	}
 
-	// Strict JSON decoding
-	var health HealthResult
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&health); err != nil {
-		result.ErrorClass = ErrMalformedJSON
-		return result
-	}
-
-	// Check for trailing data
-	var trailing json.RawMessage
-	if err := dec.Decode(&trailing); err == nil && len(trailing) > 0 {
-		result.ErrorClass = ErrTrailingJSON
+	// Strict decoding: decode one value, require EOF
+	health, err := strictDecodeHealth(body)
+	if err != nil {
+		if decodeErr, ok := err.(*DecodeError); ok {
+			result.ErrorClass = decodeErr.ErrClass
+		} else {
+			result.ErrorClass = ErrMalformedJSON
+		}
 		return result
 	}
 
@@ -369,9 +342,56 @@ func doHealthCheck(ctx context.Context, url string, timeout time.Duration) Healt
 		return result
 	}
 
-	result.Health = &health
+	result.Health = health
 	result.ExitCode = 0
 	return result
+}
+
+// strictDecodeHealth strictly decodes a health payload.
+func strictDecodeHealth(data []byte) (*HealthPayload, error) {
+	// Check for empty input
+	if len(data) == 0 {
+		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: "empty body"}
+	}
+
+	// First pass: check required fields are present
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: "invalid JSON"}
+	}
+
+	// Verify required fields exist (not null, not missing)
+	if _, ok := raw["ready"]; !ok {
+		return nil, &DecodeError{ErrClass: ErrMissingRequiredField, Message: "missing ready"}
+	}
+	if _, ok := raw["mode"]; !ok {
+		return nil, &DecodeError{ErrClass: ErrMissingRequiredField, Message: "missing mode"}
+	}
+
+	// Second pass: strict decode with DisallowUnknownFields
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+
+	var health HealthPayload
+	if err := dec.Decode(&health); err != nil {
+		// Check for unknown field error by checking error message
+		if strings.Contains(err.Error(), "unknown field") {
+			return nil, &DecodeError{ErrClass: ErrUnknownJSONField, Message: err.Error()}
+		}
+		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: err.Error()}
+	}
+
+	// Third pass: require exactly one value (EOF on next decode)
+	var extra json.RawMessage
+	decodeErr := dec.Decode(&extra)
+	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
+		return nil, &DecodeError{ErrClass: ErrTrailingJSON, Message: "trailing data"}
+	}
+	if decodeErr == nil && len(extra) > 0 {
+		return nil, &DecodeError{ErrClass: ErrTrailingJSON, Message: "second JSON value"}
+	}
+
+	return &health, nil
 }
 
 // StateCheckResult represents the result of a state check.
@@ -379,12 +399,15 @@ type StateCheckResult struct {
 	ExitCode   int
 	HTTPStatus int
 	ErrorClass ErrorClass
-	State      *StateResult
+	State      *StatePayload
 }
 
 // doStateCheck performs a state check using Go's HTTP client.
 func doStateCheck(ctx context.Context, url string, timeout time.Duration) StateCheckResult {
 	result := StateCheckResult{ExitCode: 1, HTTPStatus: 0}
+
+	opCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -396,7 +419,7 @@ func doStateCheck(ctx context.Context, url string, timeout time.Duration) StateC
 		Timeout: timeout,
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(opCtx, "GET", url, nil)
 	if err != nil {
 		result.ErrorClass = ErrRequestCreateFailed
 		return result
@@ -404,7 +427,9 @@ func doStateCheck(ctx context.Context, url string, timeout time.Duration) StateC
 
 	resp, err := client.Do(req)
 	if err != nil {
-		if ctx.Err() != nil {
+		if opCtx.Err() == context.DeadlineExceeded || errors.Is(err, context.DeadlineExceeded) {
+			result.ErrorClass = ErrRequestTimeout
+		} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 			result.ErrorClass = ErrRequestTimeout
 		} else {
 			result.ErrorClass = ErrConnectionFailed
@@ -420,9 +445,7 @@ func doStateCheck(ctx context.Context, url string, timeout time.Duration) StateC
 		return result
 	}
 
-	// Read bounded response body
-	limited := io.LimitReader(resp.Body, MaxResponseBody+1)
-	body, err := io.ReadAll(limited)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBody+1))
 	if err != nil {
 		result.ErrorClass = ErrMalformedJSON
 		return result
@@ -433,19 +456,13 @@ func doStateCheck(ctx context.Context, url string, timeout time.Duration) StateC
 		return result
 	}
 
-	// Strict JSON decoding
-	var state StateResult
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&state); err != nil {
-		result.ErrorClass = ErrMalformedJSON
-		return result
-	}
-
-	// Check for trailing data
-	var trailing json.RawMessage
-	if err := dec.Decode(&trailing); err == nil && len(trailing) > 0 {
-		result.ErrorClass = ErrTrailingJSON
+	state, err := strictDecodeState(body)
+	if err != nil {
+		if decodeErr, ok := err.(*DecodeError); ok {
+			result.ErrorClass = decodeErr.ErrClass
+		} else {
+			result.ErrorClass = ErrMalformedJSON
+		}
 		return result
 	}
 
@@ -455,9 +472,53 @@ func doStateCheck(ctx context.Context, url string, timeout time.Duration) StateC
 		return result
 	}
 
-	result.State = &state
+	result.State = state
 	result.ExitCode = 0
 	return result
+}
+
+// strictDecodeState strictly decodes a state payload.
+func strictDecodeState(data []byte) (*StatePayload, error) {
+	if len(data) == 0 {
+		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: "empty body"}
+	}
+
+	// Check required fields
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: "invalid JSON"}
+	}
+
+	requiredFields := []string{"mode", "retained_blocks", "retained_bytes", "operation_count", "fd_count", "ready"}
+	for _, field := range requiredFields {
+		if _, ok := raw[field]; !ok {
+			return nil, &DecodeError{ErrClass: ErrMissingRequiredField, Message: "missing " + field}
+		}
+	}
+
+	// Strict decode
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+
+	var state StatePayload
+	if err := dec.Decode(&state); err != nil {
+		if strings.Contains(err.Error(), "unknown field") {
+			return nil, &DecodeError{ErrClass: ErrUnknownJSONField, Message: err.Error()}
+		}
+		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: err.Error()}
+	}
+
+	// Require exactly one value
+	var extra json.RawMessage
+	decodeErr := dec.Decode(&extra)
+	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
+		return nil, &DecodeError{ErrClass: ErrTrailingJSON, Message: "trailing data"}
+	}
+	if decodeErr == nil && len(extra) > 0 {
+		return nil, &DecodeError{ErrClass: ErrTrailingJSON, Message: "second JSON value"}
+	}
+
+	return &state, nil
 }
 
 // OperateCheckResult represents the result of an operate request.
@@ -465,12 +526,15 @@ type OperateCheckResult struct {
 	ExitCode   int
 	HTTPStatus int
 	ErrorClass ErrorClass
-	Workload   *WorkloadResult
+	Workload   *WorkloadPayload
 }
 
 // doOperateCheck performs an operate request using Go's HTTP client.
 func doOperateCheck(ctx context.Context, url string, requested int, timeout time.Duration) OperateCheckResult {
 	result := OperateCheckResult{ExitCode: 1, HTTPStatus: 0}
+
+	opCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -482,7 +546,7 @@ func doOperateCheck(ctx context.Context, url string, requested int, timeout time
 		Timeout: timeout,
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	req, err := http.NewRequestWithContext(opCtx, "POST", url, nil)
 	if err != nil {
 		result.ErrorClass = ErrRequestCreateFailed
 		return result
@@ -490,7 +554,9 @@ func doOperateCheck(ctx context.Context, url string, requested int, timeout time
 
 	resp, err := client.Do(req)
 	if err != nil {
-		if ctx.Err() != nil {
+		if opCtx.Err() == context.DeadlineExceeded || errors.Is(err, context.DeadlineExceeded) {
+			result.ErrorClass = ErrRequestTimeout
+		} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 			result.ErrorClass = ErrRequestTimeout
 		} else {
 			result.ErrorClass = ErrConnectionFailed
@@ -506,9 +572,7 @@ func doOperateCheck(ctx context.Context, url string, requested int, timeout time
 		return result
 	}
 
-	// Read bounded response body
-	limited := io.LimitReader(resp.Body, MaxResponseBody+1)
-	body, err := io.ReadAll(limited)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBody+1))
 	if err != nil {
 		result.ErrorClass = ErrMalformedJSON
 		return result
@@ -519,29 +583,67 @@ func doOperateCheck(ctx context.Context, url string, requested int, timeout time
 		return result
 	}
 
-	// Strict JSON decoding
-	var workload WorkloadResult
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&workload); err != nil {
-		result.ErrorClass = ErrMalformedJSON
+	workload, err := strictDecodeWorkload(body)
+	if err != nil {
+		if decodeErr, ok := err.(*DecodeError); ok {
+			result.ErrorClass = decodeErr.ErrClass
+		} else {
+			result.ErrorClass = ErrMalformedJSON
+		}
 		return result
 	}
 
-	// Check for trailing data
-	var trailing json.RawMessage
-	if err := dec.Decode(&trailing); err == nil && len(trailing) > 0 {
-		result.ErrorClass = ErrTrailingJSON
-		return result
-	}
-
-	// Validate required fields
-	if workload.Attempted != requested || workload.Completed != workload.Attempted {
+	// Validate workload counts - CORRECTION30 P0-3
+	if workload.Requested != requested || workload.Attempted != requested || workload.Completed != workload.Attempted {
 		result.ErrorClass = ErrWorkloadCountMismatch
 		return result
 	}
 
-	result.Workload = &workload
+	result.Workload = workload
 	result.ExitCode = 0
 	return result
+}
+
+// strictDecodeWorkload strictly decodes a workload payload.
+func strictDecodeWorkload(data []byte) (*WorkloadPayload, error) {
+	if len(data) == 0 {
+		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: "empty body"}
+	}
+
+	// Check required fields
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: "invalid JSON"}
+	}
+
+	requiredFields := []string{"requested", "attempted", "completed"}
+	for _, field := range requiredFields {
+		if _, ok := raw[field]; !ok {
+			return nil, &DecodeError{ErrClass: ErrMissingRequiredField, Message: "missing " + field}
+		}
+	}
+
+	// Strict decode
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+
+	var workload WorkloadPayload
+	if err := dec.Decode(&workload); err != nil {
+		if strings.Contains(err.Error(), "unknown field") {
+			return nil, &DecodeError{ErrClass: ErrUnknownJSONField, Message: err.Error()}
+		}
+		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: err.Error()}
+	}
+
+	// Require exactly one value
+	var extra json.RawMessage
+	decodeErr := dec.Decode(&extra)
+	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
+		return nil, &DecodeError{ErrClass: ErrTrailingJSON, Message: "trailing data"}
+	}
+	if decodeErr == nil && len(extra) > 0 {
+		return nil, &DecodeError{ErrClass: ErrTrailingJSON, Message: "second JSON value"}
+	}
+
+	return &workload, nil
 }

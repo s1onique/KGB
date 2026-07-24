@@ -5,16 +5,16 @@
 //
 // Reference: kgb://doctrine/native-owned-critical-paths
 //
-// CORRECTION02: ImageRepoDigests / ImageLabels / ContainerImageID
-// provide canary image provenance (image ID, repository digests,
-// OCI labels).
+// CORRECTION30: Presence-aware control protocol with strict validation.
 
 package dockerlab
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -50,8 +50,7 @@ func NewClient(ctx context.Context) (*Client, error) {
 }
 
 // ClientWithRuntime wraps a DockerRuntime for the qualified execution path.
-// Allows tests to inject a recording fake. This is the CORRECTION06 seam
-// used by the qualified memory-lab execution path.
+// CORRECTION06 seam used by the qualified memory-lab execution path.
 type ClientWithRuntime struct {
 	runtime DockerRuntime
 }
@@ -78,7 +77,6 @@ func (c *ClientWithRuntime) ResolveImageIdentity(ctx context.Context, reference 
 }
 
 // ContainerCreateWithImageID validates and creates a container via the injected runtime.
-// The exact supplied ID reaches Docker exactly once when validation passes.
 func (c *ClientWithRuntime) ContainerCreateWithImageID(ctx context.Context, cfg ContainerConfig) (string, error) {
 	if cfg.Config == nil {
 		return "", ErrMissingContainerConfig
@@ -148,15 +146,11 @@ var ErrEmptyImageID = fmt.Errorf("image ID is empty")
 var canonicalImageIDPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 // ValidateExactImageID validates that the given string is a canonical image ID.
-// Returns nil if valid, ErrEmptyImageID if empty, or error otherwise.
 func ValidateExactImageID(imageID string) error {
 	if imageID == "" {
 		return ErrEmptyImageID
 	}
-
-	// Check canonical form using the pre-compiled regex
 	if !canonicalImageIDPattern.MatchString(imageID) {
-		// Provide helpful error messages for common issues
 		if strings.HasPrefix(imageID, "sha256:") {
 			suffix := strings.TrimPrefix(imageID, "sha256:")
 			if len(suffix) != 64 {
@@ -172,41 +166,26 @@ func ValidateExactImageID(imageID string) error {
 		}
 		return fmt.Errorf("image ID must match sha256:<64-lowercase-hex>")
 	}
-
 	return nil
 }
 
 // ResolveImageIdentity resolves a descriptive reference to its exact canonical
-// image ID using ONLY local inspection via ImageInspectWithRaw. This is the
-// P0-10 canonical approach:
-// - locally present image: resolve full canonical ID
-// - locally absent image: fail closed (ErrImageNotFound)
-// - registry access: never attempted
-// - automatic pull: never attempted
-// - fallback reference: never attempted
+// image ID using ONLY local inspection via ImageInspectWithRaw.
 func (c *Client) ResolveImageIdentity(ctx context.Context, reference string) (string, error) {
-	// Use direct image inspection - single reference, no list
 	inspect, _, err := c.Client.ImageInspectWithRaw(ctx, reference)
 	if err != nil {
-		// Use structured Docker not-found classification
 		if errdefs.IsNotFound(err) {
 			return "", fmt.Errorf("%w: %s", ErrImageNotFound, reference)
 		}
-		// Daemon failures are preserved, not misclassified
 		return "", fmt.Errorf("inspect local image %q: %w", reference, err)
 	}
-
-	// Validate the returned ID is canonical
 	if err := ValidateExactImageID(inspect.ID); err != nil {
 		return "", fmt.Errorf("resolved image %q has invalid ID: %w", reference, err)
 	}
-
 	return inspect.ID, nil
 }
 
 // ImagePull pulls an image if not present.
-// P0-10: This is retained ONLY for explicitly pull-owning workflows.
-// Qualified execution paths MUST use ResolveImageIdentity instead.
 func (c *Client) ImagePull(ctx context.Context, refStr string) (string, error) {
 	args := filters.NewArgs()
 	args.Add("reference", refStr)
@@ -238,10 +217,7 @@ func (c *Client) ImagePull(ctx context.Context, refStr string) (string, error) {
 	return images[0].ID, nil
 }
 
-// ImageRepoDigests returns the repository digests for a referenced
-// image. CORRECTION02 §7. Returns an empty slice when the image
-// has no repository digests (typical for a local-only image built
-// from a Dockerfile without tagging a remote registry).
+// ImageRepoDigests returns the repository digests for a referenced image.
 func (c *Client) ImageRepoDigests(ctx context.Context, refStr string) ([]string, error) {
 	args := filters.NewArgs()
 	args.Add("reference", refStr)
@@ -256,9 +232,6 @@ func (c *Client) ImageRepoDigests(ctx context.Context, refStr string) ([]string,
 }
 
 // ImageLabels returns the labels for a specific image ID.
-// CORRECTION02 §7: OCI labels (org.opencontainers.image.revision
-// and kgb.dev/* labels) bind the canary image to the source tree
-// and binary identity.
 func (c *Client) ImageLabels(ctx context.Context, imageID string) (map[string]string, error) {
 	inspect, _, err := c.Client.ImageInspectWithRaw(ctx, imageID)
 	if err != nil {
@@ -268,8 +241,6 @@ func (c *Client) ImageLabels(ctx context.Context, imageID string) (map[string]st
 }
 
 // ContainerImageID returns the image ID for a running container.
-// CORRECTION02 §7: used to verify the container inspect's image
-// matches the verified image ID.
 func (c *Client) ContainerImageID(ctx context.Context, containerID string) (string, error) {
 	inspect, err := c.Client.ContainerInspect(ctx, containerID)
 	if err != nil {
@@ -296,28 +267,16 @@ func (c *Client) ContainerCreate(ctx context.Context, cfg ContainerConfig) (stri
 var ErrMissingContainerConfig = fmt.Errorf("container config is required for exact image ID creation")
 
 // ContainerCreateWithImageID creates a container using the exact image ID.
-// This is the P0-10 canonical approach: use the full immutable image ID
-// instead of a mutable tag, which guarantees no pull behavior.
-//
-// REQUIRED: The image ID must be in canonical sha256:<64-hex> format.
-// This method fails closed on any validation error before calling Docker.
 func (c *Client) ContainerCreateWithImageID(ctx context.Context, cfg ContainerConfig) (string, error) {
-	// Phase 2: Fail closed on nil config
 	if cfg.Config == nil {
 		return "", ErrMissingContainerConfig
 	}
-
-	// Phase 2: Fail closed on empty image
 	if cfg.Config.Image == "" {
 		return "", ErrEmptyImageID
 	}
-
-	// Phase 2: Fail closed on invalid canonical image ID
-	// This rejects tags, short IDs, uppercase, and malformed IDs
 	if err := ValidateExactImageID(cfg.Config.Image); err != nil {
 		return "", fmt.Errorf("image ID validation for container create: %w", err)
 	}
-
 	resources := container.Resources{
 		Memory:   cfg.MemoryLimit,
 		CPUQuota: cfg.CPUQuota,
@@ -365,8 +324,7 @@ func (c *Client) ContainerLogs(ctx context.Context, containerID string, tail str
 }
 
 // ContainerExec creates an exec instance in a running container
-// and returns (exit_code, output, error). Used by the canary
-// binary hash verification path (CORRECTION02 §7).
+// and returns (exit_code, output, error).
 func (c *Client) ContainerExec(ctx context.Context, containerID string, cmd []string) (int, string, error) {
 	execResp, err := c.Client.ContainerExecCreate(ctx, containerID, types.ExecConfig{
 		Cmd:          cmd,
@@ -400,18 +358,13 @@ func (c *Client) ContainerExec(ctx context.Context, containerID string, cmd []st
 	return info.ExitCode, string(output), nil
 }
 
-// ContainerExtractFile extracts a single file from a running
-// (or stopped) container via `docker cp` and returns its
-// contents as a byte slice. Used by CORRECTION03 to hash
-// /app/canary inside the built image.
+// ContainerExtractFile extracts a single file from a running container.
 func (c *Client) ContainerExtractFile(ctx context.Context, containerID, path string) ([]byte, error) {
 	rc, _, err := c.Client.CopyFromContainer(ctx, containerID, path)
 	if err != nil {
 		return nil, fmt.Errorf("copy from container: %w", err)
 	}
 	defer rc.Close()
-	// Untar: the docker cp protocol emits a tar stream
-	// containing the file. We extract the first regular file.
 	tr := tar.NewReader(rc)
 	for {
 		hdr, err := tr.Next()
@@ -431,9 +384,7 @@ func (c *Client) ContainerExtractFile(ctx context.Context, containerID, path str
 	}
 }
 
-// ContainerCreateReadOnly creates a read-only container from
-// the given image so the binary can be extracted without
-// running the canary. Returns the container ID.
+// ContainerCreateReadOnly creates a read-only container.
 func (c *Client) ContainerCreateReadOnly(ctx context.Context, imageID string) (string, error) {
 	resp, err := c.Client.ContainerCreate(ctx,
 		&container.Config{Image: imageID, Cmd: []string{"/bin/sh"}},
@@ -594,7 +545,6 @@ func NewImageBuilder(client *Client) *ImageBuilder {
 }
 
 // BuildFromDockerfile builds an image from a Dockerfile.
-// Returns image ID and binary hash.
 func (ib *ImageBuilder) BuildFromDockerfile(ctx context.Context, dockerfilePath string, tag string) (string, string, error) {
 	tarReader, err := createTarContext(dockerfilePath)
 	if err != nil {
@@ -722,12 +672,12 @@ func (c *Client) ContainerStats(ctx context.Context, containerID string) (*Conta
 		MemoryUsageBytes:    memUsage,
 		MemoryLimitBytes:    memLimit,
 		CPUUsageNanoSeconds: cpuNano,
-		MemoryPerc:          float64(memUsage) / float64(memLimit) * 100,
+		MemoryPerc:         float64(memUsage) / float64(memLimit) * 100,
 	}, nil
 }
 
 // CanaryControlExecResult represents the result of a canary-control exec operation.
-// CORRECTION28: Replaces shell/curl with image-owned canary-control binary.
+// CORRECTION30: Typed protocol errors with presence-aware validation.
 type CanaryControlExecResult struct {
 	ExitCode      int
 	Stdout        string
@@ -743,7 +693,6 @@ type CanaryControlExecResult struct {
 
 // CanaryHealthCheckViaExec performs a health check on a canary container
 // using the image-owned canary-control binary via docker exec.
-// CORRECTION28: Eliminates shell/curl dependency by using /app/canary control.
 func (c *Client) CanaryHealthCheckViaExec(ctx context.Context, containerID string, port int, timeout time.Duration) (int, error) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -752,15 +701,15 @@ func (c *Client) CanaryHealthCheckViaExec(ctx context.Context, containerID strin
 			return -1, ctx.Err()
 		default:
 		}
-		// Use image-owned canary-control binary - no shell, no curl
-		result := c.CanaryControlExec(ctx, containerID, []string{
+		// CORRECTION30 P0-7: Typed methods own argv construction
+		result := c.canaryControlExec(ctx, containerID, "health", []string{
 			"/app/canary", "control", "health",
 			"--port", fmt.Sprintf("%d", port),
 			"--timeout", "5s",
 		})
+		// CORRECTION30 P0-6: Protocol errors are typed, stop immediately
 		if result.Error != nil {
-			time.Sleep(500 * time.Millisecond)
-			continue
+			return -1, result.Error
 		}
 		if result.ExitCode == 0 && result.HealthValid {
 			return 0, nil
@@ -770,16 +719,15 @@ func (c *Client) CanaryHealthCheckViaExec(ctx context.Context, containerID strin
 	return -1, fmt.Errorf("timeout waiting for canary health via docker exec")
 }
 
-// CanaryStateViaExec fetches canary state using the image-owned
-// canary-control binary. CORRECTION28: Eliminates shell/curl dependency.
+// CanaryStateViaExec fetches canary state using the image-owned canary-control binary.
 func (c *Client) CanaryStateViaExec(ctx context.Context, containerID string, port int) (*CanaryStateFromExec, error) {
-	result := c.CanaryControlExec(ctx, containerID, []string{
+	result := c.canaryControlExec(ctx, containerID, "state", []string{
 		"/app/canary", "control", "state",
 		"--port", fmt.Sprintf("%d", port),
 		"--timeout", "5s",
 	})
 	if result.Error != nil {
-		return nil, fmt.Errorf("exec state: %w", result.Error)
+		return nil, result.Error
 	}
 	if result.ExitCode != 0 {
 		return nil, fmt.Errorf("state check failed: exit code %d, stderr: %s", result.ExitCode, result.Stderr)
@@ -790,17 +738,16 @@ func (c *Client) CanaryStateViaExec(ctx context.Context, containerID string, por
 	return result.State, nil
 }
 
-// CanaryOperateViaExec performs N operations using the image-owned
-// canary-control binary. CORRECTION28: Eliminates shell/curl dependency.
+// CanaryOperateViaExec performs N operations using the image-owned canary-control binary.
 func (c *Client) CanaryOperateViaExec(ctx context.Context, containerID string, port int, count int, timeout time.Duration) (*CanaryWorkloadResult, error) {
-	result := c.CanaryControlExec(ctx, containerID, []string{
+	result := c.canaryControlExec(ctx, containerID, "operate", []string{
 		"/app/canary", "control", "operate",
 		"--port", fmt.Sprintf("%d", port),
 		"--count", fmt.Sprintf("%d", count),
 		"--timeout", fmt.Sprintf("%ds", int(timeout.Seconds())),
 	})
 	if result.Error != nil {
-		return nil, fmt.Errorf("exec operate: %w", result.Error)
+		return nil, result.Error
 	}
 	if result.ExitCode != 0 {
 		return nil, fmt.Errorf("operate failed: exit code %d, stderr: %s", result.ExitCode, result.Stderr)
@@ -820,57 +767,137 @@ type CanaryWorkloadResult struct {
 	Completed int `json:"completed"`
 }
 
-// CanaryControlExec runs the canary-control binary inside the container.
-// Uses exact argv execution - no shell, no curl, no wget.
-// CORRECTION29: Strictly parses canonical ControlEnvelope protocol.
-func (c *Client) CanaryControlExec(ctx context.Context, containerID string, cmd []string) CanaryControlExecResult {
+// canaryControlExec runs the canary-control binary inside the container.
+// CORRECTION30 P0-7: Private method with validated argv.
+// CORRECTION30 P0-6: Protocol failures populate typed errors.
+func (c *Client) canaryControlExec(
+	ctx context.Context,
+	containerID string,
+	expectedOperation string,
+	argv []string,
+) CanaryControlExecResult {
 	result := CanaryControlExecResult{ExitCode: -1}
 
-	// Determine expected operation from argv
-	var expectedOperation string
-	if len(cmd) >= 3 {
-		expectedOperation = cmd[2]
+	// CORRECTION30 P0-8: Validate exact argv before execution
+	if len(argv) < 3 {
+		result.Error = &ProtocolError{
+			Operation: expectedOperation,
+			ErrClass:  "invalid_arguments",
+			Message:   "argv too short",
+		}
+		result.Stderr = "argv too short"
+		return result
+	}
+	if argv[0] != "/app/canary" {
+		result.Error = &ProtocolError{
+			Operation: expectedOperation,
+			ErrClass:  "invalid_arguments",
+			Message:   "must start with /app/canary",
+		}
+		result.Stderr = "must start with /app/canary"
+		return result
+	}
+	if argv[1] != "control" {
+		result.Error = &ProtocolError{
+			Operation: expectedOperation,
+			ErrClass:  "invalid_arguments",
+			Message:   "must be control subcommand",
+		}
+		result.Stderr = "must be control subcommand"
+		return result
+	}
+	if argv[2] != expectedOperation {
+		result.Error = &ProtocolError{
+			Operation: expectedOperation,
+			ErrClass:  "invalid_arguments",
+			Message:   "operation mismatch",
+		}
+		result.Stderr = fmt.Sprintf("operation mismatch: expected %s, got %s", expectedOperation, argv[2])
+		return result
 	}
 
 	// Use ContainerExec to run the exact command
-	exitCode, stdout, err := c.ContainerExec(ctx, containerID, cmd)
+	exitCode, stdout, err := c.ContainerExec(ctx, containerID, argv)
 	result.ExitCode = exitCode
 	result.Stdout = stdout
 	result.Error = err
 
 	// Handle exec errors
 	if err != nil {
+		result.Error = &ProtocolError{
+			Operation: expectedOperation,
+			ErrClass:  "connection_failed",
+			Message:   err.Error(),
+		}
 		result.Stderr = err.Error()
 		return result
 	}
 
 	// Parse canonical envelope - must be exactly one JSON document
 	if stdout == "" {
+		result.Error = &ProtocolError{
+			Operation: expectedOperation,
+			ErrClass:  "malformed_json",
+			Message:   "empty stdout",
+		}
+		result.Stderr = "empty stdout"
 		return result
 	}
 
-	// Use strict decoding
+	// CORRECTION30 P0-1: Strict decoding with correct trailing rejection
 	envelope, parseErr := strictParseEnvelope(stdout)
 	if parseErr != nil {
-		result.Stderr = fmt.Sprintf("envelope parse failed: %v", parseErr)
+		var parseErrTyped *ParseError
+		if errors.As(parseErr, &parseErrTyped) {
+			result.Error = &ProtocolError{
+				Operation: expectedOperation,
+				ErrClass:  parseErrTyped.ErrClass,
+				Message:   parseErrTyped.Message,
+			}
+			result.Stderr = parseErrTyped.Message
+		} else {
+			result.Error = &ProtocolError{
+				Operation: expectedOperation,
+				ErrClass:  "malformed_json",
+				Message:   parseErr.Error(),
+			}
+			result.Stderr = parseErr.Error()
+		}
 		return result
 	}
 
-	// Validate schema version
-	if envelope.SchemaVersion != "canary-control/v1" {
-		result.Stderr = fmt.Sprintf("unexpected schema version: %s", envelope.SchemaVersion)
+	// CORRECTION30 P0-4: Validate envelope consistency
+	validErr := validateControlEnvelope(envelope, expectedOperation, exitCode)
+	if validErr != nil {
+		var validErrTyped *ParseError
+		if errors.As(validErr, &validErrTyped) {
+			result.Error = &ProtocolError{
+				Operation: expectedOperation,
+				ErrClass:  validErrTyped.ErrClass,
+				Message:   validErrTyped.Message,
+			}
+			result.Stderr = validErrTyped.Message
+		} else {
+			result.Error = &ProtocolError{
+				Operation: expectedOperation,
+				ErrClass:  "malformed_json",
+				Message:   validErr.Error(),
+			}
+			result.Stderr = validErr.Error()
+		}
 		return result
 	}
 
-	// Validate operation matches argv
-	if envelope.Operation != expectedOperation {
-		result.Stderr = fmt.Sprintf("operation mismatch: expected %s, got %s", expectedOperation, envelope.Operation)
-		return result
-	}
-
-	// Validate success matches exit code
-	if envelope.Success != (exitCode == 0) {
-		result.Stderr = fmt.Sprintf("success/exit-code mismatch: success=%v, exit=%d", envelope.Success, exitCode)
+	// Handle failure envelopes - CORRECTION30 P0-4
+	if !envelope.Success {
+		result.Error = &ProtocolError{
+			Operation:     expectedOperation,
+			ErrClass:      string(envelope.ErrorClass),
+			HTTPStatus:    envelope.HTTPStatus,
+			ExecExitCode:  exitCode,
+			Message:       fmt.Sprintf("control error: %s", envelope.ErrorClass),
+		}
+		result.Stderr = fmt.Sprintf("control error: %s", envelope.ErrorClass)
 		return result
 	}
 
@@ -878,11 +905,20 @@ func (c *Client) CanaryControlExec(ctx context.Context, containerID string, cmd 
 	switch expectedOperation {
 	case "health":
 		if envelope.Health == nil {
+			result.Error = &ProtocolError{
+				Operation: expectedOperation,
+				ErrClass:  "missing_required_field",
+				Message:   "health operation missing health payload",
+			}
 			result.Stderr = "health operation missing health payload"
 			return result
 		}
-		// Validate required health fields
 		if !envelope.Health.Ready {
+			result.Error = &ProtocolError{
+				Operation: expectedOperation,
+				ErrClass:  "health_not_ready",
+				Message:   "health not ready",
+			}
 			result.Stderr = "health not ready"
 			return result
 		}
@@ -890,11 +926,20 @@ func (c *Client) CanaryControlExec(ctx context.Context, containerID string, cmd 
 
 	case "state":
 		if envelope.State == nil {
+			result.Error = &ProtocolError{
+				Operation: expectedOperation,
+				ErrClass:  "missing_required_field",
+				Message:   "state operation missing state payload",
+			}
 			result.Stderr = "state operation missing state payload"
 			return result
 		}
-		// Validate required state fields
 		if envelope.State.Mode == "" {
+			result.Error = &ProtocolError{
+				Operation: expectedOperation,
+				ErrClass:  "missing_required_field",
+				Message:   "state missing mode",
+			}
 			result.Stderr = "state missing mode"
 			return result
 		}
@@ -910,11 +955,20 @@ func (c *Client) CanaryControlExec(ctx context.Context, containerID string, cmd 
 
 	case "operate":
 		if envelope.Workload == nil {
+			result.Error = &ProtocolError{
+				Operation: expectedOperation,
+				ErrClass:  "missing_required_field",
+				Message:   "operate operation missing workload payload",
+			}
 			result.Stderr = "operate operation missing workload payload"
 			return result
 		}
-		// Validate workload counts
 		if envelope.Workload.Completed > envelope.Workload.Attempted {
+			result.Error = &ProtocolError{
+				Operation: expectedOperation,
+				ErrClass:  "workload_count_mismatch",
+				Message:   "completed exceeds attempted",
+			}
 			result.Stderr = "completed exceeds attempted"
 			return result
 		}
@@ -923,11 +977,46 @@ func (c *Client) CanaryControlExec(ctx context.Context, containerID string, cmd 
 		result.Completed = envelope.Workload.Completed
 
 	default:
+		result.Error = &ProtocolError{
+			Operation: expectedOperation,
+			ErrClass:  "invalid_arguments",
+			Message:   fmt.Sprintf("unknown operation: %s", expectedOperation),
+		}
 		result.Stderr = fmt.Sprintf("unknown operation: %s", expectedOperation)
 		return result
 	}
 
 	return result
+}
+
+// ProtocolError represents a typed protocol error.
+// CORRECTION30 P0-6: Typed errors for proper error propagation.
+type ProtocolError struct {
+	Operation   string
+	ErrClass    string
+	HTTPStatus  int
+	ExecExitCode int
+	Message     string
+}
+
+func (e *ProtocolError) Error() string {
+	return fmt.Sprintf("protocol error [%s]: %s: %s", e.Operation, e.ErrClass, e.Message)
+}
+
+// IsProtocolNonRetryable returns true if this error should not be retried.
+func IsProtocolNonRetryable(err error) bool {
+	var protoErr *ProtocolError
+	if errors.As(err, &protoErr) {
+		switch protoErr.ErrClass {
+		case "invalid_arguments", "malformed_json", "unknown_json_field",
+			"missing_required_field", "trailing_json", "connection_failed":
+			return false // These are retryable
+		case "request_timeout", "unexpected_http_status", "health_not_ready",
+			"state_invalid", "workload_count_mismatch":
+			return true // These are non-retryable
+		}
+	}
+	return false
 }
 
 // ControlEnvelope is the canonical protocol envelope.
@@ -936,10 +1025,10 @@ type ControlEnvelope struct {
 	Operation    string           `json:"operation"`
 	Success      bool             `json:"success"`
 	HTTPStatus  int              `json:"http_status"`
-	Health      *HealthPayload   `json:"health,omitempty"`
-	State       *StatePayload    `json:"state,omitempty"`
-	Workload    *WorkloadPayload `json:"workload,omitempty"`
-	ErrorClass  string           `json:"error_class,omitempty"`
+	Health       *HealthPayload  `json:"health,omitempty"`
+	State        *StatePayload   `json:"state,omitempty"`
+	Workload     *WorkloadPayload `json:"workload,omitempty"`
+	ErrorClass   string          `json:"error_class,omitempty"`
 }
 
 // HealthPayload represents health check result.
@@ -965,28 +1054,102 @@ type WorkloadPayload struct {
 	Completed int `json:"completed"`
 }
 
+// ParseError represents a parsing error with classification.
+type ParseError struct {
+	ErrClass string
+	Message string
+}
+
+func (e *ParseError) Error() string {
+	return e.Message
+}
+
 // strictParseEnvelope parses exactly one JSON envelope from stdout.
+// CORRECTION30 P0-1: Correct trailing rejection - requires io.EOF.
 func strictParseEnvelope(stdout string) (*ControlEnvelope, error) {
 	if stdout == "" {
-		return nil, fmt.Errorf("empty stdout")
+		return nil, &ParseError{ErrClass: "malformed_json", Message: "empty stdout"}
 	}
 
-	// Use json.Decoder with DisallowUnknownFields
-	dec := json.NewDecoder(strings.NewReader(stdout))
+	// First pass: check required envelope fields
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(stdout), &raw); err != nil {
+		return nil, &ParseError{ErrClass: "malformed_json", Message: "invalid JSON"}
+	}
+
+	// Check required envelope fields are present
+	requiredEnvelopeFields := []string{"schema_version", "operation", "success", "http_status"}
+	for _, field := range requiredEnvelopeFields {
+		if _, ok := raw[field]; !ok {
+			return nil, &ParseError{ErrClass: "missing_required_field", Message: fmt.Sprintf("missing %s", field)}
+		}
+	}
+
+	// Second pass: strict decode with DisallowUnknownFields
+	dec := json.NewDecoder(bytes.NewReader([]byte(stdout)))
 	dec.DisallowUnknownFields()
 
 	var env ControlEnvelope
 	if err := dec.Decode(&env); err != nil {
-		return nil, fmt.Errorf("decode failed: %w", err)
+		// Check for unknown field error by error message
+		if strings.Contains(err.Error(), "unknown field") {
+			return nil, &ParseError{ErrClass: "unknown_json_field", Message: err.Error()}
+		}
+		return nil, &ParseError{ErrClass: "malformed_json", Message: err.Error()}
 	}
 
-	// Check for trailing data
-	var trailing json.RawMessage
-	if err := dec.Decode(&trailing); err == nil && len(trailing) > 0 {
-		return nil, fmt.Errorf("trailing data after envelope")
+	// Third pass: require exactly one value - CORRECTION30 P0-1
+	// The key fix: require io.EOF, not just any error
+	var extra json.RawMessage
+	decodeErr := dec.Decode(&extra)
+	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
+		// Malformed trailing data
+		return nil, &ParseError{ErrClass: "trailing_json", Message: "trailing data after envelope"}
+	}
+	if decodeErr == nil && len(extra) > 0 {
+		// Second valid JSON value
+		return nil, &ParseError{ErrClass: "trailing_json", Message: "second JSON value after envelope"}
 	}
 
 	return &env, nil
+}
+
+// validateControlEnvelope validates envelope consistency.
+// CORRECTION30 P0-4: Validates success/failure variants.
+func validateControlEnvelope(env *ControlEnvelope, expectedOperation string, exitCode int) error {
+	// Validate schema version
+	if env.SchemaVersion != "canary-control/v1" {
+		return &ParseError{ErrClass: "invalid_arguments", Message: fmt.Sprintf("unexpected schema version: %s", env.SchemaVersion)}
+	}
+
+	// Validate operation matches argv
+	if env.Operation != expectedOperation {
+		return &ParseError{ErrClass: "invalid_arguments", Message: fmt.Sprintf("operation mismatch: expected %s, got %s", expectedOperation, env.Operation)}
+	}
+
+	// Validate success matches exit code
+	if env.Success != (exitCode == 0) {
+		return &ParseError{ErrClass: "invalid_arguments", Message: fmt.Sprintf("success/exit-code mismatch: success=%v, exit=%d", env.Success, exitCode)}
+	}
+
+	// CORRECTION30 P0-4: Validate envelope variant consistency
+	if env.Success {
+		// Success envelope must not contain error_class
+		if env.ErrorClass != "" {
+			return &ParseError{ErrClass: "invalid_arguments", Message: "success envelope must not contain error_class"}
+		}
+		// Success envelope must have HTTP 200
+		if env.HTTPStatus != 200 {
+			return &ParseError{ErrClass: "unexpected_http_status", Message: fmt.Sprintf("success envelope must have HTTP 200, got %d", env.HTTPStatus)}
+		}
+	} else {
+		// Failure envelope must contain non-empty error_class
+		if env.ErrorClass == "" {
+			return &ParseError{ErrClass: "missing_required_field", Message: "failure envelope must contain error_class"}
+		}
+	}
+
+	return nil
 }
 
 // CanaryStateFromExec represents the canary state when fetched via exec.
@@ -994,7 +1157,7 @@ type CanaryStateFromExec struct {
 	Mode           string `json:"mode"`
 	RetainedBlocks int    `json:"retained_blocks"`
 	RetainedBytes  int64  `json:"retained_bytes"`
-	OperationCount int64   `json:"operation_count"`
-	FDCount        int     `json:"fd_count"`
-	Ready          bool    `json:"ready"`
+	OperationCount int64  `json:"operation_count"`
+	FDCount        int    `json:"fd_count"`
+	Ready          bool   `json:"ready"`
 }
