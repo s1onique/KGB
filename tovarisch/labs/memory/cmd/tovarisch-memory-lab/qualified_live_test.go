@@ -158,7 +158,11 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 	obs.SetVCSModified(cp.VCSModified)
 
 	// Build canonical evidence and persist with fail-closed.
+	// PersistQualifiedExecutionEvidence compares the supplied
+	// derived claims to the recomputed ones, so the producer must
+	// stamp the claims on the in-memory artifact before persisting.
 	ev := evidence.BuildEvidenceFromObservations(obs)
+	ev.SetDerivedFields()
 	if err := evidence.PersistQualifiedExecutionEvidence("/tmp", ev); err != nil {
 		// Failure close: the smoke FAILS the test on persistence error.
 		raw, _ := json.MarshalIndent(ev, "", "  ")
