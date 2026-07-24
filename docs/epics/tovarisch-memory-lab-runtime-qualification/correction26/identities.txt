@@ -1,0 +1,26 @@
+CORRECTION26 Identities
+=======================
+
+S26 (subject commit): 7e07d34484267c4060d7068309ca9b9911e064df
+ST26 (subject tree): 1c2cfa693454a9e1d478d4895d8692df75c2474f
+E26 (evidence commit): (pending commit)
+
+Parent chain:
+  CORRECTION25 subject: 91e3719e4b822a3bb699e6d3427a74b726b97920 (S25)
+  CORRECTION25 evidence: e2cb37f6cf41edad539fef898211b24f64c920e4 (E25)
+
+Helper Smoke Binary:
+  SHA-256: 7da068b15bfd812edbeb96f99a26cb61eab47f2a235ca763c1f2f3bee9de1210
+  VCS: 7e07d34484267c4060d7068309ca9b9911e064df
+  Tree: 1c2cfa693454a9e1d478d4895d8692df75c2474f
+
+Production CLI Binary:
+  SHA-256: 63d922cb2eaf95fb14fb181e31005d676512a24fa81a78159e32babf2b13cce4
+  VCS: 7e07d34484267c4060d7068309ca9b9911e064df
+  Tree: 1c2cfa693454a9e1d478d4895d8692df75c2474f
+
+Image ID (live smoke):
+  sha256:318f3aa49873231d3b7fefed088202340dcdf7c3f3febfe628f51f6169d69aad
+
+Network ID (live smoke):
+  2a23d49f4b24d0cbc04fb9572ad8184210592a1e34baf9542de0642668a385ba
