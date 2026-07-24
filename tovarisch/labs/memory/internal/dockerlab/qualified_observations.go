@@ -139,12 +139,13 @@ func (o *QualifiedExecutionObservations) SetPullAudit(attempted bool, count int,
 }
 
 // SetProvenance records the source-tree binding.
-func (o *QualifiedExecutionObservations) SetProvenance(commit, tree, format, dockerVer, producer string) {
+func (o *QualifiedExecutionObservations) SetProvenance(commit, tree, format, dockerVer, producer, executableSHA256 string) {
 	o.Provenance.SourceCommit = commit
 	o.Provenance.SourceTree = tree
 	o.Provenance.GitObjectFormat = format
 	o.Provenance.DockerServerVersion = dockerVer
 	o.Provenance.ProducerVersion = producer
+	o.Provenance.ExecutableSHA256 = executableSHA256
 }
 
 // SetProvenanceDirty marks both the working tree and the source commit as dirty.

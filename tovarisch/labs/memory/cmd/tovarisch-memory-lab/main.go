@@ -2664,7 +2664,7 @@ func buildAndPersistQualifiedEvidence(
 		return fmt.Errorf("qualified execution observations are nil")
 	}
 	ver, _ := cli.ServerVersion(ctx)
-	obs.SetProvenance(sourceCommit, sourceTree, gitObjectFormat, ver.Version, "tovarisch-memory-lab/1.0.0")
+	obs.SetProvenance(sourceCommit, sourceTree, gitObjectFormat, ver.Version, "tovarisch-memory-lab/1.0.0", "")
 	if containerStarted {
 		obs.SetContainerStarted()
 	}

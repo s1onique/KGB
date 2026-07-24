@@ -16,6 +16,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -144,7 +146,17 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 	if v, err := docker.ServerVersion(ctx); err == nil {
 		dockerVer = v.Version
 	}
-	obs.SetProvenance(cp.VCSRevision, cp.VCSTree, cp.GitObjectFormat, dockerVer, cp.ProducerVersion)
+	execHash := cp.ExecutableSHA256
+	if execHash == "" {
+		// Fallback: compute from os.Executable.
+		if exe, err := os.Executable(); err == nil {
+			if data, err := osReadFile(exe); err == nil {
+				sum := sha256.Sum256(data)
+				execHash = hex.EncodeToString(sum[:])
+			}
+		}
+	}
+	obs.SetProvenance(cp.VCSRevision, cp.VCSTree, cp.GitObjectFormat, dockerVer, cp.ProducerVersion, execHash)
 	obs.SetProvenanceDirty(cp.WorkingTreeDirty, cp.SourceCommitDirty)
 	obs.SetVCSModified(cp.VCSModified)
 
