@@ -672,7 +672,7 @@ func (c *Client) ContainerStats(ctx context.Context, containerID string) (*Conta
 		MemoryUsageBytes:    memUsage,
 		MemoryLimitBytes:    memLimit,
 		CPUUsageNanoSeconds: cpuNano,
-		MemoryPerc:         float64(memUsage) / float64(memLimit) * 100,
+		MemoryPerc:          float64(memUsage) / float64(memLimit) * 100,
 	}, nil
 }
 
@@ -891,11 +891,11 @@ func (c *Client) canaryControlExec(
 	// Handle failure envelopes - CORRECTION30 P0-4
 	if !envelope.Success {
 		result.Error = &ProtocolError{
-			Operation:     expectedOperation,
-			ErrClass:      string(envelope.ErrorClass),
-			HTTPStatus:    envelope.HTTPStatus,
-			ExecExitCode:  exitCode,
-			Message:       fmt.Sprintf("control error: %s", envelope.ErrorClass),
+			Operation:    expectedOperation,
+			ErrClass:     string(envelope.ErrorClass),
+			HTTPStatus:   envelope.HTTPStatus,
+			ExecExitCode: exitCode,
+			Message:      fmt.Sprintf("control error: %s", envelope.ErrorClass),
 		}
 		result.Stderr = fmt.Sprintf("control error: %s", envelope.ErrorClass)
 		return result
@@ -992,11 +992,11 @@ func (c *Client) canaryControlExec(
 // ProtocolError represents a typed protocol error.
 // CORRECTION30 P0-6: Typed errors for proper error propagation.
 type ProtocolError struct {
-	Operation   string
-	ErrClass    string
-	HTTPStatus  int
+	Operation    string
+	ErrClass     string
+	HTTPStatus   int
 	ExecExitCode int
-	Message     string
+	Message      string
 }
 
 func (e *ProtocolError) Error() string {
@@ -1022,13 +1022,13 @@ func IsProtocolNonRetryable(err error) bool {
 // ControlEnvelope is the canonical protocol envelope.
 type ControlEnvelope struct {
 	SchemaVersion string           `json:"schema_version"`
-	Operation    string           `json:"operation"`
-	Success      bool             `json:"success"`
-	HTTPStatus  int              `json:"http_status"`
-	Health       *HealthPayload  `json:"health,omitempty"`
-	State        *StatePayload   `json:"state,omitempty"`
-	Workload     *WorkloadPayload `json:"workload,omitempty"`
-	ErrorClass   string          `json:"error_class,omitempty"`
+	Operation     string           `json:"operation"`
+	Success       bool             `json:"success"`
+	HTTPStatus    int              `json:"http_status"`
+	Health        *HealthPayload   `json:"health,omitempty"`
+	State         *StatePayload    `json:"state,omitempty"`
+	Workload      *WorkloadPayload `json:"workload,omitempty"`
+	ErrorClass    string           `json:"error_class,omitempty"`
 }
 
 // HealthPayload represents health check result.
@@ -1057,7 +1057,7 @@ type WorkloadPayload struct {
 // ParseError represents a parsing error with classification.
 type ParseError struct {
 	ErrClass string
-	Message string
+	Message  string
 }
 
 func (e *ParseError) Error() string {

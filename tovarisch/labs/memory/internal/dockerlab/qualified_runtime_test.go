@@ -41,8 +41,6 @@ func TestQualifiedRun_NilConfigFailsBeforeDocker(t *testing.T) {
 // because the qualified runtime now treats the networkID as an optional
 // input (the runtime creates the network itself when no ID is supplied).
 
-
-
 // TestQualifiedRun_CreateReceivesExactNetworkingConfig verifies ContainerCreate receives the network config.
 func TestQualifiedRun_CreateReceivesExactNetworkingConfig(t *testing.T) {
 	fake := newRecordingDockerRuntime()

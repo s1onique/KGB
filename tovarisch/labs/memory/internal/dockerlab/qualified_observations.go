@@ -32,14 +32,14 @@ const (
 // ReachabilityObservations captures the canary reachability verification
 // method and outcomes. CORRECTION27 P0-1.
 type ReachabilityObservations struct {
-	Method             ReachabilityMethod `json:"method"`
-	TargetHost         string             `json:"target_host,omitempty"`
-	TargetPort         int                `json:"target_port,omitempty"`
-	NetworkID          string             `json:"network_id,omitempty"`
-	HTTPResponseCode   int                `json:"http_response_code,omitempty"`
-	ExecExitCode      int                `json:"exec_exit_code,omitempty"`
-	Success            bool               `json:"success"`
-	FailureReason     string             `json:"failure_reason,omitempty"`
+	Method           ReachabilityMethod `json:"method"`
+	TargetHost       string             `json:"target_host,omitempty"`
+	TargetPort       int                `json:"target_port,omitempty"`
+	NetworkID        string             `json:"network_id,omitempty"`
+	HTTPResponseCode int                `json:"http_response_code,omitempty"`
+	ExecExitCode     int                `json:"exec_exit_code,omitempty"`
+	Success          bool               `json:"success"`
+	FailureReason    string             `json:"failure_reason,omitempty"`
 }
 
 // ProvenanceBinding distinguishes the canonical repository identities
@@ -59,12 +59,12 @@ type ProvenanceBinding struct {
 
 // ImageObservations captures the immutable image identity observations.
 type ImageObservations struct {
-	RequestedReference      string   `json:"requested_reference"`
-	InspectedBeforeCreate   string   `json:"inspected_id_before_create"`
-	InspectedRepoDigests    []string `json:"repo_digests"`
-	CreateRequestImage      string   `json:"create_request_image"`
-	ContainerInspectImage   string   `json:"container_inspect_image_id"`
-	ContainerConfigImage    string   `json:"container_inspect_config_image"`
+	RequestedReference    string   `json:"requested_reference"`
+	InspectedBeforeCreate string   `json:"inspected_id_before_create"`
+	InspectedRepoDigests  []string `json:"repo_digests"`
+	CreateRequestImage    string   `json:"create_request_image"`
+	ContainerInspectImage string   `json:"container_inspect_image_id"`
+	ContainerConfigImage  string   `json:"container_inspect_config_image"`
 }
 
 // NetworkObservations captures the canonical network identity observations.
@@ -96,14 +96,14 @@ type ContainerObservations struct {
 
 // QualifiedExecutionObservations is the canonical observation object.
 type QualifiedExecutionObservations struct {
-	SchemaVersion   string                  `json:"schema_version"`
-	GeneratedAt     time.Time               `json:"generated_at"`
-	Image           ImageObservations        `json:"image"`
-	Network         NetworkObservations      `json:"network"`
-	Pull            PullObservations         `json:"pull"`
-	Container       ContainerObservations    `json:"container"`
-	Provenance      ProvenanceBinding        `json:"provenance"`
-	Reachability    ReachabilityObservations `json:"reachability"`
+	SchemaVersion string                   `json:"schema_version"`
+	GeneratedAt   time.Time                `json:"generated_at"`
+	Image         ImageObservations        `json:"image"`
+	Network       NetworkObservations      `json:"network"`
+	Pull          PullObservations         `json:"pull"`
+	Container     ContainerObservations    `json:"container"`
+	Provenance    ProvenanceBinding        `json:"provenance"`
+	Reachability  ReachabilityObservations `json:"reachability"`
 }
 
 // SetInspectedImage records the result of ImageInspectWithRaw.

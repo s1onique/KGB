@@ -296,9 +296,9 @@ func TestStrictDecodeWorkload_MalformedTrailingBytes(t *testing.T) {
 func TestEncodeEnvelope_Success(t *testing.T) {
 	env := ControlEnvelope{
 		SchemaVersion: SchemaVersion,
-		Operation:    "health",
-		Success:      true,
-		HTTPStatus:  200,
+		Operation:     "health",
+		Success:       true,
+		HTTPStatus:    200,
 		Health: &HealthPayload{
 			Ready: true,
 			Mode:  "growing",
@@ -333,10 +333,10 @@ func TestEncodeEnvelope_Success(t *testing.T) {
 func TestEncodeEnvelope_Failure(t *testing.T) {
 	env := ControlEnvelope{
 		SchemaVersion: SchemaVersion,
-		Operation:    "health",
-		Success:      false,
-		HTTPStatus:  500,
-		ErrorClass:   ErrHealthNotReady,
+		Operation:     "health",
+		Success:       false,
+		HTTPStatus:    500,
+		ErrorClass:    ErrHealthNotReady,
 	}
 
 	var buf bytes.Buffer
@@ -389,9 +389,9 @@ func TestAllowedErrorClasses_Complete(t *testing.T) {
 func TestStrictDecodeEnvelope_Success(t *testing.T) {
 	// We need to test strict parsing from a client perspective
 	// Since strictParseEnvelope is in dockerlab, we test the control client decoders
-	
+
 	data := []byte(`{"schema_version":"canary-control/v1","operation":"health","success":true,"http_status":200,"health":{"ready":true,"mode":"growing"}}`)
-	
+
 	// Test that we can re-encode and decode the inner health payload
 	var env map[string]json.RawMessage
 	if err := json.Unmarshal(data, &env); err != nil {
@@ -422,7 +422,7 @@ func TestStrictDecodeEnvelope_Success(t *testing.T) {
 // TestStrictDecodeEnvelope_MissingFields tests envelope with missing required fields
 func TestStrictDecodeEnvelope_MissingFields(t *testing.T) {
 	data := []byte(`{"operation":"health","success":true}`) // missing schema_version, http_status
-	
+
 	var env map[string]json.RawMessage
 	if err := json.Unmarshal(data, &env); err != nil {
 		t.Fatalf("unmarshal error: %v", err)
@@ -445,12 +445,12 @@ func TestControlEnvelope_ValidEnvelopeVariants(t *testing.T) {
 	// Success variant
 	successEnv := ControlEnvelope{
 		SchemaVersion: SchemaVersion,
-		Operation:    "health",
-		Success:      true,
-		HTTPStatus:  200,
-		Health:       &HealthPayload{Ready: true, Mode: "growing"},
+		Operation:     "health",
+		Success:       true,
+		HTTPStatus:    200,
+		Health:        &HealthPayload{Ready: true, Mode: "growing"},
 	}
-	
+
 	// Validate success envelope rules
 	if !successEnv.Success {
 		t.Error("success envelope must have success=true")
@@ -465,12 +465,12 @@ func TestControlEnvelope_ValidEnvelopeVariants(t *testing.T) {
 	// Failure variant
 	failureEnv := ControlEnvelope{
 		SchemaVersion: SchemaVersion,
-		Operation:    "health",
-		Success:      false,
-		HTTPStatus:  500,
-		ErrorClass:   ErrHealthNotReady,
+		Operation:     "health",
+		Success:       false,
+		HTTPStatus:    500,
+		ErrorClass:    ErrHealthNotReady,
 	}
-	
+
 	// Validate failure envelope rules
 	if failureEnv.Success {
 		t.Error("failure envelope must have success=false")
@@ -513,7 +513,7 @@ func TestBoundedReader_LargeBody(t *testing.T) {
 	for i := range largeData {
 		largeData[i] = 'x'
 	}
-	
+
 	// A LimitReader wrapping this should stop at MaxResponseBody+1 (the limit)
 	// So ReadAll will read MaxResponseBody+1 bytes from the reader
 	reader := io.LimitReader(bytes.NewReader(largeData), MaxResponseBody+1)
@@ -521,26 +521,31 @@ func TestBoundedReader_LargeBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read error: %v", err)
 	}
-	
+
 	// LimitReader allows up to n bytes, so we expect exactly MaxResponseBody+1 bytes
 	if len(read) != MaxResponseBody+1 {
 		t.Errorf("expected %d bytes from limit reader, got %d", MaxResponseBody+1, len(read))
 	}
-	
+
 	// Verify that checking against MaxResponseBody would catch oversized response
 	if len(read) > MaxResponseBody {
 		// This is the check the caller does
 	}
 }
 
-// TestStrictDecodeHealth_NullField tests explicit null behavior
+// TestStrictDecodeHealth_NullField tests that explicit null is rejected
 func TestStrictDecodeHealth_NullField(t *testing.T) {
 	data := []byte(`{"ready":null,"mode":"growing"}`)
 	_, err := strictDecodeHealth(data)
-	// Note: Go's json.Unmarshal accepts null for bool fields (sets to false/zero value)
-	// This is current behavior - caller may need to check for zero values explicitly
-	if err != nil {
-		t.Fatalf("strictDecodeHealth should accept null (current behavior): %v", err)
+	if err == nil {
+		t.Fatal("expected error for null ready field")
+	}
+	decodeErr, ok := err.(*DecodeError)
+	if !ok {
+		t.Fatalf("expected DecodeError, got %T", err)
+	}
+	if decodeErr.ErrClass != ErrMissingRequiredField {
+		t.Errorf("expected ErrMissingRequiredField, got %s", decodeErr.ErrClass)
 	}
 }
 

@@ -49,14 +49,14 @@ func TestRunErrorPropagates(t *testing.T) {
 	audited := NewAuditedDockerRuntime(fake)
 
 	opts := LifecycleOptions{
-		ImageReference: "kgb-tovarisch-canary:latest",
-		NetworkName:    "kgb-lab-net",
-		ContainerName:  "kgb-subject",
-		ContainerCmd:   []string{"true"},
-		TerminalTimeout: time.Second,
-		CleanupTimeout: time.Second,
+		ImageReference:   "kgb-tovarisch-canary:latest",
+		NetworkName:      "kgb-lab-net",
+		ContainerName:    "kgb-subject",
+		ContainerCmd:     []string{"true"},
+		TerminalTimeout:  time.Second,
+		CleanupTimeout:   time.Second,
 		TerminalObserver: func(_ context.Context, _ string) bool { return true },
-		Run: func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return errRun },
+		Run:              func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return errRun },
 	}
 	_, err := executeQualifiedLifecycle(context.Background(), audited, opts.TerminalObserver, opts)
 	if err == nil {
@@ -76,14 +76,14 @@ func TestRunAndTerminalErrorsJoin(t *testing.T) {
 	audited := NewAuditedDockerRuntime(fake)
 
 	opts := LifecycleOptions{
-		ImageReference: "kgb-tovarisch-canary:latest",
-		NetworkName:    "kgb-lab-net",
-		ContainerName:  "kgb-subject",
-		ContainerCmd:   []string{"true"},
-		TerminalTimeout: 100 * time.Millisecond,
-		CleanupTimeout:  time.Second,
+		ImageReference:   "kgb-tovarisch-canary:latest",
+		NetworkName:      "kgb-lab-net",
+		ContainerName:    "kgb-subject",
+		ContainerCmd:     []string{"true"},
+		TerminalTimeout:  100 * time.Millisecond,
+		CleanupTimeout:   time.Second,
 		TerminalObserver: func(_ context.Context, _ string) bool { return false },
-		Run: func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return errRun },
+		Run:              func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return errRun },
 	}
 	_, err := executeQualifiedLifecycle(context.Background(), audited, opts.TerminalObserver, opts)
 	if err == nil {
@@ -106,14 +106,14 @@ func TestRunAndCleanupErrorsJoin(t *testing.T) {
 	audited := NewAuditedDockerRuntime(fake)
 
 	opts := LifecycleOptions{
-		ImageReference: "kgb-tovarisch-canary:latest",
-		NetworkName:    "kgb-lab-net",
-		ContainerName:  "kgb-subject",
-		ContainerCmd:   []string{"true"},
-		TerminalTimeout: time.Second,
-		CleanupTimeout:  time.Second,
+		ImageReference:   "kgb-tovarisch-canary:latest",
+		NetworkName:      "kgb-lab-net",
+		ContainerName:    "kgb-subject",
+		ContainerCmd:     []string{"true"},
+		TerminalTimeout:  time.Second,
+		CleanupTimeout:   time.Second,
 		TerminalObserver: func(_ context.Context, _ string) bool { return true },
-		Run: func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return errRun },
+		Run:              func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return errRun },
 	}
 	_, err := executeQualifiedLifecycle(context.Background(), audited, opts.TerminalObserver, opts)
 	if err == nil {
@@ -137,14 +137,14 @@ func TestTerminalAndCleanupErrorsJoin(t *testing.T) {
 	audited := NewAuditedDockerRuntime(fake)
 
 	opts := LifecycleOptions{
-		ImageReference: "kgb-tovarisch-canary:latest",
-		NetworkName:    "kgb-lab-net",
-		ContainerName:  "kgb-subject",
-		ContainerCmd:   []string{"true"},
-		TerminalTimeout: 100 * time.Millisecond,
-		CleanupTimeout:  time.Second,
+		ImageReference:   "kgb-tovarisch-canary:latest",
+		NetworkName:      "kgb-lab-net",
+		ContainerName:    "kgb-subject",
+		ContainerCmd:     []string{"true"},
+		TerminalTimeout:  100 * time.Millisecond,
+		CleanupTimeout:   time.Second,
 		TerminalObserver: func(_ context.Context, _ string) bool { return false },
-		Run: func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return nil },
+		Run:              func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return nil },
 	}
 	_, err := executeQualifiedLifecycle(context.Background(), audited, opts.TerminalObserver, opts)
 	if err == nil {
@@ -169,14 +169,14 @@ func TestRunTerminalAndCleanupErrorsJoin(t *testing.T) {
 	audited := NewAuditedDockerRuntime(fake)
 
 	opts := LifecycleOptions{
-		ImageReference: "kgb-tovarisch-canary:latest",
-		NetworkName:    "kgb-lab-net",
-		ContainerName:  "kgb-subject",
-		ContainerCmd:   []string{"true"},
-		TerminalTimeout: 100 * time.Millisecond,
-		CleanupTimeout:  time.Second,
+		ImageReference:   "kgb-tovarisch-canary:latest",
+		NetworkName:      "kgb-lab-net",
+		ContainerName:    "kgb-subject",
+		ContainerCmd:     []string{"true"},
+		TerminalTimeout:  100 * time.Millisecond,
+		CleanupTimeout:   time.Second,
 		TerminalObserver: func(_ context.Context, _ string) bool { return false },
-		Run: func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return errRun },
+		Run:              func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return errRun },
 	}
 	_, err := executeQualifiedLifecycle(context.Background(), audited, opts.TerminalObserver, opts)
 	if err == nil {
@@ -196,22 +196,23 @@ func TestRunTerminalAndCleanupErrorsJoin(t *testing.T) {
 // TestPullAttemptFailureObservations verifies that when the run
 // callback invokes ImagePull, finalizePullAudit captures the
 // attempt and the returned observation reflects:
-//   observation_available: true
-//   attempted:              true
-//   attempt_count:          1
-//   last_reference:         non-empty
+//
+//	observation_available: true
+//	attempted:              true
+//	attempt_count:          1
+//	last_reference:         non-empty
 func TestPullAttemptFailureObservations(t *testing.T) {
 	fake := newRecordingDockerRuntime()
 	seedValidLifecycle(t, fake)
 	audited := NewAuditedDockerRuntime(fake)
 
 	opts := LifecycleOptions{
-		ImageReference: "kgb-tovarisch-canary:latest",
-		NetworkName:    "kgb-lab-net",
-		ContainerName:  "kgb-subject",
-		ContainerCmd:   []string{"true"},
-		TerminalTimeout: time.Second,
-		CleanupTimeout:  time.Second,
+		ImageReference:   "kgb-tovarisch-canary:latest",
+		NetworkName:      "kgb-lab-net",
+		ContainerName:    "kgb-subject",
+		ContainerCmd:     []string{"true"},
+		TerminalTimeout:  time.Second,
+		CleanupTimeout:   time.Second,
 		TerminalObserver: func(_ context.Context, _ string) bool { return true },
 		Run: func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error {
 			// Trigger ImagePull via the audited runtime. This
@@ -258,14 +259,14 @@ func TestLifecycle_PhaseOrder(t *testing.T) {
 	audited := NewAuditedDockerRuntime(fake)
 
 	opts := LifecycleOptions{
-		ImageReference: "kgb-tovarisch-canary:latest",
-		NetworkName:    "kgb-lab-net",
-		ContainerName:  "kgb-subject",
-		ContainerCmd:   []string{"true"},
-		TerminalTimeout: time.Second,
-		CleanupTimeout:  time.Second,
+		ImageReference:   "kgb-tovarisch-canary:latest",
+		NetworkName:      "kgb-lab-net",
+		ContainerName:    "kgb-subject",
+		ContainerCmd:     []string{"true"},
+		TerminalTimeout:  time.Second,
+		CleanupTimeout:   time.Second,
 		TerminalObserver: func(_ context.Context, _ string) bool { return true },
-		Run: func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return nil },
+		Run:              func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return nil },
 	}
 	if _, err := executeQualifiedLifecycle(context.Background(), audited, opts.TerminalObserver, opts); err != nil {
 		t.Fatalf("expected success, got: %v", err)

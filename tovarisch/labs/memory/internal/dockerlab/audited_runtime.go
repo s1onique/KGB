@@ -40,15 +40,15 @@ type AuditedDockerRuntime struct {
 	mu sync.Mutex
 
 	// Pull audit.
-	pullAttempted     bool
-	pullAttemptCount  int
+	pullAttempted       bool
+	pullAttemptCount    int
 	lastPulledReference string
 
 	// ContainerCreate audit.
-	createCalled     bool
-	createImage       string
-	createNetName     string
-	createNetID       string
+	createCalled  bool
+	createImage   string
+	createNetName string
+	createNetID   string
 
 	// ContainerInspect audit (response values).
 	inspectCalled   bool
@@ -57,7 +57,7 @@ type AuditedDockerRuntime struct {
 	inspectEndpoint string
 
 	// NetworkCreate / NetworkInspect audit (response values).
-	netCreateID string
+	netCreateID  string
 	netInspectID string
 }
 
@@ -68,11 +68,11 @@ func NewAuditedDockerRuntime(delegate DockerRuntime) *AuditedDockerRuntime {
 
 // AuditSnapshot is a read-only view of every captured observation.
 type AuditSnapshot struct {
-	PullAttempted     bool
-	PullAttemptCount  int
+	PullAttempted       bool
+	PullAttemptCount    int
 	LastPulledReference string
 
-	CreateCalled bool
+	CreateCalled  bool
 	CreateImage   string
 	CreateNetName string
 	CreateNetID   string
@@ -82,7 +82,7 @@ type AuditSnapshot struct {
 	InspectConfig   string
 	InspectEndpoint string
 
-	NetCreateID string
+	NetCreateID  string
 	NetInspectID string
 }
 
@@ -99,18 +99,18 @@ func (a *AuditedDockerRuntime) Snapshot() AuditSnapshot {
 	defer a.mu.Unlock()
 	return AuditSnapshot{
 		PullAttempted:       a.pullAttempted,
-		PullAttemptCount:     a.pullAttemptCount,
-		LastPulledReference:  a.lastPulledReference,
-		CreateCalled:         a.createCalled,
-		CreateImage:          a.createImage,
-		CreateNetName:        a.createNetName,
-		CreateNetID:          a.createNetID,
-		InspectCalled:        a.inspectCalled,
-		InspectImage:         a.inspectImage,
-		InspectConfig:        a.inspectConfig,
-		InspectEndpoint:       a.inspectEndpoint,
-		NetCreateID:          a.netCreateID,
-		NetInspectID:         a.netInspectID,
+		PullAttemptCount:    a.pullAttemptCount,
+		LastPulledReference: a.lastPulledReference,
+		CreateCalled:        a.createCalled,
+		CreateImage:         a.createImage,
+		CreateNetName:       a.createNetName,
+		CreateNetID:         a.createNetID,
+		InspectCalled:       a.inspectCalled,
+		InspectImage:        a.inspectImage,
+		InspectConfig:       a.inspectConfig,
+		InspectEndpoint:     a.inspectEndpoint,
+		NetCreateID:         a.netCreateID,
+		NetInspectID:        a.netInspectID,
 	}
 }
 

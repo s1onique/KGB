@@ -168,10 +168,10 @@ func TestStrictParseEnvelope_TrailingWhitespace(t *testing.T) {
 func TestValidateControlEnvelope_SuccessVariant(t *testing.T) {
 	env := &ControlEnvelope{
 		SchemaVersion: "canary-control/v1",
-		Operation:    "health",
-		Success:      true,
-		HTTPStatus:  200,
-		Health:       &HealthPayload{Ready: true, Mode: "growing"},
+		Operation:     "health",
+		Success:       true,
+		HTTPStatus:    200,
+		Health:        &HealthPayload{Ready: true, Mode: "growing"},
 	}
 	err := validateControlEnvelope(env, "health", 0)
 	if err != nil {
@@ -182,10 +182,10 @@ func TestValidateControlEnvelope_SuccessVariant(t *testing.T) {
 func TestValidateControlEnvelope_FailureVariant(t *testing.T) {
 	env := &ControlEnvelope{
 		SchemaVersion: "canary-control/v1",
-		Operation:    "health",
-		Success:      false,
-		HTTPStatus:  500,
-		ErrorClass:   "health_not_ready",
+		Operation:     "health",
+		Success:       false,
+		HTTPStatus:    500,
+		ErrorClass:    "health_not_ready",
 	}
 	err := validateControlEnvelope(env, "health", 1)
 	if err != nil {
@@ -196,9 +196,9 @@ func TestValidateControlEnvelope_FailureVariant(t *testing.T) {
 func TestValidateControlEnvelope_WrongSchemaVersion(t *testing.T) {
 	env := &ControlEnvelope{
 		SchemaVersion: "wrong-version",
-		Operation:    "health",
-		Success:      true,
-		HTTPStatus:  200,
+		Operation:     "health",
+		Success:       true,
+		HTTPStatus:    200,
 	}
 	err := validateControlEnvelope(env, "health", 0)
 	if err == nil {
@@ -216,9 +216,9 @@ func TestValidateControlEnvelope_WrongSchemaVersion(t *testing.T) {
 func TestValidateControlEnvelope_OperationMismatch(t *testing.T) {
 	env := &ControlEnvelope{
 		SchemaVersion: "canary-control/v1",
-		Operation:    "state",
-		Success:      true,
-		HTTPStatus:  200,
+		Operation:     "state",
+		Success:       true,
+		HTTPStatus:    200,
 	}
 	err := validateControlEnvelope(env, "health", 0)
 	if err == nil {
@@ -229,9 +229,9 @@ func TestValidateControlEnvelope_OperationMismatch(t *testing.T) {
 func TestValidateControlEnvelope_SuccessExitMismatch(t *testing.T) {
 	env := &ControlEnvelope{
 		SchemaVersion: "canary-control/v1",
-		Operation:    "health",
-		Success:      true,
-		HTTPStatus:  200,
+		Operation:     "health",
+		Success:       true,
+		HTTPStatus:    200,
 	}
 	// exitCode=1 but success=true
 	err := validateControlEnvelope(env, "health", 1)
@@ -243,10 +243,10 @@ func TestValidateControlEnvelope_SuccessExitMismatch(t *testing.T) {
 func TestValidateControlEnvelope_FailureExitMismatch(t *testing.T) {
 	env := &ControlEnvelope{
 		SchemaVersion: "canary-control/v1",
-		Operation:    "health",
-		Success:      false,
-		HTTPStatus:  500,
-		ErrorClass:   "health_not_ready",
+		Operation:     "health",
+		Success:       false,
+		HTTPStatus:    500,
+		ErrorClass:    "health_not_ready",
 	}
 	// exitCode=0 but success=false
 	err := validateControlEnvelope(env, "health", 0)
@@ -258,10 +258,10 @@ func TestValidateControlEnvelope_FailureExitMismatch(t *testing.T) {
 func TestValidateControlEnvelope_SuccessWithErrorClass(t *testing.T) {
 	env := &ControlEnvelope{
 		SchemaVersion: "canary-control/v1",
-		Operation:    "health",
-		Success:      true,
-		HTTPStatus:  200,
-		ErrorClass:   "some_error", // Should be empty for success
+		Operation:     "health",
+		Success:       true,
+		HTTPStatus:    200,
+		ErrorClass:    "some_error", // Should be empty for success
 	}
 	err := validateControlEnvelope(env, "health", 0)
 	if err == nil {
@@ -272,10 +272,10 @@ func TestValidateControlEnvelope_SuccessWithErrorClass(t *testing.T) {
 func TestValidateControlEnvelope_FailureWithoutErrorClass(t *testing.T) {
 	env := &ControlEnvelope{
 		SchemaVersion: "canary-control/v1",
-		Operation:    "health",
-		Success:      false,
-		HTTPStatus:  500,
-		ErrorClass:   "", // Should be non-empty for failure
+		Operation:     "health",
+		Success:       false,
+		HTTPStatus:    500,
+		ErrorClass:    "", // Should be non-empty for failure
 	}
 	err := validateControlEnvelope(env, "health", 1)
 	if err == nil {
@@ -286,9 +286,9 @@ func TestValidateControlEnvelope_FailureWithoutErrorClass(t *testing.T) {
 func TestValidateControlEnvelope_SuccessWithNon200(t *testing.T) {
 	env := &ControlEnvelope{
 		SchemaVersion: "canary-control/v1",
-		Operation:    "health",
-		Success:      true,
-		HTTPStatus:  500, // Should be 200 for success
+		Operation:     "health",
+		Success:       true,
+		HTTPStatus:    500, // Should be 200 for success
 	}
 	err := validateControlEnvelope(env, "health", 0)
 	if err == nil {
@@ -299,7 +299,7 @@ func TestValidateControlEnvelope_SuccessWithNon200(t *testing.T) {
 // TestProtocolError_TypedError tests that ProtocolError is properly typed
 func TestProtocolError_TypedError(t *testing.T) {
 	err := &ProtocolError{
-		Operation:  "health",
+		Operation: "health",
 		ErrClass:  "connection_failed",
 		Message:   "connection refused",
 	}
@@ -431,24 +431,24 @@ func TestCanaryControlExecResult_Fields(t *testing.T) {
 func TestControlEnvelope_JSONRoundTrip(t *testing.T) {
 	original := ControlEnvelope{
 		SchemaVersion: "canary-control/v1",
-		Operation:    "health",
-		Success:      true,
-		HTTPStatus:  200,
-		Health:       &HealthPayload{Ready: true, Mode: "growing"},
+		Operation:     "health",
+		Success:       true,
+		HTTPStatus:    200,
+		Health:        &HealthPayload{Ready: true, Mode: "growing"},
 	}
-	
+
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(original); err != nil {
 		t.Fatalf("encode error: %v", err)
 	}
-	
+
 	env, err := strictParseEnvelope(buf.String())
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	
+
 	if env.SchemaVersion != original.SchemaVersion {
 		t.Errorf("schema_version mismatch: got %s, want %s", env.SchemaVersion, original.SchemaVersion)
 	}
@@ -464,10 +464,10 @@ func TestControlEnvelope_JSONRoundTrip(t *testing.T) {
 func TestProtocolError_ErrorsAs(t *testing.T) {
 	err := &ProtocolError{
 		Operation: "health",
-		ErrClass: "connection_failed",
-		Message:  "connection refused",
+		ErrClass:  "connection_failed",
+		Message:   "connection refused",
 	}
-	
+
 	var protoErr *ProtocolError
 	if !errors.As(err, &protoErr) {
 		t.Fatal("expected errors.As to work with ProtocolError")
@@ -483,7 +483,7 @@ func TestParseError_ErrorsAs(t *testing.T) {
 		ErrClass: "malformed_json",
 		Message:  "invalid JSON",
 	}
-	
+
 	var parseErr *ParseError
 	if !errors.As(err, &parseErr) {
 		t.Fatal("expected errors.As to work with ParseError")
@@ -497,18 +497,18 @@ func TestParseError_ErrorsAs(t *testing.T) {
 func TestBoundedResponse_64KB(t *testing.T) {
 	// Use the same limit as the control client (64KB)
 	const maxBody = 64 * 1024
-	
+
 	// Create exactly maxBody bytes of valid JSON
 	data := make([]byte, maxBody)
 	copy(data, []byte(`{"schema_version":"canary-control/v1","operation":"health","success":true,"http_status":200,"health":{"ready":true,"mode":"growing"}`))
-	
+
 	// Ensure it's valid JSON up to maxBody
 	validPrefix := `{"schema_version":"canary-control/v1","operation":"health","success":true,"http_status":200,"health":{"ready":true,"mode":"growing"}}`
 	_, err := strictParseEnvelope(validPrefix)
 	if err != nil {
 		t.Fatalf("expected valid JSON to parse: %v", err)
 	}
-	
+
 	// Verify we can still read with LimitReader
 	reader := io.LimitReader(bytes.NewReader(data), maxBody+1)
 	read, err := io.ReadAll(reader)

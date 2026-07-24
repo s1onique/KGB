@@ -331,11 +331,11 @@ func (q *QualifiedClient) ExecuteQualifiedContainer(
 // QualifiedLifecycleOutcome describes the full result of a qualified
 // lifecycle run (CORRECTION18 production helper).
 type QualifiedLifecycleOutcome struct {
-	ContainerID string
-	ImageID     string
-	NetworkID   string
-	Started     bool
-	Terminal    bool
+	ContainerID      string
+	ImageID          string
+	NetworkID        string
+	Started          bool
+	Terminal         bool
 	ContainerRemoved bool
 	NetworkRemoved   bool
 	StartedByRuntime bool

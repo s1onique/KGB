@@ -50,7 +50,7 @@ const (
 type ErrorClass string
 
 const (
-	ErrInvalidArguments       ErrorClass = "invalid_arguments"
+	ErrInvalidArguments      ErrorClass = "invalid_arguments"
 	ErrRequestCreateFailed   ErrorClass = "request_create_failed"
 	ErrConnectionFailed      ErrorClass = "connection_failed"
 	ErrRequestTimeout        ErrorClass = "request_timeout"
@@ -69,29 +69,29 @@ const (
 var AllowedErrorClasses = map[ErrorClass]bool{
 	ErrInvalidArguments:      true,
 	ErrRequestCreateFailed:   true,
-	ErrConnectionFailed:     true,
+	ErrConnectionFailed:      true,
 	ErrRequestTimeout:        true,
 	ErrResponseTooLarge:      true,
 	ErrUnexpectedHTTPStatus:  true,
-	ErrMalformedJSON:        true,
-	ErrUnknownJSONField:     true,
+	ErrMalformedJSON:         true,
+	ErrUnknownJSONField:      true,
 	ErrMissingRequiredField:  true,
-	ErrTrailingJSON:         true,
-	ErrHealthNotReady:       true,
-	ErrStateInvalid:         true,
+	ErrTrailingJSON:          true,
+	ErrHealthNotReady:        true,
+	ErrStateInvalid:          true,
 	ErrWorkloadCountMismatch: true,
 }
 
 // ControlEnvelope is the canonical protocol envelope.
 type ControlEnvelope struct {
 	SchemaVersion string           `json:"schema_version"`
-	Operation    string           `json:"operation"`
-	Success      bool             `json:"success"`
-	HTTPStatus  int              `json:"http_status"`
-	Health       *HealthPayload  `json:"health,omitempty"`
-	State        *StatePayload   `json:"state,omitempty"`
-	Workload     *WorkloadPayload `json:"workload,omitempty"`
-	ErrorClass   ErrorClass      `json:"error_class,omitempty"`
+	Operation     string           `json:"operation"`
+	Success       bool             `json:"success"`
+	HTTPStatus    int              `json:"http_status"`
+	Health        *HealthPayload   `json:"health,omitempty"`
+	State         *StatePayload    `json:"state,omitempty"`
+	Workload      *WorkloadPayload `json:"workload,omitempty"`
+	ErrorClass    ErrorClass       `json:"error_class,omitempty"`
 }
 
 // HealthPayload represents health check result.
@@ -230,12 +230,12 @@ func runOperate(args []string) int {
 func emitSuccessEnvelope(operation string, httpStatus int, health *HealthPayload, state *StatePayload, workload *WorkloadPayload) {
 	env := ControlEnvelope{
 		SchemaVersion: SchemaVersion,
-		Operation:    operation,
-		Success:      true,
-		HTTPStatus:  httpStatus,
-		Health:      health,
-		State:       state,
-		Workload:    workload,
+		Operation:     operation,
+		Success:       true,
+		HTTPStatus:    httpStatus,
+		Health:        health,
+		State:         state,
+		Workload:      workload,
 	}
 	emitEnvelope(env)
 }
@@ -244,9 +244,9 @@ func emitSuccessEnvelope(operation string, httpStatus int, health *HealthPayload
 func emitFailureEnvelope(operation string, errClass ErrorClass, httpStatus int) {
 	env := ControlEnvelope{
 		SchemaVersion: SchemaVersion,
-		Operation:    operation,
-		Success:      false,
-		HTTPStatus:   httpStatus,
+		Operation:     operation,
+		Success:       false,
+		HTTPStatus:    httpStatus,
 		ErrorClass:    errClass,
 	}
 	emitEnvelope(env)
@@ -360,11 +360,11 @@ func strictDecodeHealth(data []byte) (*HealthPayload, error) {
 		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: "invalid JSON"}
 	}
 
-	// Verify required fields exist (not null, not missing)
-	if _, ok := raw["ready"]; !ok {
+	// Verify required fields exist and are not null
+	if v, ok := raw["ready"]; !ok || v == nil || string(v) == "null" {
 		return nil, &DecodeError{ErrClass: ErrMissingRequiredField, Message: "missing ready"}
 	}
-	if _, ok := raw["mode"]; !ok {
+	if v, ok := raw["mode"]; !ok || v == nil || string(v) == "null" {
 		return nil, &DecodeError{ErrClass: ErrMissingRequiredField, Message: "missing mode"}
 	}
 
@@ -491,7 +491,7 @@ func strictDecodeState(data []byte) (*StatePayload, error) {
 
 	requiredFields := []string{"mode", "retained_blocks", "retained_bytes", "operation_count", "fd_count", "ready"}
 	for _, field := range requiredFields {
-		if _, ok := raw[field]; !ok {
+		if v, ok := raw[field]; !ok || v == nil || string(v) == "null" {
 			return nil, &DecodeError{ErrClass: ErrMissingRequiredField, Message: "missing " + field}
 		}
 	}
@@ -618,7 +618,7 @@ func strictDecodeWorkload(data []byte) (*WorkloadPayload, error) {
 
 	requiredFields := []string{"requested", "attempted", "completed"}
 	for _, field := range requiredFields {
-		if _, ok := raw[field]; !ok {
+		if v, ok := raw[field]; !ok || v == nil || string(v) == "null" {
 			return nil, &DecodeError{ErrClass: ErrMissingRequiredField, Message: "missing " + field}
 		}
 	}
