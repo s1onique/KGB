@@ -1,0 +1,26 @@
+# S28 Identities
+
+## Commit Identifiers
+
+| Field | Value |
+|-------|-------|
+| parent_commit | 6380816554371d250afcfbf395c70698f72d8788 |
+| parent_tree | be707d281924a0ae99ccf881907a43009e028f75 |
+| working_tree | (to be computed at commit time) |
+| working_tree_root | be707d281924a0ae99ccf881907a43009e028f75 |
+
+## Binary SHA-256
+
+| Binary | SHA-256 |
+|--------|---------|
+| canary | cdbd93f51176e6c211c42ddaafe22a900bd092e423cdc94d329b2326501023d2 |
+| tovarisch-memory-lab | 5e631fcf4bbacc674f652282aee7936262c680546abc70b3f96698e1fda3d12a |
+
+## Files Changed Summary
+
+- tovarisch/labs/memory/cmd/canary/control.go (new)
+- tovarisch/labs/memory/cmd/canary/main.go (modified)
+- tovarisch/labs/memory/cmd/tovarisch-memory-lab/main.go (modified)
+- tovarisch/labs/memory/internal/dockerlab/client.go (modified)
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction28/close-report.md (new)
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction28/identities.txt (new)

@@ -71,6 +71,12 @@ type Canary struct {
 }
 
 func main() {
+	// Check for control subcommand first
+	if len(os.Args) >= 3 && os.Args[1] == "control" {
+		// Skip the "control" keyword and pass remaining args
+		os.Exit(runControl(os.Args[1:]))
+	}
+
 	mode := flag.String("mode", "bounded", "Mode: bounded, growing, descriptor")
 	blockSize := flag.Int64("block-size", 1024*1024, "Block size in bytes for growing mode")
 	port := flag.Int("port", 8080, "HTTP status port")

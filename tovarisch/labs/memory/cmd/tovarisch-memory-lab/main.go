@@ -262,40 +262,20 @@ func runCommand(args []string) error {
 			fmt.Printf("Container %s started with PID %d\n", containerID, containerPID)
 		}
 
-		// CORRECTION27 P0-1: Use Docker exec-based health check instead of direct HTTP.
-		// This avoids Docker bridge networking issues where the container IP is not
-		// reachable from the host. Docker exec always works because it uses the
-		// container's own network namespace.
+		// CORRECTION28: Use Docker exec-based health check with image-owned canary-control.
+		// This eliminates shell/curl dependency and uses the image's own binary.
+		// Docker exec always works because it uses the container's own network namespace.
 		if _, err := dockerClient.CanaryHealthCheckViaExec(workloadCtx, containerID, *canaryPort, 30*time.Second); err != nil {
 			return fmt.Errorf("canary health check failed (docker exec): %w", err)
 		}
 		if *verbose {
-			fmt.Printf("Canary healthy (via docker exec)\n")
+			fmt.Printf("Canary healthy (via canary-control exec)\n")
 		}
 
-		// For the workload, we still need direct HTTP - fall back to container IP
-		// but this is only for operating the canary, not for health verification.
-		containerIP, _ := dockerClient.ContainerIP(workloadCtx, containerID, netName)
-		canaryURL := ""
-		if containerIP != "" {
-			canaryURL = fmt.Sprintf("http://%s:%d", containerIP, *canaryPort)
-			if *verbose {
-				fmt.Printf("Canary URL (for workload): %s\n", canaryURL)
-			}
-		}
-
-		httpClient := &http.Client{
-			Timeout: 5 * time.Second,
-			Transport: &http.Transport{
-				Proxy: nil,
-			},
-		}
-
-		// CORRECTION27: Try exec-based state fetch first (more reliable), fall back to HTTP
+		// CORRECTION28: All canary operations use exec with canary-control binary.
+		// No bridge IP, no direct HTTP, no shell/curl dependency.
+		// Initial state via exec
 		initialState, err := fetchCanaryStateViaExec(workloadCtx, dockerClient, containerID, *canaryPort)
-		if err != nil && canaryURL != "" {
-			initialState, err = fetchCanaryState(workloadCtx, httpClient, canaryURL)
-		}
 		if err != nil {
 			return fmt.Errorf("fetch initial canary state: %w", err)
 		}
@@ -348,7 +328,8 @@ func runCommand(args []string) error {
 		if *verbose {
 			fmt.Printf("Stimulus phase started, triggering workload\n")
 		}
-		workloadResult, err := operateCanary(workloadCtx, httpClient, canaryURL, getScenarioOperationCount(*scenario))
+		// CORRECTION28: Use canary-control exec for operate, not direct HTTP
+		workloadResult, err := operateCanaryViaExec(workloadCtx, dockerClient, containerID, *canaryPort, getScenarioOperationCount(*scenario))
 		if err != nil {
 			sampler.Stop()
 			return fmt.Errorf("operate canary: %w", err)
@@ -379,11 +360,10 @@ func runCommand(args []string) error {
 			return fmt.Errorf("bounded stop: %w", stopErr)
 		}
 
-		// CORRECTION27: Try exec-based state fetch first (more reliable), fall back to HTTP
+		// CORRECTION28: All canary operations use exec with canary-control binary.
+		// No bridge IP, no direct HTTP, no shell/curl dependency.
+		// Final state via exec
 		finalState, err := fetchCanaryStateViaExec(workloadCtx, dockerClient, containerID, *canaryPort)
-		if err != nil && canaryURL != "" {
-			finalState, err = fetchCanaryState(workloadCtx, httpClient, canaryURL)
-		}
 		if err != nil {
 			sampler.Stop()
 			return fmt.Errorf("fetch final canary state: %w", err)
@@ -2724,5 +2704,22 @@ func fetchCanaryStateViaExec(ctx context.Context, dockerClient *dockerlab.Client
 		OperationCount: int(state.OperationCount),
 		FDCount:        state.FDCount,
 		Ready:          state.Ready,
+	}, nil
+}
+
+// operateCanaryViaExec triggers N operations on the canary via exec.
+// CORRECTION28: Eliminates shell/curl dependency by using the
+// image-owned canary-control binary.
+func operateCanaryViaExec(ctx context.Context, dockerClient *dockerlab.Client, containerID string, port int, count int) (*WorkloadResult, error) {
+	result, err := dockerClient.CanaryOperateViaExec(ctx, containerID, port, count, 60*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("canary operate via exec: %w", err)
+	}
+	return &WorkloadResult{
+		Requested: count,
+		Attempted: result.Attempted,
+		Completed: result.Completed,
+		Failed:    count - result.Completed,
+		Returned:  result.Completed,
 	}, nil
 }

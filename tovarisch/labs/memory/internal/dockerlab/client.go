@@ -726,11 +726,24 @@ func (c *Client) ContainerStats(ctx context.Context, containerID string) (*Conta
 	}, nil
 }
 
+// CanaryControlExecResult represents the result of a canary-control exec operation.
+// CORRECTION28: Replaces shell/curl with image-owned canary-control binary.
+type CanaryControlExecResult struct {
+	ExitCode      int
+	Stdout        string
+	Stderr        string
+	HealthValid   bool
+	StateValid    bool
+	WorkloadValid bool
+	State         *CanaryStateFromExec
+	Attempted     int
+	Completed     int
+	Error         error
+}
+
 // CanaryHealthCheckViaExec performs a health check on a canary container
-// using docker exec instead of direct HTTP. This addresses CORRECTION27:
-// Docker bridge networking issues can prevent direct IP access, but
-// `docker exec` always works because it uses the container's own network
-// namespace.
+// using the image-owned canary-control binary via docker exec.
+// CORRECTION28: Eliminates shell/curl dependency by using /app/canary control.
 func (c *Client) CanaryHealthCheckViaExec(ctx context.Context, containerID string, port int, timeout time.Duration) (int, error) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -739,16 +752,17 @@ func (c *Client) CanaryHealthCheckViaExec(ctx context.Context, containerID strin
 			return -1, ctx.Err()
 		default:
 		}
-		// Use curl from inside the container to hit localhost:port
-		exitCode, _, err := c.ContainerExec(ctx, containerID, []string{
-			"sh", "-c",
-			fmt.Sprintf("curl -sf http://localhost:%d/health || curl -sf http://127.0.0.1:%d/health || exit 1", port, port),
+		// Use image-owned canary-control binary - no shell, no curl
+		result := c.CanaryControlExec(ctx, containerID, []string{
+			"/app/canary", "control", "health",
+			"--port", fmt.Sprintf("%d", port),
+			"--timeout", "5s",
 		})
-		if err != nil {
+		if result.Error != nil {
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
-		if exitCode == 0 {
+		if result.ExitCode == 0 && result.HealthValid {
 			return 0, nil
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -756,24 +770,112 @@ func (c *Client) CanaryHealthCheckViaExec(ctx context.Context, containerID strin
 	return -1, fmt.Errorf("timeout waiting for canary health via docker exec")
 }
 
-// CanaryStateViaExec fetches canary state using docker exec and
-// the container's localhost networking. CORRECTION27.
+// CanaryStateViaExec fetches canary state using the image-owned
+// canary-control binary. CORRECTION28: Eliminates shell/curl dependency.
 func (c *Client) CanaryStateViaExec(ctx context.Context, containerID string, port int) (*CanaryStateFromExec, error) {
-	exitCode, output, err := c.ContainerExec(ctx, containerID, []string{
-		"sh", "-c",
-		fmt.Sprintf("curl -sf http://localhost:%d/state || curl -sf http://127.0.0.1:%d/state", port, port),
+	result := c.CanaryControlExec(ctx, containerID, []string{
+		"/app/canary", "control", "state",
+		"--port", fmt.Sprintf("%d", port),
+		"--timeout", "5s",
 	})
-	if err != nil {
-		return nil, fmt.Errorf("exec state: %w", err)
+	if result.Error != nil {
+		return nil, fmt.Errorf("exec state: %w", result.Error)
 	}
-	if exitCode != 0 {
-		return nil, fmt.Errorf("state check failed: exit code %d", exitCode)
+	if result.ExitCode != 0 {
+		return nil, fmt.Errorf("state check failed: exit code %d, stderr: %s", result.ExitCode, result.Stderr)
 	}
-	var state CanaryStateFromExec
-	if err := json.Unmarshal([]byte(output), &state); err != nil {
-		return nil, fmt.Errorf("parse state JSON: %w", err)
+	if result.State == nil {
+		return nil, fmt.Errorf("state check succeeded but state is nil")
 	}
-	return &state, nil
+	return result.State, nil
+}
+
+// CanaryOperateViaExec performs N operations using the image-owned
+// canary-control binary. CORRECTION28: Eliminates shell/curl dependency.
+func (c *Client) CanaryOperateViaExec(ctx context.Context, containerID string, port int, count int, timeout time.Duration) (*CanaryWorkloadResult, error) {
+	result := c.CanaryControlExec(ctx, containerID, []string{
+		"/app/canary", "control", "operate",
+		"--port", fmt.Sprintf("%d", port),
+		"--count", fmt.Sprintf("%d", count),
+		"--timeout", fmt.Sprintf("%ds", int(timeout.Seconds())),
+	})
+	if result.Error != nil {
+		return nil, fmt.Errorf("exec operate: %w", result.Error)
+	}
+	if result.ExitCode != 0 {
+		return nil, fmt.Errorf("operate failed: exit code %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+	if !result.WorkloadValid {
+		return nil, fmt.Errorf("operate response validation failed")
+	}
+	return &CanaryWorkloadResult{
+		Attempted: result.Attempted,
+		Completed: result.Completed,
+	}, nil
+}
+
+// CanaryWorkloadResult represents the result of an operate command.
+type CanaryWorkloadResult struct {
+	Attempted int `json:"attempted"`
+	Completed int `json:"completed"`
+}
+
+// CanaryControlExec runs the canary-control binary inside the container.
+// Uses exact argv execution - no shell, no curl, no wget.
+// CORRECTION28: Tool-independent control plane.
+func (c *Client) CanaryControlExec(ctx context.Context, containerID string, cmd []string) CanaryControlExecResult {
+	result := CanaryControlExecResult{ExitCode: -1}
+
+	// Use ContainerExec to run the exact command
+	exitCode, stdout, err := c.ContainerExec(ctx, containerID, cmd)
+	result.ExitCode = exitCode
+	result.Stdout = stdout
+	result.Error = err
+
+	// Parse stdout based on the command
+	if len(cmd) >= 3 && cmd[2] == "health" {
+		if exitCode == 0 && strings.Contains(stdout, "OK") {
+			result.HealthValid = true
+		}
+	} else if len(cmd) >= 3 && cmd[2] == "state" {
+		if exitCode == 0 {
+			var state CanaryStateFromExec
+			if err := json.Unmarshal([]byte(stdout), &state); err == nil {
+				if state.Mode != "" {
+					result.StateValid = true
+					result.State = &state
+				}
+			}
+		}
+		// Capture stderr if present
+		if err != nil && result.ExitCode != 0 {
+			result.Stderr = err.Error()
+		}
+	} else if len(cmd) >= 3 && cmd[2] == "operate" {
+		if exitCode == 0 && strings.Contains(stdout, "WORKLOAD_VALID") {
+			result.WorkloadValid = true
+			// Parse JSON to extract counts
+			var resp struct {
+				Attempted int `json:"attempted"`
+				Completed int `json:"completed"`
+			}
+			// The operate command outputs both WORKLOAD_VALID and JSON
+			lines := strings.Split(stdout, "\n")
+			for _, line := range lines {
+				if strings.Contains(line, "attempted") {
+					json.Unmarshal([]byte(line), &resp)
+					result.Attempted = resp.Attempted
+					result.Completed = resp.Completed
+					break
+				}
+			}
+		}
+		if err != nil && result.ExitCode != 0 {
+			result.Stderr = err.Error()
+		}
+	}
+
+	return result
 }
 
 // CanaryStateFromExec represents the canary state when fetched via exec.
