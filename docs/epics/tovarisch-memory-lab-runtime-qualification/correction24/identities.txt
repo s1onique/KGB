@@ -1,0 +1,19 @@
+S24=f3f8e7f55bec7c4efe21fbb23758905604804f67
+ST24=07f153615f5988de88492235f7e353bbc07dab56
+S23=7e02636e51e0fb5147e04f716073a1c20a137481
+E23=4b189308057f53b3bed2d675a41297856c3b5060
+ET23=4fb08fa92cd0aecf75a9d35578241b308e86b67d
+
+Helper smoke binary:
+  role: helper_smoke
+  vcs_revision: f3f8e7f55bec7c4efe21fbb23758905604804f67
+  vcs_modified: false
+  source_tree: 07f153615f5988de88492235f7e353bbc07dab56
+  sha256: cf238f2bce6d8e0e9d3bbad08ffcdb59ccd3cf79e642b8743481b71edc2d0da0
+
+Production CLI binary:
+  role: production_cli
+  vcs_revision: f3f8e7f55bec7c4efe21fbb23758905604804f67
+  vcs_modified: false
+  source_tree: 07f153615f5988de88492235f7e353bbc07dab56
+  sha256: 021897b1fe89c65e61cc959814d718edc9bbf6fa4948bb4bba3a9c0c77905979
