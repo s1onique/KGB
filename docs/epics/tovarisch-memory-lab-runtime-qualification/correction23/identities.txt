@@ -1,0 +1,33 @@
+# CORRECTION23 Identities
+
+## Baseline from CORRECTION22
+
+subject_commit: d62a1d72ea654d55a251999dc050cb06b40ffdeb
+subject_tree: c3c57afb02255187a0a2e39ef9cce236f15bba10
+
+evidence_commit: b7794dc7da16e9256b5f69884602acb1f7b78ac9
+evidence_tree: 05efb1c9cb5c5c916a6a10fe8a288782e8f68e67
+
+status: PARTIAL
+
+## Known Mismatches in E22
+
+declared_subject_commit: d62a1d72ea654d55a251999dc050cb06b40ffdeb
+committed_evidence_commit: 01ae545e40e0e5726cdae552e861675cdd7e434b
+
+declared_subject_tree: c3c57afb02255187a0a2e39ef9cce236f15bba10
+committed_evidence_tree: 1626f58349071e8f6d3f034edb0c19c49ee32246
+
+declared_smoke_binary_sha256: 6fcff2dca4698bed0b02ae10edf1734f4582aeb1148aa9cb70e4b3aabf285682
+committed_evidence_executable_sha256: 20dc30a5a432209f2750c35b15e7005c90cf1e6ca8201ba6552be856368cc442
+
+## Script Doctrine Issues
+
+1. bootstrap-missing-baseline: scripts/build_tovarisch_canary_image.sh not in baseline
+2. python-invocation: Lines 50-51 use python3 for JSON parsing
+
+## Original Introducing Commit
+
+scripts/build_tovarisch_canary_image.sh introduced in:
+commit: 0357b80c92b8705ae045b2eebf1517542c93480e
+tree: 4f5c841c4a253020b3ead2b9106af84babfa4a00
