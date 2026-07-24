@@ -114,16 +114,22 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 	}
 
 	// Build provenance from the running controller binary.
-	// Use canonical root resolver.
-	projRoots, err := roots.ResolveProjectRoots(
+	// Use canonical root resolver with explicit env.
+	projRoots, explicitErr := roots.ResolveProjectRoots(
 		os.Getenv("TOVARISCH_REPO_ROOT"),
 		os.Getenv("TOVARISCH_MEMORY_MODULE_ROOT"),
 		"", // no start dir - require explicit env
 	)
-	if err != nil {
+	if explicitErr != nil {
 		// Fall back to searching upward from CWD for development.
-		cwd, _ := os.Getwd()
-		projRoots, _ = roots.ResolveProjectRoots("", "", cwd)
+		cwd, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			t.Fatalf("resolve project roots: explicit resolution failed: %v; cwd failed: %v", explicitErr, cwdErr)
+		}
+		projRoots, explicitErr = roots.ResolveProjectRoots("", "", cwd)
+		if explicitErr != nil {
+			t.Fatalf("resolve project roots: explicit resolution failed: %v; fallback failed: %v", explicitErr, explicitErr)
+		}
 	}
 	cp, err := evidence.CollectControllerProvenance(evidence.ProvenanceOptions{
 		RepoDir:        projRoots.Repository,
