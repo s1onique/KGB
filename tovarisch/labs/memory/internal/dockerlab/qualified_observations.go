@@ -1,11 +1,10 @@
 // qualified_observations.go — Canonical observation object for the
 // qualified execution path.
 //
-// CORRECTION17: the producer populates each field at the operation
-// that actually observes it. No field may be derived from an input
-// value alone. The evidence serializer round-trips the object and
-// the verifier (a) re-derives the derived fields, (b) fails closed
-// for any missing or inconsistent observation.
+// CORRECTION18: the producer populates each field at the operation
+// that actually observes it. The observation object also carries
+// the cleanup-absence and provenance fields required by the
+// serialized verifier and the gate.
 
 package dockerlab
 
@@ -20,8 +19,10 @@ type ProvenanceBinding struct {
 	GitObjectFormat     string `json:"git_object_format"` // "sha1" or "sha256"
 	WorkingTreeDirty    bool   `json:"working_tree_dirty"`
 	SourceCommitDirty   bool   `json:"source_commit_dirty"`
+	VCSModified         bool   `json:"vcs_modified"`
 	DockerServerVersion string `json:"docker_server_version"`
 	ProducerVersion     string `json:"producer_version"`
+	ExecutableSHA256    string `json:"executable_sha256,omitempty"`
 }
 
 // ImageObservations captures the immutable image identity observations.
@@ -36,10 +37,11 @@ type ImageObservations struct {
 
 // NetworkObservations captures the canonical network identity observations.
 type NetworkObservations struct {
-	RequestedName      string `json:"requested_name"`
-	CreateResponseID   string `json:"create_response_id"`
-	InspectResponseID  string `json:"inspected_network_id"`
+	RequestedName       string `json:"requested_name"`
+	CreateResponseID    string `json:"create_response_id"`
+	InspectResponseID   string `json:"inspected_network_id"`
 	ContainerEndpointID string `json:"container_endpoint_network_id"`
+	Removed             bool   `json:"removed"`
 }
 
 // PullObservations captures the pull-audit observations.
@@ -109,7 +111,8 @@ func (o *QualifiedExecutionObservations) SetContainerTerminalState() {
 	o.Container.TerminalStateObserved = true
 }
 
-// SetContainerRemoved marks the container as removed.
+// SetContainerRemoved marks the container as removed (only after
+// proven absence via post-remove inspect).
 func (o *QualifiedExecutionObservations) SetContainerRemoved() {
 	o.Container.Removed = true
 }
@@ -119,6 +122,12 @@ func (o *QualifiedExecutionObservations) SetNetworkCreated(name, createID, inspe
 	o.Network.RequestedName = name
 	o.Network.CreateResponseID = createID
 	o.Network.InspectResponseID = inspectID
+}
+
+// SetNetworkRemoved marks the network as removed (only after proven
+// absence via post-remove inspect).
+func (o *QualifiedExecutionObservations) SetNetworkRemoved() {
+	o.Network.Removed = true
 }
 
 // SetPullAudit records the audit counters.
@@ -142,4 +151,9 @@ func (o *QualifiedExecutionObservations) SetProvenance(commit, tree, format, doc
 func (o *QualifiedExecutionObservations) SetProvenanceDirty(working, commitDirty bool) {
 	o.Provenance.WorkingTreeDirty = working
 	o.Provenance.SourceCommitDirty = commitDirty
+}
+
+// SetVCSModified marks the VCS-modified flag.
+func (o *QualifiedExecutionObservations) SetVCSModified(modified bool) {
+	o.Provenance.VCSModified = modified
 }

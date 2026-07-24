@@ -1,18 +1,23 @@
 // qualified_execution.go — Canonical evidence schema, converter,
 // and serialized verifier for the P0-10 qualified execution path.
 //
-// CORRECTION17:
-//   - The schema includes every authoritative observation
-//     (image, network, pull, container, provenance).
+// CORRECTION18:
+//   - The schema is the presence-aware version. Every required
+//     field is listed in the verifier's required-fields allowlist.
 //   - The producer never copies an input value into an observation
 //     field; the converter translates the dockerlab observation
-//     object (which is populated at the operation that observed
-//     each value) into the canonical evidence schema.
+//     object (populated at the operation that observed each value)
+//     into the canonical evidence schema.
 //   - The independent verifier (a) checks serialized presence for
 //     every required field, (b) re-derives the derived fields
-//     (image.exact_id_match, network.exact_id_match, pass) from the
-//     underlying values, (c) fails closed for any disagreement
-//     between a claimed derived value and the recomputed value.
+//     (image.exact_id_match, network.exact_id_match, pass,
+//     cleanup_complete) from the underlying values, (c) fails
+//     closed for any disagreement between a claimed derived value
+//     and the recomputed value.
+//   - PersistQualifiedExecutionEvidence fails closed on any
+//     semantic or structural verification failure.
+//   - Nested JSON verification uses an explicit allowlist per
+//     object; unknown fields are rejected.
 
 package evidence
 
@@ -34,28 +39,34 @@ import (
 // QualifiedExecutionSchemaVersion is the canonical schema version.
 const QualifiedExecutionSchemaVersion = "1.0.0"
 
+const (
+	gitObjectFormatSHA1   = "sha1"
+	gitObjectFormatSHA256 = "sha256"
+)
+
 // canonicalImageIDPattern is the only accepted exact image ID form.
 var canonicalImageIDPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 // canonicalNetworkIDPattern matches Docker network IDs.
 var canonicalNetworkIDPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// canonicalCommitSHA1 is the Git SHA-1 object format.
-const canonicalCommitSHA1 = "sha1"
+// sha1Hex40 matches 40 lowercase hex characters.
+var sha1Hex40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
-// canonicalCommitSHA256 is the Git SHA-256 object format.
-const canonicalCommitSHA256 = "sha256"
+// sha256Hex64 matches 64 lowercase hex characters.
+var sha256Hex64 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// ImageObservations mirrors dockerlab.ImageObservations. The
-// evidence package keeps its own copy to keep the converter trivial
-// and to avoid dragging dockerlab types into the persisted JSON.
+// sha256HexPattern matches 64 lowercase hex characters (no algorithm prefix).
+var sha256HexPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// ImageObservations mirrors dockerlab.ImageObservations.
 type ImageObservations struct {
-	RequestedReference      string   `json:"requested_reference"`
-	InspectedBeforeCreate   string   `json:"inspected_id_before_create"`
-	InspectedRepoDigests    []string `json:"repo_digests"`
-	CreateRequestImage      string   `json:"create_request_image"`
-	ContainerInspectImage   string   `json:"container_inspect_image_id"`
-	ContainerConfigImage    string   `json:"container_inspect_config_image"`
+	RequestedReference    string   `json:"requested_reference"`
+	InspectedBeforeCreate string   `json:"inspected_id_before_create"`
+	InspectedRepoDigests  []string `json:"repo_digests"`
+	CreateRequestImage    string   `json:"create_request_image"`
+	ContainerInspectImage string   `json:"container_inspect_image_id"`
+	ContainerConfigImage  string   `json:"container_inspect_config_image"`
 }
 
 // NetworkObservations mirrors dockerlab.NetworkObservations.
@@ -64,6 +75,7 @@ type NetworkObservations struct {
 	CreateResponseID    string `json:"create_response_id"`
 	InspectResponseID   string `json:"inspected_network_id"`
 	ContainerEndpointID string `json:"container_endpoint_network_id"`
+	Removed             bool   `json:"removed"`
 }
 
 // PullObservations mirrors dockerlab.PullObservations.
@@ -91,8 +103,10 @@ type ProvenanceBinding struct {
 	GitObjectFormat     string `json:"git_object_format"`
 	WorkingTreeDirty    bool   `json:"working_tree_dirty"`
 	SourceCommitDirty   bool   `json:"source_commit_dirty"`
+	VCSModified         bool   `json:"vcs_modified"`
 	DockerServerVersion string `json:"docker_server_version"`
 	ProducerVersion     string `json:"producer_version"`
+	ExecutableSHA256    string `json:"executable_sha256,omitempty"`
 }
 
 // QualifiedExecutionEvidence is the canonical persisted evidence.
@@ -104,15 +118,15 @@ type QualifiedExecutionEvidence struct {
 	Pull          PullObservations    `json:"pull"`
 	Container     ContainerObservations `json:"container"`
 	Provenance    ProvenanceBinding   `json:"provenance"`
-	ImageExactIDMatch  bool     `json:"image_exact_id_match"`
-	NetworkExactIDMatch bool   `json:"network_exact_id_match"`
-	Pass               bool     `json:"pass"`
-	VerifierErrors     []string `json:"verifier_errors,omitempty"`
+	ImageExactIDMatch  bool `json:"image_exact_id_match"`
+	NetworkExactIDMatch bool `json:"network_exact_id_match"`
+	CleanupComplete   bool `json:"cleanup_complete"`
+	Pass             bool `json:"pass"`
+	VerifierErrors   []string `json:"verifier_errors,omitempty"`
 }
 
 // BuildEvidenceFromObservations translates a dockerlab observation
-// object into the canonical evidence schema. The conversion is
-// purely structural; no observation value is overwritten.
+// object into the canonical evidence schema.
 func BuildEvidenceFromObservations(obs *dockerlab.QualifiedExecutionObservations) *QualifiedExecutionEvidence {
 	if obs == nil {
 		return nil
@@ -134,6 +148,7 @@ func BuildEvidenceFromObservations(obs *dockerlab.QualifiedExecutionObservations
 			CreateResponseID:    cp.Network.CreateResponseID,
 			InspectResponseID:   cp.Network.InspectResponseID,
 			ContainerEndpointID: cp.Network.ContainerEndpointID,
+			Removed:             cp.Network.Removed,
 		},
 		Pull: PullObservations{
 			ObservationAvailable: cp.Pull.ObservationAvailable,
@@ -155,8 +170,10 @@ func BuildEvidenceFromObservations(obs *dockerlab.QualifiedExecutionObservations
 			GitObjectFormat:     cp.Provenance.GitObjectFormat,
 			WorkingTreeDirty:    cp.Provenance.WorkingTreeDirty,
 			SourceCommitDirty:   cp.Provenance.SourceCommitDirty,
+			VCSModified:         cp.Provenance.VCSModified,
 			DockerServerVersion: cp.Provenance.DockerServerVersion,
 			ProducerVersion:     cp.Provenance.ProducerVersion,
+			ExecutableSHA256:    cp.Provenance.ExecutableSHA256,
 		},
 	}
 }
@@ -167,93 +184,24 @@ type VerifyQualifiedExecutionResult struct {
 	Errors []string
 }
 
+// VerificationError carries a list of verifier errors and renders as
+// the joined message. The canonical persistence path uses this
+// type so callers can distinguish "verified OK" from "verifier
+// rejected" from "structural parse error".
+type VerificationError struct {
+	Errors []string
+}
+
+func (e *VerificationError) Error() string {
+	return fmt.Sprintf("qualified execution evidence rejected: %v", e.Errors)
+}
+
 // VerifyQualifiedExecution verifies an in-memory evidence struct.
 func VerifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExecutionResult {
-	return verifyQualifiedExecution(ev, true)
+	return verifyQualifiedExecution(ev)
 }
 
-// VerifyQualifiedExecutionBytes parses and verifies serialized
-// evidence. The verifier rejects:
-//   - malformed JSON
-//   - trailing JSON values
-//   - unknown fields
-//   - missing required fields
-//   - missing nested objects
-//   - inconsistent claimed derived values
-func VerifyQualifiedExecutionBytes(data []byte) (VerifyQualifiedExecutionResult, error) {
-	if len(data) == 0 {
-		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{"evidence bytes are empty"}}, nil
-	}
-	dec := json.NewDecoder(strings.NewReader(string(data)))
-	dec.DisallowUnknownFields()
-	var raw map[string]json.RawMessage
-	if err := dec.Decode(&raw); err != nil {
-		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{fmt.Sprintf("malformed JSON: %v", err)}}, err
-	}
-	// DisallowUnknownFields does not apply to maps; enforce top-level
-	// field allowlist explicitly.
-	allowed := map[string]struct{}{
-		"schema_version": {}, "generated_at": {},
-		"image": {}, "network": {}, "pull": {},
-		"container": {}, "provenance": {},
-		"image_exact_id_match": {}, "network_exact_id_match": {},
-		"pass": {},
-	}
-	for k := range raw {
-		if _, ok := allowed[k]; !ok {
-			return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{
-				fmt.Sprintf("unknown top-level field: %q", k),
-			}}, nil
-		}
-	}
-	// Reject trailing JSON values.
-	var extra any
-	if err := dec.Decode(&extra); err == nil {
-		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{"trailing JSON document"}}, errors.New("trailing JSON document")
-	}
-	// Require the top-level fields to be present.
-	required := []string{
-		"schema_version", "generated_at", "image", "network", "pull",
-		"container", "provenance", "image_exact_id_match",
-		"network_exact_id_match", "pass",
-	}
-	var missing []string
-	for _, k := range required {
-		if _, ok := raw[k]; !ok {
-			missing = append(missing, k)
-		}
-	}
-	if len(missing) > 0 {
-		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{
-			fmt.Sprintf("missing required top-level fields: %v", missing),
-		}}, nil
-	}
-	// Required nested fields. Missing nested objects are an error.
-	if _, ok := raw["image"]; !ok || len(raw["image"]) == 0 {
-		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{"missing image object"}}, nil
-	}
-	if _, ok := raw["network"]; !ok || len(raw["network"]) == 0 {
-		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{"missing network object"}}, nil
-	}
-	if _, ok := raw["pull"]; !ok || len(raw["pull"]) == 0 {
-		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{"missing pull object"}}, nil
-	}
-	if _, ok := raw["container"]; !ok || len(raw["container"]) == 0 {
-		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{"missing container object"}}, nil
-	}
-	if _, ok := raw["provenance"]; !ok || len(raw["provenance"]) == 0 {
-		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{"missing provenance object"}}, nil
-	}
-
-	// Decode into the typed struct, then run the in-memory verifier.
-	var ev QualifiedExecutionEvidence
-	if err := json.Unmarshal(data, &ev); err != nil {
-		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{fmt.Sprintf("decode after structural check: %v", err)}}, err
-	}
-	return verifyQualifiedExecution(&ev, false), nil
-}
-
-func verifyQualifiedExecution(ev *QualifiedExecutionEvidence, fromMemory bool) VerifyQualifiedExecutionResult {
+func verifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExecutionResult {
 	result := VerifyQualifiedExecutionResult{Pass: true}
 	appendErr := func(msg string) {
 		result.Pass = false
@@ -269,12 +217,6 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence, fromMemory bool) V
 	} else if ev.SchemaVersion != QualifiedExecutionSchemaVersion {
 		appendErr(fmt.Sprintf("unsupported schema_version=%q (expected %q)",
 			ev.SchemaVersion, QualifiedExecutionSchemaVersion))
-	}
-	if fromMemory && ev.SchemaVersion == "" {
-		// In-memory verifier does not require every field to be
-		// physically present in JSON, but the values must still
-		// validate. The structural check (from bytes) catches the
-		// missing-field case.
 	}
 
 	// Image validation.
@@ -332,6 +274,9 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence, fromMemory bool) V
 	}
 
 	// Network validation.
+	if strings.TrimSpace(ev.Network.RequestedName) == "" {
+		appendErr("network.requested_name is empty")
+	}
 	if strings.TrimSpace(ev.Network.CreateResponseID) == "" {
 		appendErr("network.create_response_id is empty")
 	}
@@ -340,9 +285,6 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence, fromMemory bool) V
 	}
 	if strings.TrimSpace(ev.Network.ContainerEndpointID) == "" {
 		appendErr("network.container_endpoint_network_id is empty")
-	}
-	if strings.TrimSpace(ev.Network.RequestedName) == "" {
-		appendErr("network.requested_name is empty")
 	}
 	if ev.Network.CreateResponseID != "" {
 		if err := ValidateCanonicalNetworkID(ev.Network.CreateResponseID); err != nil {
@@ -368,7 +310,6 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence, fromMemory bool) V
 				ev.Network.ContainerEndpointID, ev.Network.InspectResponseID))
 		}
 	}
-
 	impliedNetExact := ev.Network.CreateResponseID != "" &&
 		ev.Network.CreateResponseID == ev.Network.InspectResponseID &&
 		ev.Network.InspectResponseID == ev.Network.ContainerEndpointID
@@ -408,7 +349,16 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence, fromMemory bool) V
 		appendErr("container.terminal_state_observed=false")
 	}
 	if !ev.Container.Removed {
-		appendErr("container.removed=false")
+		appendErr("container.removed=false: container cleanup unproven")
+	}
+
+	// Cleanup_complete derived from container.removed AND network.removed.
+	impliedCleanup := ev.Container.Removed && ev.Network.Removed
+	if ev.CleanupComplete && !impliedCleanup {
+		appendErr("cleanup_complete=true but container.removed or network.removed is false")
+	}
+	if ev.Network.Removed {
+		// pass
 	}
 
 	// Provenance validation.
@@ -422,20 +372,29 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence, fromMemory bool) V
 		appendErr("provenance.git_object_format is empty")
 	} else {
 		switch ev.Provenance.GitObjectFormat {
-		case canonicalCommitSHA1:
-			if len(ev.Provenance.SourceCommit) != 40 {
-				appendErr(fmt.Sprintf("provenance.source_commit length=%d, expected 40 for sha1",
-					len(ev.Provenance.SourceCommit)))
+		case gitObjectFormatSHA1:
+			if !sha1Hex40.MatchString(ev.Provenance.SourceCommit) {
+				appendErr(fmt.Sprintf("provenance.source_commit=%q is not 40 lowercase hex characters",
+					ev.Provenance.SourceCommit))
 			}
-		case canonicalCommitSHA256:
-			if len(ev.Provenance.SourceCommit) != 64 {
-				appendErr(fmt.Sprintf("provenance.source_commit length=%d, expected 64 for sha256",
-					len(ev.Provenance.SourceCommit)))
+		case gitObjectFormatSHA256:
+			if !sha256Hex64.MatchString(ev.Provenance.SourceCommit) {
+				appendErr(fmt.Sprintf("provenance.source_commit=%q is not 64 lowercase hex characters",
+					ev.Provenance.SourceCommit))
 			}
 		default:
 			appendErr(fmt.Sprintf("provenance.git_object_format=%q invalid (expected sha1 or sha256)",
 				ev.Provenance.GitObjectFormat))
 		}
+	}
+	if ev.Provenance.VCSModified {
+		appendErr("provenance.vcs_modified=true: VCS reports the build is dirty")
+	}
+	if ev.Provenance.WorkingTreeDirty {
+		appendErr("provenance.working_tree_dirty=true: working tree has uncommitted changes")
+	}
+	if ev.Provenance.SourceCommitDirty {
+		appendErr("provenance.source_commit_dirty=true: source commit is dirty")
 	}
 	if strings.TrimSpace(ev.Provenance.DockerServerVersion) == "" {
 		appendErr("provenance.docker_server_version is empty")
@@ -450,6 +409,176 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence, fromMemory bool) V
 	}
 
 	return result
+}
+
+// RequiredTopLevelFields is the canonical allowlist of top-level
+// keys for the serialized verifier. Missing any of these fails the
+// verifier.
+var RequiredTopLevelFields = []string{
+	"schema_version",
+	"generated_at",
+	"image",
+	"network",
+	"pull",
+	"container",
+	"provenance",
+	"image_exact_id_match",
+	"network_exact_id_match",
+	"cleanup_complete",
+	"pass",
+}
+
+// RequiredImageFields is the canonical allowlist of fields that
+// must be physically present in the image object.
+var RequiredImageFields = []string{
+	"requested_reference",
+	"inspected_id_before_create",
+	"create_request_image",
+	"container_inspect_image_id",
+	"container_inspect_config_image",
+	"repo_digests",
+}
+
+// RequiredNetworkFields is the canonical allowlist of fields that
+// must be physically present in the network object.
+var RequiredNetworkFields = []string{
+	"requested_name",
+	"create_response_id",
+	"inspected_network_id",
+	"container_endpoint_network_id",
+	"removed",
+}
+
+// RequiredPullFields is the canonical allowlist of fields that
+// must be physically present in the pull object.
+var RequiredPullFields = []string{
+	"observation_available",
+	"attempted",
+	"attempt_count",
+}
+
+// RequiredContainerFields is the canonical allowlist of fields
+// that must be physically present in the container object.
+var RequiredContainerFields = []string{
+	"id",
+	"created",
+	"inspected",
+	"started",
+	"terminal_state_observed",
+	"removed",
+}
+
+// RequiredProvenanceFields is the canonical allowlist of fields
+// that must be physically present in the provenance object.
+var RequiredProvenanceFields = []string{
+	"source_commit",
+	"source_tree",
+	"git_object_format",
+	"vcs_modified",
+	"working_tree_dirty",
+	"source_commit_dirty",
+	"docker_server_version",
+	"producer_version",
+}
+
+// VerifyQualifiedExecutionBytes parses and verifies serialized
+// evidence. The verifier rejects malformed JSON, trailing JSON,
+// unknown top-level fields, missing required fields, and any
+// semantic failure. Unknown fields at any nested level are
+// rejected by the strict decoder + per-object allowlist.
+func VerifyQualifiedExecutionBytes(data []byte) (VerifyQualifiedExecutionResult, error) {
+	if len(data) == 0 {
+		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{"evidence bytes are empty"}}, nil
+	}
+	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec.DisallowUnknownFields()
+	var raw map[string]json.RawMessage
+	if err := dec.Decode(&raw); err != nil {
+		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{fmt.Sprintf("malformed JSON: %v", err)}}, err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err == nil {
+		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{"trailing JSON document"}}, errors.New("trailing JSON document")
+	}
+	// Top-level field allowlist.
+	for k := range raw {
+		allowed := false
+		for _, want := range RequiredTopLevelFields {
+			if k == want || k == "verifier_errors" {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{
+				fmt.Sprintf("unknown top-level field: %q", k),
+			}}, nil
+		}
+	}
+	// Top-level presence.
+	for _, k := range RequiredTopLevelFields {
+		if _, ok := raw[k]; !ok {
+			return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{
+				fmt.Sprintf("missing required top-level field: %q", k),
+			}}, nil
+		}
+	}
+	// Nested object presence + per-object allowlist.
+	if err := verifyNestedObject(raw["image"], "image", RequiredImageFields); err != nil {
+		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{err.Error()}}, nil
+	}
+	if err := verifyNestedObject(raw["network"], "network", RequiredNetworkFields); err != nil {
+		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{err.Error()}}, nil
+	}
+	if err := verifyNestedObject(raw["pull"], "pull", RequiredPullFields); err != nil {
+		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{err.Error()}}, nil
+	}
+	if err := verifyNestedObject(raw["container"], "container", RequiredContainerFields); err != nil {
+		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{err.Error()}}, nil
+	}
+	if err := verifyNestedObject(raw["provenance"], "provenance", RequiredProvenanceFields); err != nil {
+		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{err.Error()}}, nil
+	}
+
+	// Decode into the typed struct, then run the in-memory verifier.
+	var ev QualifiedExecutionEvidence
+	if err := json.Unmarshal(data, &ev); err != nil {
+		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{fmt.Sprintf("decode after structural check: %v", err)}}, err
+	}
+	return verifyQualifiedExecution(&ev), nil
+}
+
+// verifyNestedObject checks that a nested JSON object is present
+// and that every key is on the allowlist.
+func verifyNestedObject(raw json.RawMessage, name string, required []string) error {
+	if len(raw) == 0 {
+		return fmt.Errorf("missing %s object", name)
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return fmt.Errorf("decode %s: %w", name, err)
+	}
+	if len(m) == 0 {
+		return fmt.Errorf("missing %s object", name)
+	}
+	for k := range m {
+		ok := false
+		for _, want := range required {
+			if k == want {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return fmt.Errorf("unknown field in %s: %q", name, k)
+		}
+	}
+	for _, k := range required {
+		if _, ok := m[k]; !ok {
+			return fmt.Errorf("missing required field in %s: %q", name, k)
+		}
+	}
+	return nil
 }
 
 // ValidateCanonicalImageID enforces the canonical image ID form.
@@ -474,6 +603,22 @@ func ValidateCanonicalNetworkID(id string) error {
 	return nil
 }
 
+// ValidateSHA1Hex validates a 40-character lowercase hex string.
+func ValidateSHA1Hex(s string) error {
+	if !sha1Hex40.MatchString(s) {
+		return fmt.Errorf("not 40 lowercase hex characters: %q", s)
+	}
+	return nil
+}
+
+// ValidateSHA256Hex validates a 64-character lowercase hex string.
+func ValidateSHA256Hex(s string) error {
+	if !sha256HexPattern.MatchString(s) {
+		return fmt.Errorf("not 64 lowercase hex characters: %q", s)
+	}
+	return nil
+}
+
 // SetDerivedFields computes the derived fields from the underlying
 // values. The producer calls this just before persistence.
 func (ev *QualifiedExecutionEvidence) SetDerivedFields() {
@@ -487,6 +632,7 @@ func (ev *QualifiedExecutionEvidence) SetDerivedFields() {
 		ev.Network.CreateResponseID == ev.Network.InspectResponseID &&
 		ev.Network.InspectResponseID == ev.Network.ContainerEndpointID
 	ev.NetworkExactIDMatch = impliedNet
+	ev.CleanupComplete = ev.Container.Removed && ev.Network.Removed
 }
 
 // ComputeEvidenceSHA256 returns a deterministic SHA-256 of the
@@ -501,6 +647,7 @@ func ComputeEvidenceSHA256(ev *QualifiedExecutionEvidence) (string, error) {
 	cp.Pass = false
 	cp.ImageExactIDMatch = false
 	cp.NetworkExactIDMatch = false
+	cp.CleanupComplete = false
 	cp.GeneratedAt = time.Time{}
 	if cp.Image.InspectedRepoDigests != nil {
 		cp.Image.InspectedRepoDigests = append([]string{}, ev.Image.InspectedRepoDigests...)
@@ -515,7 +662,14 @@ func ComputeEvidenceSHA256(ev *QualifiedExecutionEvidence) (string, error) {
 }
 
 // PersistQualifiedExecutionEvidence writes the canonical evidence
-// atomically and re-verifies the persisted bytes.
+// atomically and re-verifies the persisted bytes. The function
+// fails closed on:
+//   - any in-memory verifier rejection;
+//   - any bytes-verifier rejection (after round-trip);
+//   - any write or read error.
+//
+// On failure, an optional `qualified-execution-evidence.rejected.json`
+// is written for diagnostics; the canonical PASS path is not returned.
 func PersistQualifiedExecutionEvidence(dir string, ev *QualifiedExecutionEvidence) error {
 	if ev == nil {
 		return errors.New("evidence is nil")
@@ -524,9 +678,12 @@ func PersistQualifiedExecutionEvidence(dir string, ev *QualifiedExecutionEvidenc
 		return errors.New("dir is empty")
 	}
 	ev.SetDerivedFields()
-	verify := VerifyQualifiedExecution(ev)
-	ev.Pass = verify.Pass
-	ev.VerifierErrors = verify.Errors
+	memResult := verifyQualifiedExecution(ev)
+	if !memResult.Pass {
+		// Persist a diagnostic copy and return the rejection.
+		_ = writeRejectedDiagnostic(dir, ev, memResult.Errors)
+		return &VerificationError{Errors: memResult.Errors}
+	}
 	if len(ev.Image.InspectedRepoDigests) > 1 {
 		sort.Strings(ev.Image.InspectedRepoDigests)
 	}
@@ -537,15 +694,34 @@ func PersistQualifiedExecutionEvidence(dir string, ev *QualifiedExecutionEvidenc
 	if err := writeFileAtomic(dir+"/qualified-execution-evidence.json", data); err != nil {
 		return err
 	}
-	// Re-verify the persisted bytes to prove round-trip safety.
 	persisted, err := os.ReadFile(dir + "/qualified-execution-evidence.json")
 	if err != nil {
 		return fmt.Errorf("read persisted evidence: %w", err)
 	}
-	if _, err := VerifyQualifiedExecutionBytes(persisted); err != nil {
-		return fmt.Errorf("persisted evidence rejected: %w", err)
+	result, err := VerifyQualifiedExecutionBytes(persisted)
+	if err != nil {
+		return fmt.Errorf("persisted evidence bytes rejected: %w", err)
 	}
+	if !result.Pass {
+		_ = writeRejectedDiagnostic(dir, ev, result.Errors)
+		return &VerificationError{Errors: result.Errors}
+	}
+	ev.Pass = true
+	ev.VerifierErrors = nil
 	return nil
+}
+
+// writeRejectedDiagnostic writes the failed evidence to a separate
+// non-PASS file for diagnostics.
+func writeRejectedDiagnostic(dir string, ev *QualifiedExecutionEvidence, errors []string) error {
+	cp := *ev
+	cp.Pass = false
+	cp.VerifierErrors = errors
+	data, err := json.MarshalIndent(&cp, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(dir+"/qualified-execution-evidence.rejected.json", data)
 }
 
 // writeFileAtomic writes data atomically by writing to a temp file and renaming.
@@ -582,12 +758,8 @@ func writeFileAtomic(path string, data []byte) error {
 	return nil
 }
 
-// removeFile deletes a file via os.Remove.
-func removeFile(path string) error {
-	return os.Remove(path)
-}
+// removeFile is a small helper used by tests to delete a file.
+func removeFile(path string) error { return os.Remove(path) }
 
-// readAll reads a file. Exported via readFile alias in tests.
-func readAll(path string) ([]byte, error) {
-	return os.ReadFile(path)
-}
+// readAll is a small helper used by tests to read a file.
+func readAll(path string) ([]byte, error) { return os.ReadFile(path) }

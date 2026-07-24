@@ -22,7 +22,7 @@ func TestQualifiedRun_NilConfigFailsBeforeDocker(t *testing.T) {
 
 	cfg := ContainerConfig{Name: "test"} // Config is nil
 
-	_, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "", "", cfg)
+	_, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "", cfg)
 	if err == nil {
 		t.Fatal("expected error for nil config")
 	}
@@ -59,7 +59,7 @@ func TestQualifiedRun_CreateReceivesExactNetworkingConfig(t *testing.T) {
 
 	// The runtime creates and inspects the network. The test asserts
 	// the resulting endpoint equals the recorded network ID.
-	result, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "mynetwork", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd00", cfg)
+	result, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "mynetwork", cfg)
 	if err != nil {
 		t.Fatalf("expected success, got: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestQualifiedRun_AcceptsExactDeclaredNetworkSet(t *testing.T) {
 		Config: &container.Config{Image: ""},
 	}
 
-	result, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "mynetwork", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd00", cfg)
+	result, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "mynetwork", cfg)
 	if err != nil {
 		t.Fatalf("expected success, got: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestQualifiedRun_RejectsWrongObservedNetworkID(t *testing.T) {
 		}, nil
 	}
 
-	_, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "mynetwork", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdff", cfg)
+	_, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "mynetwork", cfg)
 	if err == nil {
 		t.Fatal("expected error for wrong network ID")
 	}
@@ -163,7 +163,7 @@ func TestQualifiedRun_OrderedCallsWithNetwork(t *testing.T) {
 		Config: &container.Config{Image: ""},
 	}
 
-	_, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "mynetwork", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd00", cfg)
+	_, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "mynetwork", cfg)
 	if err != nil {
 		t.Fatalf("expected success, got: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestQualifiedRun_OrderedCallsRequiresNetwork(t *testing.T) {
 		Config: &container.Config{Image: ""},
 	}
 
-	_, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "", "", cfg)
+	_, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "", cfg)
 	if err == nil {
 		t.Fatal("expected error for missing qualified network")
 	}
@@ -224,7 +224,7 @@ func TestQualifiedRun_DoesNotMutateCallerImage(t *testing.T) {
 		Config: callerConfig,
 	}
 
-	_, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "mynetwork", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd00", cfg)
+	_, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "mynetwork", cfg)
 	if err != nil {
 		t.Fatalf("expected success, got: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestQualifiedRun_RuntimeCannotMutateCallerConfig(t *testing.T) {
 		c.Entrypoint = newEp
 	}
 
-	_, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "mynetwork", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd00", cfg)
+	_, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "mynetwork", cfg)
 	if err != nil {
 		t.Fatalf("expected success, got: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestQualifiedRun_ImageMismatchTriggersCleanup(t *testing.T) {
 		Config: &container.Config{Image: ""},
 	}
 
-	_, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "mynetwork", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd00", cfg)
+	_, err := qc.ExecuteQualifiedContainer(ctx, "myimage:latest", "mynetwork", cfg)
 	if !errors.Is(err, ErrImageIdentityMismatch) {
 		t.Errorf("expected ErrImageIdentityMismatch, got: %v", err)
 	}

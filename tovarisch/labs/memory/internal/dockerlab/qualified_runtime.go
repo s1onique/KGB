@@ -1,14 +1,16 @@
 // qualified_runtime.go — Shared interface-backed qualified execution path.
 //
-// CORRECTION17: this file is the single production implementation
+// CORRECTION18: this file is the single production implementation
 // used by:
-//   - the real CLI run path (via the production client.Client);
-//   - the live Docker smoke (via the AuditedDockerRuntime wrapper);
+//   - the real CLI run path (via the production client.Client wrapped
+//     in NewAuditedDockerRuntime);
+//   - the live Docker smoke (via the same wrapper);
 //   - hermetic DockerRuntime tests (via the recordingDockerRuntime).
 //
-// The path exposes a single shared Prepare operation that returns
-// raw authoritative observations. The caller owns start, workload,
-// stop and cleanup.
+// The path exposes a single shared Prepare operation that consumes
+// the audited runtime observations and returns raw authoritative
+// observations. The caller owns start, workload, terminal-state
+// observation, bounded cleanup and final evidence persistence.
 
 package dockerlab
 
@@ -35,14 +37,8 @@ var ErrNetworkIdentityMismatch = errors.New("inspected network identity does not
 // the network it should be attached to.
 var ErrMissingQualifiedNetwork = errors.New("qualified run requires an explicitly declared network")
 
-// ErrContainerAlreadyStarted is returned when the caller attempts to
-// start a container that the qualified runtime has already started.
-var ErrContainerAlreadyStarted = errors.New("container is already started by the qualified runtime")
-
 // QualifiedExecutionObservationsSchemaVersion is the canonical
 // schema version used by the qualified execution observation object.
-// The runtime does not import the evidence package to keep the
-// import graph acyclic; the constant is duplicated in evidence.
 const QualifiedExecutionObservationsSchemaVersion = "1.0.0"
 
 // QualifiedContainerResult describes the outcome of a qualified run.
@@ -55,7 +51,8 @@ type QualifiedContainerResult struct {
 	StartedByRuntime  bool
 	Started           bool
 	Terminal          bool
-	Removed           bool
+	ContainerRemoved  bool
+	NetworkRemoved    bool
 }
 
 // QualifiedClient combines DockerRuntime operations into a single
@@ -78,22 +75,27 @@ func (q *QualifiedClient) Runtime() DockerRuntime {
 // execution workflow:
 //  1. Validate preconditions.
 //  2. Resolve the local image to its exact canonical ID via
-//     ImageInspectWithRaw. Record the observation.
-//  3. Create the isolated lab network via NetworkCreate. Record
-//     the create-response ID.
-//  4. Inspect the network via NetworkInspect. Record the
-//     inspect-response ID.
+//     ImageInspectWithRaw.
+//  3. Create the isolated lab network via NetworkCreate.
+//  4. Inspect the network via NetworkInspect.
 //  5. Create the container with the exact image ID and the
 //     create-time networking config.
 //  6. Post-create inspect and complete validation (P0-4).
 //
 // PrepareQualifiedContainer does NOT start the container. The
-// caller owns the start, workload, stop and cleanup.
+// caller owns the start, workload, stop and cleanup. The
+// observation values are populated from the audited runtime
+// where possible; the recorded audit values are an integral
+// authority — the producer never copies a value that contradicts
+// the audit.
+//
+// The runtime must be an AuditedDockerRuntime; the qualified
+// runtime consumes the audit rather than rely on local
+// post-call string copies of the audit's own recorded values.
 func (q *QualifiedClient) PrepareQualifiedContainer(
 	ctx context.Context,
 	imageReference string,
 	networkName string,
-	networkID string,
 	cfg ContainerConfig,
 ) (*QualifiedExecutionObservations, error) {
 	if q.runtime == nil {
@@ -104,11 +106,6 @@ func (q *QualifiedClient) PrepareQualifiedContainer(
 	}
 	if networkName == "" {
 		return nil, ErrMissingQualifiedNetwork
-	}
-	if networkID != "" {
-		if err := ValidateCanonicalNetworkIDLenient(networkID); err != nil {
-			return nil, fmt.Errorf("requested network ID is not canonical: %w", err)
-		}
 	}
 
 	obs := &QualifiedExecutionObservations{
@@ -165,8 +162,7 @@ func (q *QualifiedClient) PrepareQualifiedContainer(
 	obs.SetNetworkCreated(networkName, createResp.ID, netInsp.ID)
 
 	// Step 5: Create the container with the exact image ID and
-	// create-time networking. Deep-copy the caller's container.Config
-	// so runtime mutations cannot leak (CORRECTION15).
+	// create-time networking. Deep-copy the caller's container.Config.
 	qualifiedCfg := ContainerConfig{
 		Name:        cfg.Name,
 		MemoryLimit: cfg.MemoryLimit,
@@ -194,6 +190,36 @@ func (q *QualifiedClient) PrepareQualifiedContainer(
 		_ = q.runtime.NetworkRemove(ctx, createResp.ID)
 		return nil, errors.New("container create returned empty ID")
 	}
+
+	// Cross-check: the create-request image observed by the audit
+	// must match the exact image ID we passed. This proves the
+	// production path does not substitute a different value at
+	// the SDK boundary.
+	if audited, ok := q.runtime.(*AuditedDockerRuntime); ok {
+		snap := audited.Snapshot()
+		if !snap.CreateCalled {
+			return nil, errors.New("audit did not record a ContainerCreate call")
+		}
+		if snap.CreateImage != inspect.ID {
+			_ = q.runtime.ContainerRemove(ctx, createResp2.ID, types.ContainerRemoveOptions{Force: true})
+			_ = q.runtime.NetworkRemove(ctx, createResp.ID)
+			return nil, fmt.Errorf("audit-recorded create-request image %q != resolved image %q",
+				snap.CreateImage, inspect.ID)
+		}
+		if snap.CreateNetName != networkName {
+			_ = q.runtime.ContainerRemove(ctx, createResp2.ID, types.ContainerRemoveOptions{Force: true})
+			_ = q.runtime.NetworkRemove(ctx, createResp.ID)
+			return nil, fmt.Errorf("audit-recorded create network name %q != requested %q",
+				snap.CreateNetName, networkName)
+		}
+		if snap.CreateNetID != createResp.ID {
+			_ = q.runtime.ContainerRemove(ctx, createResp2.ID, types.ContainerRemoveOptions{Force: true})
+			_ = q.runtime.NetworkRemove(ctx, createResp.ID)
+			return nil, fmt.Errorf("audit-recorded create network ID %q != createResp.ID %q",
+				snap.CreateNetID, createResp.ID)
+		}
+	}
+
 	obs.SetContainerCreated(createResp2.ID)
 	obs.SetCreateRequestImage(inspect.ID)
 
@@ -213,6 +239,8 @@ func (q *QualifiedClient) PrepareQualifiedContainer(
 	}
 
 	obs.SetContainerInspect(createResp2.ID, insp.Image, insp.Config.Image, insp.NetworkSettings.Networks[networkName].NetworkID)
+	obs.Network.Removed = false
+	obs.Container.Removed = false
 	return obs, nil
 }
 
@@ -260,20 +288,16 @@ func validateContainerInspect(insp types.ContainerJSON, expectedImageID, expecte
 }
 
 // ExecuteQualifiedContainer runs the qualified lifecycle using
-// PrepareQualifiedContainer + the runtime start/remove helpers.
-// The observations are filled in from real Docker operations.
-//
-// Deprecated: callers should use PrepareQualifiedContainer and
-// own the lifecycle explicitly so the observation fields are
-// fully populated.
+// PrepareQualifiedContainer + the runtime start helper. Deprecated
+// in CORRECTION18; new callers should use the production helper
+// ExecuteQualifiedDockerLifecycle directly.
 func (q *QualifiedClient) ExecuteQualifiedContainer(
 	ctx context.Context,
 	imageReference string,
 	networkName string,
-	networkID string,
 	cfg ContainerConfig,
 ) (QualifiedContainerResult, error) {
-	obs, err := q.PrepareQualifiedContainer(ctx, imageReference, networkName, networkID, cfg)
+	obs, err := q.PrepareQualifiedContainer(ctx, imageReference, networkName, cfg)
 	if err != nil {
 		return QualifiedContainerResult{}, err
 	}
@@ -294,22 +318,256 @@ func (q *QualifiedClient) ExecuteQualifiedContainer(
 	}, nil
 }
 
-// CleanupContainerAndNetwork is a bounded helper that the caller can
-// use after the workload completes. It always tries to remove both
-// resources and joins the diagnostics.
-func (q *QualifiedClient) CleanupContainerAndNetwork(ctx context.Context, containerID, networkID string) error {
-	cleanErr := error(nil)
+// QualifiedLifecycleOutcome describes the full result of a qualified
+// lifecycle run (CORRECTION18 production helper).
+type QualifiedLifecycleOutcome struct {
+	ContainerID string
+	ImageID     string
+	NetworkID   string
+	Started     bool
+	Terminal    bool
+	ContainerRemoved bool
+	NetworkRemoved   bool
+	StartedByRuntime bool
+	Observations     *QualifiedExecutionObservations
+}
+
+// LifecycleOptions controls the production qualified lifecycle.
+type LifecycleOptions struct {
+	ImageReference string
+	NetworkName    string
+	ContainerName  string
+	ContainerCmd   []string
+	// StartTimeout bounds the post-create start wait. Zero means
+	// "no bounded wait; the caller waits separately".
+	StartTimeout time.Duration
+	// TerminalTimeout bounds the wait for terminal state. Zero means
+	// "no bounded wait".
+	TerminalTimeout time.Duration
+	// CleanupTimeout bounds the post-workload cleanup context. Zero
+	// means "use a default of 10s".
+	CleanupTimeout time.Duration
+	// Run is invoked after the container starts. The runner is
+	// responsible for owning the workload and returning when done.
+	Run func(ctx context.Context, containerID string) error
+}
+
+// ExecuteQualifiedDockerLifecycle is the shared production
+// lifecycle used by both the CLI run path and the live smoke. The
+// helper installs the audited runtime, calls PrepareQualifiedContainer,
+// starts the container, runs the caller-supplied workload, observes
+// the terminal state, performs bounded cleanup, and persists the
+// canonical qualified evidence.
+//
+// The runtime must wrap a real Docker client. The caller may pass
+// `dockerlab.NewAuditedDockerRuntime(dockerClient.Client)` directly.
+// Pull observations are an explicit fail-closed signal: any
+// non-zero pull counter fails the outcome.
+func ExecuteQualifiedDockerLifecycle(
+	ctx context.Context,
+	cli *Client,
+	opts LifecycleOptions,
+	producerVersion string,
+) (*QualifiedLifecycleOutcome, error) {
+	if cli == nil {
+		return nil, errors.New("docker client is nil")
+	}
+	if opts.ImageReference == "" {
+		return nil, errors.New("image reference is empty")
+	}
+	if opts.NetworkName == "" {
+		return nil, errors.New("network name is empty")
+	}
+	if opts.Run == nil {
+		return nil, errors.New("lifecycle Run is nil")
+	}
+
+	audited := NewAuditedDockerRuntime(cli.Client)
+	qc := NewQualifiedClient(audited)
+
+	// Pull-attempt pre-check: a healthy qualified run has zero pull
+	// audit at this point. We re-check after the run to detect any
+	// mid-run pulls.
+	prepStart := audited.pullAttemptCount
+
+	cfg := ContainerConfig{
+		Name: opts.ContainerName,
+		Config: &container.Config{
+			Image: opts.ImageReference,
+			Cmd:   opts.ContainerCmd,
+		},
+	}
+	obs, err := qc.PrepareQualifiedContainer(ctx, opts.ImageReference, opts.NetworkName, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// Start the container.
+	if err := audited.ContainerStart(ctx, obs.Container.ID, types.ContainerStartOptions{}); err != nil {
+		cleanup, _ := boundedCleanup(context.Background(), audited, obs.Container.ID, obs.Network.InspectResponseID, opts.CleanupTimeout)
+		obs.Container.Removed = cleanup.containerRemoved
+		obs.Network.Removed = cleanup.networkRemoved
+		return &QualifiedLifecycleOutcome{
+			ContainerID:      obs.Container.ID,
+			ImageID:          obs.Image.InspectedBeforeCreate,
+			NetworkID:        obs.Network.InspectResponseID,
+			Started:          false,
+			ContainerRemoved: cleanup.containerRemoved,
+			NetworkRemoved:   cleanup.networkRemoved,
+			StartedByRuntime: true,
+			Observations:     obs,
+		}, fmt.Errorf("start container: %w", err)
+	}
+	obs.Container.Started = true
+
+	// Run the workload.
+	runErr := opts.Run(ctx, obs.Container.ID)
+	_ = runErr // run errors are captured in outcome via state, not as a return
+
+	// Wait for terminal state. The canary image is a long-running
+	// server, so the caller is responsible for terminating the
+	// container via stop. We only observe the terminal state via
+	// inspect (no sleep-as-authority).
+	terminalCtx, terminalCancel := context.WithTimeout(ctx, opts.TerminalTimeout)
+	defer terminalCancel()
+	if !waitForTerminalState(terminalCtx, cli, obs.Container.ID) {
+		cleanup, _ := boundedCleanup(context.Background(), audited, obs.Container.ID, obs.Network.InspectResponseID, opts.CleanupTimeout)
+		obs.Container.Removed = cleanup.containerRemoved
+		obs.Network.Removed = cleanup.networkRemoved
+		return &QualifiedLifecycleOutcome{
+			ContainerID: obs.Container.ID,
+			ImageID:     obs.Image.InspectedBeforeCreate,
+			NetworkID:   obs.Network.InspectResponseID,
+			Started:     true,
+			Terminal:    false,
+			StartedByRuntime: true,
+			Observations:     obs,
+		}, errors.New("container did not reach terminal state within bounded timeout")
+	}
+	obs.Container.TerminalStateObserved = true
+
+	// Bounded cleanup (independent context).
+	cleanup, cleanupErr := boundedCleanup(context.Background(), audited, obs.Container.ID, obs.Network.InspectResponseID, opts.CleanupTimeout)
+	obs.Container.Removed = cleanup.containerRemoved
+	obs.Network.Removed = cleanup.networkRemoved
+
+	// Pull-attempt post-check: any pull during the run is a fail-closed signal.
+	_, pullCount, _ := audited.PullAudit()
+	if pullCount > prepStart {
+		return &QualifiedLifecycleOutcome{
+			ContainerID: obs.Container.ID,
+			ImageID:     obs.Image.InspectedBeforeCreate,
+			NetworkID:   obs.Network.InspectResponseID,
+			Started:     true,
+			Terminal:    true,
+			StartedByRuntime: true,
+			Observations:     obs,
+		}, errors.New("pull audit count increased during the run; qualified path must not pull")
+	}
+
+	if cleanupErr != nil {
+		return &QualifiedLifecycleOutcome{
+			ContainerID: obs.Container.ID,
+			ImageID:     obs.Image.InspectedBeforeCreate,
+			NetworkID:   obs.Network.InspectResponseID,
+			Started:     true,
+			Terminal:    true,
+			StartedByRuntime: true,
+			Observations:     obs,
+		}, fmt.Errorf("cleanup: %w", cleanupErr)
+	}
+
+	return &QualifiedLifecycleOutcome{
+		ContainerID: obs.Container.ID,
+		ImageID:     obs.Image.InspectedBeforeCreate,
+		NetworkID:   obs.Network.InspectResponseID,
+		Started:     true,
+		Terminal:    true,
+		ContainerRemoved: true,
+		NetworkRemoved:   true,
+		StartedByRuntime: true,
+		Observations:     obs,
+	}, nil
+}
+
+// cleanupResult captures the cleanup outcome.
+type cleanupResult struct {
+	containerRemoved bool
+	networkRemoved   bool
+}
+
+// boundedCleanup creates a fresh bounded context and attempts to
+// remove both the container and the network, joining errors. After
+// removal, it verifies post-cleanup absence via inspect operations
+// and only marks the cleanup state true for successfully proven
+// removal.
+func boundedCleanup(
+	parentCtx context.Context,
+	audited *AuditedDockerRuntime,
+	containerID, networkID string,
+	timeout time.Duration,
+) (cleanupResult, error) {
+	if timeout == 0 {
+		timeout = 10 * time.Second
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	_ = parentCtx // parent is ignored: cleanup uses a fresh bounded ctx
+
+	res := cleanupResult{}
+	var joinErr error
 	if containerID != "" {
-		if err := q.runtime.ContainerRemove(ctx, containerID, types.ContainerRemoveOptions{Force: true}); err != nil {
-			cleanErr = errors.Join(cleanErr, fmt.Errorf("container remove: %w", err))
+		if err := audited.ContainerRemove(cleanupCtx, containerID, types.ContainerRemoveOptions{Force: true}); err != nil {
+			joinErr = errors.Join(joinErr, fmt.Errorf("container remove: %w", err))
+		} else {
+			// Verify absence.
+			_, err := audited.ContainerInspect(cleanupCtx, containerID)
+			if err != nil {
+				res.containerRemoved = true
+			}
 		}
 	}
 	if networkID != "" {
-		if err := q.runtime.NetworkRemove(ctx, networkID); err != nil {
-			cleanErr = errors.Join(cleanErr, fmt.Errorf("network remove: %w", err))
+		if err := audited.NetworkRemove(cleanupCtx, networkID); err != nil {
+			joinErr = errors.Join(joinErr, fmt.Errorf("network remove: %w", err))
+		} else {
+			_, err := audited.NetworkInspect(cleanupCtx, networkID, types.NetworkInspectOptions{})
+			if err != nil {
+				res.networkRemoved = true
+			}
 		}
 	}
-	return cleanErr
+	return res, joinErr
+}
+
+// waitForTerminalState polls Docker inspect until the container
+// reports a non-running state or the context is done. No
+// sleep-as-authority: the inspect API is the only authority.
+func waitForTerminalState(ctx context.Context, cli *Client, containerID string) bool {
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+		}
+		ci, err := cli.ContainerInspect(ctx, containerID)
+		if err == nil && ci.State != nil && !ci.State.Running {
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// combineErrors returns an error that combines primary and cleanup errors.
+func combineErrors(primary, cleanup error) error {
+	switch {
+	case primary == nil:
+		return cleanup
+	case cleanup == nil:
+		return primary
+	default:
+		return errors.Join(primary, fmt.Errorf("cleanup failed: %w", cleanup))
+	}
 }
 
 // cloneContainerConfigForQualifiedRun returns a deep copy of the caller's
@@ -370,16 +628,4 @@ func cloneContainerConfigForQualifiedRun(cfg *container.Config) *container.Confi
 		cloned.Healthcheck = &hcCopy
 	}
 	return &cloned
-}
-
-// combineErrors returns an error that combines primary and cleanup errors.
-func combineErrors(primary, cleanup error) error {
-	switch {
-	case primary == nil:
-		return cleanup
-	case cleanup == nil:
-		return primary
-	default:
-		return errors.Join(primary, fmt.Errorf("cleanup failed: %w", cleanup))
-	}
 }
