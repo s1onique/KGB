@@ -26,6 +26,7 @@ import (
 
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/evidence"
+	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/roots"
 )
 
 const envLiveSmoke = "TOVARISCH_LIVE_DOCKER_SMOKE"
@@ -113,28 +114,26 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 	}
 
 	// Build provenance from the running controller binary.
-	// Prefer explicit repo root from environment (closure mode).
-	repoDir := os.Getenv("TOVARISCH_REPO_ROOT")
-	if repoDir == "" {
-		repoDir, _ = os.Getwd()
-		// Walk up to the repo root by removing the trailing path until
-		// `.git` is found.
-		for dir := repoDir; dir != "/" && dir != "."; dir = parentDir(dir) {
-			if _, err := os.Stat(dir + "/.git"); err == nil {
-				repoDir = dir
-				break
-			}
-		}
+	// Use canonical root resolver.
+	projRoots, err := roots.ResolveProjectRoots(
+		os.Getenv("TOVARISCH_REPO_ROOT"),
+		os.Getenv("TOVARISCH_MEMORY_MODULE_ROOT"),
+		"", // no start dir - require explicit env
+	)
+	if err != nil {
+		// Fall back to searching upward from CWD for development.
+		cwd, _ := os.Getwd()
+		projRoots, _ = roots.ResolveProjectRoots("", "", cwd)
 	}
 	cp, err := evidence.CollectControllerProvenance(evidence.ProvenanceOptions{
-		RepoDir:        repoDir,
+		RepoDir:        projRoots.Repository,
 		ProducerVersion: "qualified-live-smoke/1.0.0",
 	})
 	if err != nil {
 		// Test binaries may not have embedded VCS info. Fall back to a
 		// direct git rev-parse on the working tree (the test must
 		// pass when the source tree is reachable).
-		fallbackCP, ferr := fallbackGitProvenance(repoDir, "qualified-live-smoke/1.0.0")
+		fallbackCP, ferr := fallbackGitProvenance(projRoots.Repository, "qualified-live-smoke/1.0.0")
 		if ferr != nil {
 			t.Fatalf("collect controller provenance: %v; git fallback: %v", err, ferr)
 		}

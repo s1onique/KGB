@@ -23,9 +23,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
+
+	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/roots"
 )
 
 // testVerifierOnce ensures TestMain builds the verifier exactly once
@@ -58,23 +59,26 @@ func TestMain(m *testing.M) {
 // cleaned up implicitly by the OS on process exit.
 func buildOnce() {
 	testVerifierOnce.Do(func() {
-		// Prefer explicit repo root from environment (closure mode).
-		// Fall back to go list for development.
-		var moduleDir string
-		if repoRoot := os.Getenv("TOVARISCH_REPO_ROOT"); repoRoot != "" {
-			moduleDir = repoRoot
-		} else {
-			moduleRoot, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}").Output()
+		// Resolve project roots. Prefer explicit env, fall back to search.
+		projRoots, err := roots.ResolveProjectRoots(
+			os.Getenv("TOVARISCH_REPO_ROOT"),
+			os.Getenv("TOVARISCH_MEMORY_MODULE_ROOT"),
+			"", // no start dir - require explicit or fallback
+		)
+		if err != nil {
+			// Developer fallback: search upward from module directory.
+			// This works when running `go test` from within the repo.
+			cwd, _ := os.Getwd()
+			projRoots, err = roots.ResolveProjectRoots("", "", cwd)
 			if err != nil {
-				testVerifierErr = fmt.Errorf("go list module root: %w", err)
+				testVerifierErr = fmt.Errorf("resolve project roots: %w", err)
 				return
 			}
-			moduleDir = strings.TrimSpace(string(moduleRoot))
 		}
 
 		// The verifier package is cmd/tovarisch-memory-lab relative to
 		// the module root. Build from the package directory.
-		srcDir := filepath.Join(moduleDir, "cmd", "tovarisch-memory-lab")
+		srcDir := projRoots.PackagePath("cmd/tovarisch-memory-lab")
 
 		binDir, err := os.MkdirTemp("", "bounded-verifier-*")
 		if err != nil {

@@ -35,4 +35,5 @@ tovarisch/labs/memory/tovarisch-memory-lab
 .factory/bin/tovarisch-memory-lab
 tovarisch/.factory/bin/tovarisch-memory-lab
 tovarisch/.factory/bin/extract-image-metadata
-*.test
+tovarisch/labs/memory/tovarisch-memory-lab-qualified-smoke.test
+tovarisch/labs/memory/tovarisch-memory-lab-cli
