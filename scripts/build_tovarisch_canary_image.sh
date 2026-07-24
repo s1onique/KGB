@@ -46,9 +46,17 @@ docker build \
   "$BUILD_DIR"
 
 # Capture actual image inspect output (RepoDigests, Id, Labels).
-INSPECT_JSON="$(docker image inspect "$IMAGE_REF" --format '{{json .}}')"
-IMAGE_ID_FROM_INSPECT="$(echo "$INSPECT_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("Id",""))')"
-REPO_DIGESTS_JSON="$(echo "$INSPECT_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get("RepoDigests",[])))')"
+# CORRECTION23: Use Go helper to extract metadata - replaces Python invocation.
+EXTRACT_METADATA="$(mktemp)"
+trap 'rm -f "$EXTRACT_METADATA"' EXIT
+
+if ! .factory/bin/extract-image-metadata "$IMAGE_REF" > "$EXTRACT_METADATA"; then
+  echo "ERROR: failed to extract image metadata for $IMAGE_REF" >&2
+  exit 1
+fi
+
+IMAGE_ID_FROM_INSPECT="$(jq -r '.image_id' "$EXTRACT_METADATA")"
+REPO_DIGESTS_JSON="$(jq -r '.repo_digests' "$EXTRACT_METADATA")"
 
 # Write the build metadata sidecar. The producer reads this,
 # extracts /app/canary from the image, compares hashes, and

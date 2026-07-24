@@ -707,9 +707,16 @@ hulk-uvb76-artifact-producer-gate:
 MEMORY_LAB := .factory/bin/tovarisch-memory-lab
 
 
+# Build extract-image-metadata helper
+# CORRECTION23: Replaces Python JSON parsing in canary image build.
+extract-image-metadata:
+	@mkdir -p .factory/bin
+	cd tovarisch/labs/memory && go build -o ../../.factory/bin/extract-image-metadata ./cmd/extract-image-metadata
+
 # Build the canary image with immutable OCI + kgb.dev labels
 # CORRECTION02 §7: bind the canary binary to the tested source tree.
-tovarisch-memory-lab-canary-image:
+# CORRECTION23: Requires extract-image-metadata helper.
+tovarisch-memory-lab-canary-image: extract-image-metadata
 	@bash scripts/build_tovarisch_canary_image.sh
 
 tovarisch-memory-lab-build:
