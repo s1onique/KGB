@@ -1,21 +1,26 @@
 // qualified_execution.go — Canonical evidence schema, converter,
 // and serialized verifier for the P0-10 qualified execution path.
 //
-// CORRECTION18:
-//   - The schema is the presence-aware version. Every required
-//     field is listed in the verifier's required-fields allowlist.
-//   - The producer never copies an input value into an observation
-//     field; the converter translates the dockerlab observation
-//     object (populated at the operation that observed each value)
-//     into the canonical evidence schema.
-//   - The independent verifier (a) checks serialized presence for
-//     every required field, (b) re-derives the derived fields
-//     (image.exact_id_match, network.exact_id_match, pass,
-//     cleanup_complete) from the underlying values, (c) fails
-//     closed for any disagreement between a claimed derived value
-//     and the recomputed value.
-//   - PersistQualifiedExecutionEvidence fails closed on any
-//     semantic or structural verification failure.
+// CORRECTION22 (this file):
+//   - The verifier is split into THREE independent functions with
+//     distinct responsibilities:
+//       1. verifyUnderlyingObservations(ev) — validates raw
+//          observations ONLY. It does not read or modify the
+//          supplied claim fields (image_exact_id_match,
+//          network_exact_id_match, cleanup_complete, pass,
+//          verifier_errors). It does not call SetDerivedFields.
+//       2. deriveClaims(ev, underlying) — pure function that
+//          computes the four implied claim values from the raw
+//          observations. It does NOT mutate ev.
+//       3. VerifyQualifiedExecution(ev) — the COMPLETE verifier.
+//          It calls (1), then (2), then compares every supplied
+//          claim to the derived value and rejects disagreements.
+//   - PersistQualifiedExecutionEvidence uses the new sequence:
+//     underlying -> derived -> stamp -> marshal -> atomic write
+//     -> read back -> VerifyQualifiedExecutionBytes -> physical
+//     claim checks. The physical claim check requires the
+//     persisted artifact to literally contain pass:true plus the
+//     three derived claim values.
 //   - Nested JSON verification uses an explicit allowlist per
 //     object; unknown fields are rejected.
 
@@ -111,22 +116,28 @@ type ProvenanceBinding struct {
 
 // QualifiedExecutionEvidence is the canonical persisted evidence.
 type QualifiedExecutionEvidence struct {
-	SchemaVersion string              `json:"schema_version"`
-	GeneratedAt   time.Time           `json:"generated_at"`
-	Image         ImageObservations   `json:"image"`
-	Network       NetworkObservations `json:"network"`
-	Pull          PullObservations    `json:"pull"`
+	SchemaVersion string                `json:"schema_version"`
+	GeneratedAt   time.Time             `json:"generated_at"`
+	Image         ImageObservations     `json:"image"`
+	Network       NetworkObservations   `json:"network"`
+	Pull          PullObservations      `json:"pull"`
 	Container     ContainerObservations `json:"container"`
-	Provenance    ProvenanceBinding   `json:"provenance"`
-	ImageExactIDMatch  bool `json:"image_exact_id_match"`
-	NetworkExactIDMatch bool `json:"network_exact_id_match"`
-	CleanupComplete   bool `json:"cleanup_complete"`
-	Pass             bool `json:"pass"`
-	VerifierErrors   []string `json:"verifier_errors,omitempty"`
+	Provenance    ProvenanceBinding     `json:"provenance"`
+
+	// Supplied claims (the producer stamps these after the
+	// verifier authorizes pass=true). The verifier compares them
+	// against deriveClaims.
+	ImageExactIDMatch   bool     `json:"image_exact_id_match"`
+	NetworkExactIDMatch bool     `json:"network_exact_id_match"`
+	CleanupComplete     bool     `json:"cleanup_complete"`
+	Pass                bool     `json:"pass"`
+	VerifierErrors      []string `json:"verifier_errors,omitempty"`
 }
 
 // BuildEvidenceFromObservations translates a dockerlab observation
-// object into the canonical evidence schema.
+// object into the canonical evidence schema. The derived claim
+// fields are NOT populated by this constructor; the producer must
+// call SetDerivedFields or PersistQualifiedExecutionEvidence.
 func BuildEvidenceFromObservations(obs *dockerlab.QualifiedExecutionObservations) *QualifiedExecutionEvidence {
 	if obs == nil {
 		return nil
@@ -196,134 +207,196 @@ func (e *VerificationError) Error() string {
 	return fmt.Sprintf("qualified execution evidence rejected: %v", e.Errors)
 }
 
-// VerifyQualifiedExecution verifies an in-memory evidence struct.
+// VerifyQualifiedExecution is the COMPLETE verifier. It performs
+// three phases:
+//
+//  1. verifyUnderlyingObservations(ev) — independent validator
+//     over raw observations only.
+//  2. deriveClaims(ev, underlying) — pure derivation of the
+//     four implied claim values.
+//  3. Compare every supplied claim against the derived value;
+//     reject every disagreement.
+//
+// The complete verifier never calls SetDerivedFields and never
+// reads the supplied claims during phase 1.
 func VerifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExecutionResult {
-	return verifyQualifiedExecution(ev)
-}
+	if ev == nil {
+		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{"evidence is nil"}}
+	}
+	if ev.SchemaVersion == "" {
+		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{"schema_version is empty"}}
+	}
+	if ev.SchemaVersion != QualifiedExecutionSchemaVersion {
+		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{
+			fmt.Sprintf("unsupported schema_version=%q (expected %q)",
+				ev.SchemaVersion, QualifiedExecutionSchemaVersion),
+		}}
+	}
 
-func verifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExecutionResult {
+	// Phase 1: independent validator over raw observations.
+	underlying := verifyUnderlyingObservations(ev)
+	if !underlying.Pass {
+		return underlying
+	}
+
+	// Phase 2: derive the implied claim values from the raw
+	// observations. The function is pure and does not mutate ev.
+	derived := deriveClaims(ev, underlying)
+
+	// Phase 3: compare every supplied claim against the derived
+	// value. Any disagreement is a fail-closed signal.
 	result := VerifyQualifiedExecutionResult{Pass: true}
 	appendErr := func(msg string) {
 		result.Pass = false
 		result.Errors = append(result.Errors, msg)
 	}
+	if ev.ImageExactIDMatch != derived.ImageExactIDMatch {
+		appendErr(fmt.Sprintf("image_exact_id_match mismatch: claimed=%v derived=%v",
+			ev.ImageExactIDMatch, derived.ImageExactIDMatch))
+	}
+	if ev.NetworkExactIDMatch != derived.NetworkExactIDMatch {
+		appendErr(fmt.Sprintf("network_exact_id_match mismatch: claimed=%v derived=%v",
+			ev.NetworkExactIDMatch, derived.NetworkExactIDMatch))
+	}
+	if ev.CleanupComplete != derived.CleanupComplete {
+		appendErr(fmt.Sprintf("cleanup_complete mismatch: claimed=%v derived=%v",
+			ev.CleanupComplete, derived.CleanupComplete))
+	}
+	if ev.Pass != derived.Pass {
+		appendErr(fmt.Sprintf("pass mismatch: claimed=%v derived=%v",
+			ev.Pass, derived.Pass))
+	}
+	// VerifierErrors must be empty for a passing artifact.
+	if len(ev.VerifierErrors) > 0 {
+		appendErr(fmt.Sprintf("verifier_errors is non-empty on a passing artifact: %v", ev.VerifierErrors))
+	}
+	return result
+}
 
+// verifyUnderlyingObservations validates the raw observations
+// only. It MUST NOT read or modify any of the supplied claim
+// fields:
+//
+//	image_exact_id_match
+//	network_exact_id_match
+//	cleanup_complete
+//	pass
+//	verifier_errors
+//
+// The function returns a VerifyQualifiedExecutionResult that
+// reflects ONLY the consistency of the raw observations.
+//
+// Required semantics (CORRECTION22 P0-1):
+//
+//   - Image: requested_reference non-empty; inspected_id_before_create,
+//     create_request_image, container_inspect_image_id, and
+//     container_inspect_config_image are all canonical; precreate ==
+//     create_request == container_inspect == container_config.
+//   - Network: requested_name non-empty; create_response_id,
+//     inspected_network_id, and container_endpoint_network_id
+//     are all canonical; create == inspect == endpoint.
+//   - Pull: observation_available==true; attempted==false;
+//     attempt_count==0; last_reference=="".
+//   - Container & cleanup: container.id non-empty; created,
+//     inspected, started, terminal_state_observed, container.removed,
+//     network.removed all true.
+//   - Provenance: source_commit and source_tree canonical for the
+//     declared git_object_format; vcs_modified, working_tree_dirty,
+//     source_commit_dirty all false; docker_server_version and
+//     producer_version non-empty; executable_sha256 is exactly
+//     64 lowercase hex characters.
+func verifyUnderlyingObservations(ev *QualifiedExecutionEvidence) VerifyQualifiedExecutionResult {
+	result := VerifyQualifiedExecutionResult{Pass: true}
+	appendErr := func(msg string) {
+		result.Pass = false
+		result.Errors = append(result.Errors, msg)
+	}
 	if ev == nil {
 		appendErr("evidence is nil")
 		return result
 	}
-	if ev.SchemaVersion == "" {
-		appendErr("schema_version is empty")
-	} else if ev.SchemaVersion != QualifiedExecutionSchemaVersion {
-		appendErr(fmt.Sprintf("unsupported schema_version=%q (expected %q)",
-			ev.SchemaVersion, QualifiedExecutionSchemaVersion))
-	}
 
-	// Image validation.
+	// -- Image observations ----------------------------------------
 	if strings.TrimSpace(ev.Image.RequestedReference) == "" {
 		appendErr("image.requested_reference is empty")
 	}
 	if strings.TrimSpace(ev.Image.InspectedBeforeCreate) == "" {
 		appendErr("image.inspected_id_before_create is empty")
+	} else if err := ValidateCanonicalImageID(ev.Image.InspectedBeforeCreate); err != nil {
+		appendErr(fmt.Sprintf("image.inspected_id_before_create invalid: %v", err))
 	}
-	if ev.Image.InspectedBeforeCreate != "" {
-		if err := ValidateCanonicalImageID(ev.Image.InspectedBeforeCreate); err != nil {
-			appendErr(fmt.Sprintf("image.inspected_id_before_create invalid: %v", err))
-		}
+	if strings.TrimSpace(ev.Image.CreateRequestImage) == "" {
+		appendErr("image.create_request_image is empty")
+	} else if err := ValidateCanonicalImageID(ev.Image.CreateRequestImage); err != nil {
+		appendErr(fmt.Sprintf("image.create_request_image invalid: %v", err))
 	}
-	if ev.Image.CreateRequestImage != "" {
-		if err := ValidateCanonicalImageID(ev.Image.CreateRequestImage); err != nil {
-			appendErr(fmt.Sprintf("image.create_request_image invalid: %v", err))
-		}
-	}
-	if ev.Image.RequestedReference != "" && ev.Image.CreateRequestImage != "" {
+	if ev.Image.CreateRequestImage != "" && ev.Image.RequestedReference != "" {
 		if ev.Image.CreateRequestImage == ev.Image.RequestedReference {
 			appendErr("create request image is the original mutable tag/reference")
 		}
 	}
 	if ev.Image.InspectedBeforeCreate != "" && ev.Image.CreateRequestImage != "" {
 		if ev.Image.InspectedBeforeCreate != ev.Image.CreateRequestImage {
-			appendErr(fmt.Sprintf("image mismatch: inspected_id_before_create=%q != create_request_image=%q",
+			appendErr(fmt.Sprintf("image precreate!=create_request: inspected=%q create=%q",
 				ev.Image.InspectedBeforeCreate, ev.Image.CreateRequestImage))
 		}
 	}
-	if ev.Image.ContainerInspectImage != "" {
+	if ev.Image.ContainerInspectImage == "" {
+		appendErr("image.container_inspect_image_id is empty")
+	} else {
 		if err := ValidateCanonicalImageID(ev.Image.ContainerInspectImage); err != nil {
 			appendErr(fmt.Sprintf("image.container_inspect_image_id invalid: %v", err))
-		} else if ev.Image.ContainerInspectImage != ev.Image.CreateRequestImage {
-			appendErr(fmt.Sprintf("image mismatch: container_inspect_image_id=%q != create_request_image=%q",
+		}
+		if ev.Image.CreateRequestImage != "" && ev.Image.ContainerInspectImage != ev.Image.CreateRequestImage {
+			appendErr(fmt.Sprintf("image container_inspect!=create_request: container=%q create=%q",
 				ev.Image.ContainerInspectImage, ev.Image.CreateRequestImage))
 		}
 	}
-	if ev.Image.ContainerConfigImage != "" {
+	if ev.Image.ContainerConfigImage == "" {
+		appendErr("image.container_inspect_config_image is empty")
+	} else {
 		if err := ValidateCanonicalImageID(ev.Image.ContainerConfigImage); err != nil {
 			appendErr(fmt.Sprintf("image.container_inspect_config_image invalid: %v", err))
-		} else if ev.Image.ContainerConfigImage != ev.Image.CreateRequestImage {
-			appendErr(fmt.Sprintf("image mismatch: container_inspect_config_image=%q != create_request_image=%q",
+		}
+		if ev.Image.CreateRequestImage != "" && ev.Image.ContainerConfigImage != ev.Image.CreateRequestImage {
+			appendErr(fmt.Sprintf("image container_config!=create_request: config=%q create=%q",
 				ev.Image.ContainerConfigImage, ev.Image.CreateRequestImage))
 		}
 	}
 
-	var impliedImageExact = ev.Image.InspectedBeforeCreate != "" &&
-		ev.Image.InspectedBeforeCreate == ev.Image.CreateRequestImage &&
-		ev.Image.CreateRequestImage != "" &&
-		ev.Image.CreateRequestImage == ev.Image.ContainerInspectImage &&
-		ev.Image.CreateRequestImage == ev.Image.ContainerConfigImage
-	if ev.ImageExactIDMatch && !impliedImageExact {
-		appendErr("image_exact_id_match=true but the underlying image values disagree")
-	}
-	if ev.ImageExactIDMatch != impliedImageExact {
-		appendErr(fmt.Sprintf("image_exact_id_match mismatch: claimed=%v implied=%v", ev.ImageExactIDMatch, impliedImageExact))
-	}
-
-	// Network validation.
+	// -- Network observations --------------------------------------
 	if strings.TrimSpace(ev.Network.RequestedName) == "" {
 		appendErr("network.requested_name is empty")
 	}
 	if strings.TrimSpace(ev.Network.CreateResponseID) == "" {
 		appendErr("network.create_response_id is empty")
+	} else if err := ValidateCanonicalNetworkID(ev.Network.CreateResponseID); err != nil {
+		appendErr(fmt.Sprintf("network.create_response_id invalid: %v", err))
 	}
 	if strings.TrimSpace(ev.Network.InspectResponseID) == "" {
 		appendErr("network.inspected_network_id is empty")
-	}
-	if strings.TrimSpace(ev.Network.ContainerEndpointID) == "" {
-		appendErr("network.container_endpoint_network_id is empty")
-	}
-	if ev.Network.CreateResponseID != "" {
-		if err := ValidateCanonicalNetworkID(ev.Network.CreateResponseID); err != nil {
-			appendErr(fmt.Sprintf("network.create_response_id invalid: %v", err))
-		}
-	}
-	if ev.Network.InspectResponseID != "" {
+	} else {
 		if err := ValidateCanonicalNetworkID(ev.Network.InspectResponseID); err != nil {
 			appendErr(fmt.Sprintf("network.inspected_network_id invalid: %v", err))
 		}
-	}
-	if ev.Network.CreateResponseID != "" && ev.Network.InspectResponseID != "" {
-		if ev.Network.CreateResponseID != ev.Network.InspectResponseID {
-			appendErr(fmt.Sprintf("network mismatch: create_response_id=%q != inspected_network_id=%q",
+		if ev.Network.CreateResponseID != "" && ev.Network.InspectResponseID != ev.Network.CreateResponseID {
+			appendErr(fmt.Sprintf("network create!=inspect: create=%q inspect=%q",
 				ev.Network.CreateResponseID, ev.Network.InspectResponseID))
 		}
 	}
-	if ev.Network.ContainerEndpointID != "" {
+	if strings.TrimSpace(ev.Network.ContainerEndpointID) == "" {
+		appendErr("network.container_endpoint_network_id is empty")
+	} else {
 		if err := ValidateCanonicalNetworkID(ev.Network.ContainerEndpointID); err != nil {
 			appendErr(fmt.Sprintf("network.container_endpoint_network_id invalid: %v", err))
-		} else if ev.Network.ContainerEndpointID != ev.Network.InspectResponseID {
-			appendErr(fmt.Sprintf("network mismatch: container_endpoint_network_id=%q != inspected_network_id=%q",
+		}
+		if ev.Network.InspectResponseID != "" && ev.Network.ContainerEndpointID != ev.Network.InspectResponseID {
+			appendErr(fmt.Sprintf("network endpoint!=inspect: endpoint=%q inspect=%q",
 				ev.Network.ContainerEndpointID, ev.Network.InspectResponseID))
 		}
 	}
-	var impliedNetExact = ev.Network.CreateResponseID != "" &&
-		ev.Network.CreateResponseID == ev.Network.InspectResponseID &&
-		ev.Network.InspectResponseID == ev.Network.ContainerEndpointID
-	if ev.NetworkExactIDMatch && !impliedNetExact {
-		appendErr("network_exact_id_match=true but the underlying network values disagree")
-	}
-	if ev.NetworkExactIDMatch != impliedNetExact {
-		appendErr(fmt.Sprintf("network_exact_id_match mismatch: claimed=%v implied=%v", ev.NetworkExactIDMatch, impliedNetExact))
-	}
 
-	// Pull validation.
+	// -- Pull observations -----------------------------------------
 	if !ev.Pull.ObservationAvailable {
 		appendErr("pull.observation_available is false: the audit was not installed")
 	}
@@ -337,8 +410,12 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExe
 	if ev.Pull.AttemptCount < 0 {
 		appendErr("pull.attempt_count is negative: pull observation is corrupted")
 	}
+	if ev.Pull.LastReference != "" {
+		appendErr(fmt.Sprintf("pull.last_reference=%q must be empty when no pull is attempted",
+			ev.Pull.LastReference))
+	}
 
-	// Container validation.
+	// -- Container observations ------------------------------------
 	if strings.TrimSpace(ev.Container.ID) == "" {
 		appendErr("container.id is empty")
 	}
@@ -361,16 +438,7 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExe
 		appendErr("network.removed=false: network cleanup unproven")
 	}
 
-	// Cleanup_complete derived from container.removed AND network.removed.
-	impliedCleanup := ev.Container.Removed && ev.Network.Removed
-	if ev.CleanupComplete && !impliedCleanup {
-		appendErr("cleanup_complete=true but container.removed or network.removed is false")
-	}
-	if ev.CleanupComplete != impliedCleanup {
-		appendErr(fmt.Sprintf("cleanup_complete mismatch: claimed=%v implied=%v", ev.CleanupComplete, impliedCleanup))
-	}
-
-	// Provenance validation.
+	// -- Provenance observations ------------------------------------
 	if strings.TrimSpace(ev.Provenance.SourceCommit) == "" {
 		appendErr("provenance.source_commit is empty")
 	}
@@ -386,10 +454,18 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExe
 				appendErr(fmt.Sprintf("provenance.source_commit=%q is not 40 lowercase hex characters",
 					ev.Provenance.SourceCommit))
 			}
+			if !sha1Hex40.MatchString(ev.Provenance.SourceTree) {
+				appendErr(fmt.Sprintf("provenance.source_tree=%q is not 40 lowercase hex characters",
+					ev.Provenance.SourceTree))
+			}
 		case gitObjectFormatSHA256:
 			if !sha256Hex64.MatchString(ev.Provenance.SourceCommit) {
 				appendErr(fmt.Sprintf("provenance.source_commit=%q is not 64 lowercase hex characters",
 					ev.Provenance.SourceCommit))
+			}
+			if !sha256Hex64.MatchString(ev.Provenance.SourceTree) {
+				appendErr(fmt.Sprintf("provenance.source_tree=%q is not 64 lowercase hex characters",
+					ev.Provenance.SourceTree))
 			}
 		default:
 			appendErr(fmt.Sprintf("provenance.git_object_format=%q invalid (expected sha1 or sha256)",
@@ -417,12 +493,53 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExe
 		appendErr(fmt.Sprintf("provenance.executable_sha256 invalid: %v", err))
 	}
 
-	// The Pass claim must agree with the absence of errors.
-	if ev.Pass && len(result.Errors) > 0 {
-		appendErr("pass=true but authoritative observations are missing or inconsistent")
-	}
-
 	return result
+}
+
+// DerivedClaims holds the implied claim values computed from the
+// raw observations. The derivation is pure: it does not mutate ev.
+//
+//   - ImageExactIDMatch: every one of the four exact image IDs
+//     (precreate, create_request, container_inspect_image,
+//     container_inspect_config_image) is non-empty and equal.
+//   - NetworkExactIDMatch: the three network IDs (create, inspect,
+//     endpoint) are non-empty and equal.
+//   - CleanupComplete: container.removed && network.removed.
+//   - Pass: underlying.Pass && ImageExactIDMatch && NetworkExactIDMatch
+//     && CleanupComplete.
+type DerivedClaims struct {
+	ImageExactIDMatch   bool
+	NetworkExactIDMatch bool
+	CleanupComplete     bool
+	Pass                bool
+}
+
+// deriveClaims is a pure function. It reads ev to compute the
+// implied claim values and never mutates ev or the underlying
+// result. The caller MUST treat the underlying result as
+// authoritative for the raw-observation layer.
+func deriveClaims(ev *QualifiedExecutionEvidence, underlying VerifyQualifiedExecutionResult) DerivedClaims {
+	impliedImage := ev != nil &&
+		ev.Image.InspectedBeforeCreate != "" &&
+		ev.Image.InspectedBeforeCreate == ev.Image.CreateRequestImage &&
+		ev.Image.CreateRequestImage == ev.Image.ContainerInspectImage &&
+		ev.Image.CreateRequestImage == ev.Image.ContainerConfigImage
+
+	impliedNet := ev != nil &&
+		ev.Network.CreateResponseID != "" &&
+		ev.Network.CreateResponseID == ev.Network.InspectResponseID &&
+		ev.Network.InspectResponseID == ev.Network.ContainerEndpointID
+
+	impliedCleanup := ev != nil &&
+		ev.Container.Removed && ev.Network.Removed
+
+	impliedPass := underlying.Pass && impliedImage && impliedNet && impliedCleanup
+	return DerivedClaims{
+		ImageExactIDMatch:   impliedImage,
+		NetworkExactIDMatch: impliedNet,
+		CleanupComplete:     impliedCleanup,
+		Pass:                impliedPass,
+	}
 }
 
 // RequiredTopLevelFields is the canonical allowlist of top-level
@@ -560,7 +677,7 @@ func VerifyQualifiedExecutionBytes(data []byte) (VerifyQualifiedExecutionResult,
 	if err := json.Unmarshal(data, &ev); err != nil {
 		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{fmt.Sprintf("decode after structural check: %v", err)}}, err
 	}
-	return verifyQualifiedExecution(&ev), nil
+	return VerifyQualifiedExecution(&ev), nil
 }
 
 // verifyNestedObject checks that a nested JSON object is present
@@ -635,8 +752,13 @@ func ValidateSHA256Hex(s string) error {
 }
 
 // SetDerivedFields computes the derived fields from the underlying
-// values. The producer calls this just before persistence.
+// values. The producer calls this just before persistence or as
+// part of a convenience wrapper; the persistence path itself uses
+// deriveClaims to avoid touching the supplied claims directly.
 func (ev *QualifiedExecutionEvidence) SetDerivedFields() {
+	if ev == nil {
+		return
+	}
 	impliedImage := ev.Image.InspectedBeforeCreate != "" &&
 		ev.Image.InspectedBeforeCreate == ev.Image.CreateRequestImage &&
 		ev.Image.CreateRequestImage != "" &&
@@ -648,6 +770,9 @@ func (ev *QualifiedExecutionEvidence) SetDerivedFields() {
 		ev.Network.InspectResponseID == ev.Network.ContainerEndpointID
 	ev.NetworkExactIDMatch = impliedNet
 	ev.CleanupComplete = ev.Container.Removed && ev.Network.Removed
+	// Pass is left to the persistence path: the verifier authorizes
+	// pass=true after the underlying validator succeeds and the
+	// derived claims agree with the supplied claims.
 }
 
 // ComputeEvidenceSHA256 returns a deterministic SHA-256 of the
@@ -679,14 +804,20 @@ func ComputeEvidenceSHA256(ev *QualifiedExecutionEvidence) (string, error) {
 // PersistQualifiedExecutionEvidence writes the canonical evidence
 // atomically and re-verifies the persisted bytes. The function
 // fails closed on:
+//
 //   - any in-memory verifier rejection;
 //   - any bytes-verifier rejection (after round-trip);
 //   - any write or read error;
-//   - the persisted artifact not physically containing pass:true.
+//   - the persisted artifact not physically containing pass:true
+//     plus the three derived claim values.
 //
-// The producer stamps the derived fields and explicitly sets
-// Pass=true before marshalling; the persisted JSON is parsed and
-// required to contain pass=true plus the derived field values.
+// Persistence sequence (CORRECTION22 P0-4):
+//
+//  1. validate underlying observations;
+//  2. derive expected claims;
+//  3. compare supplied claims to derived;
+//  4. reject any disagreement;
+//  5. return pass only when the supplied artifact is internally truthful.
 func PersistQualifiedExecutionEvidence(dir string, ev *QualifiedExecutionEvidence) error {
 	if ev == nil {
 		return errors.New("evidence is nil")
@@ -694,17 +825,53 @@ func PersistQualifiedExecutionEvidence(dir string, ev *QualifiedExecutionEvidenc
 	if dir == "" {
 		return errors.New("dir is empty")
 	}
-	ev.SetDerivedFields()
-	preStamp := verifyUnderlyingObservations(ev)
-	if !preStamp.Pass {
-		_ = writeRejectedDiagnostic(dir, ev, preStamp.Errors)
-		return &VerificationError{Errors: preStamp.Errors}
+
+	// Phase 1: independent validator over raw observations.
+	underlying := verifyUnderlyingObservations(ev)
+	if !underlying.Pass {
+		_ = writeRejectedDiagnostic(dir, ev, underlying.Errors)
+		return &VerificationError{Errors: underlying.Errors}
 	}
-	ev.Pass = true
+
+	// Phase 2: pure claim derivation.
+	derived := deriveClaims(ev, underlying)
+
+	// Phase 3 + 4 + 5: complete verifier authorizes pass=true.
+	if !derived.Pass {
+		_ = writeRejectedDiagnostic(dir, ev, []string{
+			"derived pass=false; supplied claims disagree with raw observations",
+		})
+		return &VerificationError{Errors: []string{
+			"derived pass=false; supplied claims disagree with raw observations",
+		}}
+	}
+	if ev.ImageExactIDMatch != derived.ImageExactIDMatch ||
+		ev.NetworkExactIDMatch != derived.NetworkExactIDMatch ||
+		ev.CleanupComplete != derived.CleanupComplete {
+		_ = writeRejectedDiagnostic(dir, ev, []string{
+			"supplied derived claims do not match the recomputed values",
+		})
+		return &VerificationError{Errors: []string{
+			"supplied derived claims do not match the recomputed values",
+		}}
+	}
+
+	// Stamp the supplied claims with the derived values and pass=true.
+	ev.ImageExactIDMatch = derived.ImageExactIDMatch
+	ev.NetworkExactIDMatch = derived.NetworkExactIDMatch
+	ev.CleanupComplete = derived.CleanupComplete
+	ev.Pass = derived.Pass
 	ev.VerifierErrors = nil
 	if len(ev.Image.InspectedRepoDigests) > 1 {
 		sort.Strings(ev.Image.InspectedRepoDigests)
 	}
+
+	memoryResult := VerifyQualifiedExecution(ev)
+	if !memoryResult.Pass {
+		_ = writeRejectedDiagnostic(dir, ev, memoryResult.Errors)
+		return &VerificationError{Errors: memoryResult.Errors}
+	}
+
 	data, err := json.MarshalIndent(ev, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal evidence: %w", err)
@@ -724,48 +891,33 @@ func PersistQualifiedExecutionEvidence(dir string, ev *QualifiedExecutionEvidenc
 		_ = writeRejectedDiagnostic(dir, ev, result.Errors)
 		return &VerificationError{Errors: result.Errors}
 	}
+
 	// CORRECTION20 P0-8: require the physical document to contain
-	// pass:true plus the derived fields. The bytes verifier is the
-	// only authority for the artifact claim.
+	// pass:true plus the derived field values. The bytes verifier is
+	// the only authority for the artifact claim.
 	var persistedDoc QualifiedExecutionEvidence
 	if err := json.Unmarshal(persisted, &persistedDoc); err != nil {
 		return fmt.Errorf("unmarshal persisted evidence: %w", err)
 	}
-	if !persistedDoc.Pass || !persistedDoc.ImageExactIDMatch || !persistedDoc.NetworkExactIDMatch || !persistedDoc.CleanupComplete {
+	if !persistedDoc.Pass ||
+		!persistedDoc.ImageExactIDMatch ||
+		!persistedDoc.NetworkExactIDMatch ||
+		!persistedDoc.CleanupComplete {
 		return &VerificationError{Errors: []string{
-		fmt.Sprintf("persisted artifact lacks required pass/derived fields: pass=%v image=%v network=%v cleanup=%v",
-			persistedDoc.Pass, persistedDoc.ImageExactIDMatch, persistedDoc.NetworkExactIDMatch, persistedDoc.CleanupComplete),
+			fmt.Sprintf("persisted artifact lacks required pass/derived fields: pass=%v image=%v network=%v cleanup=%v",
+				persistedDoc.Pass, persistedDoc.ImageExactIDMatch,
+				persistedDoc.NetworkExactIDMatch, persistedDoc.CleanupComplete),
 		}}
 	}
 	return nil
 }
 
-// verifyUnderlyingObservations runs the verifier over the
-// underlying observations without trusting the pass/derived field
-// claims. The producer calls this to confirm the underlying state is
-// valid before stamping pass=true.
-func verifyUnderlyingObservations(ev *QualifiedExecutionEvidence) VerifyQualifiedExecutionResult {
-	result := VerifyQualifiedExecutionResult{Pass: true}
-	appendErr := func(msg string) {
-		result.Pass = false
-		result.Errors = append(result.Errors, msg)
-	}
-	if ev == nil {
-		appendErr("evidence is nil")
-		return result
-	}
-	// Reuse the in-memory verifier but ignore ev.Pass (we check it later).
-	tmp := *ev
-	tmp.Pass = false
-	tmp.ImageExactIDMatch = false
-	tmp.NetworkExactIDMatch = false
-	tmp.CleanupComplete = false
-	return verifyQualifiedExecution(&tmp)
-}
-
 // writeRejectedDiagnostic writes the failed evidence to a separate
 // non-PASS file for diagnostics.
 func writeRejectedDiagnostic(dir string, ev *QualifiedExecutionEvidence, errors []string) error {
+	if ev == nil {
+		return nil
+	}
 	cp := *ev
 	cp.Pass = false
 	cp.VerifierErrors = errors

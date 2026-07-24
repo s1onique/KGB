@@ -29,7 +29,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/analysis"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/evidence"
@@ -119,6 +118,22 @@ func run(args []string) error {
 	}
 }
 
+// workloadArtifacts holds the data the workload callback produces
+// and that the outer runCommand needs to compute the verdict.
+// Captured by closure; the Run callback writes them via shared
+// pointer.
+type workloadArtifacts struct {
+	InitialState   *CanaryState
+	FinalState     *CanaryState
+	WorkloadResult *WorkloadResult
+	Samples        []sampling.Sample
+	Events         []sampling.Event
+	PhaseConfig    sampling.PhaseConfig
+	PhaseValid     bool
+	WorkloadValid  bool
+	IdentityStable bool
+}
+
 func runCommand(args []string) error {
 	fs := flag.NewFlagSet("memory-lab run", flag.ContinueOnError)
 	fs.Usage = func() {
@@ -174,22 +189,21 @@ func runCommand(args []string) error {
 		fmt.Printf("Docker %s (API %s)\n", dockerInfo.Version, dockerClient.ClientVersion())
 	}
 
-	// P0-10 CORRECTION02: Resolve descriptive reference to exact image ID exactly once
-	// Use ResolveImageIdentity - NEVER ImagePull in qualified paths
+	// P0-10 CORRECTION02: Resolve descriptive reference to exact
+	// image ID exactly once. Use ResolveImageIdentity - NEVER
+	// ImagePull in qualified paths.
 	imageID, err := dockerClient.ResolveImageIdentity(ctx, *containerImage)
 	if err != nil {
 		return fmt.Errorf("resolve image identity: %w", err)
 	}
 
-	// P0-10: Validate the resolved image ID is in canonical form
+	// P0-10: Validate the resolved image ID is in canonical form.
 	if err := dockerlab.ValidateExactImageID(imageID); err != nil {
 		return fmt.Errorf("resolved image ID validation failed: %w", err)
 	}
 
-	// P0-10: Use the frozen exact image ID, NOT the descriptive tag
-	frozenImageID := imageID          // This ID is now frozen for the run
-	imageReference := *containerImage // Store the original descriptive reference
-
+	frozenImageID := imageID
+	imageReference := *containerImage
 	if *verbose {
 		fmt.Printf("Resolved %s -> %s\n", imageReference, frozenImageID[:12])
 	}
@@ -217,271 +231,268 @@ func runCommand(args []string) error {
 		return fmt.Errorf("write manifest: %w", err)
 	}
 
-	cleanup := dockerlab.NewCleanupManager(dockerClient, runID)
-
-	labNet, err := dockerlab.CreateNetwork(ctx, dockerClient, cleanup, runID, "lab")
-	if err != nil {
-		return fmt.Errorf("create lab network: %w", err)
-	}
-	if *verbose {
-		fmt.Printf("Created network: %s\n", labNet.ID)
-	}
-
-	cmd := getScenarioCommand(*scenario)
-	containerName := fmt.Sprintf("tovarisch-subject-%s", runID)
-	// P0-10: Use frozen exact image ID, not the descriptive tag
-	containerCfg := dockerlab.ContainerConfig{
-		Name: containerName,
-		Config: &container.Config{
-			Image: frozenImageID, // EXACT ID - the frozen resolution
-		},
-	}
-	containerCfg.Config.Cmd = cmd
-	containerCfg.Config.Labels = map[string]string{
-		"kgb.dev/lab":          "tovarisch-memory",
-		"kgb.dev/lab.run-id":   runID,
-		"kgb.dev/lab.scenario": *scenario,
-	}
-	containerCfg.MemoryLimit = 128 * 1024 * 1024
-	containerCfg.CPUQuota = 50000
-
-	containerID, err := dockerClient.ContainerCreate(ctx, containerCfg)
-	if err != nil {
-		return fmt.Errorf("create container: %w", err)
-	}
-	cleanup.RegisterContainer(containerID)
-
-	if err := dockerClient.NetworkConnect(ctx, labNet.ID, containerID); err != nil {
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("connect to network: %w", err)
-	}
-
-	if err := dockerClient.ContainerStart(ctx, containerID); err != nil {
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("start container: %w", err)
-	}
-
-	containerPID, err := dockerClient.ContainerGetPID(ctx, containerID)
-	if err != nil {
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("get container PID: %w", err)
-	}
-
-	if *verbose {
-		fmt.Printf("Container %s started with PID %d\n", containerID, containerPID)
-	}
-
-	containerIP, err := dockerClient.ContainerIP(ctx, containerID, labNet.Name)
-	if err != nil {
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("get container IP: %w", err)
-	}
-	canaryURL := fmt.Sprintf("http://%s:%d", containerIP, *canaryPort)
-
-	if *verbose {
-		fmt.Printf("Canary URL: %s\n", canaryURL)
-	}
-
-	httpClient := &http.Client{
-		Timeout: 5 * time.Second,
-		Transport: &http.Transport{
-			Proxy: nil,
-		},
-	}
-
-	if err := waitForCanaryHealth(ctx, httpClient, canaryURL, 30*time.Second, *verbose); err != nil {
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("canary health check failed: %w", err)
-	}
-
-	initialState, err := fetchCanaryState(ctx, httpClient, canaryURL)
-	if err != nil {
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("fetch initial canary state: %w", err)
-	}
-
-	expectedMode := scenarioToMode(*scenario)
-	if initialState.Mode != expectedMode {
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("canary mode mismatch: expected %s, got %s", expectedMode, initialState.Mode)
-	}
-
-	if *verbose {
-		fmt.Printf("Initial canary state: mode=%s, operations=%d, retained_blocks=%d\n",
-			initialState.Mode, initialState.OperationCount, initialState.RetainedBlocks)
-	}
-
-	if err := evidenceWriter.WriteCanaryState("initial", initialState); err != nil {
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("write initial canary state: %w", err)
-	}
-
 	phaseCfg := sampling.SmokePhaseConfig()
 	phaseCfg.Stimulus = time.Duration(*duration) * time.Second
 
-	sampler := sampling.NewSamplerWithDocker(
-		containerID,
-		func() int { return containerPID },
-		dockerClient,
-		phaseCfg,
-	)
+	cmd := getScenarioCommand(*scenario)
+	containerName := fmt.Sprintf("tovarisch-subject-%s", runID)
+	netName := fmt.Sprintf("kgb-lab-%s", runID)
 
-	cgroupPath, cgroupErr := procfs.ResolveCgroupV2Path(containerPID)
-	controllerPIDInt := os.Getpid()
-	capability, proof := classifyCgroupFailureWithNamespace(cgroupErr, containerPID, controllerPIDInt)
+	// CORRECTION22 P0-8: extract the existing matrix workload
+	// into a callback. The callback receives the running container
+	// ID and owns the workload until terminal state. Phase order
+	// is preserved verbatim from the legacy bridge.
+	workload := &workloadArtifacts{PhaseConfig: phaseCfg}
+	var workloadErr error
 
-	if cgroupErr != nil {
-		sampler.RecordCgroupCapability(ctx, containerPID, capability, "", cgroupErr, controllerPIDInt, proof)
+	runWorkload := func(workloadCtx context.Context, containerID string) error {
+		containerPID, err := dockerClient.ContainerGetPID(workloadCtx, containerID)
+		if err != nil {
+			return fmt.Errorf("get container PID: %w", err)
+		}
 		if *verbose {
-			fmt.Printf("CGROUP RESOLUTION FAILED: pid=%d capability=%s error=%v\n", containerPID, capability, cgroupErr)
+			fmt.Printf("Container %s started with PID %d\n", containerID, containerPID)
 		}
-	} else {
+
+		containerIP, err := dockerClient.ContainerIP(workloadCtx, containerID, netName)
+		if err != nil {
+			return fmt.Errorf("get container IP: %w", err)
+		}
+		canaryURL := fmt.Sprintf("http://%s:%d", containerIP, *canaryPort)
 		if *verbose {
-			fmt.Printf("CGROUP RESOLVED: pid=%d path=%s\n", containerPID, cgroupPath)
+			fmt.Printf("Canary URL: %s\n", canaryURL)
 		}
-		sampler.SetCgroupPath(cgroupPath)
-		sampler.RecordCgroupCapability(ctx, containerPID, sampling.CgroupCapabilityAvailable, cgroupPath, nil, controllerPIDInt, nil)
-	}
 
-	sampler.Start(ctx)
+		httpClient := &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: &http.Transport{
+				Proxy: nil,
+			},
+		}
 
-	if *verbose {
-		fmt.Printf("Waiting for stimulus phase...\n")
-	}
-	select {
-	case <-ctx.Done():
+		if err := waitForCanaryHealth(workloadCtx, httpClient, canaryURL, 30*time.Second, *verbose); err != nil {
+			return fmt.Errorf("canary health check failed: %w", err)
+		}
+
+		initialState, err := fetchCanaryState(workloadCtx, httpClient, canaryURL)
+		if err != nil {
+			return fmt.Errorf("fetch initial canary state: %w", err)
+		}
+		expectedMode := scenarioToMode(*scenario)
+		if initialState.Mode != expectedMode {
+			return fmt.Errorf("canary mode mismatch: expected %s, got %s", expectedMode, initialState.Mode)
+		}
+		if *verbose {
+			fmt.Printf("Initial canary state: mode=%s, operations=%d, retained_blocks=%d\n",
+				initialState.Mode, initialState.OperationCount, initialState.RetainedBlocks)
+		}
+		if err := evidenceWriter.WriteCanaryState("initial", initialState); err != nil {
+			return fmt.Errorf("write initial canary state: %w", err)
+		}
+
+		sampler := sampling.NewSamplerWithDocker(
+			containerID,
+			func() int { return containerPID },
+			dockerClient,
+			phaseCfg,
+		)
+		cgroupPath, cgroupErr := procfs.ResolveCgroupV2Path(containerPID)
+		controllerPIDInt := os.Getpid()
+		capability, proof := classifyCgroupFailureWithNamespace(cgroupErr, containerPID, controllerPIDInt)
+		if cgroupErr != nil {
+			sampler.RecordCgroupCapability(workloadCtx, containerPID, capability, "", cgroupErr, controllerPIDInt, proof)
+			if *verbose {
+				fmt.Printf("CGROUP RESOLUTION FAILED: pid=%d capability=%s error=%v\n", containerPID, capability, cgroupErr)
+			}
+		} else {
+			if *verbose {
+				fmt.Printf("CGROUP RESOLVED: pid=%d path=%s\n", containerPID, cgroupPath)
+			}
+			sampler.SetCgroupPath(cgroupPath)
+			sampler.RecordCgroupCapability(workloadCtx, containerPID, sampling.CgroupCapabilityAvailable, cgroupPath, nil, controllerPIDInt, nil)
+		}
+
+		sampler.Start(workloadCtx)
+
+		if *verbose {
+			fmt.Printf("Waiting for stimulus phase...\n")
+		}
+		select {
+		case <-workloadCtx.Done():
+			sampler.Stop()
+			return workloadCtx.Err()
+		case <-sampler.StimulusReady():
+		}
+
+		if *verbose {
+			fmt.Printf("Stimulus phase started, triggering workload\n")
+		}
+		workloadResult, err := operateCanary(workloadCtx, httpClient, canaryURL, getScenarioOperationCount(*scenario))
+		if err != nil {
+			sampler.Stop()
+			return fmt.Errorf("operate canary: %w", err)
+		}
+		if *verbose {
+			fmt.Printf("Workload completed: requested=%d attempted=%d completed=%d\n",
+				workloadResult.Requested, workloadResult.Attempted, workloadResult.Completed)
+		}
+
+		if err := sampler.WaitForPhase(workloadCtx, sampling.PhaseSettling); err != nil {
+			sampler.Stop()
+			return fmt.Errorf("wait settling: %w", err)
+		}
+		if err := sampler.WaitForPhase(workloadCtx, sampling.PhaseFinal); err != nil {
+			sampler.Stop()
+			return fmt.Errorf("wait final: %w", err)
+		}
+		if err := sampler.WaitForComplete(workloadCtx); err != nil {
+			sampler.Stop()
+			return fmt.Errorf("wait complete: %w", err)
+		}
+
+		finalState, err := fetchCanaryState(workloadCtx, httpClient, canaryURL)
+		if err != nil {
+			sampler.Stop()
+			return fmt.Errorf("fetch final canary state: %w", err)
+		}
+		if *verbose {
+			fmt.Printf("Final canary state: mode=%s, operations=%d, retained_blocks=%d\n",
+				finalState.Mode, finalState.OperationCount, finalState.RetainedBlocks)
+		}
+
 		sampler.Stop()
-		cleanup.Cleanup(ctx)
-		return ctx.Err()
-	case <-sampler.StimulusReady():
+		samples := sampler.Samples()
+		events := sampler.Events()
+		if *verbose {
+			fmt.Printf("Collected %d samples\n", len(samples))
+		}
+
+		phaseValid := validatePhaseContract(samples, phaseCfg)
+		if !phaseValid {
+			fmt.Printf("WARNING: Phase contract validation failed\n")
+		}
+		workloadValid := workloadResult.Completed == workloadResult.Requested
+		identityStable := validateProcessIdentity(samples)
+
+		if err := evidenceWriter.WriteCanaryState("final", finalState); err != nil {
+			return fmt.Errorf("write final canary state: %w", err)
+		}
+		if err := evidenceWriter.WriteWorkloadResult(workloadResult); err != nil {
+			return fmt.Errorf("write workload result: %w", err)
+		}
+		if err := evidenceWriter.WriteSamplesCSV(samples); err != nil {
+			return fmt.Errorf("write samples CSV: %w", err)
+		}
+		if err := evidenceWriter.WriteEventsJSONL(events); err != nil {
+			return fmt.Errorf("write events JSONL: %w", err)
+		}
+		logs, _ := dockerClient.ContainerLogs(workloadCtx, containerID, "100")
+		_ = evidenceWriter.WriteContainerLogs("container", []byte(logs))
+		inspectData, _ := dockerClient.ContainerInspect(workloadCtx, containerID)
+		_ = evidenceWriter.WriteContainerInspect("container", inspectData)
+
+		// Capture the artifacts for the outer runCommand.
+		workload.InitialState = initialState
+		workload.FinalState = finalState
+		workload.WorkloadResult = workloadResult
+		workload.Samples = samples
+		workload.Events = events
+		workload.PhaseValid = phaseValid
+		workload.WorkloadValid = workloadValid
+		workload.IdentityStable = identityStable
+		return nil
 	}
 
-	if *verbose {
-		fmt.Printf("Stimulus phase started, triggering workload\n")
-	}
-	workloadResult, err := operateCanary(ctx, httpClient, canaryURL, getScenarioOperationCount(*scenario))
-	if err != nil {
-		sampler.Stop()
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("operate canary: %w", err)
-	}
-	if *verbose {
-		fmt.Printf("Workload completed: requested=%d attempted=%d completed=%d\n",
-			workloadResult.Requested, workloadResult.Attempted, workloadResult.Completed)
+	opts := dockerlab.LifecycleOptions{
+		ImageReference: *containerImage,
+		NetworkName:    netName,
+		ContainerName:  containerName,
+		ContainerCmd:   cmd,
+		TerminalTimeout: 30 * time.Second,
+		CleanupTimeout:  10 * time.Second,
+		Run:             runWorkload,
 	}
 
-	if err := sampler.WaitForPhase(ctx, sampling.PhaseSettling); err != nil {
-		sampler.Stop()
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("wait settling: %w", err)
-	}
-
-	if err := sampler.WaitForPhase(ctx, sampling.PhaseFinal); err != nil {
-		sampler.Stop()
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("wait final: %w", err)
-	}
-
-	if err := sampler.WaitForComplete(ctx); err != nil {
-		sampler.Stop()
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("wait complete: %w", err)
-	}
-
-	finalState, err := fetchCanaryState(ctx, httpClient, canaryURL)
-	if err != nil {
-		sampler.Stop()
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("fetch final canary state: %w", err)
-	}
-
-	if *verbose {
-		fmt.Printf("Final canary state: mode=%s, operations=%d, retained_blocks=%d\n",
-			finalState.Mode, finalState.OperationCount, finalState.RetainedBlocks)
-	}
-
-	sampler.Stop()
-
-	samples := sampler.Samples()
-	events := sampler.Events()
-
-	if *verbose {
-		fmt.Printf("Collected %d samples\n", len(samples))
-	}
-
-	phaseValid := validatePhaseContract(samples, phaseCfg)
-	if !phaseValid {
-		fmt.Printf("WARNING: Phase contract validation failed\n")
-	}
-
-	workloadValid := workloadResult.Completed == workloadResult.Requested
-	identityStable := validateProcessIdentity(samples)
-
-	if err := evidenceWriter.WriteCanaryState("final", finalState); err != nil {
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("write final canary state: %w", err)
-	}
-
-	if err := evidenceWriter.WriteWorkloadResult(workloadResult); err != nil {
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("write workload result: %w", err)
-	}
-
-	if err := evidenceWriter.WriteSamplesCSV(samples); err != nil {
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("write samples CSV: %w", err)
-	}
-
-	if err := evidenceWriter.WriteEventsJSONL(events); err != nil {
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("write events JSONL: %w", err)
-	}
-
-	logs, _ := dockerClient.ContainerLogs(ctx, containerID, "100")
-	evidenceWriter.WriteContainerLogs("container", []byte(logs))
-
-	inspectData, _ := dockerClient.ContainerInspect(ctx, containerID)
-	evidenceWriter.WriteContainerInspect("container", inspectData)
-
-	// CORRECTION16: build and persist the canonical qualified-execution
-	// evidence from the actual Docker observations. The post-create
-	// image and network identity are read from the inspect output.
-	var (
-		containerEndpointIDForEvidence  string
-		containerConfigImageForEvidence string
+	outcome, err := dockerlab.ExecuteQualifiedDockerLifecycle(
+		ctx, dockerClient, opts, "tovarisch-memory-lab/1.0.0",
 	)
-	if inspectData.NetworkSettings != nil {
-		if ep, ok := inspectData.NetworkSettings.Networks[labNet.Name]; ok && ep != nil {
-			containerEndpointIDForEvidence = ep.NetworkID
+	// The Run callback never returned an error if err is non-nil here
+	// — but we still record its state.
+	workloadErr = err
+	if outcome == nil {
+		// Prepare failed before Run was called. No observations yet.
+		return fmt.Errorf("qualified lifecycle: %w", err)
+	}
+
+	// CORRECTION22 P0-10: set provenance on the observations so the
+	// verifier can authorize pass=true. The lifecycle itself never
+	// reads or modifies the supplied claim fields; the producer
+	// stamps them after the underlying validator succeeds.
+	if outcome.Observations != nil {
+		cp, perr := evidence.CollectControllerProvenance(evidence.ProvenanceOptions{
+			RepoDir:         repoDirForProvenance(),
+			ProducerVersion: "tovarisch-memory-lab/1.0.0",
+		})
+		if perr != nil {
+			cp, perr = fallbackGitProvenance(repoDirForProvenance(), "tovarisch-memory-lab/1.0.0")
+		}
+		dockerVer := ""
+		if v, derr := dockerClient.ServerVersion(ctx); derr == nil {
+			dockerVer = v.Version
+		}
+		execHash := cp.ExecutableSHA256
+		if execHash == "" {
+			if exe, eerr := os.Executable(); eerr == nil {
+				if data, rerr := osReadFile(exe); rerr == nil {
+					sum := sha256.Sum256(data)
+					execHash = hex.EncodeToString(sum[:])
+				}
+			}
+		}
+		outcome.Observations.SetProvenance(
+			cp.VCSRevision, cp.VCSTree, cp.GitObjectFormat,
+			dockerVer, cp.ProducerVersion, execHash,
+		)
+		outcome.Observations.SetProvenanceDirty(cp.WorkingTreeDirty, cp.SourceCommitDirty)
+		outcome.Observations.SetVCSModified(cp.VCSModified)
+
+		ev := evidence.BuildEvidenceFromObservations(outcome.Observations)
+		if perr := evidence.PersistQualifiedExecutionEvidence(artifactsPath, ev); perr != nil {
+			return fmt.Errorf("qualified evidence: %w", perr)
 		}
 	}
-	if inspectData.Config != nil {
-		containerConfigImageForEvidence = inspectData.Config.Image
+
+	if err != nil {
+		// Lifecycle failed. The bounded cleanup has already happened.
+		return fmt.Errorf("qualified lifecycle: %w", workloadErr)
 	}
-	var qualifiedSourceCommit, qualifiedSourceTree string
-	if manifest.SubjectIdentity != nil {
-		qualifiedSourceCommit = manifest.SubjectIdentity.GitCommit
-		qualifiedSourceTree = manifest.SubjectIdentity.GitTree
+	if !outcome.Terminal {
+		return fmt.Errorf("container did not reach terminal state")
 	}
-			if err := buildAndPersistQualifiedEvidenceFromInspect(
-			dockerClient, ctx, runID, artifactsPath,
-			*containerImage, frozenImageID, containerID,
-			labNet.Name, labNet.ID, containerEndpointIDForEvidence,
-			containerConfigImageForEvidence,
-			qualifiedSourceCommit, qualifiedSourceTree,
-		); err != nil {
-		cleanup.Cleanup(ctx)
-		return fmt.Errorf("qualified execution evidence: %w", err)
+	if !outcome.ContainerRemoved || !outcome.NetworkRemoved {
+		return fmt.Errorf("qualified cleanup incomplete: container=%v network=%v",
+			outcome.ContainerRemoved, outcome.NetworkRemoved)
 	}
+
+	// Lifecycle succeeded. workload artifacts must be set.
+	if workload.InitialState == nil || workload.FinalState == nil || workload.WorkloadResult == nil {
+		return fmt.Errorf("workload did not produce initial/final state or workload result")
+	}
+	initialState := workload.InitialState
+	finalState := workload.FinalState
+	workloadResult := workload.WorkloadResult
+	samples := workload.Samples
+	phaseValid := workload.PhaseValid
+	workloadValid := workload.WorkloadValid
+	identityStable := workload.IdentityStable
 
 	// CORRECTION03: capture and verify canary image identity.
 	// Fails closed BEFORE the stimulus if pre-build, extracted-image,
 	// and label hashes disagree. The result is stored inside the
 	// canonical manifest.json (the canary-image-provenance.json
 	// sidecar is no longer used).
-	canaryImageIdentity, err := captureAndVerifyCanaryImageIdentity(ctx, dockerClient, containerID)
+	canaryImageIdentity, err := captureAndVerifyCanaryImageIdentity(ctx, dockerClient, outcome.ContainerID)
 	if err != nil {
-		cleanup.Cleanup(ctx)
 		return fmt.Errorf("canary image identity: %w", err)
 	}
 
@@ -593,12 +604,10 @@ func runCommand(args []string) error {
 		ProvenanceError:        provenanceErrorString(provenanceErr),
 	}
 	if err := evidenceWriter.WriteVerdict(verdictOutput); err != nil {
-		cleanup.Cleanup(ctx)
 		return fmt.Errorf("write verdict: %w", err)
 	}
 
 	if provenanceErr != nil {
-		cleanup.Cleanup(ctx)
 		return fmt.Errorf("provenance collection failed: %w", provenanceErr)
 	}
 
@@ -633,7 +642,6 @@ func runCommand(args []string) error {
 		},
 	}
 	if err := evidenceWriter.WriteManifest(finalizedManifest); err != nil {
-		cleanup.Cleanup(ctx)
 		return fmt.Errorf("write finalized manifest: %w", err)
 	}
 
@@ -645,13 +653,11 @@ func runCommand(args []string) error {
 	if canaryImageIdentity != nil {
 		finalizedManifest.SubjectImageIdentity = canaryImageIdentity
 		if err := evidenceWriter.WriteManifest(finalizedManifest); err != nil {
-			cleanup.Cleanup(ctx)
 			return fmt.Errorf("write manifest with image identity: %w", err)
 		}
 	}
 
 	if err := evidenceWriter.WriteChecksumsForInventory(finalizedManifest.ArtifactInventory); err != nil {
-		cleanup.Cleanup(ctx)
 		return fmt.Errorf("write checksums: %w", err)
 	}
 
@@ -677,11 +683,6 @@ func runCommand(args []string) error {
 		fmt.Printf("Invariant Failures: %v\n", invariantResult.Failures)
 	}
 
-	if err := cleanup.Cleanup(ctx); err != nil {
-		fmt.Printf("ERROR: cleanup failed: %v\n", err)
-		return fmt.Errorf("cleanup failed: %w", err)
-	}
-
 	fmt.Printf("\nArtifacts written to: %s\n", artifactsPath)
 	fmt.Printf("Run ID: %s\n", runID)
 
@@ -691,6 +692,74 @@ func runCommand(args []string) error {
 	}
 
 	return nil
+}
+
+// fallbackGitProvenance computes a ControllerProvenance directly
+// from the git repository when the embedded VCS info is
+// unavailable (e.g. during `go test`). The producer falls back
+// to this when CollectControllerProvenance returns
+// ErrProvenanceUnavailable.
+func fallbackGitProvenance(repoDir, producer string) (evidence.ControllerProvenance, error) {
+	head, err := gitOutputRepo(repoDir, "rev-parse", "HEAD")
+	if err != nil {
+		return evidence.ControllerProvenance{}, err
+	}
+	tree, err := gitOutputRepo(repoDir, "rev-parse", "--verify", head+"^{tree}")
+	if err != nil {
+		return evidence.ControllerProvenance{}, err
+	}
+	format, _ := gitOutputRepo(repoDir, "rev-parse", "--show-object-format")
+	dirty, _ := gitWorkingTreeDirtyOutput(repoDir)
+	return evidence.ControllerProvenance{
+		VCSRevision:       head,
+		VCSTree:           tree,
+		VCSModified:       false,
+		WorkingTreeDirty:  dirty,
+		SourceCommitDirty: false,
+		GitObjectFormat:   format,
+		ProducerVersion:   producer,
+	}, nil
+}
+
+func gitOutputRepo(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func gitWorkingTreeDirtyOutput(dir string) (bool, error) {
+	out, err := gitOutputRepo(dir, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
+// osReadFile is a thin wrapper for tests / fallback paths.
+func osReadFile(path string) ([]byte, error) { return os.ReadFile(path) }
+
+// repoDirForProvenance returns the working directory's nearest
+// ancestor that contains a .git directory. Used by both the
+// shared lifecycle helper and the production CLI.
+func repoDirForProvenance() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "."
+		}
+		dir = parent
+	}
 }
 
 // captureAndVerifyCanaryImageIdentity is the CORRECTION03
@@ -2591,90 +2660,8 @@ func validateStateInvariant(scenario string, initial, final *CanaryState, worklo
 }
 
 
-// CORRECTION17: convenience bridge that builds a dockerlab
-// observation object from the inspect data and the original
-// arguments, then delegates to buildAndPersistQualifiedEvidence.
-// Used by the CLI's existing run path while the broader
-// refactor (Prepare-only) is being staged.
-func buildAndPersistQualifiedEvidenceFromInspect(
-	cli *dockerlab.Client,
-	ctx context.Context,
-	runID string,
-	artifactsPath string,
-	requestedImageRef string,
-	imageID string,
-	containerID string,
-	networkName string,
-	networkID string,
-	containerEndpointID string,
-	containerConfigImage string,
-	sourceCommit string,
-	sourceTree string,
-) error {
-	obs := &dockerlab.QualifiedExecutionObservations{
-		SchemaVersion: dockerlab.QualifiedExecutionObservationsSchemaVersion,
-		GeneratedAt:   time.Now().UTC(),
-		Image: dockerlab.ImageObservations{
-			RequestedReference:    requestedImageRef,
-			InspectedBeforeCreate: imageID,
-			CreateRequestImage:    imageID,
-			ContainerInspectImage: imageID,
-			ContainerConfigImage:  containerConfigImage,
-		},
-		Network: dockerlab.NetworkObservations{
-			RequestedName:       networkName,
-			CreateResponseID:    networkID,
-			InspectResponseID:   networkID,
-			ContainerEndpointID: containerEndpointID,
-		},
-		Container: dockerlab.ContainerObservations{
-			ID:                    containerID,
-			Created:               containerID != "",
-			Inspected:             containerID != "" && imageID != "",
-			Started:               true,
-			TerminalStateObserved: true,
-			Removed:               true,
-		},
-	}
-	return buildAndPersistQualifiedEvidence(
-		cli, ctx, runID, artifactsPath, obs,
-		true, true, sourceCommit, sourceTree, "sha1",
-	)
-}
-
-// CORRECTION17: build and persist the canonical qualified-execution
-// evidence from the actual Docker observations collected by the CLI
-// run path. The CLI bridges the dockerlab observation object (which
-// is populated at the operation that observed each value) into the
-// canonical evidence schema. The independent verifier fails closed
-// for any missing or inconsistent observation.
-func buildAndPersistQualifiedEvidence(
-	cli *dockerlab.Client,
-	ctx context.Context,
-	runID string,
-	artifactsPath string,
-	obs *dockerlab.QualifiedExecutionObservations,
-	containerStarted bool,
-	terminalStateObserved bool,
-	sourceCommit string,
-	sourceTree string,
-	gitObjectFormat string,
-) error {
-	if obs == nil {
-		return fmt.Errorf("qualified execution observations are nil")
-	}
-	ver, _ := cli.ServerVersion(ctx)
-	obs.SetProvenance(sourceCommit, sourceTree, gitObjectFormat, ver.Version, "tovarisch-memory-lab/1.0.0", "")
-	if containerStarted {
-		obs.SetContainerStarted()
-	}
-	if terminalStateObserved {
-		obs.SetContainerTerminalState()
-	}
-	obs.SetContainerRemoved()
-	ev := evidence.BuildEvidenceFromObservations(obs)
-	if ev == nil {
-		return fmt.Errorf("evidence converter returned nil")
-	}
-	return evidence.PersistQualifiedExecutionEvidence(artifactsPath, ev)
-}
+// CORRECTION22: the legacy bridge helpers
+// (buildAndPersistQualifiedEvidenceFromInspect and
+// buildAndPersistQualifiedEvidence) have been deleted. The
+// production CLI now goes through dockerlab.ExecuteQualifiedDockerLifecycle
+// and evidence.PersistQualifiedExecutionEvidence directly.

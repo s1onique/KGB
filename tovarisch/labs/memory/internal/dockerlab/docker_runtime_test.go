@@ -242,6 +242,7 @@ func (f *recordingDockerRuntime) NetworkRemove(ctx context.Context, networkID st
 	if f.networkRemoveErr != nil {
 		return f.networkRemoveErr
 	}
+	delete(f.storedNetworks, networkID)
 	return nil
 }
 

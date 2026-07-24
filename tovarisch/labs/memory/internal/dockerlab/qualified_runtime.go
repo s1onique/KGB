@@ -37,6 +37,16 @@ var ErrNetworkIdentityMismatch = errors.New("inspected network identity does not
 // the network it should be attached to.
 var ErrMissingQualifiedNetwork = errors.New("qualified run requires an explicitly declared network")
 
+// errTerminalTimeout is the sentinel returned when the bounded
+// terminal-state observer does not observe a non-running state.
+// It is exported via errors.Is through errors.Join so callers
+// can introspect a timeout failure.
+var errTerminalTimeout = errors.New("container did not reach terminal state within bounded timeout")
+
+// errPullAuditIncreased is the sentinel returned when the audit
+// observes a pull attempt during the run.
+var errPullAuditIncreased = errors.New("pull audit count increased during the run; qualified path must not pull")
+
 // QualifiedExecutionObservationsSchemaVersion is the canonical
 // schema version used by the qualified execution observation object.
 const QualifiedExecutionObservationsSchemaVersion = "1.0.0"
@@ -348,6 +358,28 @@ type LifecycleOptions struct {
 	// Run is invoked after the container starts. The runner is
 	// responsible for owning the workload and returning when done.
 	Run func(ctx context.Context, containerID string) error
+
+	// TerminalObserver is an optional seam for tests. When nil,
+	// the production path uses cli.ContainerInspect to detect the
+	// non-running state. Tests inject a deterministic observer.
+	TerminalObserver func(ctx context.Context, containerID string) bool
+}
+
+// finalizePullAudit is the centralized pull-audit finalizer. It
+// MUST be invoked before every return path of
+// ExecuteQualifiedDockerLifecycle that has a non-nil obs.
+// Centralizing the audit snapshot prevents the kind of drift that
+// let prior CORRECTION iterations publish a stale pull=0 even when
+// a pull was attempted.
+func finalizePullAudit(
+	audited *AuditedDockerRuntime,
+	obs *QualifiedExecutionObservations,
+) {
+	if audited == nil || obs == nil {
+		return
+	}
+	attempted, count, lastRef := audited.PullAudit()
+	obs.SetPullAudit(attempted, count, lastRef)
 }
 
 // ExecuteQualifiedDockerLifecycle is the shared production
@@ -361,6 +393,19 @@ type LifecycleOptions struct {
 // `dockerlab.NewAuditedDockerRuntime(dockerClient.Client)` directly.
 // Pull observations are an explicit fail-closed signal: any
 // non-zero pull counter fails the outcome.
+//
+// Error-propagation contract (CORRECTION22 P0-9):
+//
+//   - workload error (Run) is preserved as the primary error;
+//   - terminal-state observation error is preserved alongside the
+//     workload error via errors.Join when both apply;
+//   - container cleanup error and network cleanup error are joined
+//     with the primary error so every failure is discoverable via
+//     errors.Is;
+//   - pull-attempt error is preserved as the primary error.
+//
+// finalizePullAudit is invoked on every return path; no error is
+// ever silently discarded.
 func ExecuteQualifiedDockerLifecycle(
 	ctx context.Context,
 	cli *Client,
@@ -369,6 +414,34 @@ func ExecuteQualifiedDockerLifecycle(
 ) (*QualifiedLifecycleOutcome, error) {
 	if cli == nil {
 		return nil, errors.New("docker client is nil")
+	}
+	audited := NewAuditedDockerRuntime(cli.Client)
+	terminalObs := opts.TerminalObserver
+	if terminalObs == nil {
+		terminalObs = func(c context.Context, id string) bool {
+			return waitForTerminalState(c, cli, id)
+		}
+	}
+	return executeQualifiedLifecycle(
+		ctx,
+		audited,
+		terminalObs,
+		opts,
+	)
+}
+
+// executeQualifiedLifecycle is the runtime-agnostic core. It
+// accepts an already-installed AuditedDockerRuntime and a
+// terminal-state observer. Tests drive it directly with the
+// recording fake.
+func executeQualifiedLifecycle(
+	ctx context.Context,
+	audited *AuditedDockerRuntime,
+	terminalObs func(context.Context, string) bool,
+	opts LifecycleOptions,
+) (*QualifiedLifecycleOutcome, error) {
+	if audited == nil {
+		return nil, errors.New("audited runtime is nil")
 	}
 	if opts.ImageReference == "" {
 		return nil, errors.New("image reference is empty")
@@ -379,8 +452,10 @@ func ExecuteQualifiedDockerLifecycle(
 	if opts.Run == nil {
 		return nil, errors.New("lifecycle Run is nil")
 	}
+	if terminalObs == nil {
+		return nil, errors.New("terminal observer is nil")
+	}
 
-	audited := NewAuditedDockerRuntime(cli.Client)
 	qc := NewQualifiedClient(audited)
 
 	// Pull-attempt pre-check: a healthy qualified run has zero pull
@@ -397,6 +472,7 @@ func ExecuteQualifiedDockerLifecycle(
 	}
 	obs, err := qc.PrepareQualifiedContainer(ctx, opts.ImageReference, opts.NetworkName, cfg)
 	if err != nil {
+		// No obs to finalize on Prepare failure.
 		return nil, err
 	}
 	// The audit is always installed in the qualified lifecycle. Record
@@ -405,10 +481,12 @@ func ExecuteQualifiedDockerLifecycle(
 	obs.Pull.ObservationAvailable = true
 
 	// Start the container.
-	if err := audited.ContainerStart(ctx, obs.Container.ID, types.ContainerStartOptions{}); err != nil {
+	if startErr := audited.ContainerStart(ctx, obs.Container.ID, types.ContainerStartOptions{}); startErr != nil {
 		cleanup, _ := boundedCleanup(context.Background(), audited, obs.Container.ID, obs.Network.InspectResponseID, opts.CleanupTimeout)
 		obs.Container.Removed = cleanup.containerRemoved
 		obs.Network.Removed = cleanup.networkRemoved
+		obs.Container.Started = false
+		finalizePullAudit(audited, obs)
 		return &QualifiedLifecycleOutcome{
 			ContainerID:      obs.Container.ID,
 			ImageID:          obs.Image.InspectedBeforeCreate,
@@ -418,13 +496,12 @@ func ExecuteQualifiedDockerLifecycle(
 			NetworkRemoved:   cleanup.networkRemoved,
 			StartedByRuntime: true,
 			Observations:     obs,
-		}, fmt.Errorf("start container: %w", err)
+		}, fmt.Errorf("start container: %w", startErr)
 	}
 	obs.Container.Started = true
 
 	// Run the workload.
 	runErr := opts.Run(ctx, obs.Container.ID)
-	_ = runErr // run errors are captured in outcome via state, not as a return
 
 	// Wait for terminal state. The canary image is a long-running
 	// server, so the caller is responsible for terminating the
@@ -432,19 +509,25 @@ func ExecuteQualifiedDockerLifecycle(
 	// inspect (no sleep-as-authority).
 	terminalCtx, terminalCancel := context.WithTimeout(ctx, opts.TerminalTimeout)
 	defer terminalCancel()
-	if !waitForTerminalState(terminalCtx, cli, obs.Container.ID) {
-		cleanup, _ := boundedCleanup(context.Background(), audited, obs.Container.ID, obs.Network.InspectResponseID, opts.CleanupTimeout)
+	terminalOK := terminalObs(terminalCtx, obs.Container.ID)
+
+	if !terminalOK {
+		cleanup, cleanupErr := boundedCleanup(context.Background(), audited, obs.Container.ID, obs.Network.InspectResponseID, opts.CleanupTimeout)
 		obs.Container.Removed = cleanup.containerRemoved
 		obs.Network.Removed = cleanup.networkRemoved
+		finalizePullAudit(audited, obs)
+		joined := errors.Join(runErr, errTerminalTimeout, cleanupErr)
 		return &QualifiedLifecycleOutcome{
-			ContainerID: obs.Container.ID,
-			ImageID:     obs.Image.InspectedBeforeCreate,
-			NetworkID:   obs.Network.InspectResponseID,
-			Started:     true,
-			Terminal:    false,
+			ContainerID:      obs.Container.ID,
+			ImageID:          obs.Image.InspectedBeforeCreate,
+			NetworkID:        obs.Network.InspectResponseID,
+			Started:          true,
+			Terminal:         false,
+			ContainerRemoved: cleanup.containerRemoved,
+			NetworkRemoved:   cleanup.networkRemoved,
 			StartedByRuntime: true,
 			Observations:     obs,
-		}, errors.New("container did not reach terminal state within bounded timeout")
+		}, joined
 	}
 	obs.Container.TerminalStateObserved = true
 
@@ -456,35 +539,45 @@ func ExecuteQualifiedDockerLifecycle(
 	// Pull-attempt post-check: any pull during the run is a fail-closed signal.
 	_, pullCount, _ := audited.PullAudit()
 	if pullCount > prepStart {
+		finalizePullAudit(audited, obs)
+		pullErr := errPullAuditIncreased
+		joined := errors.Join(runErr, cleanupErr, pullErr)
 		return &QualifiedLifecycleOutcome{
-			ContainerID: obs.Container.ID,
-			ImageID:     obs.Image.InspectedBeforeCreate,
-			NetworkID:   obs.Network.InspectResponseID,
-			Started:     true,
-			Terminal:    true,
+			ContainerID:      obs.Container.ID,
+			ImageID:          obs.Image.InspectedBeforeCreate,
+			NetworkID:        obs.Network.InspectResponseID,
+			Started:          true,
+			Terminal:         true,
+			ContainerRemoved: cleanup.containerRemoved,
+			NetworkRemoved:   cleanup.networkRemoved,
 			StartedByRuntime: true,
 			Observations:     obs,
-		}, errors.New("pull audit count increased during the run; qualified path must not pull")
+		}, joined
 	}
 
-	if cleanupErr != nil {
+	finalizePullAudit(audited, obs)
+
+	if runErr != nil || cleanupErr != nil {
+		joined := errors.Join(runErr, cleanupErr)
 		return &QualifiedLifecycleOutcome{
-			ContainerID: obs.Container.ID,
-			ImageID:     obs.Image.InspectedBeforeCreate,
-			NetworkID:   obs.Network.InspectResponseID,
-			Started:     true,
-			Terminal:    true,
+			ContainerID:      obs.Container.ID,
+			ImageID:          obs.Image.InspectedBeforeCreate,
+			NetworkID:        obs.Network.InspectResponseID,
+			Started:          true,
+			Terminal:         true,
+			ContainerRemoved: cleanup.containerRemoved,
+			NetworkRemoved:   cleanup.networkRemoved,
 			StartedByRuntime: true,
 			Observations:     obs,
-		}, fmt.Errorf("cleanup: %w", cleanupErr)
+		}, joined
 	}
 
 	return &QualifiedLifecycleOutcome{
-		ContainerID: obs.Container.ID,
-		ImageID:     obs.Image.InspectedBeforeCreate,
-		NetworkID:   obs.Network.InspectResponseID,
-		Started:     true,
-		Terminal:    true,
+		ContainerID:      obs.Container.ID,
+		ImageID:          obs.Image.InspectedBeforeCreate,
+		NetworkID:        obs.Network.InspectResponseID,
+		Started:          true,
+		Terminal:         true,
 		ContainerRemoved: true,
 		NetworkRemoved:   true,
 		StartedByRuntime: true,

@@ -21,8 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
-	"strings"
 	"testing"
 	"time"
 
@@ -166,7 +164,7 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 		raw, _ := json.MarshalIndent(ev, "", "  ")
 		t.Fatalf("persist evidence: %v\n%s", err, string(raw))
 	}
-	defer func() { _ = osRemove("/tmp/qualified-execution-evidence.json") }()
+	defer func() { _ = os.Remove("/tmp/qualified-execution-evidence.json") }()
 	persisted, err := osReadFile("/tmp/qualified-execution-evidence.json")
 	if err != nil {
 		t.Fatalf("read persisted evidence: %v", err)
@@ -215,53 +213,8 @@ func parentDir(p string) string {
 }
 
 
-// fallbackGitProvenance builds a ControllerProvenance directly from
-// the git repository when the embedded VCS info is unavailable
-// (e.g. during `go test`).
-func fallbackGitProvenance(repoDir, producer string) (evidence.ControllerProvenance, error) {
-	head, err := gitOutput(repoDir, "rev-parse", "HEAD")
-	if err != nil {
-		return evidence.ControllerProvenance{}, err
-	}
-	tree, err := gitOutput(repoDir, "rev-parse", "--verify", head+"^{tree}")
-	if err != nil {
-		return evidence.ControllerProvenance{}, err
-	}
-	format, _ := gitOutput(repoDir, "rev-parse", "--show-object-format")
-	dirty, _ := gitWorkingTreeDirtyOutput(repoDir)
-	return evidence.ControllerProvenance{
-		VCSRevision:      head,
-		VCSTree:          tree,
-		VCSModified:      false,
-		WorkingTreeDirty: dirty,
-		SourceCommitDirty: false,
-		GitObjectFormat:  format,
-		ProducerVersion:  producer,
-	}, nil
-}
-
-func gitOutput(dir string, args ...string) (string, error) {
-	cmd := newGitCmd(dir, args...)
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func gitWorkingTreeDirtyOutput(dir string) (bool, error) {
-	out, err := gitOutput(dir, "status", "--porcelain")
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(out) != "", nil
-}
-
-func newGitCmd(dir string, args ...string) *exec.Cmd {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	return cmd
-}
-
-func osRemove(path string) error { return os.Remove(path) }
-func osReadFile(path string) ([]byte, error) { return os.ReadFile(path) }
+// (CORRECTION22: fallbackGitProvenance, gitOutput,
+// gitWorkingTreeDirtyOutput, newGitCmd, osRemove and osReadFile
+// moved to main.go so the smoke and the production CLI share the
+// exact same provenance helpers. The tests still call them via
+// the production symbol.)
