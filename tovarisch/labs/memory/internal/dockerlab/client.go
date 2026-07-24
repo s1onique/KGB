@@ -822,9 +822,15 @@ type CanaryWorkloadResult struct {
 
 // CanaryControlExec runs the canary-control binary inside the container.
 // Uses exact argv execution - no shell, no curl, no wget.
-// CORRECTION28: Tool-independent control plane.
+// CORRECTION29: Strictly parses canonical ControlEnvelope protocol.
 func (c *Client) CanaryControlExec(ctx context.Context, containerID string, cmd []string) CanaryControlExecResult {
 	result := CanaryControlExecResult{ExitCode: -1}
+
+	// Determine expected operation from argv
+	var expectedOperation string
+	if len(cmd) >= 3 {
+		expectedOperation = cmd[2]
+	}
 
 	// Use ContainerExec to run the exact command
 	exitCode, stdout, err := c.ContainerExec(ctx, containerID, cmd)
@@ -832,50 +838,155 @@ func (c *Client) CanaryControlExec(ctx context.Context, containerID string, cmd 
 	result.Stdout = stdout
 	result.Error = err
 
-	// Parse stdout based on the command
-	if len(cmd) >= 3 && cmd[2] == "health" {
-		if exitCode == 0 && strings.Contains(stdout, "OK") {
-			result.HealthValid = true
+	// Handle exec errors
+	if err != nil {
+		result.Stderr = err.Error()
+		return result
+	}
+
+	// Parse canonical envelope - must be exactly one JSON document
+	if stdout == "" {
+		return result
+	}
+
+	// Use strict decoding
+	envelope, parseErr := strictParseEnvelope(stdout)
+	if parseErr != nil {
+		result.Stderr = fmt.Sprintf("envelope parse failed: %v", parseErr)
+		return result
+	}
+
+	// Validate schema version
+	if envelope.SchemaVersion != "canary-control/v1" {
+		result.Stderr = fmt.Sprintf("unexpected schema version: %s", envelope.SchemaVersion)
+		return result
+	}
+
+	// Validate operation matches argv
+	if envelope.Operation != expectedOperation {
+		result.Stderr = fmt.Sprintf("operation mismatch: expected %s, got %s", expectedOperation, envelope.Operation)
+		return result
+	}
+
+	// Validate success matches exit code
+	if envelope.Success != (exitCode == 0) {
+		result.Stderr = fmt.Sprintf("success/exit-code mismatch: success=%v, exit=%d", envelope.Success, exitCode)
+		return result
+	}
+
+	// Validate operation-specific payload
+	switch expectedOperation {
+	case "health":
+		if envelope.Health == nil {
+			result.Stderr = "health operation missing health payload"
+			return result
 		}
-	} else if len(cmd) >= 3 && cmd[2] == "state" {
-		if exitCode == 0 {
-			var state CanaryStateFromExec
-			if err := json.Unmarshal([]byte(stdout), &state); err == nil {
-				if state.Mode != "" {
-					result.StateValid = true
-					result.State = &state
-				}
-			}
+		// Validate required health fields
+		if !envelope.Health.Ready {
+			result.Stderr = "health not ready"
+			return result
 		}
-		// Capture stderr if present
-		if err != nil && result.ExitCode != 0 {
-			result.Stderr = err.Error()
+		result.HealthValid = true
+
+	case "state":
+		if envelope.State == nil {
+			result.Stderr = "state operation missing state payload"
+			return result
 		}
-	} else if len(cmd) >= 3 && cmd[2] == "operate" {
-		if exitCode == 0 && strings.Contains(stdout, "WORKLOAD_VALID") {
-			result.WorkloadValid = true
-			// Parse JSON to extract counts
-			var resp struct {
-				Attempted int `json:"attempted"`
-				Completed int `json:"completed"`
-			}
-			// The operate command outputs both WORKLOAD_VALID and JSON
-			lines := strings.Split(stdout, "\n")
-			for _, line := range lines {
-				if strings.Contains(line, "attempted") {
-					json.Unmarshal([]byte(line), &resp)
-					result.Attempted = resp.Attempted
-					result.Completed = resp.Completed
-					break
-				}
-			}
+		// Validate required state fields
+		if envelope.State.Mode == "" {
+			result.Stderr = "state missing mode"
+			return result
 		}
-		if err != nil && result.ExitCode != 0 {
-			result.Stderr = err.Error()
+		result.StateValid = true
+		result.State = &CanaryStateFromExec{
+			Mode:           envelope.State.Mode,
+			RetainedBlocks: envelope.State.RetainedBlocks,
+			RetainedBytes:  envelope.State.RetainedBytes,
+			OperationCount: envelope.State.OperationCount,
+			FDCount:        envelope.State.FDCount,
+			Ready:          envelope.State.Ready,
 		}
+
+	case "operate":
+		if envelope.Workload == nil {
+			result.Stderr = "operate operation missing workload payload"
+			return result
+		}
+		// Validate workload counts
+		if envelope.Workload.Completed > envelope.Workload.Attempted {
+			result.Stderr = "completed exceeds attempted"
+			return result
+		}
+		result.WorkloadValid = true
+		result.Attempted = envelope.Workload.Attempted
+		result.Completed = envelope.Workload.Completed
+
+	default:
+		result.Stderr = fmt.Sprintf("unknown operation: %s", expectedOperation)
+		return result
 	}
 
 	return result
+}
+
+// ControlEnvelope is the canonical protocol envelope.
+type ControlEnvelope struct {
+	SchemaVersion string           `json:"schema_version"`
+	Operation    string           `json:"operation"`
+	Success      bool             `json:"success"`
+	HTTPStatus  int              `json:"http_status"`
+	Health      *HealthPayload   `json:"health,omitempty"`
+	State       *StatePayload    `json:"state,omitempty"`
+	Workload    *WorkloadPayload `json:"workload,omitempty"`
+	ErrorClass  string           `json:"error_class,omitempty"`
+}
+
+// HealthPayload represents health check result.
+type HealthPayload struct {
+	Ready bool   `json:"ready"`
+	Mode  string `json:"mode,omitempty"`
+}
+
+// StatePayload represents state result.
+type StatePayload struct {
+	Mode           string `json:"mode"`
+	RetainedBlocks int    `json:"retained_blocks"`
+	RetainedBytes  int64  `json:"retained_bytes"`
+	OperationCount int64  `json:"operation_count"`
+	FDCount        int    `json:"fd_count"`
+	Ready          bool   `json:"ready"`
+}
+
+// WorkloadPayload represents operate result.
+type WorkloadPayload struct {
+	Requested int `json:"requested"`
+	Attempted int `json:"attempted"`
+	Completed int `json:"completed"`
+}
+
+// strictParseEnvelope parses exactly one JSON envelope from stdout.
+func strictParseEnvelope(stdout string) (*ControlEnvelope, error) {
+	if stdout == "" {
+		return nil, fmt.Errorf("empty stdout")
+	}
+
+	// Use json.Decoder with DisallowUnknownFields
+	dec := json.NewDecoder(strings.NewReader(stdout))
+	dec.DisallowUnknownFields()
+
+	var env ControlEnvelope
+	if err := dec.Decode(&env); err != nil {
+		return nil, fmt.Errorf("decode failed: %w", err)
+	}
+
+	// Check for trailing data
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); err == nil && len(trailing) > 0 {
+		return nil, fmt.Errorf("trailing data after envelope")
+	}
+
+	return &env, nil
 }
 
 // CanaryStateFromExec represents the canary state when fetched via exec.

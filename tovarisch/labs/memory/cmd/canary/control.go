@@ -1,13 +1,14 @@
 // cmd/canary/control.go — Canary Control Client Subcommand
 //
-// Self-contained HTTP client that uses Go's net/http directly (no shell, no curl).
-// This is the only approved transport for qualified production reachability.
+// Canonical control protocol using typed JSON envelopes.
+// Each command emits exactly one JSON document to stdout.
 //
-// CORRECTION28: Eliminates shell/curl/wget dependency for container reachability.
+// CORRECTION29: Defines one canonical machine-readable protocol.
 
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -16,40 +17,77 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 )
 
 const (
-	// ControlDialTimeout is the timeout for establishing a connection.
-	ControlDialTimeout = 5 * time.Second
-	// ControlResponseHeaderTimeout is the timeout for reading response headers.
-	ControlResponseHeaderTimeout = 5 * time.Second
-	// ControlReadTimeout is the total timeout for reading the response body.
-	ControlReadTimeout = 10 * time.Second
+	// SchemaVersion is the canonical protocol version.
+	SchemaVersion = "canary-control/v1"
+
 	// MaxResponseBody is the maximum response body size to prevent memory issues.
 	MaxResponseBody = 64 * 1024 // 64KB
+
+	// ControlDialTimeout is the timeout for establishing a connection.
+	ControlDialTimeout = 5 * time.Second
+
+	// ControlResponseHeaderTimeout is the timeout for reading response headers.
+	ControlResponseHeaderTimeout = 5 * time.Second
+
+	// ControlReadTimeout is the total timeout for reading the response body.
+	ControlReadTimeout = 10 * time.Second
 )
 
-// ControlResult represents the result of a control operation.
-type ControlResult struct {
-	ExitCode       int
-	ResponseCode   int
-	HealthValid    bool
-	StateValid     bool
-	WorkloadValid  bool
-	Error          string
-	Diagnostic     string
+// ErrorClass defines stable error classification.
+type ErrorClass string
+
+const (
+	ErrInvalidArguments       ErrorClass = "invalid_arguments"
+	ErrRequestCreateFailed    ErrorClass = "request_create_failed"
+	ErrConnectionFailed       ErrorClass = "connection_failed"
+	ErrRequestTimeout         ErrorClass = "request_timeout"
+	ErrResponseTooLarge       ErrorClass = "response_too_large"
+	ErrUnexpectedHTTPStatus   ErrorClass = "unexpected_http_status"
+	ErrMalformedJSON          ErrorClass = "malformed_json"
+	ErrUnknownJSONField       ErrorClass = "unknown_json_field"
+	ErrMissingRequiredField   ErrorClass = "missing_required_field"
+	ErrTrailingJSON          ErrorClass = "trailing_json"
+	ErrHealthNotReady        ErrorClass = "health_not_ready"
+	ErrStateInvalid          ErrorClass = "state_invalid"
+	ErrWorkloadCountMismatch ErrorClass = "workload_count_mismatch"
+)
+
+// ControlEnvelope is the canonical protocol envelope.
+// Exactly one envelope is emitted per command invocation.
+type ControlEnvelope struct {
+	SchemaVersion string           `json:"schema_version"`
+	Operation     string           `json:"operation"`
+	Success       bool             `json:"success"`
+	HTTPStatus   int              `json:"http_status"`
+	Health       *HealthResult   `json:"health,omitempty"`
+	State        *StateResult    `json:"state,omitempty"`
+	Workload     *WorkloadResult `json:"workload,omitempty"`
+	ErrorClass   ErrorClass      `json:"error_class,omitempty"`
 }
 
-// HealthResponse represents the health check response.
-type HealthResponse struct {
-	Ready bool   `json:"ready,omitempty"`
+// HealthResult represents the health check payload.
+type HealthResult struct {
+	Ready bool   `json:"ready"`
 	Mode  string `json:"mode,omitempty"`
 }
 
-// WorkloadResponse represents the operate response.
-type WorkloadResponse struct {
+// StateResult represents the state payload.
+type StateResult struct {
+	Mode           string `json:"mode"`
+	RetainedBlocks int    `json:"retained_blocks"`
+	RetainedBytes  int64  `json:"retained_bytes"`
+	OperationCount int64  `json:"operation_count"`
+	FDCount        int    `json:"fd_count"`
+	Ready          bool   `json:"ready"`
+}
+
+// WorkloadResult represents the operate payload.
+type WorkloadResult struct {
+	Requested int `json:"requested"`
 	Attempted int `json:"attempted"`
 	Completed int `json:"completed"`
 }
@@ -87,21 +125,48 @@ func runControl(args []string) int {
 func runHealth(args []string) int {
 	fs := flag.NewFlagSet("canary control health", flag.ContinueOnError)
 	port := fs.Int("port", 8080, "Canary HTTP port")
-	timeout := fs.Duration("timeout", 10*time.Second, "Request timeout")
+	timeout := fs.Duration("timeout", 5*time.Second, "Request timeout")
 	if err := fs.Parse(args); err != nil {
+		emitEnvelope(ControlEnvelope{
+			SchemaVersion: SchemaVersion,
+			Operation:     "health",
+			Success:       false,
+			HTTPStatus:    0,
+			ErrorClass:    ErrInvalidArguments,
+		})
+		return 1
+	}
+
+	if *timeout <= 0 {
+		emitEnvelope(ControlEnvelope{
+			SchemaVersion: SchemaVersion,
+			Operation:     "health",
+			Success:       false,
+			HTTPStatus:    0,
+			ErrorClass:    ErrInvalidArguments,
+		})
 		return 1
 	}
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/health", *port)
 	result := doHealthCheck(context.Background(), url, *timeout)
-	if result.Error != "" {
-		fmt.Fprintf(os.Stderr, "error: %s\n", result.Error)
-	}
-	if result.Diagnostic != "" {
-		fmt.Fprintf(os.Stderr, "diagnostic: %s\n", result.Diagnostic)
-	}
-	if result.HealthValid {
-		fmt.Println("OK")
+
+	if result.ErrorClass != "" {
+		emitEnvelope(ControlEnvelope{
+			SchemaVersion: SchemaVersion,
+			Operation:     "health",
+			Success:       false,
+			HTTPStatus:    result.HTTPStatus,
+			ErrorClass:    result.ErrorClass,
+		})
+	} else {
+		emitEnvelope(ControlEnvelope{
+			SchemaVersion: SchemaVersion,
+			Operation:     "health",
+			Success:       true,
+			HTTPStatus:    200,
+			Health:        result.Health,
+		})
 	}
 	return result.ExitCode
 }
@@ -109,21 +174,48 @@ func runHealth(args []string) int {
 func runState(args []string) int {
 	fs := flag.NewFlagSet("canary control state", flag.ContinueOnError)
 	port := fs.Int("port", 8080, "Canary HTTP port")
-	timeout := fs.Duration("timeout", 10*time.Second, "Request timeout")
+	timeout := fs.Duration("timeout", 5*time.Second, "Request timeout")
 	if err := fs.Parse(args); err != nil {
+		emitEnvelope(ControlEnvelope{
+			SchemaVersion: SchemaVersion,
+			Operation:     "state",
+			Success:       false,
+			HTTPStatus:    0,
+			ErrorClass:    ErrInvalidArguments,
+		})
+		return 1
+	}
+
+	if *timeout <= 0 {
+		emitEnvelope(ControlEnvelope{
+			SchemaVersion: SchemaVersion,
+			Operation:     "state",
+			Success:       false,
+			HTTPStatus:    0,
+			ErrorClass:    ErrInvalidArguments,
+		})
 		return 1
 	}
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/state", *port)
 	result := doStateCheck(context.Background(), url, *timeout)
-	if result.Error != "" {
-		fmt.Fprintf(os.Stderr, "error: %s\n", result.Error)
-	}
-	if result.Diagnostic != "" {
-		fmt.Fprintf(os.Stderr, "diagnostic: %s\n", result.Diagnostic)
-	}
-	if result.StateValid {
-		fmt.Println("STATE_VALID")
+
+	if result.ErrorClass != "" {
+		emitEnvelope(ControlEnvelope{
+			SchemaVersion: SchemaVersion,
+			Operation:     "state",
+			Success:       false,
+			HTTPStatus:    result.HTTPStatus,
+			ErrorClass:    result.ErrorClass,
+		})
+	} else {
+		emitEnvelope(ControlEnvelope{
+			SchemaVersion: SchemaVersion,
+			Operation:     "state",
+			Success:       true,
+			HTTPStatus:    200,
+			State:         result.State,
+		})
 	}
 	return result.ExitCode
 }
@@ -134,26 +226,79 @@ func runOperate(args []string) int {
 	count := fs.Int("count", 1, "Number of operations")
 	timeout := fs.Duration("timeout", 30*time.Second, "Request timeout")
 	if err := fs.Parse(args); err != nil {
+		emitEnvelope(ControlEnvelope{
+			SchemaVersion: SchemaVersion,
+			Operation:     "operate",
+			Success:       false,
+			HTTPStatus:    0,
+			ErrorClass:    ErrInvalidArguments,
+		})
+		return 1
+	}
+
+	if *count <= 0 {
+		emitEnvelope(ControlEnvelope{
+			SchemaVersion: SchemaVersion,
+			Operation:     "operate",
+			Success:       false,
+			HTTPStatus:    0,
+			ErrorClass:    ErrInvalidArguments,
+		})
+		return 1
+	}
+
+	if *timeout <= 0 {
+		emitEnvelope(ControlEnvelope{
+			SchemaVersion: SchemaVersion,
+			Operation:     "operate",
+			Success:       false,
+			HTTPStatus:    0,
+			ErrorClass:    ErrInvalidArguments,
+		})
 		return 1
 	}
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/operate?count=%d", *port, *count)
-	result := doOperateCheck(context.Background(), url, *timeout)
-	if result.Error != "" {
-		fmt.Fprintf(os.Stderr, "error: %s\n", result.Error)
-	}
-	if result.Diagnostic != "" {
-		fmt.Fprintf(os.Stderr, "diagnostic: %s\n", result.Diagnostic)
-	}
-	if result.WorkloadValid {
-		fmt.Println("WORKLOAD_VALID")
+	result := doOperateCheck(context.Background(), url, *count, *timeout)
+
+	if result.ErrorClass != "" {
+		emitEnvelope(ControlEnvelope{
+			SchemaVersion: SchemaVersion,
+			Operation:     "operate",
+			Success:       false,
+			HTTPStatus:    result.HTTPStatus,
+			ErrorClass:    result.ErrorClass,
+		})
+	} else {
+		emitEnvelope(ControlEnvelope{
+			SchemaVersion: SchemaVersion,
+			Operation:     "operate",
+			Success:       true,
+			HTTPStatus:    200,
+			Workload:      result.Workload,
+		})
 	}
 	return result.ExitCode
 }
 
+// emitEnvelope emits exactly one JSON envelope to stdout.
+func emitEnvelope(env ControlEnvelope) {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
+	enc.Encode(env)
+}
+
+// HealthCheckResult represents the result of a health check.
+type HealthCheckResult struct {
+	ExitCode   int
+	HTTPStatus int
+	ErrorClass ErrorClass
+	Health     *HealthResult
+}
+
 // doHealthCheck performs a health check using Go's HTTP client.
-func doHealthCheck(ctx context.Context, url string, timeout time.Duration) ControlResult {
-	result := ControlResult{ExitCode: 1}
+func doHealthCheck(ctx context.Context, url string, timeout time.Duration) HealthCheckResult {
+	result := HealthCheckResult{ExitCode: 1, HTTPStatus: 0}
 
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -167,60 +312,79 @@ func doHealthCheck(ctx context.Context, url string, timeout time.Duration) Contr
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		result.Error = fmt.Sprintf("create request: %v", err)
-		result.Diagnostic = "failed to create HTTP request"
+		result.ErrorClass = ErrRequestCreateFailed
 		return result
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		result.Error = fmt.Sprintf("request failed: %v", err)
-		result.Diagnostic = fmt.Sprintf("connection to %s failed", url)
+		if ctx.Err() != nil {
+			result.ErrorClass = ErrRequestTimeout
+		} else {
+			result.ErrorClass = ErrConnectionFailed
+		}
 		return result
 	}
 	defer resp.Body.Close()
 
-	result.ResponseCode = resp.StatusCode
+	result.HTTPStatus = resp.StatusCode
 
-	// Check for 2xx status
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		result.Error = fmt.Sprintf("unexpected status: %d", resp.StatusCode)
-		result.Diagnostic = fmt.Sprintf("health check returned HTTP %d", resp.StatusCode)
+	if resp.StatusCode != 200 {
+		result.ErrorClass = ErrUnexpectedHTTPStatus
 		return result
 	}
 
 	// Read bounded response body
-	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBody))
+	limited := io.LimitReader(resp.Body, MaxResponseBody+1)
+	body, err := io.ReadAll(limited)
 	if err != nil {
-		result.Error = fmt.Sprintf("read body: %v", err)
-		result.Diagnostic = "failed to read health response body"
+		result.ErrorClass = ErrMalformedJSON
 		return result
 	}
 
-	// Try to parse as JSON (optional)
-	var health HealthResponse
-	if err := json.Unmarshal(body, &health); err != nil {
-		// Non-JSON is OK for health - we just need 2xx
-		result.HealthValid = true
-		result.ExitCode = 0
+	if len(body) > MaxResponseBody {
+		result.ErrorClass = ErrResponseTooLarge
 		return result
 	}
 
-	// If JSON, validate it contains expected fields
-	if health.Ready || health.Mode != "" {
-		result.HealthValid = true
-		result.ExitCode = 0
-	} else {
-		result.HealthValid = true // HTTP 2xx is sufficient
-		result.ExitCode = 0
+	// Strict JSON decoding
+	var health HealthResult
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&health); err != nil {
+		result.ErrorClass = ErrMalformedJSON
+		return result
 	}
 
+	// Check for trailing data
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); err == nil && len(trailing) > 0 {
+		result.ErrorClass = ErrTrailingJSON
+		return result
+	}
+
+	// Validate required fields
+	if !health.Ready {
+		result.ErrorClass = ErrHealthNotReady
+		return result
+	}
+
+	result.Health = &health
+	result.ExitCode = 0
 	return result
 }
 
+// StateCheckResult represents the result of a state check.
+type StateCheckResult struct {
+	ExitCode   int
+	HTTPStatus int
+	ErrorClass ErrorClass
+	State      *StateResult
+}
+
 // doStateCheck performs a state check using Go's HTTP client.
-func doStateCheck(ctx context.Context, url string, timeout time.Duration) ControlResult {
-	result := ControlResult{ExitCode: 1}
+func doStateCheck(ctx context.Context, url string, timeout time.Duration) StateCheckResult {
+	result := StateCheckResult{ExitCode: 1, HTTPStatus: 0}
 
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -234,53 +398,79 @@ func doStateCheck(ctx context.Context, url string, timeout time.Duration) Contro
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		result.Error = fmt.Sprintf("create request: %v", err)
+		result.ErrorClass = ErrRequestCreateFailed
 		return result
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		result.Error = fmt.Sprintf("request failed: %v", err)
+		if ctx.Err() != nil {
+			result.ErrorClass = ErrRequestTimeout
+		} else {
+			result.ErrorClass = ErrConnectionFailed
+		}
 		return result
 	}
 	defer resp.Body.Close()
 
-	result.ResponseCode = resp.StatusCode
+	result.HTTPStatus = resp.StatusCode
 
 	if resp.StatusCode != 200 {
-		result.Error = fmt.Sprintf("unexpected status: %d", resp.StatusCode)
+		result.ErrorClass = ErrUnexpectedHTTPStatus
 		return result
 	}
 
 	// Read bounded response body
-	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBody))
+	limited := io.LimitReader(resp.Body, MaxResponseBody+1)
+	body, err := io.ReadAll(limited)
 	if err != nil {
-		result.Error = fmt.Sprintf("read body: %v", err)
+		result.ErrorClass = ErrMalformedJSON
 		return result
 	}
 
-	// Validate JSON structure
-	var state State
-	if err := json.Unmarshal(body, &state); err != nil {
-		result.Error = fmt.Sprintf("parse state: %v", err)
-		result.Diagnostic = "state response is not valid JSON"
+	if len(body) > MaxResponseBody {
+		result.ErrorClass = ErrResponseTooLarge
+		return result
+	}
+
+	// Strict JSON decoding
+	var state StateResult
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&state); err != nil {
+		result.ErrorClass = ErrMalformedJSON
+		return result
+	}
+
+	// Check for trailing data
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); err == nil && len(trailing) > 0 {
+		result.ErrorClass = ErrTrailingJSON
 		return result
 	}
 
 	// Validate required fields
 	if state.Mode == "" {
-		result.Error = "state missing mode field"
+		result.ErrorClass = ErrMissingRequiredField
 		return result
 	}
 
-	result.StateValid = true
+	result.State = &state
 	result.ExitCode = 0
 	return result
 }
 
+// OperateCheckResult represents the result of an operate request.
+type OperateCheckResult struct {
+	ExitCode   int
+	HTTPStatus int
+	ErrorClass ErrorClass
+	Workload   *WorkloadResult
+}
+
 // doOperateCheck performs an operate request using Go's HTTP client.
-func doOperateCheck(ctx context.Context, url string, timeout time.Duration) ControlResult {
-	result := ControlResult{ExitCode: 1}
+func doOperateCheck(ctx context.Context, url string, requested int, timeout time.Duration) OperateCheckResult {
+	result := OperateCheckResult{ExitCode: 1, HTTPStatus: 0}
 
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -294,95 +484,64 @@ func doOperateCheck(ctx context.Context, url string, timeout time.Duration) Cont
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
 	if err != nil {
-		result.Error = fmt.Sprintf("create request: %v", err)
+		result.ErrorClass = ErrRequestCreateFailed
 		return result
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		result.Error = fmt.Sprintf("request failed: %v", err)
+		if ctx.Err() != nil {
+			result.ErrorClass = ErrRequestTimeout
+		} else {
+			result.ErrorClass = ErrConnectionFailed
+		}
 		return result
 	}
 	defer resp.Body.Close()
 
-	result.ResponseCode = resp.StatusCode
+	result.HTTPStatus = resp.StatusCode
 
 	if resp.StatusCode != 200 {
-		result.Error = fmt.Sprintf("unexpected status: %d", resp.StatusCode)
+		result.ErrorClass = ErrUnexpectedHTTPStatus
 		return result
 	}
 
 	// Read bounded response body
-	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBody))
+	limited := io.LimitReader(resp.Body, MaxResponseBody+1)
+	body, err := io.ReadAll(limited)
 	if err != nil {
-		result.Error = fmt.Sprintf("read body: %v", err)
+		result.ErrorClass = ErrMalformedJSON
 		return result
 	}
 
-	// Validate JSON structure
-	var workload WorkloadResponse
-	if err := json.Unmarshal(body, &workload); err != nil {
-		result.Error = fmt.Sprintf("parse workload: %v", err)
-		result.Diagnostic = "workload response is not valid JSON"
+	if len(body) > MaxResponseBody {
+		result.ErrorClass = ErrResponseTooLarge
+		return result
+	}
+
+	// Strict JSON decoding
+	var workload WorkloadResult
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&workload); err != nil {
+		result.ErrorClass = ErrMalformedJSON
+		return result
+	}
+
+	// Check for trailing data
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); err == nil && len(trailing) > 0 {
+		result.ErrorClass = ErrTrailingJSON
 		return result
 	}
 
 	// Validate required fields
-	if workload.Attempted < 0 || workload.Completed < 0 {
-		result.Error = "workload response has invalid counts"
+	if workload.Attempted != requested || workload.Completed != workload.Attempted {
+		result.ErrorClass = ErrWorkloadCountMismatch
 		return result
 	}
 
-	result.WorkloadValid = true
+	result.Workload = &workload
 	result.ExitCode = 0
 	return result
-}
-
-// ControlExecResult is returned by the Docker exec control client.
-type ControlExecResult struct {
-	ExitCode       int
-	HealthValid    bool
-	StateValid     bool
-	WorkloadValid  bool
-	State          *State
-	WorkloadResult *WorkloadResponse
-	Diagnostic     string
-}
-
-// ControlExecHealth runs health check via docker exec.
-func ControlExecHealth(ctx context.Context, containerID string, port int) ControlExecResult {
-	return controlExecCommand(ctx, containerID, []string{
-		"/app/canary", "control", "health",
-		"--port", strconv.Itoa(port),
-		"--timeout", "10s",
-	})
-}
-
-// ControlExecState runs state check via docker exec.
-func ControlExecState(ctx context.Context, containerID string, port int) (ControlExecResult, *State) {
-	result := controlExecCommand(ctx, containerID, []string{
-		"/app/canary", "control", "state",
-		"--port", strconv.Itoa(port),
-		"--timeout", "10s",
-	})
-	return result, result.State
-}
-
-// ControlExecOperate runs operate via docker exec.
-func ControlExecOperate(ctx context.Context, containerID string, port int, count int) (ControlExecResult, *WorkloadResponse) {
-	result := controlExecCommand(ctx, containerID, []string{
-		"/app/canary", "control", "operate",
-		"--port", strconv.Itoa(port),
-		"--count", strconv.Itoa(count),
-		"--timeout", "30s",
-	})
-	return result, result.WorkloadResult
-}
-
-// controlExecCommand is a placeholder - the actual implementation
-// uses the docker client to run exec. This is called from the controller.
-func controlExecCommand(ctx context.Context, containerID string, cmd []string) ControlExecResult {
-	// This is implemented by the controller using docker.ContainerExec
-	// The canary binary itself just implements the control subcommand.
-	return ControlExecResult{ExitCode: 1, Diagnostic: "use docker client for exec"}
 }
