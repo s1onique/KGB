@@ -41,6 +41,7 @@ func buildValidObservations() *dockerlab.QualifiedExecutionObservations {
 			CreateResponseID:    validCanonicalNetworkID,
 			InspectResponseID:   validCanonicalNetworkID,
 			ContainerEndpointID: validCanonicalNetworkID,
+			Removed:             true,
 		},
 		Pull: dockerlab.PullObservations{
 			ObservationAvailable: true,
@@ -59,8 +60,12 @@ func buildValidObservations() *dockerlab.QualifiedExecutionObservations {
 			SourceCommit:        strings.Repeat("a", 40), // sha1
 			SourceTree:          strings.Repeat("b", 40),
 			GitObjectFormat:     "sha1",
+			WorkingTreeDirty:    false,
+			SourceCommitDirty:   false,
+			VCSModified:         false,
 			DockerServerVersion: "29.6.2",
 			ProducerVersion:     "tovarisch-memory-lab/1.0.0",
+			ExecutableSHA256:    strings.Repeat("c", 64),
 		},
 	}
 	return obs
@@ -69,6 +74,7 @@ func buildValidObservations() *dockerlab.QualifiedExecutionObservations {
 func TestVerifyQualifiedExecution_ValidFixturePasses(t *testing.T) {
 	obs := buildValidObservations()
 	ev := BuildEvidenceFromObservations(obs)
+	ev.SetDerivedFields()
 	res := VerifyQualifiedExecution(ev)
 	if !res.Pass {
 		t.Fatalf("expected valid fixture to pass, got errors: %v", res.Errors)

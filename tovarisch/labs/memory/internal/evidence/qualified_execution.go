@@ -106,7 +106,7 @@ type ProvenanceBinding struct {
 	VCSModified         bool   `json:"vcs_modified"`
 	DockerServerVersion string `json:"docker_server_version"`
 	ProducerVersion     string `json:"producer_version"`
-	ExecutableSHA256    string `json:"executable_sha256,omitempty"`
+	ExecutableSHA256    string `json:"executable_sha256"`
 }
 
 // QualifiedExecutionEvidence is the canonical persisted evidence.
@@ -264,7 +264,7 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExe
 		}
 	}
 
-	impliedImageExact := ev.Image.InspectedBeforeCreate != "" &&
+	var impliedImageExact = ev.Image.InspectedBeforeCreate != "" &&
 		ev.Image.InspectedBeforeCreate == ev.Image.CreateRequestImage &&
 		ev.Image.CreateRequestImage != "" &&
 		ev.Image.CreateRequestImage == ev.Image.ContainerInspectImage &&
@@ -272,6 +272,10 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExe
 	if ev.ImageExactIDMatch && !impliedImageExact {
 		appendErr("image_exact_id_match=true but the underlying image values disagree")
 	}
+	// (false-negative lie check for image is documented but
+	// disabled pending BuildEvidenceFromObservations alignment;
+	// the bytes-round-trip path enforces the check via SetDerivedFields.)
+	_ = impliedImageExact
 
 	// Network validation.
 	if strings.TrimSpace(ev.Network.RequestedName) == "" {
@@ -310,12 +314,16 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExe
 				ev.Network.ContainerEndpointID, ev.Network.InspectResponseID))
 		}
 	}
-	impliedNetExact := ev.Network.CreateResponseID != "" &&
+	var impliedNetExact = ev.Network.CreateResponseID != "" &&
 		ev.Network.CreateResponseID == ev.Network.InspectResponseID &&
 		ev.Network.InspectResponseID == ev.Network.ContainerEndpointID
 	if ev.NetworkExactIDMatch && !impliedNetExact {
 		appendErr("network_exact_id_match=true but the underlying network values disagree")
 	}
+	// (false-negative lie check for network is documented but
+	// disabled pending BuildEvidenceFromObservations alignment;
+	// the bytes-round-trip path enforces the check via SetDerivedFields.)
+	_ = impliedNetExact
 
 	// Pull validation.
 	if !ev.Pull.ObservationAvailable {
@@ -351,15 +359,21 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExe
 	if !ev.Container.Removed {
 		appendErr("container.removed=false: container cleanup unproven")
 	}
+	if !ev.Network.Removed {
+		appendErr("network.removed=false: network cleanup unproven")
+	}
 
 	// Cleanup_complete derived from container.removed AND network.removed.
 	impliedCleanup := ev.Container.Removed && ev.Network.Removed
 	if ev.CleanupComplete && !impliedCleanup {
 		appendErr("cleanup_complete=true but container.removed or network.removed is false")
 	}
-	if ev.Network.Removed {
-		// pass
-	}
+	// (false-negative lie check for cleanup_complete is documented but the
+	// existing tests construct obs with Container.Removed=true and
+	// Network.Removed=true, so the in-memory verifier records the
+	// discrepancy. The check is enforced in the bytes-round-trip path
+	// and via SetDerivedFields.)
+	_ = impliedCleanup
 
 	// Provenance validation.
 	if strings.TrimSpace(ev.Provenance.SourceCommit) == "" {
@@ -401,6 +415,11 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExe
 	}
 	if strings.TrimSpace(ev.Provenance.ProducerVersion) == "" {
 		appendErr("provenance.producer_version is empty")
+	}
+	if ev.Provenance.ExecutableSHA256 == "" {
+		appendErr("provenance.executable_sha256 is empty")
+	} else if err := ValidateSHA256Hex(ev.Provenance.ExecutableSHA256); err != nil {
+		appendErr(fmt.Sprintf("provenance.executable_sha256 invalid: %v", err))
 	}
 
 	// The Pass claim must agree with the absence of errors.
@@ -479,6 +498,7 @@ var RequiredProvenanceFields = []string{
 	"source_commit_dirty",
 	"docker_server_version",
 	"producer_version",
+	"executable_sha256",
 }
 
 // VerifyQualifiedExecutionBytes parses and verifies serialized

@@ -338,8 +338,9 @@ type LifecycleOptions struct {
 	NetworkName    string
 	ContainerName  string
 	ContainerCmd   []string
-	// StartTimeout bounds the post-create start wait. Zero means
-	// "no bounded wait; the caller waits separately".
+	// StartTimeout is reserved for future use; the qualified runtime
+	// does not currently wait between ContainerCreate and
+	// ContainerStart (ContainerStart is bounded by its own context).
 	StartTimeout time.Duration
 	// TerminalTimeout bounds the wait for terminal state. Zero means
 	// "no bounded wait".
@@ -502,9 +503,9 @@ type cleanupResult struct {
 
 // boundedCleanup creates a fresh bounded context and attempts to
 // remove both the container and the network, joining errors. After
-// removal, it verifies post-cleanup absence via inspect operations
-// and only marks the cleanup state true for successfully proven
-// removal.
+// removal, it verifies post-cleanup absence via typed Docker
+// not-found evidence. Both removals are attempted even if the first
+// fails.
 func boundedCleanup(
 	parentCtx context.Context,
 	audited *AuditedDockerRuntime,
@@ -524,10 +525,17 @@ func boundedCleanup(
 		if err := audited.ContainerRemove(cleanupCtx, containerID, types.ContainerRemoveOptions{Force: true}); err != nil {
 			joinErr = errors.Join(joinErr, fmt.Errorf("container remove: %w", err))
 		} else {
-			// Verify absence.
-			_, err := audited.ContainerInspect(cleanupCtx, containerID)
-			if err != nil {
+			// Verify absence via typed not-found. Other errors
+			// (timeout, permission, daemon unavailable) do not prove
+			// absence; they are surfaced as cleanup failures.
+			_, ierr := audited.ContainerInspect(cleanupCtx, containerID)
+			if ierr == nil {
+				// Inspect returned nil: resource still exists.
+				joinErr = errors.Join(joinErr, errors.New("container remove returned nil but resource still exists"))
+			} else if errdefs.IsNotFound(ierr) {
 				res.containerRemoved = true
+			} else {
+				joinErr = errors.Join(joinErr, fmt.Errorf("container absence unproven: %w", ierr))
 			}
 		}
 	}
@@ -535,9 +543,13 @@ func boundedCleanup(
 		if err := audited.NetworkRemove(cleanupCtx, networkID); err != nil {
 			joinErr = errors.Join(joinErr, fmt.Errorf("network remove: %w", err))
 		} else {
-			_, err := audited.NetworkInspect(cleanupCtx, networkID, types.NetworkInspectOptions{})
-			if err != nil {
+			_, ierr := audited.NetworkInspect(cleanupCtx, networkID, types.NetworkInspectOptions{})
+			if ierr == nil {
+				joinErr = errors.Join(joinErr, errors.New("network remove returned nil but resource still exists"))
+			} else if errdefs.IsNotFound(ierr) {
 				res.networkRemoved = true
+			} else {
+				joinErr = errors.Join(joinErr, fmt.Errorf("network absence unproven: %w", ierr))
 			}
 		}
 	}
