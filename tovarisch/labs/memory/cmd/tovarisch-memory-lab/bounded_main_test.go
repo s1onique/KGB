@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -57,19 +58,17 @@ func TestMain(m *testing.M) {
 // cleaned up implicitly by the OS on process exit.
 func buildOnce() {
 	testVerifierOnce.Do(func() {
-		workdir, err := os.Getwd()
+		// Get the module root using go list.
+		moduleRoot, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}").Output()
 		if err != nil {
-			testVerifierErr = fmt.Errorf("getwd: %w", err)
+			testVerifierErr = fmt.Errorf("go list module root: %w", err)
 			return
 		}
-		// The verifier is built from the same source tree the tests
-		// are running in. The relative path is stable across the
-		// cmd/tovarisch-memory-lab package.
-		srcDir, err := filepath.Abs(workdir)
-		if err != nil {
-			testVerifierErr = fmt.Errorf("abspath: %w", err)
-			return
-		}
+		moduleDir := strings.TrimSpace(string(moduleRoot))
+
+		// The verifier package is cmd/tovarisch-memory-lab relative to
+		// the module root. Build from the package directory.
+		srcDir := filepath.Join(moduleDir, "cmd", "tovarisch-memory-lab")
 
 		binDir, err := os.MkdirTemp("", "bounded-verifier-*")
 		if err != nil {
