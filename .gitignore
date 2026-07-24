@@ -35,3 +35,4 @@ tovarisch/labs/memory/tovarisch-memory-lab
 .factory/bin/tovarisch-memory-lab
 tovarisch/.factory/bin/tovarisch-memory-lab
 tovarisch/.factory/bin/extract-image-metadata
+*.test
