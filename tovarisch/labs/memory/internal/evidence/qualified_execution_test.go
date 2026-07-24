@@ -73,6 +73,16 @@ func buildValidObservations() *dockerlab.QualifiedExecutionObservations {
 			ProducerVersion:     "tovarisch-memory-lab/1.0.0",
 			ExecutableSHA256:    strings.Repeat("c", 64),
 		},
+		// CORRECTION27: Valid reachability observations
+		Reachability: dockerlab.ReachabilityObservations{
+			Method:      dockerlab.ReachabilityMethodDockerExec,
+			NetworkID:   validCanonicalNetworkID,
+			ExecExitCode: 0,
+			TargetHost: "localhost",
+			TargetPort: 8080,
+			HTTPResponseCode: 200,
+			Success:    true,
+		},
 	}
 }
 

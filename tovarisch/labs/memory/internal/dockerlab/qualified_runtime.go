@@ -357,7 +357,9 @@ type LifecycleOptions struct {
 	CleanupTimeout time.Duration
 	// Run is invoked after the container starts. The runner is
 	// responsible for owning the workload and returning when done.
-	Run func(ctx context.Context, containerID string) error
+	// CORRECTION27: Run callback receives observations pointer for
+	// reachability instrumentation.
+	Run func(ctx context.Context, containerID string, observations *QualifiedExecutionObservations) error
 
 	// TerminalObserver is an optional seam for tests. When nil,
 	// the production path uses cli.ContainerInspect to detect the
@@ -501,7 +503,7 @@ func executeQualifiedLifecycle(
 	obs.Container.Started = true
 
 	// Run the workload.
-	runErr := opts.Run(ctx, obs.Container.ID)
+	runErr := opts.Run(ctx, obs.Container.ID, obs)
 
 	// Wait for terminal state. The canary image is a long-running
 	// server, so the caller is responsible for terminating the

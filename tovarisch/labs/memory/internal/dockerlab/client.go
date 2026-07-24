@@ -725,3 +725,63 @@ func (c *Client) ContainerStats(ctx context.Context, containerID string) (*Conta
 		MemoryPerc:          float64(memUsage) / float64(memLimit) * 100,
 	}, nil
 }
+
+// CanaryHealthCheckViaExec performs a health check on a canary container
+// using docker exec instead of direct HTTP. This addresses CORRECTION27:
+// Docker bridge networking issues can prevent direct IP access, but
+// `docker exec` always works because it uses the container's own network
+// namespace.
+func (c *Client) CanaryHealthCheckViaExec(ctx context.Context, containerID string, port int, timeout time.Duration) (int, error) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return -1, ctx.Err()
+		default:
+		}
+		// Use curl from inside the container to hit localhost:port
+		exitCode, _, err := c.ContainerExec(ctx, containerID, []string{
+			"sh", "-c",
+			fmt.Sprintf("curl -sf http://localhost:%d/health || curl -sf http://127.0.0.1:%d/health || exit 1", port, port),
+		})
+		if err != nil {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		if exitCode == 0 {
+			return 0, nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return -1, fmt.Errorf("timeout waiting for canary health via docker exec")
+}
+
+// CanaryStateViaExec fetches canary state using docker exec and
+// the container's localhost networking. CORRECTION27.
+func (c *Client) CanaryStateViaExec(ctx context.Context, containerID string, port int) (*CanaryStateFromExec, error) {
+	exitCode, output, err := c.ContainerExec(ctx, containerID, []string{
+		"sh", "-c",
+		fmt.Sprintf("curl -sf http://localhost:%d/state || curl -sf http://127.0.0.1:%d/state", port, port),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("exec state: %w", err)
+	}
+	if exitCode != 0 {
+		return nil, fmt.Errorf("state check failed: exit code %d", exitCode)
+	}
+	var state CanaryStateFromExec
+	if err := json.Unmarshal([]byte(output), &state); err != nil {
+		return nil, fmt.Errorf("parse state JSON: %w", err)
+	}
+	return &state, nil
+}
+
+// CanaryStateFromExec represents the canary state when fetched via exec.
+type CanaryStateFromExec struct {
+	Mode           string `json:"mode"`
+	RetainedBlocks int    `json:"retained_blocks"`
+	RetainedBytes  int64  `json:"retained_bytes"`
+	OperationCount int64   `json:"operation_count"`
+	FDCount        int     `json:"fd_count"`
+	Ready          bool    `json:"ready"`
+}

@@ -122,6 +122,13 @@ func run(args []string) error {
 // and that the outer runCommand needs to compute the verdict.
 // Captured by closure; the Run callback writes them via shared
 // pointer.
+type ReachabilityInfo struct {
+	Method dockerlab.ReachabilityMethod `json:"method"`
+	NetworkID string `json:"network_id"`
+	Success bool `json:"success"`
+	FailureReason string `json:"failure_reason,omitempty"`
+}
+
 type workloadArtifacts struct {
 	InitialState   *CanaryState
 	FinalState     *CanaryState
@@ -132,6 +139,7 @@ type workloadArtifacts struct {
 	PhaseValid     bool
 	WorkloadValid  bool
 	IdentityStable bool
+	Reachability *ReachabilityInfo
 }
 
 func runCommand(args []string) error {
@@ -245,7 +253,7 @@ func runCommand(args []string) error {
 	workload := &workloadArtifacts{PhaseConfig: phaseCfg}
 	var workloadErr error
 
-	runWorkload := func(workloadCtx context.Context, containerID string) error {
+	runWorkload := func(workloadCtx context.Context, containerID string, obs *dockerlab.QualifiedExecutionObservations) error {
 		containerPID, err := dockerClient.ContainerGetPID(workloadCtx, containerID)
 		if err != nil {
 			return fmt.Errorf("get container PID: %w", err)
@@ -254,13 +262,26 @@ func runCommand(args []string) error {
 			fmt.Printf("Container %s started with PID %d\n", containerID, containerPID)
 		}
 
-		containerIP, err := dockerClient.ContainerIP(workloadCtx, containerID, netName)
-		if err != nil {
-			return fmt.Errorf("get container IP: %w", err)
+		// CORRECTION27 P0-1: Use Docker exec-based health check instead of direct HTTP.
+		// This avoids Docker bridge networking issues where the container IP is not
+		// reachable from the host. Docker exec always works because it uses the
+		// container's own network namespace.
+		if _, err := dockerClient.CanaryHealthCheckViaExec(workloadCtx, containerID, *canaryPort, 30*time.Second); err != nil {
+			return fmt.Errorf("canary health check failed (docker exec): %w", err)
 		}
-		canaryURL := fmt.Sprintf("http://%s:%d", containerIP, *canaryPort)
 		if *verbose {
-			fmt.Printf("Canary URL: %s\n", canaryURL)
+			fmt.Printf("Canary healthy (via docker exec)\n")
+		}
+
+		// For the workload, we still need direct HTTP - fall back to container IP
+		// but this is only for operating the canary, not for health verification.
+		containerIP, _ := dockerClient.ContainerIP(workloadCtx, containerID, netName)
+		canaryURL := ""
+		if containerIP != "" {
+			canaryURL = fmt.Sprintf("http://%s:%d", containerIP, *canaryPort)
+			if *verbose {
+				fmt.Printf("Canary URL (for workload): %s\n", canaryURL)
+			}
 		}
 
 		httpClient := &http.Client{
@@ -270,11 +291,11 @@ func runCommand(args []string) error {
 			},
 		}
 
-		if err := waitForCanaryHealth(workloadCtx, httpClient, canaryURL, 30*time.Second, *verbose); err != nil {
-			return fmt.Errorf("canary health check failed: %w", err)
+		// CORRECTION27: Try exec-based state fetch first (more reliable), fall back to HTTP
+		initialState, err := fetchCanaryStateViaExec(workloadCtx, dockerClient, containerID, *canaryPort)
+		if err != nil && canaryURL != "" {
+			initialState, err = fetchCanaryState(workloadCtx, httpClient, canaryURL)
 		}
-
-		initialState, err := fetchCanaryState(workloadCtx, httpClient, canaryURL)
 		if err != nil {
 			return fmt.Errorf("fetch initial canary state: %w", err)
 		}
@@ -358,7 +379,11 @@ func runCommand(args []string) error {
 			return fmt.Errorf("bounded stop: %w", stopErr)
 		}
 
-		finalState, err := fetchCanaryState(workloadCtx, httpClient, canaryURL)
+		// CORRECTION27: Try exec-based state fetch first (more reliable), fall back to HTTP
+		finalState, err := fetchCanaryStateViaExec(workloadCtx, dockerClient, containerID, *canaryPort)
+		if err != nil && canaryURL != "" {
+			finalState, err = fetchCanaryState(workloadCtx, httpClient, canaryURL)
+		}
 		if err != nil {
 			sampler.Stop()
 			return fmt.Errorf("fetch final canary state: %w", err)
@@ -408,6 +433,12 @@ func runCommand(args []string) error {
 		workload.PhaseValid = phaseValid
 		workload.WorkloadValid = workloadValid
 		workload.IdentityStable = identityStable
+		// CORRECTION27 P0-2: Track reachability method
+		workload.Reachability = &ReachabilityInfo{
+			Method:     dockerlab.ReachabilityMethodDockerExec,
+			NetworkID:  netName,
+			Success:    true,
+		}
 		return nil
 	}
 
@@ -2677,3 +2708,21 @@ func validateStateInvariant(scenario string, initial, final *CanaryState, worklo
 // buildAndPersistQualifiedEvidence) have been deleted. The
 // production CLI now goes through dockerlab.ExecuteQualifiedDockerLifecycle
 // and evidence.PersistQualifiedExecutionEvidence directly.
+
+// fetchCanaryStateViaExec fetches canary state using docker exec.
+// CORRECTION27 P0-1: More reliable than direct HTTP when Docker bridge
+// networking has issues.
+func fetchCanaryStateViaExec(ctx context.Context, dockerClient *dockerlab.Client, containerID string, port int) (*CanaryState, error) {
+	state, err := dockerClient.CanaryStateViaExec(ctx, containerID, port)
+	if err != nil {
+		return nil, err
+	}
+	return &CanaryState{
+		Mode:           state.Mode,
+		RetainedBlocks: state.RetainedBlocks,
+		RetainedBytes:  state.RetainedBytes,
+		OperationCount: int(state.OperationCount),
+		FDCount:        state.FDCount,
+		Ready:          state.Ready,
+	}, nil
+}

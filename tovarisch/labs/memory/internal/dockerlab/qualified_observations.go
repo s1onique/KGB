@@ -5,10 +5,42 @@
 // that actually observes it. The observation object also carries
 // the cleanup-absence and provenance fields required by the
 // serialized verifier and the gate.
+//
+// CORRECTION27: Added ReachabilityObservations to track the method
+// used for canary health verification. This addresses production
+// reachability failures caused by Docker bridge networking issues
+// when containers cannot be reached via direct IP polling.
 
 package dockerlab
 
 import "time"
+
+// ReachabilityMethod defines how the canary's health was verified.
+type ReachabilityMethod string
+
+const (
+	// ReachabilityMethodDirectHTTP uses direct HTTP to the container IP
+	// (the legacy approach, vulnerable to Docker bridge networking issues).
+	ReachabilityMethodDirectHTTP ReachabilityMethod = "direct_http"
+	// ReachabilityMethodDockerExec uses `docker exec` to hit the canary
+	// from inside the Docker network namespace (CORRECTION27 fix).
+	ReachabilityMethodDockerExec ReachabilityMethod = "docker_exec"
+	// ReachabilityMethodUnknown indicates the method was not recorded.
+	ReachabilityMethodUnknown ReachabilityMethod = "unknown"
+)
+
+// ReachabilityObservations captures the canary reachability verification
+// method and outcomes. CORRECTION27 P0-1.
+type ReachabilityObservations struct {
+	Method             ReachabilityMethod `json:"method"`
+	TargetHost         string             `json:"target_host,omitempty"`
+	TargetPort         int                `json:"target_port,omitempty"`
+	NetworkID          string             `json:"network_id,omitempty"`
+	HTTPResponseCode   int                `json:"http_response_code,omitempty"`
+	ExecExitCode      int                `json:"exec_exit_code,omitempty"`
+	Success            bool               `json:"success"`
+	FailureReason     string             `json:"failure_reason,omitempty"`
+}
 
 // ProvenanceBinding distinguishes the canonical repository identities
 // for the implementation tree. The verifier enforces the Git object
@@ -64,13 +96,14 @@ type ContainerObservations struct {
 
 // QualifiedExecutionObservations is the canonical observation object.
 type QualifiedExecutionObservations struct {
-	SchemaVersion string                `json:"schema_version"`
-	GeneratedAt   time.Time             `json:"generated_at"`
-	Image         ImageObservations     `json:"image"`
-	Network       NetworkObservations   `json:"network"`
-	Pull          PullObservations      `json:"pull"`
-	Container     ContainerObservations `json:"container"`
-	Provenance    ProvenanceBinding     `json:"provenance"`
+	SchemaVersion   string                  `json:"schema_version"`
+	GeneratedAt     time.Time               `json:"generated_at"`
+	Image           ImageObservations        `json:"image"`
+	Network         NetworkObservations      `json:"network"`
+	Pull            PullObservations         `json:"pull"`
+	Container       ContainerObservations    `json:"container"`
+	Provenance      ProvenanceBinding        `json:"provenance"`
+	Reachability    ReachabilityObservations `json:"reachability"`
 }
 
 // SetInspectedImage records the result of ImageInspectWithRaw.
@@ -157,4 +190,30 @@ func (o *QualifiedExecutionObservations) SetProvenanceDirty(working, commitDirty
 // SetVCSModified marks the VCS-modified flag.
 func (o *QualifiedExecutionObservations) SetVCSModified(modified bool) {
 	o.Provenance.VCSModified = modified
+}
+
+// SetReachabilityDirectHTTP records a successful direct HTTP reachability check.
+func (o *QualifiedExecutionObservations) SetReachabilityDirectHTTP(host string, port int, networkID string, responseCode int) {
+	o.Reachability.Method = ReachabilityMethodDirectHTTP
+	o.Reachability.TargetHost = host
+	o.Reachability.TargetPort = port
+	o.Reachability.NetworkID = networkID
+	o.Reachability.HTTPResponseCode = responseCode
+	o.Reachability.Success = responseCode >= 200 && responseCode < 300
+}
+
+// SetReachabilityDockerExec records a successful Docker exec-based reachability check.
+func (o *QualifiedExecutionObservations) SetReachabilityDockerExec(networkID string, exitCode int) {
+	o.Reachability.Method = ReachabilityMethodDockerExec
+	o.Reachability.NetworkID = networkID
+	o.Reachability.ExecExitCode = exitCode
+	o.Reachability.Success = exitCode == 0
+}
+
+// SetReachabilityFailed records a failed reachability check.
+func (o *QualifiedExecutionObservations) SetReachabilityFailed(method ReachabilityMethod, networkID, reason string) {
+	o.Reachability.Method = method
+	o.Reachability.NetworkID = networkID
+	o.Reachability.FailureReason = reason
+	o.Reachability.Success = false
 }

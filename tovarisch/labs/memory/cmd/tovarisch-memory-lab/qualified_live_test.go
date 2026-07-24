@@ -82,14 +82,46 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 	// Run the production helper. The Run function stops the
 	// container boundedly so waitForTerminalState observes the
 	// non-running state.
+	// CORRECTION27: Use canary binary to test docker exec-based reachability.
 	opts := dockerlab.LifecycleOptions{
 		ImageReference: liveSmokeImageRef,
 		NetworkName:    netName,
 		ContainerName:  runID,
-		ContainerCmd:   []string{"true"},
-		TerminalTimeout: 10 * time.Second,
+		ContainerCmd:   []string{"/app/canary", "--mode=bounded", "--port=8080"},
+		TerminalTimeout: 15 * time.Second,
 		CleanupTimeout: 10 * time.Second,
-		Run: func(runCtx context.Context, containerID string) error {
+		Run: func(runCtx context.Context, containerID string, observations *dockerlab.QualifiedExecutionObservations) error {
+			// CORRECTION27: Test docker exec-based reachability
+			// Use docker exec since direct HTTP may fail due to Docker bridge issues.
+			canaryPort := 8080
+			networkID := observations.Network.CreateResponseID
+
+			// Try docker exec-based health check (CORRECTION27 path C)
+			execExitCode := -1
+			execErr := error(nil)
+			for i := 0; i < 20; i++ {
+				execExitCode, _, execErr = docker.ContainerExec(runCtx, containerID, []string{
+					"sh", "-c",
+					fmt.Sprintf("wget -qO- http://localhost:%d/health || wget -qO- http://127.0.0.1:%d/health || exit 1", canaryPort, canaryPort),
+				})
+				if execErr == nil && execExitCode == 0 {
+					break
+				}
+				select {
+				case <-runCtx.Done():
+					observations.SetReachabilityFailed(dockerlab.ReachabilityMethodDockerExec, networkID, "timeout")
+					return runCtx.Err()
+				case <-time.After(500 * time.Millisecond):
+				}
+			}
+
+			// Record reachability in observations
+			if execExitCode == 0 && execErr == nil {
+				observations.SetReachabilityDockerExec(networkID, execExitCode)
+			} else {
+				observations.SetReachabilityFailed(dockerlab.ReachabilityMethodDockerExec, networkID, fmt.Sprintf("exit code %d", execExitCode))
+			}
+
 			if err := docker.ContainerStop(runCtx, containerID, 5*time.Second); err != nil {
 				return fmt.Errorf("bounded stop: %w", err)
 			}

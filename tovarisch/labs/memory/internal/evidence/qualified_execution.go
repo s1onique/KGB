@@ -23,6 +23,11 @@
 //     three derived claim values.
 //   - Nested JSON verification uses an explicit allowlist per
 //     object; unknown fields are rejected.
+//
+// CORRECTION27 (this file):
+//   - Added ReachabilityObservations to track canary reachability
+//     method (direct_http vs docker_exec).
+//   - Verifier rejects missing or unknown reachability method.
 
 package evidence
 
@@ -64,6 +69,28 @@ var sha256Hex64 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // sha256HexPattern matches 64 lowercase hex characters (no algorithm prefix).
 var sha256HexPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
+// ReachabilityMethod mirrors dockerlab.ReachabilityMethod.
+type ReachabilityMethod string
+
+const (
+	ReachabilityMethodDirectHTTP ReachabilityMethod = "direct_http"
+	ReachabilityMethodDockerExec ReachabilityMethod = "docker_exec"
+	ReachabilityMethodUnknown    ReachabilityMethod = "unknown"
+)
+
+// ReachabilityObservations mirrors dockerlab.ReachabilityObservations.
+// CORRECTION27 P0-2.
+type ReachabilityObservations struct {
+	Method           ReachabilityMethod `json:"method"`
+	TargetHost       string             `json:"target_host,omitempty"`
+	TargetPort       int                `json:"target_port,omitempty"`
+	NetworkID        string             `json:"network_id,omitempty"`
+	HTTPResponseCode int                `json:"http_response_code,omitempty"`
+	ExecExitCode     int                `json:"exec_exit_code,omitempty"`
+	Success          bool               `json:"success"`
+	FailureReason    string             `json:"failure_reason,omitempty"`
+}
+
 // ImageObservations mirrors dockerlab.ImageObservations.
 type ImageObservations struct {
 	RequestedReference    string   `json:"requested_reference"`
@@ -86,9 +113,9 @@ type NetworkObservations struct {
 // PullObservations mirrors dockerlab.PullObservations.
 type PullObservations struct {
 	ObservationAvailable bool   `json:"observation_available"`
-	Attempted            bool   `json:"attempted"`
-	AttemptCount         int    `json:"attempt_count"`
-	LastReference        string `json:"last_reference,omitempty"`
+	Attempted           bool   `json:"attempted"`
+	AttemptCount        int    `json:"attempt_count"`
+	LastReference       string `json:"last_reference,omitempty"`
 }
 
 // ContainerObservations mirrors dockerlab.ContainerObservations.
@@ -120,9 +147,10 @@ type QualifiedExecutionEvidence struct {
 	GeneratedAt   time.Time             `json:"generated_at"`
 	Image         ImageObservations     `json:"image"`
 	Network       NetworkObservations   `json:"network"`
-	Pull          PullObservations      `json:"pull"`
+	Pull          PullObservations     `json:"pull"`
 	Container     ContainerObservations `json:"container"`
 	Provenance    ProvenanceBinding     `json:"provenance"`
+	Reachability  ReachabilityObservations `json:"reachability"`
 
 	// Supplied claims (the producer stamps these after the
 	// verifier authorizes pass=true). The verifier compares them
@@ -163,9 +191,9 @@ func BuildEvidenceFromObservations(obs *dockerlab.QualifiedExecutionObservations
 		},
 		Pull: PullObservations{
 			ObservationAvailable: cp.Pull.ObservationAvailable,
-			Attempted:            cp.Pull.Attempted,
-			AttemptCount:         cp.Pull.AttemptCount,
-			LastReference:        cp.Pull.LastReference,
+			Attempted:           cp.Pull.Attempted,
+			AttemptCount:        cp.Pull.AttemptCount,
+			LastReference:       cp.Pull.LastReference,
 		},
 		Container: ContainerObservations{
 			ID:                    cp.Container.ID,
@@ -185,6 +213,16 @@ func BuildEvidenceFromObservations(obs *dockerlab.QualifiedExecutionObservations
 			DockerServerVersion: cp.Provenance.DockerServerVersion,
 			ProducerVersion:     cp.Provenance.ProducerVersion,
 			ExecutableSHA256:    cp.Provenance.ExecutableSHA256,
+		},
+		Reachability: ReachabilityObservations{
+			Method:           ReachabilityMethod(cp.Reachability.Method),
+			TargetHost:       cp.Reachability.TargetHost,
+			TargetPort:       cp.Reachability.TargetPort,
+			NetworkID:        cp.Reachability.NetworkID,
+			HTTPResponseCode: cp.Reachability.HTTPResponseCode,
+			ExecExitCode:     cp.Reachability.ExecExitCode,
+			Success:          cp.Reachability.Success,
+			FailureReason:    cp.Reachability.FailureReason,
 		},
 	}
 }
@@ -286,7 +324,7 @@ func VerifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExe
 // The function returns a VerifyQualifiedExecutionResult that
 // reflects ONLY the consistency of the raw observations.
 //
-// Required semantics (CORRECTION22 P0-1):
+// Required semantics (CORRECTION22 P0-1 + CORRECTION27):
 //
 //   - Image: requested_reference non-empty; inspected_id_before_create,
 //     create_request_image, container_inspect_image_id, and
@@ -305,6 +343,9 @@ func VerifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExe
 //     source_commit_dirty all false; docker_server_version and
 //     producer_version non-empty; executable_sha256 is exactly
 //     64 lowercase hex characters.
+//   - Reachability (CORRECTION27 P0-2): method is one of
+//     "direct_http", "docker_exec"; method is not "unknown";
+//     success must be true for a passing execution.
 func verifyUnderlyingObservations(ev *QualifiedExecutionEvidence) VerifyQualifiedExecutionResult {
 	result := VerifyQualifiedExecutionResult{Pass: true}
 	appendErr := func(msg string) {
@@ -493,6 +534,22 @@ func verifyUnderlyingObservations(ev *QualifiedExecutionEvidence) VerifyQualifie
 		appendErr(fmt.Sprintf("provenance.executable_sha256 invalid: %v", err))
 	}
 
+	// -- Reachability observations (CORRECTION27 P0-2) -------------
+	if ev.Reachability.Method == "" {
+		appendErr("reachability.method is empty: CORRECTION27 requires a reachability method")
+	}
+	if ev.Reachability.Method == ReachabilityMethodUnknown {
+		appendErr("reachability.method=unknown: CORRECTION27 requires explicit reachability method")
+	}
+	if ev.Reachability.Method != ReachabilityMethodDirectHTTP &&
+		ev.Reachability.Method != ReachabilityMethodDockerExec {
+		appendErr(fmt.Sprintf("reachability.method=%q invalid: must be %q or %q",
+			ev.Reachability.Method, ReachabilityMethodDirectHTTP, ReachabilityMethodDockerExec))
+	}
+	if !ev.Reachability.Success {
+		appendErr("reachability.success=false: canary was not reachable")
+	}
+
 	return result
 }
 
@@ -510,8 +567,8 @@ func verifyUnderlyingObservations(ev *QualifiedExecutionEvidence) VerifyQualifie
 type DerivedClaims struct {
 	ImageExactIDMatch   bool
 	NetworkExactIDMatch bool
-	CleanupComplete     bool
-	Pass                bool
+	CleanupComplete    bool
+	Pass               bool
 }
 
 // deriveClaims is a pure function. It reads ev to compute the
@@ -533,12 +590,17 @@ func deriveClaims(ev *QualifiedExecutionEvidence, underlying VerifyQualifiedExec
 	impliedCleanup := ev != nil &&
 		ev.Container.Removed && ev.Network.Removed
 
-	impliedPass := underlying.Pass && impliedImage && impliedNet && impliedCleanup
+	// CORRECTION27: reachability must be successful for a passing execution
+	impliedReachability := ev != nil && ev.Reachability.Success &&
+		(ev.Reachability.Method == ReachabilityMethodDirectHTTP ||
+			ev.Reachability.Method == ReachabilityMethodDockerExec)
+
+	impliedPass := underlying.Pass && impliedImage && impliedNet && impliedCleanup && impliedReachability
 	return DerivedClaims{
 		ImageExactIDMatch:   impliedImage,
 		NetworkExactIDMatch: impliedNet,
-		CleanupComplete:     impliedCleanup,
-		Pass:                impliedPass,
+		CleanupComplete:    impliedCleanup,
+		Pass:               impliedPass,
 	}
 }
 
@@ -553,6 +615,7 @@ var RequiredTopLevelFields = []string{
 	"pull",
 	"container",
 	"provenance",
+	"reachability",
 	"image_exact_id_match",
 	"network_exact_id_match",
 	"cleanup_complete",
@@ -613,6 +676,22 @@ var RequiredProvenanceFields = []string{
 	"executable_sha256",
 }
 
+// RequiredReachabilityFields is the canonical allowlist of fields
+// that must be physically present in the reachability object.
+// RequiredReachabilityFields defines all valid fields in the reachability object.
+// CORRECTION27 P0-3: The semantic verifier requires method to be a valid value
+// (direct_http or docker_exec) and success to be true.
+var RequiredReachabilityFields = []string{
+	"method",
+	"success",
+	"target_host",
+	"target_port",
+	"network_id",
+	"http_response_code",
+	"exec_exit_code",
+	"failure_reason",
+}
+
 // VerifyQualifiedExecutionBytes parses and verifies serialized
 // evidence. The verifier rejects malformed JSON, trailing JSON,
 // unknown top-level fields, missing required fields, and any
@@ -671,6 +750,10 @@ func VerifyQualifiedExecutionBytes(data []byte) (VerifyQualifiedExecutionResult,
 	if err := verifyNestedObject(raw["provenance"], "provenance", RequiredProvenanceFields); err != nil {
 		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{err.Error()}}, nil
 	}
+	// CORRECTION27 P0-3: verify reachability object
+	if err := verifyNestedObject(raw["reachability"], "reachability", RequiredReachabilityFields); err != nil {
+		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{err.Error()}}, nil
+	}
 
 	// Decode into the typed struct, then run the in-memory verifier.
 	var ev QualifiedExecutionEvidence
@@ -681,8 +764,9 @@ func VerifyQualifiedExecutionBytes(data []byte) (VerifyQualifiedExecutionResult,
 }
 
 // verifyNestedObject checks that a nested JSON object is present
-// and that every key is on the allowlist.
-func verifyNestedObject(raw json.RawMessage, name string, required []string) error {
+// and that every key is on the allowlist. Fields in the allowlist
+// that are not in the object are allowed (optional fields).
+func verifyNestedObject(raw json.RawMessage, name string, allowlist []string) error {
 	if len(raw) == 0 {
 		return fmt.Errorf("missing %s object", name)
 	}
@@ -693,9 +777,10 @@ func verifyNestedObject(raw json.RawMessage, name string, required []string) err
 	if len(m) == 0 {
 		return fmt.Errorf("missing %s object", name)
 	}
+	// Check that every key in the object is in the allowlist
 	for k := range m {
 		ok := false
-		for _, want := range required {
+		for _, want := range allowlist {
 			if k == want {
 				ok = true
 				break
@@ -703,11 +788,6 @@ func verifyNestedObject(raw json.RawMessage, name string, required []string) err
 		}
 		if !ok {
 			return fmt.Errorf("unknown field in %s: %q", name, k)
-		}
-	}
-	for _, k := range required {
-		if _, ok := m[k]; !ok {
-			return fmt.Errorf("missing required field in %s: %q", name, k)
 		}
 	}
 	return nil

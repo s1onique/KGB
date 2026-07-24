@@ -56,7 +56,7 @@ func TestRunErrorPropagates(t *testing.T) {
 		TerminalTimeout: time.Second,
 		CleanupTimeout: time.Second,
 		TerminalObserver: func(_ context.Context, _ string) bool { return true },
-		Run: func(_ context.Context, _ string) error { return errRun },
+		Run: func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return errRun },
 	}
 	_, err := executeQualifiedLifecycle(context.Background(), audited, opts.TerminalObserver, opts)
 	if err == nil {
@@ -83,7 +83,7 @@ func TestRunAndTerminalErrorsJoin(t *testing.T) {
 		TerminalTimeout: 100 * time.Millisecond,
 		CleanupTimeout:  time.Second,
 		TerminalObserver: func(_ context.Context, _ string) bool { return false },
-		Run: func(_ context.Context, _ string) error { return errRun },
+		Run: func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return errRun },
 	}
 	_, err := executeQualifiedLifecycle(context.Background(), audited, opts.TerminalObserver, opts)
 	if err == nil {
@@ -113,7 +113,7 @@ func TestRunAndCleanupErrorsJoin(t *testing.T) {
 		TerminalTimeout: time.Second,
 		CleanupTimeout:  time.Second,
 		TerminalObserver: func(_ context.Context, _ string) bool { return true },
-		Run: func(_ context.Context, _ string) error { return errRun },
+		Run: func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return errRun },
 	}
 	_, err := executeQualifiedLifecycle(context.Background(), audited, opts.TerminalObserver, opts)
 	if err == nil {
@@ -144,7 +144,7 @@ func TestTerminalAndCleanupErrorsJoin(t *testing.T) {
 		TerminalTimeout: 100 * time.Millisecond,
 		CleanupTimeout:  time.Second,
 		TerminalObserver: func(_ context.Context, _ string) bool { return false },
-		Run: func(_ context.Context, _ string) error { return nil },
+		Run: func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return nil },
 	}
 	_, err := executeQualifiedLifecycle(context.Background(), audited, opts.TerminalObserver, opts)
 	if err == nil {
@@ -176,7 +176,7 @@ func TestRunTerminalAndCleanupErrorsJoin(t *testing.T) {
 		TerminalTimeout: 100 * time.Millisecond,
 		CleanupTimeout:  time.Second,
 		TerminalObserver: func(_ context.Context, _ string) bool { return false },
-		Run: func(_ context.Context, _ string) error { return errRun },
+		Run: func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return errRun },
 	}
 	_, err := executeQualifiedLifecycle(context.Background(), audited, opts.TerminalObserver, opts)
 	if err == nil {
@@ -213,7 +213,7 @@ func TestPullAttemptFailureObservations(t *testing.T) {
 		TerminalTimeout: time.Second,
 		CleanupTimeout:  time.Second,
 		TerminalObserver: func(_ context.Context, _ string) bool { return true },
-		Run: func(_ context.Context, _ string) error {
+		Run: func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error {
 			// Trigger ImagePull via the audited runtime. This
 			// records the attempt and returns the sentinel.
 			_, _ = audited.ImagePull(context.Background(), "kgb-tovarisch-canary:latest", types.ImagePullOptions{})
@@ -265,7 +265,7 @@ func TestLifecycle_PhaseOrder(t *testing.T) {
 		TerminalTimeout: time.Second,
 		CleanupTimeout:  time.Second,
 		TerminalObserver: func(_ context.Context, _ string) bool { return true },
-		Run: func(_ context.Context, _ string) error { return nil },
+		Run: func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { return nil },
 	}
 	if _, err := executeQualifiedLifecycle(context.Background(), audited, opts.TerminalObserver, opts); err != nil {
 		t.Fatalf("expected success, got: %v", err)
