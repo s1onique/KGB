@@ -338,10 +338,7 @@ type LifecycleOptions struct {
 	NetworkName    string
 	ContainerName  string
 	ContainerCmd   []string
-	// StartTimeout is reserved for future use; the qualified runtime
-	// does not currently wait between ContainerCreate and
-	// ContainerStart (ContainerStart is bounded by its own context).
-	StartTimeout time.Duration
+
 	// TerminalTimeout bounds the wait for terminal state. Zero means
 	// "no bounded wait".
 	TerminalTimeout time.Duration

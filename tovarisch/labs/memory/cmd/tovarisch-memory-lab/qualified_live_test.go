@@ -88,7 +88,6 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 		NetworkName:    netName,
 		ContainerName:  runID,
 		ContainerCmd:   []string{"true"},
-		StartTimeout:   5 * time.Second,
 		TerminalTimeout: 10 * time.Second,
 		CleanupTimeout: 10 * time.Second,
 		Run: func(runCtx context.Context, containerID string) error {

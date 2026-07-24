@@ -272,10 +272,9 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExe
 	if ev.ImageExactIDMatch && !impliedImageExact {
 		appendErr("image_exact_id_match=true but the underlying image values disagree")
 	}
-	// (false-negative lie check for image is documented but
-	// disabled pending BuildEvidenceFromObservations alignment;
-	// the bytes-round-trip path enforces the check via SetDerivedFields.)
-	_ = impliedImageExact
+	if ev.ImageExactIDMatch != impliedImageExact {
+		appendErr(fmt.Sprintf("image_exact_id_match mismatch: claimed=%v implied=%v", ev.ImageExactIDMatch, impliedImageExact))
+	}
 
 	// Network validation.
 	if strings.TrimSpace(ev.Network.RequestedName) == "" {
@@ -320,10 +319,9 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExe
 	if ev.NetworkExactIDMatch && !impliedNetExact {
 		appendErr("network_exact_id_match=true but the underlying network values disagree")
 	}
-	// (false-negative lie check for network is documented but
-	// disabled pending BuildEvidenceFromObservations alignment;
-	// the bytes-round-trip path enforces the check via SetDerivedFields.)
-	_ = impliedNetExact
+	if ev.NetworkExactIDMatch != impliedNetExact {
+		appendErr(fmt.Sprintf("network_exact_id_match mismatch: claimed=%v implied=%v", ev.NetworkExactIDMatch, impliedNetExact))
+	}
 
 	// Pull validation.
 	if !ev.Pull.ObservationAvailable {
@@ -368,12 +366,9 @@ func verifyQualifiedExecution(ev *QualifiedExecutionEvidence) VerifyQualifiedExe
 	if ev.CleanupComplete && !impliedCleanup {
 		appendErr("cleanup_complete=true but container.removed or network.removed is false")
 	}
-	// (false-negative lie check for cleanup_complete is documented but the
-	// existing tests construct obs with Container.Removed=true and
-	// Network.Removed=true, so the in-memory verifier records the
-	// discrepancy. The check is enforced in the bytes-round-trip path
-	// and via SetDerivedFields.)
-	_ = impliedCleanup
+	if ev.CleanupComplete != impliedCleanup {
+		appendErr(fmt.Sprintf("cleanup_complete mismatch: claimed=%v implied=%v", ev.CleanupComplete, impliedCleanup))
+	}
 
 	// Provenance validation.
 	if strings.TrimSpace(ev.Provenance.SourceCommit) == "" {
@@ -686,10 +681,12 @@ func ComputeEvidenceSHA256(ev *QualifiedExecutionEvidence) (string, error) {
 // fails closed on:
 //   - any in-memory verifier rejection;
 //   - any bytes-verifier rejection (after round-trip);
-//   - any write or read error.
+//   - any write or read error;
+//   - the persisted artifact not physically containing pass:true.
 //
-// On failure, an optional `qualified-execution-evidence.rejected.json`
-// is written for diagnostics; the canonical PASS path is not returned.
+// The producer stamps the derived fields and explicitly sets
+// Pass=true before marshalling; the persisted JSON is parsed and
+// required to contain pass=true plus the derived field values.
 func PersistQualifiedExecutionEvidence(dir string, ev *QualifiedExecutionEvidence) error {
 	if ev == nil {
 		return errors.New("evidence is nil")
@@ -698,12 +695,13 @@ func PersistQualifiedExecutionEvidence(dir string, ev *QualifiedExecutionEvidenc
 		return errors.New("dir is empty")
 	}
 	ev.SetDerivedFields()
-	memResult := verifyQualifiedExecution(ev)
-	if !memResult.Pass {
-		// Persist a diagnostic copy and return the rejection.
-		_ = writeRejectedDiagnostic(dir, ev, memResult.Errors)
-		return &VerificationError{Errors: memResult.Errors}
+	preStamp := verifyUnderlyingObservations(ev)
+	if !preStamp.Pass {
+		_ = writeRejectedDiagnostic(dir, ev, preStamp.Errors)
+		return &VerificationError{Errors: preStamp.Errors}
 	}
+	ev.Pass = true
+	ev.VerifierErrors = nil
 	if len(ev.Image.InspectedRepoDigests) > 1 {
 		sort.Strings(ev.Image.InspectedRepoDigests)
 	}
@@ -726,9 +724,43 @@ func PersistQualifiedExecutionEvidence(dir string, ev *QualifiedExecutionEvidenc
 		_ = writeRejectedDiagnostic(dir, ev, result.Errors)
 		return &VerificationError{Errors: result.Errors}
 	}
-	ev.Pass = true
-	ev.VerifierErrors = nil
+	// CORRECTION20 P0-8: require the physical document to contain
+	// pass:true plus the derived fields. The bytes verifier is the
+	// only authority for the artifact claim.
+	var persistedDoc QualifiedExecutionEvidence
+	if err := json.Unmarshal(persisted, &persistedDoc); err != nil {
+		return fmt.Errorf("unmarshal persisted evidence: %w", err)
+	}
+	if !persistedDoc.Pass || !persistedDoc.ImageExactIDMatch || !persistedDoc.NetworkExactIDMatch || !persistedDoc.CleanupComplete {
+		return &VerificationError{Errors: []string{
+		fmt.Sprintf("persisted artifact lacks required pass/derived fields: pass=%v image=%v network=%v cleanup=%v",
+			persistedDoc.Pass, persistedDoc.ImageExactIDMatch, persistedDoc.NetworkExactIDMatch, persistedDoc.CleanupComplete),
+		}}
+	}
 	return nil
+}
+
+// verifyUnderlyingObservations runs the verifier over the
+// underlying observations without trusting the pass/derived field
+// claims. The producer calls this to confirm the underlying state is
+// valid before stamping pass=true.
+func verifyUnderlyingObservations(ev *QualifiedExecutionEvidence) VerifyQualifiedExecutionResult {
+	result := VerifyQualifiedExecutionResult{Pass: true}
+	appendErr := func(msg string) {
+		result.Pass = false
+		result.Errors = append(result.Errors, msg)
+	}
+	if ev == nil {
+		appendErr("evidence is nil")
+		return result
+	}
+	// Reuse the in-memory verifier but ignore ev.Pass (we check it later).
+	tmp := *ev
+	tmp.Pass = false
+	tmp.ImageExactIDMatch = false
+	tmp.NetworkExactIDMatch = false
+	tmp.CleanupComplete = false
+	return verifyQualifiedExecution(&tmp)
 }
 
 // writeRejectedDiagnostic writes the failed evidence to a separate
