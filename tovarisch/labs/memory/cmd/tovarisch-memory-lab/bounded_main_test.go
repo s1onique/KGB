@@ -58,13 +58,19 @@ func TestMain(m *testing.M) {
 // cleaned up implicitly by the OS on process exit.
 func buildOnce() {
 	testVerifierOnce.Do(func() {
-		// Get the module root using go list.
-		moduleRoot, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}").Output()
-		if err != nil {
-			testVerifierErr = fmt.Errorf("go list module root: %w", err)
-			return
+		// Prefer explicit repo root from environment (closure mode).
+		// Fall back to go list for development.
+		var moduleDir string
+		if repoRoot := os.Getenv("TOVARISCH_REPO_ROOT"); repoRoot != "" {
+			moduleDir = repoRoot
+		} else {
+			moduleRoot, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}").Output()
+			if err != nil {
+				testVerifierErr = fmt.Errorf("go list module root: %w", err)
+				return
+			}
+			moduleDir = strings.TrimSpace(string(moduleRoot))
 		}
-		moduleDir := strings.TrimSpace(string(moduleRoot))
 
 		// The verifier package is cmd/tovarisch-memory-lab relative to
 		// the module root. Build from the package directory.
