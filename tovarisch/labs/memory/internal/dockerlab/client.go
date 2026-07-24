@@ -145,6 +145,29 @@ func (c *Client) ContainerCreate(ctx context.Context, cfg ContainerConfig) (stri
 	return resp.ID, nil
 }
 
+// ContainerCreateWithImageID creates a container using the exact image ID.
+// This is the P0-10 canonical approach: use the full immutable image ID
+// instead of a mutable tag, which guarantees no pull behavior.
+func (c *Client) ContainerCreateWithImageID(ctx context.Context, cfg ContainerConfig) (string, error) {
+	// Validate the image ID is canonical before use
+	if cfg.Config != nil && cfg.Config.Image != "" {
+		if err := ValidateExactImageID(cfg.Config.Image); err != nil {
+			return "", fmt.Errorf("image ID validation for container create: %w", err)
+		}
+	}
+
+	resources := container.Resources{
+		Memory:   cfg.MemoryLimit,
+		CPUQuota: cfg.CPUQuota,
+	}
+	hostCfg := container.HostConfig{Resources: resources}
+	resp, err := c.Client.ContainerCreate(ctx, cfg.Config, &hostCfg, nil, nil, cfg.Name)
+	if err != nil {
+		return "", fmt.Errorf("create container with exact image ID: %w", err)
+	}
+	return resp.ID, nil
+}
+
 func (c *Client) ContainerStart(ctx context.Context, containerID string) error {
 	return c.Client.ContainerStart(ctx, containerID, types.ContainerStartOptions{})
 }
