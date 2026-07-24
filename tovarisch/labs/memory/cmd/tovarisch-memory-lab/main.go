@@ -465,6 +465,10 @@ func runCommand(args []string) error {
 		outcome.Observations.SetVCSModified(cp.VCSModified)
 
 		ev := evidence.BuildEvidenceFromObservations(outcome.Observations)
+		// PersistQualifiedExecutionEvidence compares the supplied
+		// derived claims to the recomputed ones, so the producer must
+		// stamp the claims on the in-memory artifact before persisting.
+		ev.SetDerivedFields()
 		if perr := evidence.PersistQualifiedExecutionEvidence(artifactsPath, ev); perr != nil {
 			return fmt.Errorf("qualified evidence: %w", perr)
 		}
