@@ -140,7 +140,11 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 
 	// Install provenance into the observations.
 	obs := outcome.Observations
-	obs.SetProvenance(cp.VCSRevision, cp.VCSTree, cp.GitObjectFormat, "", cp.ProducerVersion)
+	dockerVer := ""
+	if v, err := docker.ServerVersion(ctx); err == nil {
+		dockerVer = v.Version
+	}
+	obs.SetProvenance(cp.VCSRevision, cp.VCSTree, cp.GitObjectFormat, dockerVer, cp.ProducerVersion)
 	obs.SetProvenanceDirty(cp.WorkingTreeDirty, cp.SourceCommitDirty)
 	obs.SetVCSModified(cp.VCSModified)
 
