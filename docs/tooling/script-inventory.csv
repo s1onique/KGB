@@ -262,4 +262,4 @@ PKG004,packaging/entware/S76uvb76,shell,0,packaging,,cmd/pkg-install,migration-r
 # === UVB76 SCRIPTS ===
 U001,uvb76/scripts/verify_uvb76_vet.sh,shell,0,verifier,,cmd/verify-uvb76,migration-required,Bootstrap inventory - thin wrapper
 U002,uvb76/scripts/verify_web_embed.sh,shell,0,verifier,uvb76-verify-embed,cmd/verify-web-embed,migration-required,Bootstrap inventory - thin wrapper
-TM001,scripts/build_tovarisch_canary_image.sh,shell,72,build,build-tovarisch-canary,cmd/build-tovarisch-canary,migration-required,Bootstrap inventory - canary image build with provenance labels
+TM001,scripts/build_tovarisch_canary_image.sh,shell,72,ci-glue,build-tovarisch-canary,cmd/build-tovarisch-canary,migration-required,Bootstrap inventory - canary image build with provenance labels
