@@ -119,7 +119,8 @@ func TestControlAdapter_ClosesAttachmentOnDemuxFailure(t *testing.T) {
 }
 func TestControlAdapter_ClosesAttachmentOnOverflow(t *testing.T) {
 	fake := successfulFake()
-	fake.NextAttachStdout = bytes.Repeat([]byte("x"), MaxControlStdout+1)
+	fake.NextAttachStdout = bytes.Repeat([]byte("x"), MaxControlStdout/2+1)
+	fake.Stream = io.MultiReader(multiplexedStream(fake.NextAttachStdout, nil), multiplexedStream(fake.NextAttachStdout, nil))
 	if err := probe(fake, context.Background(), time.Second); !errors.Is(err, ErrStdoutOverflow) {
 		t.Fatalf("err=%v", err)
 	}

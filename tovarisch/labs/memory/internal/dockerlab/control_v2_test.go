@@ -7,6 +7,7 @@ package dockerlab
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -169,7 +170,8 @@ func TestEngineSeam_ExecInspectFailure(t *testing.T) {
 
 func TestEngineSeam_StdoutOverflow(t *testing.T) {
 	fake := &FakeControlExecRuntime{}
-	fake.NextAttachStdout = make([]byte, MaxControlStdout+1)
+	fake.NextAttachStdout = make([]byte, MaxControlStdout/2+1)
+	fake.Stream = io.MultiReader(multiplexedStream(fake.NextAttachStdout, nil), multiplexedStream(fake.NextAttachStdout, nil))
 	r := NewControlRunner(fake)
 	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)
 	if !errors.Is(err, ErrStdoutOverflow) {
@@ -180,7 +182,8 @@ func TestEngineSeam_StdoutOverflow(t *testing.T) {
 func TestEngineSeam_StderrOverflow(t *testing.T) {
 	fake := &FakeControlExecRuntime{}
 	fake.NextAttachStdout = []byte(`{"schema_version":"canary-control/v1","operation":"health","success":true,"http_status":200,"health":{"ready":true,"mode":"growing"}}`)
-	fake.NextAttachStderr = make([]byte, MaxControlStderr+1)
+	fake.NextAttachStderr = make([]byte, MaxControlStderr/2+1)
+	fake.Stream = io.MultiReader(multiplexedStream(nil, fake.NextAttachStderr), multiplexedStream(nil, fake.NextAttachStderr))
 	fake.NextInspectResult = ExecInspectResult{ExitCode: 0}
 	r := NewControlRunner(fake)
 	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)

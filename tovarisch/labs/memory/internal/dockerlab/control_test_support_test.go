@@ -32,19 +32,20 @@ type RecordedCall struct {
 type FakeControlExecRuntime struct {
 	mu sync.Mutex
 
-	NextCreateExecID  string
-	ReturnEmptyExecID bool
-	NextCreateErr     error
-	NextAttachErr     error
-	NextInspectResult ExecInspectResult
-	NextInspectErr    error
-	NextAttachStdout  []byte
-	NextAttachStderr  []byte
-	Stream            io.Reader
-	CloseErr          error
-	BlockCreate       bool
-	BlockAttach       bool
-	BlockInspect      bool
+	NextCreateExecID   string
+	ReturnEmptyExecID  bool
+	NextCreateErr      error
+	NextAttachErr      error
+	NextInspectResult  ExecInspectResult
+	NextInspectErr     error
+	NextAttachStdout   []byte
+	NextAttachStderr   []byte
+	Stream             io.Reader
+	AttachmentOverride ControlExecAttachment
+	CloseErr           error
+	BlockCreate        bool
+	BlockAttach        bool
+	BlockInspect       bool
 
 	Calls      []RecordedCall
 	Attachment *fakeAttachment
@@ -76,6 +77,7 @@ func (f *FakeControlExecRuntime) ExecAttach(ctx context.Context, containerID, ex
 	f.mu.Lock()
 	f.Calls = append(f.Calls, RecordedCall{Kind: "ExecAttach", ContainerID: containerID, ExecID: execID})
 	block, err := f.BlockAttach, f.NextAttachErr
+	override := f.AttachmentOverride
 	stream := f.Stream
 	if stream == nil {
 		stream = multiplexedStream(f.NextAttachStdout, f.NextAttachStderr)
@@ -89,6 +91,9 @@ func (f *FakeControlExecRuntime) ExecAttach(ctx context.Context, containerID, ex
 	}
 	if err != nil {
 		return nil, err
+	}
+	if override != nil {
+		return override, nil
 	}
 	return a, nil
 }
@@ -118,18 +123,31 @@ func (f *FakeControlExecRuntime) CallsByKind(kind string) []RecordedCall {
 }
 
 type fakeAttachment struct {
-	reader   io.Reader
-	closeErr error
-	mu       sync.Mutex
-	closed   int
+	reader    io.Reader
+	closeErr  error
+	closeHook func()
+	closeOnce sync.Once
+	closeDone chan struct{}
+	mu        sync.Mutex
+	closed    int
+	result    error
 }
 
 func (a *fakeAttachment) Reader() io.Reader { return a.reader }
 func (a *fakeAttachment) Close() error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.closed++
-	return a.closeErr
+	a.closeOnce.Do(func() {
+		a.mu.Lock()
+		a.closed++
+		a.result = a.closeErr
+		a.mu.Unlock()
+		if a.closeHook != nil {
+			a.closeHook()
+		}
+		if a.closeDone != nil {
+			close(a.closeDone)
+		}
+	})
+	return a.result
 }
 func (a *fakeAttachment) closeCount() int {
 	a.mu.Lock()

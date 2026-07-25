@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
@@ -91,7 +92,13 @@ func (p *ProductionControlExecRuntime) ExecAttach(ctx context.Context, container
 	if err != nil {
 		return nil, err
 	}
-	return &dockerExecAttachment{response: response}, nil
+	if response.Conn == nil {
+		return nil, ErrHijackedConnectionRequired
+	}
+	if response.Reader == nil {
+		return nil, errors.Join(ErrHijackedReaderRequired, response.Conn.Close())
+	}
+	return newDockerExecAttachment(response), nil
 }
 
 func (p *ProductionControlExecRuntime) ExecInspect(ctx context.Context, containerID, execID string) (ExecInspectResult, error) {
@@ -118,21 +125,33 @@ func (p *ProductionControlExecRuntime) ExecInspect(ctx context.Context, containe
 }
 
 type dockerExecAttachment struct {
-	response types.HijackedResponse
+	reader    io.Reader
+	conn      io.Closer
+	closeOnce sync.Once
+	closeDone chan struct{}
+	closeErr  error
 }
 
-func (a *dockerExecAttachment) Reader() io.Reader { return a.response.Reader }
+func newDockerExecAttachment(response types.HijackedResponse) *dockerExecAttachment {
+	return &dockerExecAttachment{reader: response.Reader, conn: response.Conn, closeDone: make(chan struct{})}
+}
+
+func (a *dockerExecAttachment) Reader() io.Reader { return a.reader }
 func (a *dockerExecAttachment) Close() error {
-	if a.response.Conn == nil {
-		return nil
-	}
-	return a.response.Conn.Close()
+	a.closeOnce.Do(func() {
+		a.closeErr = a.conn.Close()
+		close(a.closeDone)
+	})
+	<-a.closeDone
+	return a.closeErr
 }
 
 var (
-	ErrStdoutOverflow = errors.New("dockerlab: stdout overflow")
-	ErrStderrOverflow = errors.New("dockerlab: stderr overflow")
-	ErrEmptyStdout    = errors.New("dockerlab: empty stdout")
+	ErrStdoutOverflow             = errors.New("dockerlab: stdout overflow")
+	ErrStderrOverflow             = errors.New("dockerlab: stderr overflow")
+	ErrEmptyStdout                = errors.New("dockerlab: empty stdout")
+	ErrHijackedConnectionRequired = errors.New("dockerlab: hijacked connection required")
+	ErrHijackedReaderRequired     = errors.New("dockerlab: hijacked reader required")
 )
 
 type boundedWriter struct {

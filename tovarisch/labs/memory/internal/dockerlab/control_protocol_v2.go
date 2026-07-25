@@ -13,11 +13,13 @@ import (
 )
 
 var (
-	ErrExitEnvelopeMismatch = errors.New("dockerlab: exit/envelope mismatch")
-	ErrContainerIDRequired  = errors.New("dockerlab: container ID required")
-	ErrExecIDRequired       = errors.New("dockerlab: exec ID required")
-	ErrWrongOperation       = errors.New("dockerlab: envelope operation does not match request")
-	ErrControlTimeout       = errors.New("dockerlab: control attempt timeout")
+	ErrExitEnvelopeMismatch   = errors.New("dockerlab: exit/envelope mismatch")
+	ErrContainerIDRequired    = errors.New("dockerlab: container ID required")
+	ErrExecIDRequired         = errors.New("dockerlab: exec ID required")
+	ErrWrongOperation         = errors.New("dockerlab: envelope operation does not match request")
+	ErrControlTimeout         = errors.New("dockerlab: control attempt timeout")
+	ErrControlRuntimeRequired = errors.New("dockerlab: control exec runtime required")
+	ErrExecStillRunning       = errors.New("dockerlab: control exec still running")
 )
 
 type ControlRunner struct {
@@ -29,6 +31,9 @@ func NewControlRunner(runtime ControlExecRuntime) *ControlRunner {
 }
 
 func (r *ControlRunner) ControlProbe(ctx context.Context, containerID string, kind canarycontrol.Operation, port, expectedRequest int, timeout time.Duration) (int, *canarycontrol.ControlEnvelope, error) {
+	if r == nil || r.Runtime == nil {
+		return -1, nil, ErrControlRuntimeRequired
+	}
 	if strings.TrimSpace(containerID) == "" {
 		return -1, nil, ErrContainerIDRequired
 	}
@@ -82,11 +87,24 @@ func (r *ControlRunner) runExec(ctx context.Context, op canarycontrol.ControlOpe
 
 	stdout := newBoundedWriter(MaxControlStdout, ErrStdoutOverflow)
 	stderr := newBoundedWriter(MaxControlStderr, ErrStderrOverflow)
-	if _, err := stdcopy.StdCopy(stdout, stderr, attachment.Reader()); err != nil {
-		if ctxErr := contextFailure(ctx); ctxErr != nil {
-			return -1, nil, errors.Join(ctxErr, err)
+	copyDone := make(chan struct{})
+	watchDone := make(chan error, 1)
+	go func() {
+		select {
+		case <-ctx.Done():
+			watchDone <- attachment.Close()
+		case <-copyDone:
+			watchDone <- nil
 		}
-		return -1, nil, err
+	}()
+	_, copyErr := stdcopy.StdCopy(stdout, stderr, newControlFrameGuard(attachment.Reader()))
+	close(copyDone)
+	watchErr := <-watchDone
+	if copyErr != nil || watchErr != nil {
+		if ctxErr := contextFailure(ctx); ctxErr != nil {
+			return -1, nil, errors.Join(ctxErr, copyErr, watchErr)
+		}
+		return -1, nil, errors.Join(copyErr, watchErr)
 	}
 	if ctxErr := contextFailure(ctx); ctxErr != nil {
 		return -1, nil, ctxErr
@@ -101,6 +119,9 @@ func (r *ControlRunner) runExec(ctx context.Context, op canarycontrol.ControlOpe
 			return -1, nil, errors.Join(ctxErr, err)
 		}
 		return -1, nil, err
+	}
+	if inspect.Running {
+		return inspect.ExitCode, nil, &ControlFailureError{Operation: op.Kind, ExitCode: inspect.ExitCode, Stderr: string(stderr.Bytes()), Cause: ErrExecStillRunning}
 	}
 
 	env, err = canarycontrol.DecodeEnvelopeExactlyOne(stdout.Bytes())
