@@ -1,0 +1,8 @@
+=== RUN   TestControlTimeout_ParentCancellation
+--- PASS: TestControlTimeout_ParentCancellation (0.00s)
+=== RUN   TestControlTimeout_ParentDeadline
+--- PASS: TestControlTimeout_ParentDeadline (0.00s)
+=== RUN   TestControlTimeout_AttemptDeadline
+--- PASS: TestControlTimeout_AttemptDeadline (0.00s)
+PASS
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	0.008s

@@ -1,0 +1,7 @@
+S41 source-and-tests delta from checkpoint 11dc3650747284d2623016fe9b1e3e1f63938902:
+M	tovarisch/labs/memory/internal/dockerlab/control_protocol_v2.go
+M	tovarisch/labs/memory/internal/dockerlab/control_retry.go
+M	tovarisch/labs/memory/internal/dockerlab/control_seam.go
+A	tovarisch/labs/memory/internal/dockerlab/control_test_support_test.go
+A	tovarisch/labs/memory/internal/dockerlab/control_transport_test.go
+M	tovarisch/labs/memory/internal/dockerlab/control_v2_test.go

@@ -1,0 +1,2 @@
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/canarycontrol	1.084s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	1.084s

@@ -1,0 +1,12 @@
+=== RUN   TestControlTransport_StdoutAtLimit
+--- PASS: TestControlTransport_StdoutAtLimit (0.00s)
+=== RUN   TestControlTransport_StdoutOneOver
+--- PASS: TestControlTransport_StdoutOneOver (0.00s)
+=== RUN   TestControlTransport_StderrAtLimit
+--- PASS: TestControlTransport_StderrAtLimit (0.00s)
+=== RUN   TestControlTransport_StderrOneOver
+--- PASS: TestControlTransport_StderrOneOver (0.00s)
+=== RUN   TestControlTransport_BothStreamsNearLimit
+--- PASS: TestControlTransport_BothStreamsNearLimit (0.00s)
+PASS
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	0.009s

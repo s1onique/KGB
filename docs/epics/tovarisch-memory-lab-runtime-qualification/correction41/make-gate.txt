@@ -1,0 +1,162 @@
+=== Script Doctrine Verification ===
+go run ./cmd/verify-script-doctrine --bootstrap
+Script doctrine verification passed
+=== UVB-76 Hulk Gate: Artifact Producer Enforcement ===
+=== Canonical catalog metrics ===
+=== Canonical catalog metrics ===
+  catalog surfaces:          23
+  active surfaces:           12
+  verified writer files:     28
+  verified writer symbols:   1
+  verified test files:       6
+  catalog validation errors: 0
+self-test OK
+=== Artifactio boundary tests ===
+ok  	github.com/s1onique/KGB/uvb76/internal/artifactio	0.020s
+ok  	github.com/s1onique/KGB/uvb76/internal/artifactio	1.041s
+=== Producer contract tests (no global mutation) ===
+ok  	github.com/s1onique/KGB/uvb76/internal/producer	2.554s
+ok  	github.com/s1onique/KGB/uvb76/internal/producer	(cached)
+=== Producer registry self-test ===
+=== Canonical catalog metrics ===
+  catalog surfaces:          23
+  active surfaces:           12
+  verified writer files:     28
+  verified writer symbols:   1
+  verified test files:       6
+  catalog validation errors: 0
+self-test OK
+=== Go AST writer-bypass verifier ===
+=== Canonical catalog metrics ===
+  catalog surfaces:          23
+  active surfaces:           12
+  verified writer files:     28
+  verified writer symbols:   1
+  verified test files:       6
+  catalog validation errors: 0
+FAIL: 60 bypassing direct persistence call(s) detected:
+  surfaces=[wg-netlink-lab-evidence] call=fmt.Fprintf file=tools/wg-netlink-lab/main.go line=36 destination= reason=unknown
+    replace fmt.Fprintf at line 36 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [wg-netlink-lab-evidence] (persistence=atomic_redacted_text)
+  surfaces=[wg-netlink-lab-evidence] call=os.WriteFile file=tools/wg-netlink-lab/preflight.go line=113 destination= reason=unknown
+    replace os.WriteFile at line 113 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [wg-netlink-lab-evidence] (persistence=atomic_redacted_text)
+  surfaces=[wg-netlink-lab-evidence] call=os.WriteFile file=tools/wg-netlink-lab/preflight.go line=241 destination= reason=unknown
+    replace os.WriteFile at line 241 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [wg-netlink-lab-evidence] (persistence=atomic_redacted_text)
+  surfaces=[wg-netlink-lab-evidence] call=fmt.Fprintf file=tools/wg-netlink-lab/proof.go line=82 destination= reason=unknown
+    replace fmt.Fprintf at line 82 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [wg-netlink-lab-evidence] (persistence=atomic_redacted_text)
+  surfaces=[wg-netlink-lab-evidence] call=fmt.Fprintf file=tools/wg-netlink-lab/proof.go line=84 destination= reason=unknown
+    replace fmt.Fprintf at line 84 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [wg-netlink-lab-evidence] (persistence=atomic_redacted_text)
+  surfaces=[wg-netlink-lab-evidence] call=os.WriteFile file=tools/wg-netlink-lab/proof.go line=160 destination= reason=unknown
+    replace os.WriteFile at line 160 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [wg-netlink-lab-evidence] (persistence=atomic_redacted_text)
+  surfaces=[capture-netns-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-capture-netns-lab/internal/lab/artifacts.go line=122 destination= reason=unknown
+    replace os.WriteFile at line 122 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [capture-netns-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[capture-netns-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-capture-netns-lab/internal/lab/configs.go line=26 destination= reason=unknown
+    replace os.WriteFile at line 26 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [capture-netns-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[capture-netns-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-capture-netns-lab/internal/lab/configs.go line=104 destination= reason=unknown
+    replace os.WriteFile at line 104 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [capture-netns-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[capture-netns-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-capture-netns-lab/internal/lab/orchestrator.go line=240 destination= reason=unknown
+    replace os.WriteFile at line 240 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [capture-netns-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[capture-netns-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-capture-netns-lab/internal/lab/orchestrator.go line=297 destination= reason=unknown
+    replace os.WriteFile at line 297 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [capture-netns-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[capture-netns-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-capture-netns-lab/internal/lab/orchestrator.go line=338 destination= reason=unknown
+    replace os.WriteFile at line 338 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [capture-netns-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[capture-netns-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-capture-netns-lab/internal/lab/phases.go line=114 destination= reason=unknown
+    replace os.WriteFile at line 114 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [capture-netns-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[capture-netns-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-capture-netns-lab/internal/lab/phases.go line=156 destination= reason=unknown
+    replace os.WriteFile at line 156 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [capture-netns-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[capture-netns-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-capture-netns-lab/internal/lab/phases.go line=205 destination= reason=unknown
+    replace os.WriteFile at line 205 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [capture-netns-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[capture-netns-lab-artifacts] call=os.Create file=uvb76/cmd/uvb76-capture-netns-lab/internal/lab/process_runner.go line=92 destination= reason=unknown
+    replace os.Create at line 92 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [capture-netns-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[capture-netns-lab-artifacts] call=os.Create file=uvb76/cmd/uvb76-capture-netns-lab/internal/lab/process_runner.go line=101 destination= reason=unknown
+    replace os.Create at line 101 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [capture-netns-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[capture-netns-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-capture-netns-lab/internal/lab/services.go line=128 destination= reason=unknown
+    replace os.WriteFile at line 128 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [capture-netns-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[capture-netns-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-capture-netns-lab/internal/lab/services.go line=155 destination= reason=unknown
+    replace os.WriteFile at line 155 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [capture-netns-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[capture-netns-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-capture-netns-lab/internal/lab/spikes.go line=99 destination= reason=unknown
+    replace os.WriteFile at line 99 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [capture-netns-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[latency-crash-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-latency-crash-lab/internal/workload/workload.go line=280 destination= reason=unknown
+    replace os.WriteFile at line 280 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [latency-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[latency-crash-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-latency-crash-lab/internal/workload/workload.go line=305 destination= reason=unknown
+    replace os.WriteFile at line 305 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [latency-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[latency-crash-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-latency-crash-lab/internal/workload/workload.go line=330 destination= reason=unknown
+    replace os.WriteFile at line 330 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [latency-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[latency-crash-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-latency-crash-lab/internal/workload/workload.go line=355 destination= reason=unknown
+    replace os.WriteFile at line 355 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [latency-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[latency-crash-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-latency-crash-lab/internal/workload/workload.go line=402 destination= reason=unknown
+    replace os.WriteFile at line 402 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [latency-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[latency-crash-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-latency-crash-lab/main.go line=101 destination= reason=unknown
+    replace os.WriteFile at line 101 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [latency-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[latency-crash-lab-artifacts] call=os.OpenFile file=uvb76/cmd/uvb76-latency-crash-lab/main.go line=113 destination= reason=unknown
+    replace os.OpenFile at line 113 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [latency-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[latency-crash-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-latency-crash-lab/main.go line=127 destination= reason=unknown
+    replace os.WriteFile at line 127 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [latency-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[latency-crash-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-latency-crash-lab/main.go line=218 destination= reason=unknown
+    replace os.WriteFile at line 218 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [latency-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[memleak-pprof-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-memleak-pprof-lab/evidence.go line=76 destination= reason=unknown
+    replace os.WriteFile at line 76 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memleak-pprof-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[memleak-pprof-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-memleak-pprof-lab/evidence.go line=89 destination= reason=unknown
+    replace os.WriteFile at line 89 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memleak-pprof-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[memleak-pprof-binary] call=os.WriteFile file=uvb76/cmd/uvb76-memleak-pprof-lab/internal/pprofdiff/pprofdiff.go line=78 destination= reason=unknown
+    replace os.WriteFile at line 78 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memleak-pprof-binary] (persistence=reject_binary)
+  surfaces=[memleak-pprof-lab-artifacts] call=fmt.Fprintln file=uvb76/cmd/uvb76-memleak-pprof-lab/main.go line=49 destination= reason=unknown
+    replace fmt.Fprintln at line 49 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memleak-pprof-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[memleak-pprof-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-memleak-pprof-lab/main.go line=84 destination= reason=unknown
+    replace os.WriteFile at line 84 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memleak-pprof-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[memleak-pprof-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-memleak-pprof-lab/main.go line=95 destination= reason=unknown
+    replace os.WriteFile at line 95 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memleak-pprof-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] call=os.Create file=uvb76/cmd/uvb76-memory-lab/internal/collector/collector.go line=70 destination= reason=unknown
+    replace os.Create at line 70 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] (persistence=atomic_redacted_json)
+  surfaces=[memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] call=fmt.Fprintln file=uvb76/cmd/uvb76-memory-lab/internal/collector/collector.go line=77 destination= reason=unknown
+    replace fmt.Fprintln at line 77 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] (persistence=atomic_redacted_json)
+  surfaces=[memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] call=os.Create file=uvb76/cmd/uvb76-memory-lab/internal/collector/collector.go line=80 destination= reason=unknown
+    replace os.Create at line 80 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] (persistence=atomic_redacted_json)
+  surfaces=[memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] call=fmt.Fprintln file=uvb76/cmd/uvb76-memory-lab/internal/collector/collector.go line=85 destination= reason=unknown
+    replace fmt.Fprintln at line 85 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] (persistence=atomic_redacted_json)
+  surfaces=[memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] call=fmt.Fprintf file=uvb76/cmd/uvb76-memory-lab/internal/collector/collector.go line=117 destination= reason=unknown
+    replace fmt.Fprintf at line 117 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] (persistence=atomic_redacted_json)
+  surfaces=[memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] call=fmt.Fprintln file=uvb76/cmd/uvb76-memory-lab/internal/collector/collector.go line=124 destination= reason=unknown
+    replace fmt.Fprintln at line 124 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] (persistence=atomic_redacted_json)
+  surfaces=[memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] call=fmt.Fprintln file=uvb76/cmd/uvb76-memory-lab/internal/collector/collector.go line=154 destination= reason=unknown
+    replace fmt.Fprintln at line 154 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] (persistence=atomic_redacted_json)
+  surfaces=[memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] call=fmt.Fprintf file=uvb76/cmd/uvb76-memory-lab/internal/collector/collector.go line=165 destination= reason=unknown
+    replace fmt.Fprintf at line 165 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] (persistence=atomic_redacted_json)
+  surfaces=[memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] call=fmt.Fprintf file=uvb76/cmd/uvb76-memory-lab/internal/collector/collector.go line=229 destination= reason=unknown
+    replace fmt.Fprintf at line 229 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] (persistence=atomic_redacted_json)
+  surfaces=[memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] call=fmt.Fprintln file=uvb76/cmd/uvb76-memory-lab/internal/collector/collector.go line=236 destination= reason=unknown
+    replace fmt.Fprintln at line 236 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] (persistence=atomic_redacted_json)
+  surfaces=[memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] call=os.WriteFile file=uvb76/cmd/uvb76-memory-lab/internal/collector/collector.go line=245 destination= reason=unknown
+    replace os.WriteFile at line 245 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] (persistence=atomic_redacted_json)
+  surfaces=[memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] call=os.WriteFile file=uvb76/cmd/uvb76-memory-lab/internal/collector/collector.go line=255 destination= reason=unknown
+    replace os.WriteFile at line 255 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memory-lab-artifacts memory-lab-csv-evidence memory-lab-evidence] (persistence=atomic_redacted_json)
+  surfaces=[memory-lab-artifacts] call=os.CreateTemp file=uvb76/cmd/uvb76-memory-lab/internal/fetcher/pprof.go line=78 destination= reason=unknown
+    replace os.CreateTemp at line 78 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memory-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[memory-lab-artifacts] call=io.Copy file=uvb76/cmd/uvb76-memory-lab/internal/fetcher/pprof.go line=85 destination= reason=unknown
+    replace io.Copy at line 85 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memory-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[memory-lab-artifacts] call=os.Rename file=uvb76/cmd/uvb76-memory-lab/internal/fetcher/pprof.go line=104 destination= reason=unknown
+    replace os.Rename at line 104 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [memory-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[targets-crash-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-targets-crash-lab/internal/workload/workload.go line=317 destination=workload-summary.json reason=filepath.Join
+    replace os.WriteFile at line 317 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [targets-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[targets-crash-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-targets-crash-lab/internal/workload/workload.go line=323 destination=targets-response-sample.json reason=filepath.Join
+    replace os.WriteFile at line 323 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [targets-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[targets-crash-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-targets-crash-lab/internal/workload/workload.go line=329 destination=worker-stats.json reason=filepath.Join
+    replace os.WriteFile at line 329 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [targets-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[targets-crash-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-targets-crash-lab/main.go line=109 destination= reason=unknown
+    replace os.WriteFile at line 109 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [targets-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[targets-crash-lab-artifacts] call=os.OpenFile file=uvb76/cmd/uvb76-targets-crash-lab/main.go line=125 destination= reason=unknown
+    replace os.OpenFile at line 125 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [targets-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[targets-crash-lab-artifacts] call=os.OpenFile file=uvb76/cmd/uvb76-targets-crash-lab/main.go line=131 destination= reason=unknown
+    replace os.OpenFile at line 131 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [targets-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[targets-crash-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-targets-crash-lab/main.go line=145 destination= reason=unknown
+    replace os.WriteFile at line 145 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [targets-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[targets-crash-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-targets-crash-lab/main.go line=232 destination= reason=unknown
+    replace os.WriteFile at line 232 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [targets-crash-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[tcp-diag-telemetry-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-tcp-diag-telemetry-lab/internal/artifact/artifact.go line=126 destination= reason=unknown
+    replace os.WriteFile at line 126 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [tcp-diag-telemetry-lab-artifacts] (persistence=atomic_redacted_json)
+  surfaces=[tcp-diag-telemetry-lab-artifacts] call=os.WriteFile file=uvb76/cmd/uvb76-tcp-diag-telemetry-lab/internal/runner/runner.go line=123 destination=artifactDir/diagnostic-peer-response.json reason=filepath.Join
+    replace os.WriteFile at line 123 with uvb76/internal/artifactio.WriteRedacted* for surface(s) [tcp-diag-telemetry-lab-artifacts] (persistence=atomic_redacted_json)
+validation summary:
+  registry surfaces:  23
+  registry contracts: 23
+exit status 1
+make: *** [Makefile:692: hulk-uvb76-artifact-producer-gate] Error 1

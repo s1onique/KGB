@@ -1,0 +1,10 @@
+=== RUN   TestControlIdentity_EmptyContainerRejected
+--- PASS: TestControlIdentity_EmptyContainerRejected (0.00s)
+=== RUN   TestControlIdentity_WhitespaceContainerRejected
+--- PASS: TestControlIdentity_WhitespaceContainerRejected (0.00s)
+=== RUN   TestControlIdentity_EmptyExecIDRejected
+--- PASS: TestControlIdentity_EmptyExecIDRejected (0.00s)
+=== RUN   TestControlIdentity_RecordsEveryEngineIdentity
+--- PASS: TestControlIdentity_RecordsEveryEngineIdentity (0.00s)
+PASS
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	0.007s
