@@ -1,0 +1,14 @@
+# CORRECTION37 S36 Regression Tests Output
+
+```
+go test -count=1 -v -run 'TestValidateEnvelope_|TestEquivalence_|TestAllOperations_|TestAllErrorClasses_|TestCount_' \
+  ./internal/canarycontrol/...
+```
+
+Result: PASS. All struct-validation regression tests for S36 pass:
+- Health: ready=false rejected (ErrHealthNotReady), empty mode rejected (ErrMissingRequiredField)
+- State: empty mode, each negative counter, ready=false all rejected
+- Workload: non-positive requested, attempted/completed mismatch all rejected
+- Equivalence: serialized and struct envelopes receive same ErrClass
+- Deterministic enumeration: 100 repeated calls produce identical ordering
+- Count invariants: health/state=0 accepted; nonzero rejected; operate>0 accepted; zero/negative rejected

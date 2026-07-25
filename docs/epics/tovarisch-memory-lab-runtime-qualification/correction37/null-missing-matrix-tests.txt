@@ -1,0 +1,21 @@
+# CORRECTION37 Null and Missing Matrix Tests Output
+
+```
+go test -count=1 -v -run 'TestNullMatrix_|TestMissingMatrix_|TestFixtures_AreValidJSON' \
+  ./internal/canarycontrol/...
+```
+
+Result: PASS.
+- TestNullMatrix_Health (ready, mode)
+- TestNullMatrix_State (mode, retained_blocks, retained_bytes, operation_count, fd_count, ready)
+- TestNullMatrix_Workload (requested, attempted, completed)
+- TestNullMatrix_Envelope (schema_version, operation, success, http_status)
+- TestMissingMatrix_Health (ready, mode)
+- TestMissingMatrix_State (mode, retained_blocks, retained_bytes, operation_count, fd_count, ready)
+- TestMissingMatrix_Workload (requested, attempted, completed)
+- TestMissingMatrix_Envelope (schema_version, operation, success, http_status)
+- TestFixtures_AreValidJSON: every fixture is valid JSON via json.Valid and contains the targeted null.
+
+Each fixture is built via map[string]any + json.Marshal (no string concatenation).
+Each fixture is verified to be valid JSON to ensure no malformed-JSON side effects
+confound the test signal.

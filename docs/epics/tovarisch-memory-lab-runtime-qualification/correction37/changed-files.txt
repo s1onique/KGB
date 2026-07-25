@@ -1,0 +1,14 @@
+# CORRECTION37 Changed Files
+
+## Created
+- tovarisch/labs/memory/internal/canarycontrol/c36_regression_test.go
+  (S36 struct-validator regression tests + boundary fixtures)
+
+## Modified
+(none)
+
+## Untouched
+- internal/dockerlab (NOT migrated in this bounded ACT)
+- internal/evidence (untouched)
+- cmd/canary (untouched)
+- cmd/tovarisch-memory-lab (untouched)

@@ -1,0 +1,11 @@
+# CORRECTION37 Final Git Status
+
+```
+$ git status --short
+(empty)
+
+$ git diff --check
+(no output)
+
+$ git show -s --format='commit=%H tree=%T parents=%P' S37
+commit=f86253f9c285f937a2f7a44136a95363ea92d34c tree=3e8f16e17867282586a4f9f592abcbd2d47a10a5 parents=54bc08b2f3e94179d1c0b398a8ad9eb65a125473

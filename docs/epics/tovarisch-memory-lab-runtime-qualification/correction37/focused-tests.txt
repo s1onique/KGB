@@ -1,0 +1,11 @@
+# CORRECTION37 Focused Tests Output
+
+```
+go test -count=1 ./internal/canarycontrol/... ./cmd/canary/... ./internal/dockerlab/...
+```
+
+Result:
+```
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/canarycontrol	0.014s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/cmd/canary	0.687s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	0.017s

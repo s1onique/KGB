@@ -1,0 +1,11 @@
+# CORRECTION37 make gate observation
+
+`make gate` was NOT executed in this bounded ACT. CORRECTION37 explicitly
+does not require the parent correction closed and the gate must not be
+claimed PASS for the parent.
+
+Recording make gate as DEFERRED to a future ACT that addresses the
+preexisting UVB-76 artifact-writer defects. CORRECTION37's scope is
+bounded to the hermetic protocol authority only.
+
+Note: CORRECTION37 does NOT introduce gate weakening.

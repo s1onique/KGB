@@ -1,0 +1,5 @@
+# CORRECTION37 Artifact SHA-256s
+
+SHA-256 hashes of all changed/created files in this ACT:
+
+(to be filled in by E37 commit)

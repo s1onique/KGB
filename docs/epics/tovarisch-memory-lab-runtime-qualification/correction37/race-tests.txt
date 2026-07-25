@@ -1,0 +1,9 @@
+# CORRECTION37 Race Tests Output
+
+```
+go test -race -count=1 ./internal/canarycontrol/... ./cmd/canary/... ./internal/dockerlab/...
+```
+
+Result:
+```
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/canarycontrol	1.072s

@@ -1,0 +1,7 @@
+# CORRECTION37 Focused go vet
+
+```
+go vet ./internal/canarycontrol/... ./cmd/canary/... ./internal/dockerlab/...
+```
+
+Result: PASS (exit code 0).

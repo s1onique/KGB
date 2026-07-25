@@ -1,0 +1,9 @@
+# CORRECTION37 Count=100 Tests Output
+
+```
+go test -count=100 ./internal/canarycontrol/... ./cmd/canary/... ./internal/dockerlab/...
+```
+
+Result:
+```
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/canarycontrol	0.842s

@@ -1,0 +1,77 @@
+# CORRECTION37 Dockerlab Migration Inventory
+
+Symbols in `tovarisch/labs/memory/internal/dockerlab` that duplicate
+`internal/canarycontrol` authorities. Migration is DEFERRED to a future
+ACT because dockerlab has hundreds of dependent tests.
+
+```yaml
+- symbol: ProtocolError
+  current_file: tovarisch/labs/memory/internal/dockerlab/client.go:994
+  role: typed-protocol error (duplicate of canarycontrol.ProtocolError)
+  canarycontrol_replacement: canarycontrol.ProtocolError
+  action: DELETE
+
+- symbol: ErrorClass
+  current_file: tovarisch/labs/memory/internal/dockerlab (string aliases)
+  role: error classification (duplicate of canarycontrol.ErrorClass)
+  canarycontrol_replacement: canarycontrol.ErrorClass
+  action: DELETE
+
+- symbol: ControlEnvelope
+  current_file: tovarisch/labs/memory/internal/dockerlab/client.go:1022
+  role: envelope struct (duplicate of canarycontrol.ControlEnvelope)
+  canarycontrol_replacement: canarycontrol.ControlEnvelope
+  action: DELETE
+
+- symbol: strictParseEnvelope
+  current_file: tovarisch/labs/memory/internal/dockerlab/client.go
+  role: strict envelope parser (duplicate of canarycontrol.DecodeEnvelopeExactlyOne)
+  canarycontrol_replacement: canarycontrol.DecodeEnvelopeExactlyOne
+  action: DELETE
+
+- symbol: validateControlEnvelope
+  current_file: tovarisch/labs/memory/internal/dockerlab/client.go
+  role: envelope validator (duplicate of canarycontrol.ValidateControlEnvelope)
+  canarycontrol_replacement: canarycontrol.ValidateControlEnvelope
+  action: DELETE
+
+- symbol: IsProtocolNonRetryable
+  current_file: tovarisch/labs/memory/internal/dockerlab/client.go:1007
+  role: retry classifier (inverted logic of canarycontrol.IsRetryable)
+  canarycontrol_replacement: canarycontrol.IsRetryable (inverted)
+  action: DELETE
+
+- symbol: CanaryHealthCheckViaExec
+  current_file: tovarisch/labs/memory/internal/dockerlab/client.go:696
+  role: Docker-exec health probe (does not yet use canarycontrol.BuildArgv)
+  canarycontrol_replacement: canarycontrol.NewControlOperation + BuildArgv
+  action: ADAPT
+
+- symbol: CanaryStateViaExec
+  current_file: tovarisch/labs/memory/internal/dockerlab/client.go:723
+  role: Docker-exec state probe
+  canarycontrol_replacement: canarycontrol.NewControlOperation + BuildArgv
+  action: ADAPT
+
+- symbol: CanaryOperateViaExec
+  current_file: tovarisch/labs/memory/internal/dockerlab/client.go:742
+  role: Docker-exec operate probe
+  canarycontrol_replacement: canarycontrol.NewControlOperation + BuildArgv
+  action: ADAPT
+```
+
+## Permitted Dockerlab-owned concerns (retain)
+- Docker Engine calls (exec create/start/inspect)
+- stdout/stderr attachment
+- exec inspection
+- context and transport errors
+- bounded diagnostic capture
+
+## Forbidden Dockerlab-owned concerns (must delete)
+- protocol schema (duplicate of canarycontrol.ControlEnvelope)
+- operation vocabulary (duplicate of canarycontrol.Operation)
+- error-class vocabulary (duplicate of canarycontrol.ErrorClass)
+- payload structs (duplicate of canarycontrol.HealthPayload etc.)
+- JSON semantics (duplicate of canarycontrol decoder)
+- retry classification (duplicate of canarycontrol.IsRetryable)
+- argv construction (duplicate of canarycontrol.BuildArgv)

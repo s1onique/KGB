@@ -1,0 +1,14 @@
+# CORRECTION37 Boundary Size Tests Output
+
+```
+go test -count=1 -v -run 'TestDecodeHealth_Exact65536ByteValidBody_Success|TestDoHealthCheck_65536ByteValidBody_Success|TestDoHealthCheck_65537ByteBody_Rejection' \
+  ./internal/canarycontrol/...
+```
+
+Result: PASS.
+- TestDecodeHealth_Exact65536ByteValidBody_Success: exactly 65,536 bytes of valid
+  JSON (using bytes.Repeat ASCII spaces appended to {"ready":true,"mode":"growing"})
+  decodes successfully.
+- TestDoHealthCheck_65536ByteValidBody_Success: same 65,536-byte body served via
+  httptest.Server and read by the production response reader decodes successfully.
+- TestDoHealthCheck_65537ByteBody_Rejection: 65,537-byte body is rejected.
