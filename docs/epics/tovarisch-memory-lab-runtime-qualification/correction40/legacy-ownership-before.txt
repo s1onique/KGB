@@ -1,0 +1,41 @@
+# Legacy Ownership Before (CORRECTION40 P0-0)
+
+```yaml
+internal/canarycontrol:
+  vocabulary_and_semantics_owner: true
+
+cmd/canary:
+  consumer_only: true    # type aliases and constant aliases
+
+internal/dockerlab:
+  has_legacy_duplicates: true
+  has_new_v2_path:        true
+  legacy_owns: [
+    "ProtocolError (type, private)",
+    "ErrorClass (string aliases)",
+    "ControlEnvelope (type, private)",
+    "strictParseEnvelope",
+    "validateControlEnvelope",
+    "IsProtocolNonRetryable",
+    "CanaryHealthCheckViaExec",
+    "CanaryStateViaExec",
+    "CanaryOperateViaExec"
+  ]
+  v2_owns: [
+    "ControlExecRuntime (interface)",
+    "FakeControlExecRuntime (recording fake)",
+    "ProductionControlExecRuntime (compile-time shell)",
+    "MaxControlStdout, MaxControlStderr",
+    "ControlRunner",
+    "ControlProbe",
+    "ControlFailureError",
+    "ReadinessLoop, Sleeper, FakeSleeper, realSleeper",
+    "ErrExitEnvelopeMismatch, ErrControlTimeout, ErrContainerIDRequired,
+     ErrWrongOperation, ErrEmptyStdout, ErrStdoutOverflow, ErrStderrOverflow"
+  ]
+```
+
+The legacy path remains in place because deleting it would break
+dependent callers (cmd/tovarisch-memory-lab, qualified_runtime,
+existing test suite). Deletion of the legacy symbols is staged to
+a follow-up ACT that migrates the dependent callers first.

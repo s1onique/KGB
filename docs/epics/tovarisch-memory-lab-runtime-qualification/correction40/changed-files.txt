@@ -1,0 +1,41 @@
+# CORRECTION40 Changed Files
+
+## Created (S40 source)
+- tovarisch/labs/memory/internal/dockerlab/control_seam.go (modified)
+- tovarisch/labs/memory/internal/dockerlab/control_protocol_v2.go (modified)
+- tovarisch/labs/memory/internal/dockerlab/control_v2_test.go (modified)
+
+## Created (evidence)
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/E39-A39-erratum.md
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/legacy-ownership-before.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/legacy-ownership-after.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/real-adapter-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/container-identity-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/stream-bound-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/attempt-timeout-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/operation-binding-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/typed-failure-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/readiness-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/caller-migration-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/legacy-deletion-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/reachability-evidence-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/evidence-mutation-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/focused-vet.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/full-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/race-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/count100-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/short-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/make-gate.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/close-report.md
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/subject-identities.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction40/changed-files.txt
+
+## Modified
+(none — CORRECTION40 modifies existing dockerlab source only)
+
+## Untouched (out of CORRECTION40 scope)
+- cmd/canary (no source changes)
+- internal/canarycontrol (no source changes)
+- internal/evidence (untouched)
+- cmd/tovarisch-memory-lab (legacy path; migration deferred)
+- qualified_runtime (legacy path; migration deferred)
