@@ -35,6 +35,10 @@ type CanonicalControlSequenceOptions struct {
 	Port        int
 	Operations  int
 	Timeout     time.Duration
+	// BeforeOperate runs after the initial state observation and before
+	// operate. Production uses it to align the canonical control sequence
+	// with the sampler stimulus phase without issuing a second sequence.
+	BeforeOperate func(*CanaryState) error
 }
 
 // RunCanonicalControlSequence is the bounded production seam
@@ -42,10 +46,10 @@ type CanonicalControlSequenceOptions struct {
 //
 // Calling order is fixed:
 //
-//	1. health
-//	2. initial state
-//	3. operate
-//	4. final state
+//  1. health
+//  2. initial state
+//  3. operate
+//  4. final state
 //
 // All four operations share the same container ID. The function
 // records each operation on the supplied observations and
@@ -121,6 +125,11 @@ func RunCanonicalControlSequence(
 		HTTPStatus:        initialEnv.HTTPStatus,
 		ResponseValidated: true,
 		Mode:              initialEnv.State.Mode,
+	}
+	if options.BeforeOperate != nil {
+		if err := options.BeforeOperate(initialState); err != nil {
+			return nil, nil, nil, fmt.Errorf("canonical control sequence: before operate: %w", err)
+		}
 	}
 
 	// 3. Operate.

@@ -75,7 +75,7 @@ func TestExecuteQualifiedLifecycle_NilControlFails(t *testing.T) {
 		context.Background(),
 		QualifiedLifecycleDependencies{Runtime: audited, Control: nil},
 		func(_ context.Context, _ string) bool { return true },
-		LifecycleOptions{ImageReference: "kgb-tovarisch-canary:latest", NetworkName: "kgb-lab-net", Run: func(context.Context, string, *QualifiedExecutionObservations) error { return nil }},
+		LifecycleOptions{ImageReference: "kgb-tovarisch-canary:latest", NetworkName: "kgb-lab-net", Run: successfulQualifiedWorkload},
 	)
 	if err == nil {
 		t.Fatal("expected nil control to fail before Docker lifecycle")
@@ -97,7 +97,10 @@ func TestExecuteQualifiedLifecycle_DependencyRecordHonorsControl(t *testing.T) {
 		t.Fatalf("construct: %v", err)
 	}
 	called := 0
-	workload := func(_ context.Context, _ string, _ *QualifiedExecutionObservations) error { called++; return nil }
+	workload := func(_ context.Context, input QualifiedWorkloadInput) (*QualifiedWorkloadResult, error) {
+		called++
+		return validQualifiedWorkloadResult(input), nil
+	}
 	outcome, err := executeQualifiedLifecycleWithDependencies(
 		context.Background(),
 		QualifiedLifecycleDependencies{Runtime: audited, Control: runner},

@@ -1,14 +1,5 @@
 #!/usr/bin/env bash
-# scripts/build_tovarisch_canary_image.sh — Build the
-# kgb-tovarisch-canary:latest image with immutable OCI + kgb.dev
-# provenance labels, and write a `canary-image-build.json` file
-# containing the pre-build canary binary hash and the resolved
-# provenance labels.
-#
-# CORRECTION03 §3-§5: the pre-build canary binary SHA-256 is
-# written to a sidecar JSON the producer reads, and the
-# pre-build/extracted/label hashes are compared in the verifier.
-
+# Build one exact canary image and atomically replace canonical v2 metadata.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -16,65 +7,49 @@ cd "$REPO_ROOT"
 
 TESTED_COMMIT="$(git rev-parse HEAD)"
 TESTED_TREE="$(git rev-parse HEAD^{tree})"
-CANARY_SUBTREE="$(git rev-parse "HEAD:tovarisch/labs/memory/cmd/canary")"
-
-echo "TESTED_COMMIT=$TESTED_COMMIT"
-echo "TESTED_TREE=$TESTED_TREE"
-echo "CANARY_SUBTREE=$CANARY_SUBTREE"
+CANARY_SUBTREE="$(git rev-parse 'HEAD:tovarisch/labs/memory/cmd/canary')"
+IMAGE_REF="${TOVARISCH_CANARY_IMAGE_REF:-kgb-tovarisch-canary:latest}"
+METADATA_OUTPUT="${TOVARISCH_CANARY_METADATA_OUTPUT:-tovarisch/labs/memory/canary-image-build.json}"
 
 BUILD_DIR="$(mktemp -d)"
-trap 'rm -rf "$BUILD_DIR"' EXIT
-
+cleanup() { rm -rf "$BUILD_DIR"; }
+trap cleanup EXIT
 cp tovarisch/labs/memory/Dockerfile.canary "$BUILD_DIR/Dockerfile"
 
 (
   cd tovarisch/labs/memory
-  CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o "$BUILD_DIR/canary" ./cmd/canary
+  CGO_ENABLED=0 GOOS=linux go build -ldflags='-s -w' -o "$BUILD_DIR/canary" ./cmd/canary
 )
 
-PREBUILD_BINARY_SHA256="$(sha256sum "$BUILD_DIR/canary" | awk '{print $1}')"
-echo "PREBUILD_BINARY_SHA256=$PREBUILD_BINARY_SHA256"
-
-IMAGE_REF="kgb-tovarisch-canary:latest"
-docker build \
-  --label "org.opencontainers.image.revision=$TESTED_COMMIT" \
-  --label "kgb.dev/source-tree=$TESTED_TREE" \
-  --label "kgb.dev/canary-source-tree=$CANARY_SUBTREE" \
-  --label "kgb.dev/canary-binary-sha256=$PREBUILD_BINARY_SHA256" \
-  -f "$BUILD_DIR/Dockerfile" \
-  -t "$IMAGE_REF" \
-  "$BUILD_DIR"
-
-# Capture actual image inspect output (RepoDigests, Id, Labels).
-# CORRECTION23: Use Go helper to extract metadata - replaces Python invocation.
-EXTRACT_METADATA="$(mktemp)"
-trap 'rm -f "$EXTRACT_METADATA"' EXIT
-
-if ! .factory/bin/extract-image-metadata "$IMAGE_REF" > "$EXTRACT_METADATA"; then
-  echo "ERROR: failed to extract image metadata for $IMAGE_REF" >&2
-  exit 1
+BUILDKIT_METADATA=""
+if docker buildx version >/dev/null 2>&1; then
+  BUILDKIT_METADATA="$BUILD_DIR/buildkit-metadata.json"
+  docker buildx build --load --metadata-file "$BUILDKIT_METADATA" \
+    --label "org.opencontainers.image.revision=$TESTED_COMMIT" \
+    --label "kgb.dev/source-tree=$TESTED_TREE" \
+    --label "kgb.dev/canary-source-tree=$CANARY_SUBTREE" \
+    --label "kgb.dev/canary-binary-sha256=$(sha256sum "$BUILD_DIR/canary" | awk '{print $1}')" \
+    -f "$BUILD_DIR/Dockerfile" -t "$IMAGE_REF" "$BUILD_DIR"
+else
+  docker build \
+    --label "org.opencontainers.image.revision=$TESTED_COMMIT" \
+    --label "kgb.dev/source-tree=$TESTED_TREE" \
+    --label "kgb.dev/canary-source-tree=$CANARY_SUBTREE" \
+    --label "kgb.dev/canary-binary-sha256=$(sha256sum "$BUILD_DIR/canary" | awk '{print $1}')" \
+    -f "$BUILD_DIR/Dockerfile" -t "$IMAGE_REF" "$BUILD_DIR"
 fi
 
-IMAGE_ID_FROM_INSPECT="$(jq -r '.image_id' "$EXTRACT_METADATA")"
-REPO_DIGESTS_JSON="$(jq -r '.repo_digests' "$EXTRACT_METADATA")"
+args=(
+  --source-commit "$TESTED_COMMIT"
+  --source-tree "$TESTED_TREE"
+  --canary-source-tree "$CANARY_SUBTREE"
+  --canary-binary "$BUILD_DIR/canary"
+  --output "$METADATA_OUTPUT"
+)
+if [[ -n "$BUILDKIT_METADATA" ]]; then
+  args+=(--buildkit-metadata "$BUILDKIT_METADATA")
+fi
+.factory/bin/extract-image-metadata "${args[@]}" "$IMAGE_REF"
 
-# Write the build metadata sidecar. The producer reads this,
-# extracts /app/canary from the image, compares hashes, and
-# copies the values into the canonical manifest's
-# `subject_image_identity` block.
-cat > tovarisch/labs/memory/canary-image-build.json <<EOF
-{
-  "image_reference": "$IMAGE_REF",
-  "image_id": "$IMAGE_ID_FROM_INSPECT",
-  "repo_digests": $REPO_DIGESTS_JSON,
-  "source_commit_oid": "$TESTED_COMMIT",
-  "repository_tree_oid": "$TESTED_TREE",
-  "canary_source_subtree_oid": "$CANARY_SUBTREE",
-  "prebuild_binary_sha256": "$PREBUILD_BINARY_SHA256"
-}
-EOF
-
-echo "=== canary image built: $IMAGE_REF ==="
-echo "image_id: $IMAGE_ID_FROM_INSPECT"
-echo "prebuild_binary_sha256: $PREBUILD_BINARY_SHA256"
-echo "build metadata: tovarisch/labs/memory/canary-image-build.json"
+printf 'source_commit=%s\nsource_tree=%s\ncanary_source_tree=%s\nrequested_reference=%s\nmetadata=%s\n' \
+  "$TESTED_COMMIT" "$TESTED_TREE" "$CANARY_SUBTREE" "$IMAGE_REF" "$METADATA_OUTPUT"

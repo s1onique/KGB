@@ -16,9 +16,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -32,8 +29,12 @@ import (
 
 const envLiveSmoke = "TOVARISCH_LIVE_DOCKER_SMOKE"
 
-// liveSmokeImageRef is the local canary image the smoke inspects.
-const liveSmokeImageRef = "kgb-tovarisch-canary:latest"
+func liveSmokeImageRef() string {
+	if exact := os.Getenv("TOVARISCH_LIVE_SMOKE_IMAGE"); exact != "" {
+		return exact
+	}
+	return "kgb-tovarisch-canary:latest"
+}
 
 func shouldRunLiveSmoke(t *testing.T) {
 	t.Helper()
@@ -47,9 +48,9 @@ func shouldRunLiveSmoke(t *testing.T) {
 		t.Fatalf("Docker is unavailable: %v", err)
 	}
 	defer docker.Close()
-	if _, err := docker.ResolveImageIdentity(ctx, liveSmokeImageRef); err != nil {
+	if _, err := docker.ResolveImageIdentity(ctx, liveSmokeImageRef()); err != nil {
 		t.Fatalf("required local canary image %q is not present: %v. Build it with scripts/build_tovarisch_canary_image.sh",
-			liveSmokeImageRef, err)
+			liveSmokeImageRef(), err)
 	}
 }
 
@@ -75,7 +76,7 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 
 	// Pre-resolve the canary image so we know the exact ID the
 	// runtime must produce.
-	imageID, err := docker.ResolveImageIdentity(ctx, liveSmokeImageRef)
+	imageID, err := docker.ResolveImageIdentity(ctx, liveSmokeImageRef())
 	if err != nil {
 		t.Fatalf("resolve image: %v", err)
 	}
@@ -85,19 +86,13 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 	// non-running state.
 	// CORRECTION27: Use canary binary to test docker exec-based reachability.
 	opts := dockerlab.LifecycleOptions{
-		ImageReference:  liveSmokeImageRef,
+		ImageReference:  liveSmokeImageRef(),
 		NetworkName:     netName,
 		ContainerName:   runID,
 		ContainerCmd:    []string{"/app/canary", "--mode=bounded", "--port=8080"},
 		TerminalTimeout: 15 * time.Second,
 		CleanupTimeout:  10 * time.Second,
-		Run: func(runCtx context.Context, containerID string, observations *dockerlab.QualifiedExecutionObservations) error {
-			// CORRECTION45: The live smoke executes the canonical
-			// four-operation reachability sequence via the production
-			// seam. The canary binary is image-owned and runs inside
-			// the container's network namespace, so docker exec
-			// always works. The smoke validates the canonical
-			// operation order and the resulting observation.
+		Run: func(runCtx context.Context, input dockerlab.QualifiedWorkloadInput) (*dockerlab.QualifiedWorkloadResult, error) {
 			port := 8080
 			if cp, ok := os.LookupEnv("TOVARISCH_CANARY_PORT"); ok {
 				if v, err := strconv.Atoi(cp); err == nil && v > 0 && v <= 65535 {
@@ -112,30 +107,25 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 			}
 			control, err := dockerlab.NewDockerControl(docker.Client)
 			if err != nil {
-				return fmt.Errorf("construct canonical control: %w", err)
+				return nil, fmt.Errorf("construct canonical control: %w", err)
 			}
-			// Stamp the top-level reachability fields before invoking
-			// the canonical sequence so the producer-verifier comparison
-			// does not detect a disagreement.
-			observations.Reachability.Method = dockerlab.ReachabilityMethodDockerExec
-			observations.Reachability.NetworkID = observations.Network.InspectResponseID
-			observations.Reachability.TargetHost = "127.0.0.1"
-			observations.Reachability.TargetPort = port
-			_, _, _, err = RunCanonicalControlSequence(runCtx, control, observations, CanonicalControlSequenceOptions{
-				ContainerID: containerID,
-				Port:        port,
-				Operations:  expectedRequest,
-				Timeout:     30 * time.Second,
+			workloadObs := &dockerlab.QualifiedExecutionObservations{Reachability: dockerlab.ReachabilityObservations{
+				Method: dockerlab.ReachabilityMethodDockerExec, NetworkID: input.NetworkID,
+				TargetHost: "127.0.0.1", TargetPort: port,
+			}}
+			_, _, _, err = RunCanonicalControlSequence(runCtx, control, workloadObs, CanonicalControlSequenceOptions{
+				ContainerID: input.ContainerID, Port: port, Operations: expectedRequest, Timeout: 30 * time.Second,
 			})
 			if err != nil {
-				return fmt.Errorf("canonical control sequence: %w", err)
+				return nil, fmt.Errorf("canonical control sequence: %w", err)
 			}
-			observations.Reachability.Success = true
-
-			if err := docker.ContainerStop(runCtx, containerID, 5*time.Second); err != nil {
-				return fmt.Errorf("bounded stop: %w", err)
+			workloadObs.Reachability.Success = true
+			if err := docker.ContainerStop(runCtx, input.ContainerID, 5*time.Second); err != nil {
+				return nil, fmt.Errorf("bounded stop: %w", err)
 			}
-			return nil
+			return &dockerlab.QualifiedWorkloadResult{Observations: dockerlab.QualifiedWorkloadObservations{
+				Reachability: workloadObs.Reachability,
+			}}, nil
 		},
 	}
 	outcome, err := dockerlab.ExecuteQualifiedDockerLifecycle(ctx, docker, opts, "qualified-live-smoke/1.0.0")
@@ -155,83 +145,43 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 		t.Fatalf("outcome image ID %q != pre-resolved %q", outcome.ImageID, imageID)
 	}
 
-	// Build provenance from the running controller binary.
-	// Use canonical root resolver with explicit env.
 	projRoots, explicitErr := roots.ResolveProjectRoots(
-		os.Getenv("TOVARISCH_REPO_ROOT"),
-		os.Getenv("TOVARISCH_MEMORY_MODULE_ROOT"),
-		"", // no start dir - require explicit env
+		os.Getenv("TOVARISCH_REPO_ROOT"), os.Getenv("TOVARISCH_MEMORY_MODULE_ROOT"), "",
 	)
 	if explicitErr != nil {
-		// Fall back to searching upward from CWD for development.
 		cwd, cwdErr := os.Getwd()
 		if cwdErr != nil {
-			t.Fatalf("resolve project roots: explicit resolution failed: %v; cwd failed: %v", explicitErr, cwdErr)
+			t.Fatalf("resolve project roots: %v", cwdErr)
 		}
 		projRoots, explicitErr = roots.ResolveProjectRoots("", "", cwd)
 		if explicitErr != nil {
-			t.Fatalf("resolve project roots: explicit resolution failed: %v; fallback failed: %v", explicitErr, explicitErr)
+			t.Fatalf("resolve project roots: %v", explicitErr)
 		}
+	}
+	dockerVersion, err := docker.ServerVersion(ctx)
+	if err != nil {
+		t.Fatalf("Docker server version: %v", err)
 	}
 	cp, err := evidence.CollectControllerProvenance(evidence.ProvenanceOptions{
-		RepoDir:         projRoots.Repository,
-		ProducerVersion: "qualified-live-smoke/1.0.0",
+		RepoDir: projRoots.Repository, ProducerVersion: "qualified-live-smoke/1.0.0",
+		DockerServerVersion: dockerVersion.Version,
 	})
 	if err != nil {
-		// Test binaries may not have embedded VCS info. Fall back to a
-		// direct git rev-parse on the working tree (the test must
-		// pass when the source tree is reachable).
-		fallbackCP, ferr := fallbackGitProvenance(projRoots.Repository, "qualified-live-smoke/1.0.0")
-		if ferr != nil {
-			t.Fatalf("collect controller provenance: %v; git fallback: %v", err, ferr)
-		}
-		cp = fallbackCP
+		t.Fatalf("collect running-binary provenance: %v", err)
 	}
-
-	// Install provenance into the observations.
-	obs := outcome.Observations
-	dockerVer := ""
-	if v, err := docker.ServerVersion(ctx); err == nil {
-		dockerVer = v.Version
+	artifactDir := os.Getenv("TOVARISCH_QUALIFIED_EVIDENCE_DIR")
+	if artifactDir == "" {
+		artifactDir = t.TempDir()
 	}
-	execHash := cp.ExecutableSHA256
-	if execHash == "" {
-		// Fallback: compute from os.Executable.
-		if exe, err := os.Executable(); err == nil {
-			if data, err := osReadFile(exe); err == nil {
-				sum := sha256.Sum256(data)
-				execHash = hex.EncodeToString(sum[:])
-			}
-		}
-	}
-	obs.SetProvenance(cp.VCSRevision, cp.VCSTree, cp.GitObjectFormat, dockerVer, cp.ProducerVersion, execHash)
-	obs.SetProvenanceDirty(cp.WorkingTreeDirty, cp.SourceCommitDirty)
-	obs.SetVCSModified(cp.VCSModified)
-
-	// Build canonical evidence and persist with fail-closed.
-	// PersistQualifiedExecutionEvidence compares the supplied
-	// derived claims to the recomputed ones, so the producer must
-	// stamp the claims on the in-memory artifact before persisting.
-	ev := evidence.BuildEvidenceFromObservations(obs)
-	ev.SetDerivedFields()
-	if err := evidence.PersistQualifiedExecutionEvidence("/tmp", ev); err != nil {
-		// Failure close: the smoke FAILS the test on persistence error.
-		raw, _ := json.MarshalIndent(ev, "", "  ")
-		t.Fatalf("persist evidence: %v\n%s", err, string(raw))
-	}
-	defer func() { _ = os.Remove("/tmp/qualified-execution-evidence.json") }()
-	persisted, err := osReadFile("/tmp/qualified-execution-evidence.json")
+	ev, err := evidence.BuildAndPersistFinalQualifiedEvidence(ctx, outcome, cp, artifactDir)
 	if err != nil {
-		t.Fatalf("read persisted evidence: %v", err)
+		t.Fatalf("persist final qualified evidence: %v", err)
 	}
-	result, err := evidence.VerifyQualifiedExecutionBytes(persisted)
-	if err != nil {
-		t.Fatalf("verify bytes: %v", err)
-	}
+	result := evidence.VerifyQualifiedExecution(ev)
 	if !result.Pass {
-		raw, _ := json.MarshalIndent(ev, "", "  ")
-		t.Fatalf("verifier rejected live evidence:\n%s\nerrors: %v", string(raw), result.Errors)
+		t.Fatalf("verifier rejected live evidence: %v", result.Errors)
 	}
+	obs := outcome.Observations
 
 	// Print the canonical fields for the close report.
 	t.Logf("test executed: true")
@@ -267,8 +217,5 @@ func parentDir(p string) string {
 	return "."
 }
 
-// (CORRECTION22: fallbackGitProvenance, gitOutput,
-// gitWorkingTreeDirtyOutput, newGitCmd, osRemove and osReadFile
-// moved to main.go so the smoke and the production CLI share the
-// exact same provenance helpers. The tests still call them via
-// the production symbol.)
+// Controller provenance is collected only by the canonical running-binary
+// collector after the lifecycle returns.

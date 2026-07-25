@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/analysis"
+	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/buildmetadata"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/canarycontrol"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/evidence"
@@ -258,176 +259,104 @@ func runCommand(args []string) error {
 		return fmt.Errorf("construct canonical Docker control: %w", err)
 	}
 
-	runWorkload := func(workloadCtx context.Context, containerID string, obs *dockerlab.QualifiedExecutionObservations) error {
+	runWorkload := func(workloadCtx context.Context, input dockerlab.QualifiedWorkloadInput) (*dockerlab.QualifiedWorkloadResult, error) {
+		containerID := input.ContainerID
 		containerPID, err := dockerClient.ContainerGetPID(workloadCtx, containerID)
 		if err != nil {
-			return fmt.Errorf("get container PID: %w", err)
+			return nil, fmt.Errorf("get container PID: %w", err)
 		}
 		if *verbose {
 			fmt.Printf("Container %s started with PID %d\n", containerID, containerPID)
 		}
 
-		// CORRECTION45: The four-operation reachability flow is the
-		// single canonical orchestrator. The production CLI and
-		// the live qualification tests both call this function.
-		// There is no parallel test-only implementation.
-		runSequence := func(probeCtx context.Context, port int, count int, timeout time.Duration) (*CanaryState, *WorkloadResult, *CanaryState, *dockerlab.QualifiedExecutionObservations, error) {
-			sequenceObs := &dockerlab.QualifiedExecutionObservations{
-				SchemaVersion: dockerlab.QualifiedExecutionObservationsSchemaVersion,
-				GeneratedAt:   time.Now().UTC(),
-				Image:         obs.Image,
-				Network:       obs.Network,
-				Pull:          obs.Pull,
-				Container:     obs.Container,
-				Reachability: dockerlab.ReachabilityObservations{
-					Method:     dockerlab.ReachabilityMethodDockerExec,
-					NetworkID:  obs.Network.InspectResponseID,
-					TargetHost: "127.0.0.1",
-					TargetPort: port,
-				},
-			}
-			initialState, workloadResult, finalState, sequenceErr := RunCanonicalControlSequence(
-				probeCtx, control, sequenceObs,
-				CanonicalControlSequenceOptions{
-					ContainerID: containerID,
-					Port:        port,
-					Operations:  count,
-					Timeout:     timeout,
-				},
-			)
-			return initialState, workloadResult, finalState, sequenceObs, sequenceErr
-		}
-
-		// 1. Health + initial state (count=0 so operate is skipped).
-		initialState, _, _, probeObs, err := runSequence(workloadCtx, *canaryPort, 0, 30*time.Second)
-		if err != nil {
-			return fmt.Errorf("canonical control sequence: health+initial: %w", err)
-		}
-		obs.Reachability = probeObs.Reachability
-		if *verbose {
-			fmt.Printf("Canary healthy (via canary-control exec)\n")
-		}
-		expectedMode := scenarioToMode(*scenario)
-		if initialState.Mode != expectedMode {
-			return fmt.Errorf("canary mode mismatch: expected %s, got %s", expectedMode, initialState.Mode)
-		}
-		if *verbose {
-			fmt.Printf("Initial canary state: mode=%s, operations=%d, retained_blocks=%d\n",
-				initialState.Mode, initialState.OperationCount, initialState.RetainedBlocks)
-		}
-		if err := evidenceWriter.WriteCanaryState("initial", initialState); err != nil {
-			return fmt.Errorf("write initial canary state: %w", err)
-		}
-
-		sampler := sampling.NewSamplerWithDocker(
-			containerID,
-			func() int { return containerPID },
-			dockerClient,
-			phaseCfg,
-		)
+		sampler := sampling.NewSamplerWithDocker(containerID, func() int { return containerPID }, dockerClient, phaseCfg)
 		cgroupPath, cgroupErr := procfs.ResolveCgroupV2Path(containerPID)
 		controllerPIDInt := os.Getpid()
 		capability, proof := classifyCgroupFailureWithNamespace(cgroupErr, containerPID, controllerPIDInt)
 		if cgroupErr != nil {
 			sampler.RecordCgroupCapability(workloadCtx, containerPID, capability, "", cgroupErr, controllerPIDInt, proof)
-			if *verbose {
-				fmt.Printf("CGROUP RESOLUTION FAILED: pid=%d capability=%s error=%v\n", containerPID, capability, cgroupErr)
-			}
 		} else {
-			if *verbose {
-				fmt.Printf("CGROUP RESOLVED: pid=%d path=%s\n", containerPID, cgroupPath)
-			}
 			sampler.SetCgroupPath(cgroupPath)
 			sampler.RecordCgroupCapability(workloadCtx, containerPID, sampling.CgroupCapabilityAvailable, cgroupPath, nil, controllerPIDInt, nil)
 		}
 
-		sampler.Start(workloadCtx)
-
-		if *verbose {
-			fmt.Printf("Waiting for stimulus phase...\n")
+		sequenceObs := &dockerlab.QualifiedExecutionObservations{
+			SchemaVersion: dockerlab.QualifiedExecutionObservationsSchemaVersion,
+			GeneratedAt:   time.Now().UTC(),
+			Reachability: dockerlab.ReachabilityObservations{
+				Method: dockerlab.ReachabilityMethodDockerExec, NetworkID: input.NetworkID,
+				TargetHost: "127.0.0.1", TargetPort: *canaryPort,
+			},
 		}
-		select {
-		case <-workloadCtx.Done():
-			sampler.Stop()
-			return workloadCtx.Err()
-		case <-sampler.StimulusReady():
-		}
-
-		if *verbose {
-			fmt.Printf("Stimulus phase started, triggering workload\n")
-		}
-		// CORRECTION45: operate + final state via the canonical
-		// sequence. The CLI does not call ControlProbe directly.
 		expectedRequest := getScenarioOperationCount(*scenario)
-		_, workloadResult, finalState, probeObs2, err := runSequence(workloadCtx, *canaryPort, expectedRequest, 60*time.Second)
+		initialState, workloadResult, finalState, err := RunCanonicalControlSequence(
+			workloadCtx, control, sequenceObs,
+			CanonicalControlSequenceOptions{
+				ContainerID: containerID, Port: *canaryPort, Operations: expectedRequest, Timeout: 60 * time.Second,
+				BeforeOperate: func(initial *CanaryState) error {
+					if initial.Mode != scenarioToMode(*scenario) {
+						return fmt.Errorf("canary mode mismatch: expected %s, got %s", scenarioToMode(*scenario), initial.Mode)
+					}
+					if err := evidenceWriter.WriteCanaryState("initial", initial); err != nil {
+						return fmt.Errorf("write initial canary state: %w", err)
+					}
+					sampler.Start(workloadCtx)
+					select {
+					case <-workloadCtx.Done():
+						sampler.Stop()
+						return workloadCtx.Err()
+					case <-sampler.StimulusReady():
+						return nil
+					}
+				},
+			},
+		)
 		if err != nil {
 			sampler.Stop()
-			return fmt.Errorf("canonical control sequence: operate+final: %w", err)
+			return nil, fmt.Errorf("canonical control sequence: %w", err)
 		}
-		obs.Reachability = probeObs2.Reachability
-		if *verbose {
-			fmt.Printf("Workload completed: requested=%d attempted=%d completed=%d\n",
-				workloadResult.Requested, workloadResult.Attempted, workloadResult.Completed)
-		}
+		sequenceObs.Reachability.Success = true
 
 		if err := sampler.WaitForPhase(workloadCtx, sampling.PhaseSettling); err != nil {
 			sampler.Stop()
-			return fmt.Errorf("wait settling: %w", err)
+			return nil, fmt.Errorf("wait settling: %w", err)
 		}
 		if err := sampler.WaitForPhase(workloadCtx, sampling.PhaseFinal); err != nil {
 			sampler.Stop()
-			return fmt.Errorf("wait final: %w", err)
+			return nil, fmt.Errorf("wait final: %w", err)
 		}
 		if err := sampler.WaitForComplete(workloadCtx); err != nil {
 			sampler.Stop()
-			return fmt.Errorf("wait complete: %w", err)
+			return nil, fmt.Errorf("wait complete: %w", err)
 		}
-
-		// The bounded/growing/descriptor canaries run as long-lived
-		// HTTP servers; stop the container boundedly so the
-		// lifecycle terminal-state observer succeeds.
 		if stopErr := dockerClient.ContainerStop(workloadCtx, containerID, 10*time.Second); stopErr != nil {
 			sampler.Stop()
-			return fmt.Errorf("bounded stop: %w", stopErr)
-		}
-
-		if *verbose {
-			fmt.Printf("Final canary state: mode=%s, operations=%d, retained_blocks=%d\n",
-				finalState.Mode, finalState.OperationCount, finalState.RetainedBlocks)
+			return nil, fmt.Errorf("bounded stop: %w", stopErr)
 		}
 
 		sampler.Stop()
 		samples := sampler.Samples()
 		events := sampler.Events()
-		if *verbose {
-			fmt.Printf("Collected %d samples\n", len(samples))
-		}
-
 		phaseValid := validatePhaseContract(samples, phaseCfg)
-		if !phaseValid {
-			fmt.Printf("WARNING: Phase contract validation failed\n")
-		}
 		workloadValid := workloadResult.Completed == workloadResult.Requested
 		identityStable := validateProcessIdentity(samples)
-
 		if err := evidenceWriter.WriteCanaryState("final", finalState); err != nil {
-			return fmt.Errorf("write final canary state: %w", err)
+			return nil, fmt.Errorf("write final canary state: %w", err)
 		}
 		if err := evidenceWriter.WriteWorkloadResult(workloadResult); err != nil {
-			return fmt.Errorf("write workload result: %w", err)
+			return nil, fmt.Errorf("write workload result: %w", err)
 		}
 		if err := evidenceWriter.WriteSamplesCSV(samples); err != nil {
-			return fmt.Errorf("write samples CSV: %w", err)
+			return nil, fmt.Errorf("write samples CSV: %w", err)
 		}
 		if err := evidenceWriter.WriteEventsJSONL(events); err != nil {
-			return fmt.Errorf("write events JSONL: %w", err)
+			return nil, fmt.Errorf("write events JSONL: %w", err)
 		}
 		logs, _ := dockerClient.ContainerLogs(workloadCtx, containerID, "100")
 		_ = evidenceWriter.WriteContainerLogs("container", []byte(logs))
 		inspectData, _ := dockerClient.ContainerInspect(workloadCtx, containerID)
 		_ = evidenceWriter.WriteContainerInspect("container", inspectData)
 
-		// Capture the artifacts for the outer runCommand.
 		workload.InitialState = initialState
 		workload.FinalState = finalState
 		workload.WorkloadResult = workloadResult
@@ -436,13 +365,9 @@ func runCommand(args []string) error {
 		workload.PhaseValid = phaseValid
 		workload.WorkloadValid = workloadValid
 		workload.IdentityStable = identityStable
-		// CORRECTION27 P0-2: Track reachability method
-		obs.Reachability.Method = dockerlab.ReachabilityMethodDockerExec
-		obs.Reachability.NetworkID = obs.Network.InspectResponseID
-		obs.Reachability.TargetHost = "127.0.0.1"
-		obs.Reachability.TargetPort = *canaryPort
-		obs.Reachability.Success = true
-		return nil
+		return &dockerlab.QualifiedWorkloadResult{Observations: dockerlab.QualifiedWorkloadObservations{
+			Reachability: sequenceObs.Reachability,
+		}}, nil
 	}
 
 	opts := dockerlab.LifecycleOptions{
@@ -458,66 +383,26 @@ func runCommand(args []string) error {
 	outcome, err := dockerlab.ExecuteQualifiedDockerLifecycle(
 		ctx, dockerClient, opts, "tovarisch-memory-lab/1.0.0",
 	)
-	// The Run callback never returned an error if err is non-nil here
-	// — but we still record its state.
 	workloadErr = err
 	if outcome == nil {
-		// Prepare failed before Run was called. No observations yet.
 		return fmt.Errorf("qualified lifecycle: %w", err)
 	}
-
-	// CORRECTION22 P0-10: set provenance on the observations so the
-	// verifier can authorize pass=true. The lifecycle itself never
-	// reads or modifies the supplied claim fields; the producer
-	// stamps them after the underlying validator succeeds.
-	if outcome.Observations != nil {
-		cp, perr := evidence.CollectControllerProvenance(evidence.ProvenanceOptions{
-			RepoDir:         repoDirForProvenance(),
-			ProducerVersion: "tovarisch-memory-lab/1.0.0",
-		})
-		if perr != nil {
-			cp, perr = fallbackGitProvenance(repoDirForProvenance(), "tovarisch-memory-lab/1.0.0")
-		}
-		dockerVer := ""
-		if v, derr := dockerClient.ServerVersion(ctx); derr == nil {
-			dockerVer = v.Version
-		}
-		execHash := cp.ExecutableSHA256
-		if execHash == "" {
-			if exe, eerr := os.Executable(); eerr == nil {
-				if data, rerr := osReadFile(exe); rerr == nil {
-					sum := sha256.Sum256(data)
-					execHash = hex.EncodeToString(sum[:])
-				}
-			}
-		}
-		outcome.Observations.SetProvenance(
-			cp.VCSRevision, cp.VCSTree, cp.GitObjectFormat,
-			dockerVer, cp.ProducerVersion, execHash,
-		)
-		outcome.Observations.SetProvenanceDirty(cp.WorkingTreeDirty, cp.SourceCommitDirty)
-		outcome.Observations.SetVCSModified(cp.VCSModified)
-
-		ev := evidence.BuildEvidenceFromObservations(outcome.Observations)
-		// PersistQualifiedExecutionEvidence compares the supplied
-		// derived claims to the recomputed ones, so the producer must
-		// stamp the claims on the in-memory artifact before persisting.
-		ev.SetDerivedFields()
-		if perr := evidence.PersistQualifiedExecutionEvidence(artifactsPath, ev); perr != nil {
-			return fmt.Errorf("qualified evidence: %w", perr)
-		}
-	}
-
 	if err != nil {
-		// Lifecycle failed. The bounded cleanup has already happened.
+		// A failed lifecycle may return final partial observations for
+		// diagnostics, but it must never write passing qualified evidence.
 		return fmt.Errorf("qualified lifecycle: %w", workloadErr)
 	}
-	if !outcome.Terminal {
-		return fmt.Errorf("container did not reach terminal state")
+
+	cp, err := evidence.CollectControllerProvenance(evidence.ProvenanceOptions{
+		RepoDir:             repoDirForProvenance(),
+		ProducerVersion:     "tovarisch-memory-lab/1.0.0",
+		DockerServerVersion: dockerInfo.Version,
+	})
+	if err != nil {
+		return fmt.Errorf("collect running-binary provenance: %w", err)
 	}
-	if !outcome.ContainerRemoved || !outcome.NetworkRemoved {
-		return fmt.Errorf("qualified cleanup incomplete: container=%v network=%v",
-			outcome.ContainerRemoved, outcome.NetworkRemoved)
+	if _, err := evidence.BuildAndPersistFinalQualifiedEvidence(ctx, outcome, cp, artifactsPath); err != nil {
+		return fmt.Errorf("qualified evidence: %w", err)
 	}
 
 	// Lifecycle succeeded. workload artifacts must be set.
@@ -532,12 +417,12 @@ func runCommand(args []string) error {
 	workloadValid := workload.WorkloadValid
 	identityStable := workload.IdentityStable
 
-	// CORRECTION03: capture and verify canary image identity.
-	// Fails closed BEFORE the stimulus if pre-build, extracted-image,
-	// and label hashes disagree. The result is stored inside the
+	// Capture and verify canary image identity from the exact finalized
+	// lifecycle image after cleanup. Any pre-build/extracted/label
+	// disagreement fails the production CLI. The result is stored inside the
 	// canonical manifest.json (the canary-image-provenance.json
 	// sidecar is no longer used).
-	canaryImageIdentity, err := captureAndVerifyCanaryImageIdentity(ctx, dockerClient, outcome.ContainerID)
+	canaryImageIdentity, err := captureAndVerifyCanaryImageIdentity(ctx, dockerClient, outcome.ImageID)
 	if err != nil {
 		return fmt.Errorf("canary image identity: %w", err)
 	}
@@ -740,58 +625,13 @@ func runCommand(args []string) error {
 	return nil
 }
 
-// fallbackGitProvenance computes a ControllerProvenance directly
-// from the git repository when the embedded VCS info is
-// unavailable (e.g. during `go test`). The producer falls back
-// to this when CollectControllerProvenance returns
-// ErrProvenanceUnavailable.
-func fallbackGitProvenance(repoDir, producer string) (evidence.ControllerProvenance, error) {
-	head, err := gitOutputRepo(repoDir, "rev-parse", "HEAD")
-	if err != nil {
-		return evidence.ControllerProvenance{}, err
-	}
-	tree, err := gitOutputRepo(repoDir, "rev-parse", "--verify", head+"^{tree}")
-	if err != nil {
-		return evidence.ControllerProvenance{}, err
-	}
-	format, _ := gitOutputRepo(repoDir, "rev-parse", "--show-object-format")
-	dirty, _ := gitWorkingTreeDirtyOutput(repoDir)
-	return evidence.ControllerProvenance{
-		VCSRevision:       head,
-		VCSTree:           tree,
-		VCSModified:       false,
-		WorkingTreeDirty:  dirty,
-		SourceCommitDirty: false,
-		GitObjectFormat:   format,
-		ProducerVersion:   producer,
-	}, nil
-}
-
-func gitOutputRepo(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func gitWorkingTreeDirtyOutput(dir string) (bool, error) {
-	out, err := gitOutputRepo(dir, "status", "--porcelain")
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(out) != "", nil
-}
-
-// osReadFile is a thin wrapper for tests / fallback paths.
-func osReadFile(path string) ([]byte, error) { return os.ReadFile(path) }
-
 // repoDirForProvenance returns the working directory's nearest
 // ancestor that contains a .git directory. Used by both the
 // shared lifecycle helper and the production CLI.
 func repoDirForProvenance() string {
+	if explicit := os.Getenv("TOVARISCH_REPO_ROOT"); explicit != "" {
+		return explicit
+	}
 	dir, err := os.Getwd()
 	if err != nil {
 		return "."
@@ -825,29 +665,17 @@ func repoDirForProvenance() string {
 func captureAndVerifyCanaryImageIdentity(
 	ctx context.Context,
 	dockerClient *dockerlab.Client,
-	canaryContainerID string,
+	expectedImageID string,
 ) (*evidence.SubjectImageIdentity, error) {
-	buildPath := filepath.Join("tovarisch", "labs", "memory", "canary-image-build.json")
-	raw, err := os.ReadFile(buildPath)
+	buildPath := filepath.Join(repoDirForProvenance(), "tovarisch", "labs", "memory", "canary-image-build.json")
+	build, err := buildmetadata.Read(buildPath)
 	if err != nil {
-		return nil, fmt.Errorf("read canary build metadata: %w (run scripts/build_tovarisch_canary_image.sh first)", err)
-	}
-	var build struct {
-		ImageReference         string   `json:"image_reference"`
-		ImageID                string   `json:"image_id"`
-		RepoDigests            []string `json:"repo_digests"`
-		SourceCommitOID        string   `json:"source_commit_oid"`
-		RepositoryTreeOID      string   `json:"repository_tree_oid"`
-		CanarySourceSubtreeOID string   `json:"canary_source_subtree_oid"`
-		PrebuildBinarySHA256   string   `json:"prebuild_binary_sha256"`
-	}
-	if err := json.Unmarshal(raw, &build); err != nil {
-		return nil, fmt.Errorf("parse canary build metadata: %w", err)
+		return nil, fmt.Errorf("read canonical canary build metadata: %w (run scripts/build_tovarisch_canary_image.sh first)", err)
 	}
 
 	// Create a read-only container from the canary image so
 	// /app/canary can be extracted without running it.
-	tmpContainerID, err := dockerClient.ContainerCreateReadOnly(ctx, build.ImageID)
+	tmpContainerID, err := dockerClient.ContainerCreateReadOnly(ctx, build.EngineImageID)
 	if err != nil {
 		return nil, fmt.Errorf("create read-only canary container: %w", err)
 	}
@@ -865,7 +693,7 @@ func captureAndVerifyCanaryImageIdentity(
 
 	// Read the actual image labels (this is the source of truth
 	// the manifest persists; not synthesized).
-	labels, _ := dockerClient.ImageLabels(ctx, build.ImageID)
+	labels, _ := dockerClient.ImageLabels(ctx, build.EngineImageID)
 
 	// Build the canonical SubjectImageIdentity. Every field
 	// here lives inside the checksummed manifest, so the
@@ -875,14 +703,14 @@ func captureAndVerifyCanaryImageIdentity(
 		repoDigestStatus = "available"
 	}
 	sii := &evidence.SubjectImageIdentity{
-		ImageReference:             build.ImageReference,
-		ImageID:                    build.ImageID,
+		ImageReference:             build.RequestedReference,
+		ImageID:                    build.EngineImageID,
 		RepoDigests:                build.RepoDigests,
 		RepoDigestStatus:           repoDigestStatus,
-		SourceCommitOID:            build.SourceCommitOID,
-		RepositoryTreeOID:          build.RepositoryTreeOID,
-		CanarySourceSubtreeOID:     build.CanarySourceSubtreeOID,
-		PrebuildBinarySHA256:       build.PrebuildBinarySHA256,
+		SourceCommitOID:            build.SourceCommit,
+		RepositoryTreeOID:          build.SourceTree,
+		CanarySourceSubtreeOID:     build.CanarySourceTree,
+		PrebuildBinarySHA256:       build.CanaryBinarySHA256,
 		ExtractedImageBinarySHA256: extractedImageBinarySHA256,
 		RevisionLabel:              labels["org.opencontainers.image.revision"],
 		RepositoryTreeLabel:        labels["kgb.dev/source-tree"],
@@ -890,24 +718,23 @@ func captureAndVerifyCanaryImageIdentity(
 		BinarySHA256Label:          labels["kgb.dev/canary-binary-sha256"],
 	}
 
-	// CORRECTION03 ยง3 + ยง5: fail-closed before stimulus if
-	// any comparison fails.
-	if build.PrebuildBinarySHA256 == "" {
+	// Fail closed if any source/image/binary comparison fails.
+	if build.CanaryBinarySHA256 == "" {
 		return nil, fmt.Errorf("pre-build canary binary hash is empty in build metadata")
 	}
 	if extractedImageBinarySHA256 == "" {
 		return nil, fmt.Errorf("extracted image binary hash is empty")
 	}
-	if !strings.EqualFold(build.PrebuildBinarySHA256, extractedImageBinarySHA256) {
+	if !strings.EqualFold(build.CanaryBinarySHA256, extractedImageBinarySHA256) {
 		return nil, fmt.Errorf("canary binary hash mismatch: prebuild=%s extracted=%s",
-			build.PrebuildBinarySHA256, extractedImageBinarySHA256)
+			build.CanaryBinarySHA256, extractedImageBinarySHA256)
 	}
 	if sii.BinarySHA256Label == "" {
 		return nil, fmt.Errorf("canary image is missing kgb.dev/canary-binary-sha256 label")
 	}
-	if !strings.EqualFold(build.PrebuildBinarySHA256, sii.BinarySHA256Label) {
+	if !strings.EqualFold(build.CanaryBinarySHA256, sii.BinarySHA256Label) {
 		return nil, fmt.Errorf("canary binary hash mismatch: prebuild=%s label=%s",
-			build.PrebuildBinarySHA256, sii.BinarySHA256Label)
+			build.CanaryBinarySHA256, sii.BinarySHA256Label)
 	}
 	if sii.RevisionLabel == "" {
 		return nil, fmt.Errorf("canary image is missing org.opencontainers.image.revision label")
@@ -918,30 +745,27 @@ func captureAndVerifyCanaryImageIdentity(
 	if sii.SourceSubtreeLabel == "" {
 		return nil, fmt.Errorf("canary image is missing kgb.dev/canary-source-tree label")
 	}
-	if !strings.EqualFold(sii.RevisionLabel, build.SourceCommitOID) {
+	if !strings.EqualFold(sii.RevisionLabel, build.SourceCommit) {
 		return nil, fmt.Errorf("canary image revision label=%s != tested commit=%s",
-			sii.RevisionLabel, build.SourceCommitOID)
+			sii.RevisionLabel, build.SourceCommit)
 	}
-	if !strings.EqualFold(sii.RepositoryTreeLabel, build.RepositoryTreeOID) {
+	if !strings.EqualFold(sii.RepositoryTreeLabel, build.SourceTree) {
 		return nil, fmt.Errorf("canary image repository-tree label=%s != tested tree=%s",
-			sii.RepositoryTreeLabel, build.RepositoryTreeOID)
+			sii.RepositoryTreeLabel, build.SourceTree)
 	}
-	if !strings.EqualFold(sii.SourceSubtreeLabel, build.CanarySourceSubtreeOID) {
+	if !strings.EqualFold(sii.SourceSubtreeLabel, build.CanarySourceTree) {
 		return nil, fmt.Errorf("canary image source-subtree label=%s != Git source subtree=%s",
-			sii.SourceSubtreeLabel, build.CanarySourceSubtreeOID)
+			sii.SourceSubtreeLabel, build.CanarySourceTree)
 	}
 
-	// CORRECTION03 ยง5: container inspect must report the
-	// verified image ID.
-	inspectedImage, err := dockerClient.ContainerImageID(ctx, canaryContainerID)
-	if err != nil || inspectedImage == "" {
-		return nil, fmt.Errorf("container inspect image ID is empty")
+	// The finalized lifecycle outcome already binds create + post-create
+	// inspect to this exact Engine image ID; the container has been removed
+	// before this post-lifecycle producer runs.
+	if expectedImageID != build.EngineImageID {
+		return nil, fmt.Errorf("final lifecycle image ID %s does not match build metadata %s",
+			expectedImageID, build.EngineImageID)
 	}
-	if !strings.HasPrefix(inspectedImage, build.ImageID) {
-		return nil, fmt.Errorf("container image ID %s does not match verified image id (got=%s)",
-			build.ImageID, inspectedImage)
-	}
-	sii.ContainerImageID = inspectedImage
+	sii.ContainerImageID = expectedImageID
 
 	return sii, nil
 }
@@ -2709,7 +2533,7 @@ func validateStateInvariant(scenario string, initial, final *CanaryState, worklo
 // (buildAndPersistQualifiedEvidenceFromInspect and
 // buildAndPersistQualifiedEvidence) have been deleted. The
 // production CLI now goes through dockerlab.ExecuteQualifiedDockerLifecycle
-// and evidence.PersistQualifiedExecutionEvidence directly.
+// and evidence.BuildAndPersistFinalQualifiedEvidence.
 
 // canaryStateFromEnvelope translates a /state envelope into the
 // package-local CanaryState. CORRECTION45: this is the only

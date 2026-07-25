@@ -49,6 +49,9 @@ type ControllerProvenance struct {
 	ExecutableSHA256 string
 	// ProducerVersion is the producer/CLI version string.
 	ProducerVersion string
+	// DockerServerVersion is collected once by orchestration and carried
+	// with the running-binary provenance authority.
+	DockerServerVersion string
 }
 
 // ProvenanceOptions configures the collector. The caller passes a
@@ -64,6 +67,8 @@ type ProvenanceOptions struct {
 	EmbeddedTreeOverride string
 	// ProducerVersion is the CLI version string.
 	ProducerVersion string
+	// DockerServerVersion is the observed Engine server version.
+	DockerServerVersion string
 	// RequireClean forces a failure when the working tree or source
 	// commit is dirty. Defaults to true.
 	RequireClean bool
@@ -162,14 +167,15 @@ func CollectControllerProvenance(opts ProvenanceOptions) (ControllerProvenance, 
 	}
 
 	cp := ControllerProvenance{
-		VCSRevision:       vcsRevision,
-		VCSTree:           tree,
-		VCSModified:       vcsModified,
-		WorkingTreeDirty:  workingDirty,
-		SourceCommitDirty: headMismatch,
-		GitObjectFormat:   gitFormat,
-		ExecutableSHA256:  execSHA256,
-		ProducerVersion:   opts.ProducerVersion,
+		VCSRevision:         vcsRevision,
+		VCSTree:             tree,
+		VCSModified:         vcsModified,
+		WorkingTreeDirty:    workingDirty,
+		SourceCommitDirty:   headMismatch,
+		GitObjectFormat:     gitFormat,
+		ExecutableSHA256:    execSHA256,
+		ProducerVersion:     opts.ProducerVersion,
+		DockerServerVersion: opts.DockerServerVersion,
 	}
 	if opts.RequireClean {
 		if cp.VCSModified || cp.WorkingTreeDirty || cp.SourceCommitDirty {

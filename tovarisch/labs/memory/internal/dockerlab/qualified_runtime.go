@@ -328,8 +328,8 @@ func (q *QualifiedClient) ExecuteQualifiedContainer(
 	}, nil
 }
 
-// QualifiedLifecycleOutcome describes the full result of a qualified
-// lifecycle run (CORRECTION18 production helper).
+// QualifiedLifecycleOutcome is the finalized lifecycle snapshot transferred
+// to the caller. Observations is always a deep clone of lifecycle-owned state.
 type QualifiedLifecycleOutcome struct {
 	ContainerID      string
 	ImageID          string
@@ -340,6 +340,7 @@ type QualifiedLifecycleOutcome struct {
 	NetworkRemoved   bool
 	StartedByRuntime bool
 	Observations     *QualifiedExecutionObservations
+	Phases           []QualifiedLifecyclePhase
 }
 
 // QualifiedLifecycleDependencies binds all authoritative lifecycle dependencies.
@@ -363,11 +364,9 @@ type LifecycleOptions struct {
 	// CleanupTimeout bounds the post-workload cleanup context. Zero
 	// means "use a default of 10s".
 	CleanupTimeout time.Duration
-	// Run is invoked after the container starts. The runner is
-	// responsible for owning the workload and returning when done.
-	// CORRECTION27: Run callback receives observations pointer for
-	// reachability instrumentation.
-	Run func(ctx context.Context, containerID string, observations *QualifiedExecutionObservations) error
+	// Run is invoked after start and returns workload-owned observations.
+	// It never receives a writable alias to lifecycle-owned observations.
+	Run QualifiedRunFunc
 
 	// TerminalObserver is an optional seam for tests. When nil,
 	// the production path uses cli.ContainerInspect to detect the
@@ -472,9 +471,6 @@ func executeQualifiedLifecycleWithDependencies(
 	if deps.Control == nil {
 		return nil, ErrQualifiedControlRequired
 	}
-	if audited == nil {
-		return nil, errors.New("audited runtime is nil")
-	}
 	if opts.ImageReference == "" {
 		return nil, errors.New("image reference is empty")
 	}
@@ -488,133 +484,91 @@ func executeQualifiedLifecycleWithDependencies(
 		return nil, errors.New("terminal observer is nil")
 	}
 
+	var phases []QualifiedLifecyclePhase
+	record := func(phase QualifiedLifecyclePhase) { phases = append(phases, phase) }
 	qc := NewQualifiedClient(audited)
-
-	// Pull-attempt pre-check: a healthy qualified run has zero pull
-	// audit at this point. We re-check after the run to detect any
-	// mid-run pulls.
 	prepStart := audited.pullAttemptCount
-
 	cfg := ContainerConfig{
-		Name: opts.ContainerName,
-		Config: &container.Config{
-			Image: opts.ImageReference,
-			Cmd:   opts.ContainerCmd,
-		},
+		Name:   opts.ContainerName,
+		Config: &container.Config{Image: opts.ImageReference, Cmd: opts.ContainerCmd},
 	}
 	obs, err := qc.PrepareQualifiedContainer(ctx, opts.ImageReference, opts.NetworkName, cfg)
 	if err != nil {
-		// No obs to finalize on Prepare failure.
 		return nil, err
 	}
-	// The audit is always installed in the qualified lifecycle. Record
-	// the pull-observation availability signal on the observation
-	// object so the verifier can require it as a fail-closed signal.
+	record(PhasePrepared)
 	obs.Pull.ObservationAvailable = true
 
-	// Start the container.
-	if startErr := audited.ContainerStart(ctx, obs.Container.ID, types.ContainerStartOptions{}); startErr != nil {
-		cleanup, _ := boundedCleanup(context.Background(), audited, obs.Container.ID, obs.Network.InspectResponseID, opts.CleanupTimeout)
-		obs.Container.Removed = cleanup.containerRemoved
-		obs.Network.Removed = cleanup.networkRemoved
-		obs.Container.Started = false
-		finalizePullAudit(audited, obs)
+	finalOutcome := func(started, terminal bool, cleanup cleanupResult) *QualifiedLifecycleOutcome {
+		record(PhaseLifecycleReturned)
 		return &QualifiedLifecycleOutcome{
-			ContainerID:      obs.Container.ID,
-			ImageID:          obs.Image.InspectedBeforeCreate,
-			NetworkID:        obs.Network.InspectResponseID,
-			Started:          false,
-			ContainerRemoved: cleanup.containerRemoved,
-			NetworkRemoved:   cleanup.networkRemoved,
-			StartedByRuntime: true,
-			Observations:     obs,
-		}, fmt.Errorf("start container: %w", startErr)
+			ContainerID: obs.Container.ID, ImageID: obs.Image.InspectedBeforeCreate,
+			NetworkID: obs.Network.InspectResponseID, Started: started, Terminal: terminal,
+			ContainerRemoved: cleanup.containerRemoved, NetworkRemoved: cleanup.networkRemoved,
+			StartedByRuntime: true, Observations: CloneQualifiedExecutionObservations(obs),
+			Phases: append([]QualifiedLifecyclePhase(nil), phases...),
+		}
 	}
-	obs.Container.Started = true
 
-	// Run the workload.
-	runErr := opts.Run(ctx, obs.Container.ID, obs)
-
-	// Wait for terminal state. The canary image is a long-running
-	// server, so the caller is responsible for terminating the
-	// container via stop. We only observe the terminal state via
-	// inspect (no sleep-as-authority).
-	terminalCtx, terminalCancel := context.WithTimeout(ctx, opts.TerminalTimeout)
-	defer terminalCancel()
-	terminalOK := terminalObs(terminalCtx, obs.Container.ID)
-
-	if !terminalOK {
+	if startErr := audited.ContainerStart(ctx, obs.Container.ID, types.ContainerStartOptions{}); startErr != nil {
 		cleanup, cleanupErr := boundedCleanup(context.Background(), audited, obs.Container.ID, obs.Network.InspectResponseID, opts.CleanupTimeout)
 		obs.Container.Removed = cleanup.containerRemoved
 		obs.Network.Removed = cleanup.networkRemoved
 		finalizePullAudit(audited, obs)
-		joined := errors.Join(runErr, errTerminalTimeout, cleanupErr)
-		return &QualifiedLifecycleOutcome{
-			ContainerID:      obs.Container.ID,
-			ImageID:          obs.Image.InspectedBeforeCreate,
-			NetworkID:        obs.Network.InspectResponseID,
-			Started:          true,
-			Terminal:         false,
-			ContainerRemoved: cleanup.containerRemoved,
-			NetworkRemoved:   cleanup.networkRemoved,
-			StartedByRuntime: true,
-			Observations:     obs,
-		}, joined
+		return finalOutcome(false, false, cleanup), errors.Join(fmt.Errorf("start container: %w", startErr), cleanupErr)
 	}
-	obs.Container.TerminalStateObserved = true
+	obs.Container.Started = true
+	record(PhaseStarted)
 
-	// Bounded cleanup (independent context).
+	record(PhaseWorkloadEntered)
+	workloadResult, runErr := opts.Run(ctx, QualifiedWorkloadInput{
+		ContainerID: obs.Container.ID,
+		ImageID:     obs.Image.InspectedBeforeCreate,
+		NetworkID:   obs.Network.InspectResponseID,
+	})
+	if workloadResult == nil {
+		if runErr == nil {
+			runErr = ErrMissingQualifiedWorkloadResult
+		}
+	} else if validationErr := validateQualifiedWorkloadObservations(workloadResult.Observations); validationErr != nil {
+		runErr = errors.Join(runErr, validationErr)
+	} else {
+		record(PhaseWorkloadObserved)
+		// The lifecycle is the sole writer of canonical observations and
+		// performs this workload merge exactly once.
+		obs.Reachability = workloadResult.Observations.Reachability
+	}
+	record(PhaseWorkloadReturned)
+
+	terminalCtx, terminalCancel := context.WithTimeout(ctx, opts.TerminalTimeout)
+	defer terminalCancel()
+	terminalOK := terminalObs(terminalCtx, obs.Container.ID)
+	var terminalErr error
+	if terminalOK {
+		obs.Container.TerminalStateObserved = true
+		record(PhaseTerminalObserved)
+	} else {
+		terminalErr = errTerminalTimeout
+	}
+
 	cleanup, cleanupErr := boundedCleanup(context.Background(), audited, obs.Container.ID, obs.Network.InspectResponseID, opts.CleanupTimeout)
 	obs.Container.Removed = cleanup.containerRemoved
 	obs.Network.Removed = cleanup.networkRemoved
-
-	// Pull-attempt post-check: any pull during the run is a fail-closed signal.
-	_, pullCount, _ := audited.PullAudit()
-	if pullCount > prepStart {
-		finalizePullAudit(audited, obs)
-		pullErr := errPullAuditIncreased
-		joined := errors.Join(runErr, cleanupErr, pullErr)
-		return &QualifiedLifecycleOutcome{
-			ContainerID:      obs.Container.ID,
-			ImageID:          obs.Image.InspectedBeforeCreate,
-			NetworkID:        obs.Network.InspectResponseID,
-			Started:          true,
-			Terminal:         true,
-			ContainerRemoved: cleanup.containerRemoved,
-			NetworkRemoved:   cleanup.networkRemoved,
-			StartedByRuntime: true,
-			Observations:     obs,
-		}, joined
+	if cleanup.containerRemoved {
+		record(PhaseContainerRemoved)
 	}
-
+	if cleanup.networkRemoved {
+		record(PhaseNetworkRemoved)
+	}
 	finalizePullAudit(audited, obs)
 
-	if runErr != nil || cleanupErr != nil {
-		joined := errors.Join(runErr, cleanupErr)
-		return &QualifiedLifecycleOutcome{
-			ContainerID:      obs.Container.ID,
-			ImageID:          obs.Image.InspectedBeforeCreate,
-			NetworkID:        obs.Network.InspectResponseID,
-			Started:          true,
-			Terminal:         true,
-			ContainerRemoved: cleanup.containerRemoved,
-			NetworkRemoved:   cleanup.networkRemoved,
-			StartedByRuntime: true,
-			Observations:     obs,
-		}, joined
+	var pullErr error
+	_, pullCount, _ := audited.PullAudit()
+	if pullCount > prepStart {
+		pullErr = errPullAuditIncreased
 	}
-
-	return &QualifiedLifecycleOutcome{
-		ContainerID:      obs.Container.ID,
-		ImageID:          obs.Image.InspectedBeforeCreate,
-		NetworkID:        obs.Network.InspectResponseID,
-		Started:          true,
-		Terminal:         true,
-		ContainerRemoved: true,
-		NetworkRemoved:   true,
-		StartedByRuntime: true,
-		Observations:     obs,
-	}, nil
+	joined := errors.Join(runErr, terminalErr, cleanupErr, pullErr)
+	return finalOutcome(true, terminalOK, cleanup), joined
 }
 
 // cleanupResult captures the cleanup outcome.

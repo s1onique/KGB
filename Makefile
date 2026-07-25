@@ -711,7 +711,7 @@ MEMORY_LAB := .factory/bin/tovarisch-memory-lab
 # CORRECTION23: Replaces Python JSON parsing in canary image build.
 extract-image-metadata:
 	@mkdir -p .factory/bin
-	cd tovarisch/labs/memory && go build -o ../../.factory/bin/extract-image-metadata ./cmd/extract-image-metadata
+	cd tovarisch/labs/memory && go build -o ../../../.factory/bin/extract-image-metadata ./cmd/extract-image-metadata
 
 # Build the canary image with immutable OCI + kgb.dev labels
 # CORRECTION02 §7: bind the canary binary to the tested source tree.

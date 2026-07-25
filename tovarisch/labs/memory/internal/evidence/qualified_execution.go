@@ -195,7 +195,7 @@ func BuildEvidenceFromObservations(obs *dockerlab.QualifiedExecutionObservations
 		Image: ImageObservations{
 			RequestedReference:    cp.Image.RequestedReference,
 			InspectedBeforeCreate: cp.Image.InspectedBeforeCreate,
-			InspectedRepoDigests:  cp.Image.InspectedRepoDigests,
+			InspectedRepoDigests:  append([]string(nil), cp.Image.InspectedRepoDigests...),
 			CreateRequestImage:    cp.Image.CreateRequestImage,
 			ContainerInspectImage: cp.Image.ContainerInspectImage,
 			ContainerConfigImage:  cp.Image.ContainerConfigImage,
@@ -388,7 +388,9 @@ func verifyUnderlyingObservations(ev *QualifiedExecutionEvidence) VerifyQualifie
 	}
 	if ev.Image.CreateRequestImage != "" && ev.Image.RequestedReference != "" {
 		if ev.Image.CreateRequestImage == ev.Image.RequestedReference {
-			appendErr("create request image is the original mutable tag/reference")
+			if err := ValidateCanonicalImageID(ev.Image.RequestedReference); err != nil {
+				appendErr("create request image is the original mutable tag/reference")
+			}
 		}
 	}
 	if ev.Image.InspectedBeforeCreate != "" && ev.Image.CreateRequestImage != "" {
@@ -1025,6 +1027,7 @@ func PersistQualifiedExecutionEvidence(dir string, ev *QualifiedExecutionEvidenc
 	if err != nil {
 		return fmt.Errorf("marshal evidence: %w", err)
 	}
+	data = append(data, '\n')
 	if err := writeFileAtomic(dir+"/qualified-execution-evidence.json", data); err != nil {
 		return err
 	}
@@ -1074,6 +1077,7 @@ func writeRejectedDiagnostic(dir string, ev *QualifiedExecutionEvidence, errors 
 	if err != nil {
 		return err
 	}
+	data = append(data, '\n')
 	return writeFileAtomic(dir+"/qualified-execution-evidence.rejected.json", data)
 }
 
