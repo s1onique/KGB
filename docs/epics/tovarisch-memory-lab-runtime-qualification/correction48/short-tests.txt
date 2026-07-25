@@ -1,0 +1,16 @@
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory	0.006s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/cmd/canary	0.682s
+?   	github.com/s1onique/KGB/tovarisch/labs/memory/cmd/extract-image-metadata	[no test files]
+?   	github.com/s1onique/KGB/tovarisch/labs/memory/cmd/live-qualification-verifier	[no test files]
+?   	github.com/s1onique/KGB/tovarisch/labs/memory/cmd/normalize-evidence	[no test files]
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/cmd/tovarisch-memory-lab	30.293s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/analysis	0.009s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/buildmetadata	0.028s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/canarycontrol	0.015s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	0.196s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/evidence	0.169s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/procfs	0.007s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/qualification	0.008s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/roots	0.010s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/sampling	0.208s
+?   	github.com/s1onique/KGB/tovarisch/labs/memory/internal/workload	[no test files]

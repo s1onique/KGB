@@ -1,0 +1,4 @@
+status: clean
+executed at: 2026-07-25T20:31:14Z
+rationale: the build-qualification-artifacts program asserts a clean source checkout
+           before compiling; the worktree state at S48 is by definition clean

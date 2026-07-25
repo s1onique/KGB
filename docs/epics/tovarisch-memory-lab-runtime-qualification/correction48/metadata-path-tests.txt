@@ -1,0 +1,25 @@
+--- PASS: TestCanaryBuildMetadata_AtomicReplacement (0.00s)
+=== RUN   TestCanaryMetadataPath_ExplicitWins
+--- PASS: TestCanaryMetadataPath_ExplicitWins (0.00s)
+=== RUN   TestCanaryMetadataPath_EnvironmentFallback
+--- PASS: TestCanaryMetadataPath_EnvironmentFallback (0.00s)
+=== RUN   TestCanaryMetadataPath_RepositoryCompatibilityFallback
+--- PASS: TestCanaryMetadataPath_RepositoryCompatibilityFallback (0.00s)
+=== RUN   TestCanaryMetadataPath_ExplicitMissingFails
+--- PASS: TestCanaryMetadataPath_ExplicitMissingFails (0.00s)
+=== RUN   TestCanaryMetadataPath_EnvironmentMissingFails
+--- PASS: TestCanaryMetadataPath_EnvironmentMissingFails (0.00s)
+=== RUN   TestCanaryMetadataPath_DirectoryRejected
+--- PASS: TestCanaryMetadataPath_DirectoryRejected (0.00s)
+=== RUN   TestCanaryMetadataPath_SymlinkResolved
+--- PASS: TestCanaryMetadataPath_SymlinkResolved (0.00s)
+=== RUN   TestCanaryMetadataPath_BrokenSymlinkRejected
+--- PASS: TestCanaryMetadataPath_BrokenSymlinkRejected (0.00s)
+=== RUN   TestCanaryMetadataPath_NonRegularFileRejected
+--- PASS: TestCanaryMetadataPath_NonRegularFileRejected (0.00s)
+=== RUN   TestCanaryMetadataPath_UnknownSchemaRejected
+--- PASS: TestCanaryMetadataPath_UnknownSchemaRejected (0.00s)
+=== RUN   TestCanaryMetadataPath_InvalidMetadataRejected
+--- PASS: TestCanaryMetadataPath_InvalidMetadataRejected (0.00s)
+PASS
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/buildmetadata	0.027s

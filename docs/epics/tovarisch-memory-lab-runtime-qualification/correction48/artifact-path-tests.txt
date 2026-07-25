@@ -1,0 +1,16 @@
+=== RUN   TestQualificationArtifactPaths_ExternalRootAccepted
+--- PASS: TestQualificationArtifactPaths_ExternalRootAccepted (0.00s)
+=== RUN   TestQualificationArtifactPaths_RepositoryRootRejected
+--- PASS: TestQualificationArtifactPaths_RepositoryRootRejected (0.00s)
+=== RUN   TestQualificationArtifactPaths_ModuleRootRejected
+--- PASS: TestQualificationArtifactPaths_ModuleRootRejected (0.00s)
+=== RUN   TestQualificationArtifactPaths_SymlinkIntoRepositoryRejected
+--- PASS: TestQualificationArtifactPaths_SymlinkIntoRepositoryRejected (0.00s)
+=== RUN   TestQualificationArtifactPaths_HelperProductionPathsDistinct
+--- PASS: TestQualificationArtifactPaths_HelperProductionPathsDistinct (0.00s)
+=== RUN   TestQualificationArtifactPaths_NonExistentRootRejected
+--- PASS: TestQualificationArtifactPaths_NonExistentRootRejected (0.00s)
+=== RUN   TestQualificationArtifactPaths_EmptyRootRejected
+--- PASS: TestQualificationArtifactPaths_EmptyRootRejected (0.00s)
+PASS
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/qualification	0.007s

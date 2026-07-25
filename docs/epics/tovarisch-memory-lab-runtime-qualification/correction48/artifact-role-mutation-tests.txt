@@ -1,0 +1,4 @@
+# ./cmd/verify-qualification-artifacts/...
+pattern ./cmd/verify-qualification-artifacts/...: lstat ./cmd/verify-qualification-artifacts/: no such file or directory
+FAIL	./cmd/verify-qualification-artifacts/... [setup failed]
+FAIL

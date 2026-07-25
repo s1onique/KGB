@@ -1,0 +1,5 @@
+git worktree path:     /tmp/kgb-c48-source.502TzW
+git worktree HEAD:     9d431ab83c168bb6f880a32fcf45c36d12fdc0d8
+git worktree HEAD^{tree}: 793f86e6d20c9dd147bdf73e2a763c3f1bfc67b2
+git status (--short):  0 entries
+git diff --check:       clean

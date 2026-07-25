@@ -1,0 +1,25 @@
+--- PASS: TestParseChecksumLine_HashUppercase (0.00s)
+=== RUN   TestParseChecksumLine_HashMissing
+--- PASS: TestParseChecksumLine_HashMissing (0.00s)
+=== RUN   TestParseChecksumLine_MalformedDelimiter
+--- PASS: TestParseChecksumLine_MalformedDelimiter (0.00s)
+=== RUN   TestValidateChecksumArtifactPath_DotEscape
+--- PASS: TestValidateChecksumArtifactPath_DotEscape (0.00s)
+=== RUN   TestValidateChecksumArtifactPath_NestedEscape
+--- PASS: TestValidateChecksumArtifactPath_NestedEscape (0.00s)
+=== RUN   TestValidateChecksumArtifactPath_AbsolutePath
+--- PASS: TestValidateChecksumArtifactPath_AbsolutePath (0.00s)
+=== RUN   TestValidateChecksumArtifactPath_NestedPath
+--- PASS: TestValidateChecksumArtifactPath_NestedPath (0.00s)
+=== RUN   TestValidateChecksumArtifactPath_WindowsSeparator
+--- PASS: TestValidateChecksumArtifactPath_WindowsSeparator (0.00s)
+=== RUN   TestValidateChecksumArtifactPath_BackslashNested
+--- PASS: TestValidateChecksumArtifactPath_BackslashNested (0.00s)
+=== RUN   TestValidateChecksumArtifactPath_Dot
+--- PASS: TestValidateChecksumArtifactPath_Dot (0.00s)
+=== RUN   TestValidateChecksumArtifactPath_Empty
+--- PASS: TestValidateChecksumArtifactPath_Empty (0.00s)
+=== RUN   TestParseChecksumsFile_DuplicatePath
+--- PASS: TestParseChecksumsFile_DuplicatePath (0.00s)
+PASS
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/evidence	0.159s

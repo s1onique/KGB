@@ -1,0 +1,20 @@
+{
+  "source_commit": "9d431ab83c168bb6f880a32fcf45c36d12fdc0d8",
+  "source_tree": "793f86e6d20c9dd147bdf73e2a763c3f1bfc67b2",
+  "helper": {
+    "absolute_path": "/tmp/kgb-c48-artifacts.GVDvoO/bin/tovarisch-memory-lab-helper.test",
+    "inode": "2670550",
+    "sha256": "81e509b12002146f33512094250104b4f92d7f935dd5fa66e2c35e05f31105cf",
+    "vcs_revision": "9d431ab83c168bb6f880a32fcf45c36d12fdc0d8",
+    "vcs_modified": "",
+    "requested_test_present": "TestQualifiedRun_RuntimeCannotMutateCallerConfig"
+  },
+  "production": {
+    "absolute_path": "/tmp/kgb-c48-artifacts.GVDvoO/bin/tovarisch-memory-lab",
+    "inode": "2670241",
+    "sha256": "75907a65d7c2b21a326cab06cf91095f42cb523bee3fa5af051874c6802c918b",
+    "vcs_revision": "9d431ab83c168bb6f880a32fcf45c36d12fdc0d8",
+    "vcs_modified": "",
+    "help_succeeded": "true"
+  }
+}

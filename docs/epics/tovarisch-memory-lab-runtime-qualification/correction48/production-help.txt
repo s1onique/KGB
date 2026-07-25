@@ -1,0 +1,9 @@
+usage: /tmp/kgb-c48-artifacts.GVDvoO/bin/tovarisch-memory-lab <run|verify|derive-runtime-state|matrix|verify-matrix> [options]
+
+Subcommands:
+  run                  execute a canary scenario
+  verify               verify an evidence bundle
+  derive-runtime-state emit the runtime-state block
+  matrix               execute all three scenarios
+  verify-matrix        verify a matrix bundle
+exit=0

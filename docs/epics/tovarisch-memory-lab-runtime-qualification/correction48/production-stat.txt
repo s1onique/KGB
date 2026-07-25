@@ -1,0 +1,1 @@
+inode=2670241 size=12933458 mtime=1785011355 mode=775 links=1

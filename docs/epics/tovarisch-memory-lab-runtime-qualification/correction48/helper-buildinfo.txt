@@ -1,0 +1,13 @@
+/tmp/kgb-c48-artifacts.GVDvoO/bin/tovarisch-memory-lab-helper.test: go1.25.12
+	path	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab.test
+	mod	github.com/s1onique/KGB/tovarisch/labs/memory	(devel)	
+	build	-buildmode=exe
+	build	-compiler=gc
+	build	CGO_ENABLED=1
+	build	CGO_CFLAGS=
+	build	CGO_CPPFLAGS=
+	build	CGO_CXXFLAGS=
+	build	CGO_LDFLAGS=
+	build	GOARCH=amd64
+	build	GOOS=linux
+	build	GOAMD64=v1

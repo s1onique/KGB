@@ -1,0 +1,4 @@
+# ./cmd/build-qualification-artifacts/...
+pattern ./cmd/build-qualification-artifacts/...: lstat ./cmd/build-qualification-artifacts/: no such file or directory
+FAIL	./cmd/build-qualification-artifacts/... [setup failed]
+FAIL

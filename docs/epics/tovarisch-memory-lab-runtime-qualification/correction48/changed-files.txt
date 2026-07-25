@@ -1,0 +1,17 @@
+A	build-qualification-artifacts
+A	cmd/build-qualification-artifacts/main.go
+A	cmd/verify-qualification-artifacts/main.go
+A	cmd/verify-qualification-artifacts/main_test.go
+A	cmd/verify-qualification-artifacts/verify-qualification-artifacts
+A	docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/S47-classification-erratum.md
+A	docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/pending-patch-inventory.txt
+M	tovarisch/labs/memory/cmd/tovarisch-memory-lab/main.go
+A	tovarisch/labs/memory/cmd/tovarisch-memory-lab/run_command_metadata_test.go
+A	tovarisch/labs/memory/internal/buildmetadata/path.go
+A	tovarisch/labs/memory/internal/buildmetadata/path_test.go
+A	tovarisch/labs/memory/internal/evidence/clean_policy.go
+A	tovarisch/labs/memory/internal/evidence/clean_policy_test.go
+M	tovarisch/labs/memory/internal/evidence/controller_provenance.go
+M	tovarisch/labs/memory/internal/evidence/writer.go
+A	tovarisch/labs/memory/internal/qualification/artifacts.go
+A	tovarisch/labs/memory/internal/qualification/artifacts_test.go

@@ -1,0 +1,2 @@
+PASS: role-separation record verified
+exit=0
