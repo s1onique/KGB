@@ -3,12 +3,15 @@
 // Canonical control protocol using typed JSON envelopes.
 // Each command emits exactly one JSON document to stdout.
 //
-// CORRECTION30: Presence-aware strict protocol with correct trailing rejection.
+// CORRECTION34: This file now wraps the shared protocol authority in
+// internal/canarycontrol. All vocabulary (error classes, envelope schema,
+// retry policy, typed operations, validators) is owned by that package.
+// This file only owns: process boundary, HTTP client transport, envelope
+// emission, and the CLI subcommand dispatch.
 
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,104 +21,64 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strings"
 	"time"
+
+	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/canarycontrol"
 )
 
-// DecodeError represents a decoding error with classification.
-type DecodeError struct {
-	ErrClass ErrorClass
-	Message  string
-}
+// Re-export commonly-used names from the shared package for the existing
+// in-package tests. This avoids churn in the test file while making the
+// shared package the single source of truth.
+type (
+	DecodeError      = canarycontrol.ProtocolError
+	HealthPayload    = canarycontrol.HealthPayload
+	StatePayload     = canarycontrol.StatePayload
+	WorkloadPayload  = canarycontrol.WorkloadPayload
+	ControlEnvelope  = canarycontrol.ControlEnvelope
+	ErrorClass       = canarycontrol.ErrorClass
+	ControlOperation = canarycontrol.ControlOperation
+)
 
-func (e *DecodeError) Error() string {
-	return e.Message
-}
-
+// Operation-name aliases used by runControl dispatch.
 const (
-	// SchemaVersion is the canonical protocol version.
-	SchemaVersion = "canary-control/v1"
-
-	// MaxResponseBody is the maximum response body size to prevent memory issues.
-	MaxResponseBody = 64 * 1024 // 64KB
-
-	// ControlDialTimeout is the timeout for establishing a connection.
-	ControlDialTimeout = 5 * time.Second
-
-	// ControlResponseHeaderTimeout is the timeout for reading response headers.
-	ControlResponseHeaderTimeout = 5 * time.Second
+	ControlHealth  = canarycontrol.OpHealth
+	ControlState   = canarycontrol.OpState
+	ControlOperate = canarycontrol.OpOperate
 )
 
-// ErrorClass defines stable error classification.
-type ErrorClass string
+// ControlOperationKind is the typed control operation name (re-exported
+// for tests that distinguish Operation values).
+type ControlOperationKind = canarycontrol.Operation
 
+// Constants re-exported for backward compatibility with existing tests.
 const (
-	ErrInvalidArguments      ErrorClass = "invalid_arguments"
-	ErrRequestCreateFailed   ErrorClass = "request_create_failed"
-	ErrConnectionFailed      ErrorClass = "connection_failed"
-	ErrRequestTimeout        ErrorClass = "request_timeout"
-	ErrResponseTooLarge      ErrorClass = "response_too_large"
-	ErrUnexpectedHTTPStatus  ErrorClass = "unexpected_http_status"
-	ErrMalformedJSON         ErrorClass = "malformed_json"
-	ErrUnknownJSONField      ErrorClass = "unknown_json_field"
-	ErrMissingRequiredField  ErrorClass = "missing_required_field"
-	ErrTrailingJSON          ErrorClass = "trailing_json"
-	ErrHealthNotReady        ErrorClass = "health_not_ready"
-	ErrStateInvalid          ErrorClass = "state_invalid"
-	ErrWorkloadCountMismatch ErrorClass = "workload_count_mismatch"
+	SchemaVersion                = canarycontrol.SchemaVersion
+	MaxResponseBody              = canarycontrol.MaxResponseBody
+	ControlDialTimeout           = canarycontrol.ControlDialTimeout
+	ControlResponseHeaderTimeout = canarycontrol.ControlResponseHeaderTimeout
 )
 
-// AllowedErrorClasses is the set of valid error classes.
-var AllowedErrorClasses = map[ErrorClass]bool{
-	ErrInvalidArguments:      true,
-	ErrRequestCreateFailed:   true,
-	ErrConnectionFailed:      true,
-	ErrRequestTimeout:        true,
-	ErrResponseTooLarge:      true,
-	ErrUnexpectedHTTPStatus:  true,
-	ErrMalformedJSON:         true,
-	ErrUnknownJSONField:      true,
-	ErrMissingRequiredField:  true,
-	ErrTrailingJSON:          true,
-	ErrHealthNotReady:        true,
-	ErrStateInvalid:          true,
-	ErrWorkloadCountMismatch: true,
-}
+// Error-class aliases re-exported for backward compatibility with existing tests.
+var (
+	ErrInvalidArguments      = canarycontrol.ErrInvalidArguments
+	ErrRequestCreateFailed   = canarycontrol.ErrRequestCreateFailed
+	ErrConnectionFailed      = canarycontrol.ErrConnectionFailed
+	ErrRequestTimeout        = canarycontrol.ErrRequestTimeout
+	ErrResponseTooLarge      = canarycontrol.ErrResponseTooLarge
+	ErrUnexpectedHTTPStatus  = canarycontrol.ErrUnexpectedHTTPStatus
+	ErrMalformedJSON         = canarycontrol.ErrMalformedJSON
+	ErrUnknownJSONField      = canarycontrol.ErrUnknownJSONField
+	ErrMissingRequiredField  = canarycontrol.ErrMissingRequiredField
+	ErrTrailingJSON          = canarycontrol.ErrTrailingJSON
+	ErrHealthNotReady        = canarycontrol.ErrHealthNotReady
+	ErrStateInvalid          = canarycontrol.ErrStateInvalid
+	ErrWorkloadCountMismatch = canarycontrol.ErrWorkloadCountMismatch
+	ErrSchemaVersionMismatch = canarycontrol.ErrSchemaVersionMismatch
+	ErrInvalidOperation      = canarycontrol.ErrInvalidOperation
+)
 
-// ControlEnvelope is the canonical protocol envelope.
-type ControlEnvelope struct {
-	SchemaVersion string           `json:"schema_version"`
-	Operation     string           `json:"operation"`
-	Success       bool             `json:"success"`
-	HTTPStatus    int              `json:"http_status"`
-	Health        *HealthPayload   `json:"health,omitempty"`
-	State         *StatePayload    `json:"state,omitempty"`
-	Workload      *WorkloadPayload `json:"workload,omitempty"`
-	ErrorClass    ErrorClass       `json:"error_class,omitempty"`
-}
-
-// HealthPayload represents health check result.
-type HealthPayload struct {
-	Ready bool   `json:"ready"`
-	Mode  string `json:"mode,omitempty"`
-}
-
-// StatePayload represents state result.
-type StatePayload struct {
-	Mode           string `json:"mode"`
-	RetainedBlocks int    `json:"retained_blocks"`
-	RetainedBytes  int64  `json:"retained_bytes"`
-	OperationCount int64  `json:"operation_count"`
-	FDCount        int    `json:"fd_count"`
-	Ready          bool   `json:"ready"`
-}
-
-// WorkloadPayload represents operate result.
-type WorkloadPayload struct {
-	Requested int `json:"requested"`
-	Attempted int `json:"attempted"`
-	Completed int `json:"completed"`
-}
+// AllowedErrorClasses is a re-export of the shared vocabulary.
+var AllowedErrorClasses = canarycontrol.AllowedErrorClasses
 
 // runControl executes the control subcommand.
 func runControl(args []string) int {
@@ -237,7 +200,7 @@ func emitSuccessEnvelope(operation string, httpStatus int, health *HealthPayload
 		State:         state,
 		Workload:      workload,
 	}
-	emitEnvelope(env)
+	emitEnvelope(&env)
 }
 
 // emitFailureEnvelope emits a failed control envelope.
@@ -249,11 +212,11 @@ func emitFailureEnvelope(operation string, errClass ErrorClass, httpStatus int) 
 		HTTPStatus:    httpStatus,
 		ErrorClass:    errClass,
 	}
-	emitEnvelope(env)
+	emitEnvelope(&env)
 }
 
 // emitEnvelope emits exactly one JSON envelope to stdout.
-func emitEnvelope(env ControlEnvelope) {
+func emitEnvelope(env *ControlEnvelope) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetEscapeHTML(false)
 	enc.Encode(env)
@@ -267,11 +230,11 @@ type HealthCheckResult struct {
 	Health     *HealthPayload
 }
 
-// doHealthCheck performs a health check using Go's HTTP client.
+// doHealthCheck performs a health check using Go's HTTP client and the
+// shared canarycontrol.DecodeHealth authority.
 func doHealthCheck(ctx context.Context, url string, timeout time.Duration) HealthCheckResult {
 	result := HealthCheckResult{ExitCode: 1, HTTPStatus: 0}
 
-	// Use bounded context for timeout classification
 	opCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -293,15 +256,7 @@ func doHealthCheck(ctx context.Context, url string, timeout time.Duration) Healt
 
 	resp, err := client.Do(req)
 	if err != nil {
-		if opCtx.Err() == context.DeadlineExceeded {
-			result.ErrorClass = ErrRequestTimeout
-		} else if errors.Is(err, context.DeadlineExceeded) {
-			result.ErrorClass = ErrRequestTimeout
-		} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			result.ErrorClass = ErrRequestTimeout
-		} else {
-			result.ErrorClass = ErrConnectionFailed
-		}
+		result.ErrorClass = classifyTransportErr(opCtx, err)
 		return result
 	}
 	defer resp.Body.Close()
@@ -314,7 +269,7 @@ func doHealthCheck(ctx context.Context, url string, timeout time.Duration) Healt
 	}
 
 	// Read bounded response body
-	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBody+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(MaxResponseBody+1)))
 	if err != nil {
 		result.ErrorClass = ErrMalformedJSON
 		return result
@@ -325,73 +280,19 @@ func doHealthCheck(ctx context.Context, url string, timeout time.Duration) Healt
 		return result
 	}
 
-	// Strict decoding: decode one value, require EOF
-	health, err := strictDecodeHealth(body)
+	h, err := canarycontrol.DecodeHealth(body)
 	if err != nil {
-		if decodeErr, ok := err.(*DecodeError); ok {
-			result.ErrorClass = decodeErr.ErrClass
+		if pe, ok := canarycontrol.AsProtocolError(err); ok {
+			result.ErrorClass = pe.ErrClass
 		} else {
 			result.ErrorClass = ErrMalformedJSON
 		}
 		return result
 	}
 
-	// Validate required fields
-	if !health.Ready {
-		result.ErrorClass = ErrHealthNotReady
-		return result
-	}
-
-	result.Health = health
+	result.Health = h
 	result.ExitCode = 0
 	return result
-}
-
-// strictDecodeHealth strictly decodes a health payload.
-func strictDecodeHealth(data []byte) (*HealthPayload, error) {
-	// Check for empty input
-	if len(data) == 0 {
-		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: "empty body"}
-	}
-
-	// First pass: check required fields are present
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: "invalid JSON"}
-	}
-
-	// Verify required fields exist and are not null
-	if v, ok := raw["ready"]; !ok || v == nil || string(v) == "null" {
-		return nil, &DecodeError{ErrClass: ErrMissingRequiredField, Message: "missing ready"}
-	}
-	if v, ok := raw["mode"]; !ok || v == nil || string(v) == "null" {
-		return nil, &DecodeError{ErrClass: ErrMissingRequiredField, Message: "missing mode"}
-	}
-
-	// Second pass: strict decode with DisallowUnknownFields
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-
-	var health HealthPayload
-	if err := dec.Decode(&health); err != nil {
-		// Check for unknown field error by checking error message
-		if strings.Contains(err.Error(), "unknown field") {
-			return nil, &DecodeError{ErrClass: ErrUnknownJSONField, Message: err.Error()}
-		}
-		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: err.Error()}
-	}
-
-	// Third pass: require exactly one value (EOF on next decode)
-	var extra json.RawMessage
-	decodeErr := dec.Decode(&extra)
-	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
-		return nil, &DecodeError{ErrClass: ErrTrailingJSON, Message: "trailing data"}
-	}
-	if decodeErr == nil && len(extra) > 0 {
-		return nil, &DecodeError{ErrClass: ErrTrailingJSON, Message: "second JSON value"}
-	}
-
-	return &health, nil
 }
 
 // StateCheckResult represents the result of a state check.
@@ -402,7 +303,8 @@ type StateCheckResult struct {
 	State      *StatePayload
 }
 
-// doStateCheck performs a state check using Go's HTTP client.
+// doStateCheck performs a state check using Go's HTTP client and the
+// shared canarycontrol.DecodeState authority.
 func doStateCheck(ctx context.Context, url string, timeout time.Duration) StateCheckResult {
 	result := StateCheckResult{ExitCode: 1, HTTPStatus: 0}
 
@@ -427,13 +329,7 @@ func doStateCheck(ctx context.Context, url string, timeout time.Duration) StateC
 
 	resp, err := client.Do(req)
 	if err != nil {
-		if opCtx.Err() == context.DeadlineExceeded || errors.Is(err, context.DeadlineExceeded) {
-			result.ErrorClass = ErrRequestTimeout
-		} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			result.ErrorClass = ErrRequestTimeout
-		} else {
-			result.ErrorClass = ErrConnectionFailed
-		}
+		result.ErrorClass = classifyTransportErr(opCtx, err)
 		return result
 	}
 	defer resp.Body.Close()
@@ -445,7 +341,7 @@ func doStateCheck(ctx context.Context, url string, timeout time.Duration) StateC
 		return result
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBody+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(MaxResponseBody+1)))
 	if err != nil {
 		result.ErrorClass = ErrMalformedJSON
 		return result
@@ -456,69 +352,19 @@ func doStateCheck(ctx context.Context, url string, timeout time.Duration) StateC
 		return result
 	}
 
-	state, err := strictDecodeState(body)
+	s, err := canarycontrol.DecodeState(body)
 	if err != nil {
-		if decodeErr, ok := err.(*DecodeError); ok {
-			result.ErrorClass = decodeErr.ErrClass
+		if pe, ok := canarycontrol.AsProtocolError(err); ok {
+			result.ErrorClass = pe.ErrClass
 		} else {
 			result.ErrorClass = ErrMalformedJSON
 		}
 		return result
 	}
 
-	// Validate required fields
-	if state.Mode == "" {
-		result.ErrorClass = ErrMissingRequiredField
-		return result
-	}
-
-	result.State = state
+	result.State = s
 	result.ExitCode = 0
 	return result
-}
-
-// strictDecodeState strictly decodes a state payload.
-func strictDecodeState(data []byte) (*StatePayload, error) {
-	if len(data) == 0 {
-		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: "empty body"}
-	}
-
-	// Check required fields
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: "invalid JSON"}
-	}
-
-	requiredFields := []string{"mode", "retained_blocks", "retained_bytes", "operation_count", "fd_count", "ready"}
-	for _, field := range requiredFields {
-		if v, ok := raw[field]; !ok || v == nil || string(v) == "null" {
-			return nil, &DecodeError{ErrClass: ErrMissingRequiredField, Message: "missing " + field}
-		}
-	}
-
-	// Strict decode
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-
-	var state StatePayload
-	if err := dec.Decode(&state); err != nil {
-		if strings.Contains(err.Error(), "unknown field") {
-			return nil, &DecodeError{ErrClass: ErrUnknownJSONField, Message: err.Error()}
-		}
-		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: err.Error()}
-	}
-
-	// Require exactly one value
-	var extra json.RawMessage
-	decodeErr := dec.Decode(&extra)
-	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
-		return nil, &DecodeError{ErrClass: ErrTrailingJSON, Message: "trailing data"}
-	}
-	if decodeErr == nil && len(extra) > 0 {
-		return nil, &DecodeError{ErrClass: ErrTrailingJSON, Message: "second JSON value"}
-	}
-
-	return &state, nil
 }
 
 // OperateCheckResult represents the result of an operate request.
@@ -529,7 +375,8 @@ type OperateCheckResult struct {
 	Workload   *WorkloadPayload
 }
 
-// doOperateCheck performs an operate request using Go's HTTP client.
+// doOperateCheck performs an operate request using Go's HTTP client and the
+// shared canarycontrol.DecodeWorkload authority.
 func doOperateCheck(ctx context.Context, url string, requested int, timeout time.Duration) OperateCheckResult {
 	result := OperateCheckResult{ExitCode: 1, HTTPStatus: 0}
 
@@ -554,13 +401,7 @@ func doOperateCheck(ctx context.Context, url string, requested int, timeout time
 
 	resp, err := client.Do(req)
 	if err != nil {
-		if opCtx.Err() == context.DeadlineExceeded || errors.Is(err, context.DeadlineExceeded) {
-			result.ErrorClass = ErrRequestTimeout
-		} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			result.ErrorClass = ErrRequestTimeout
-		} else {
-			result.ErrorClass = ErrConnectionFailed
-		}
+		result.ErrorClass = classifyTransportErr(opCtx, err)
 		return result
 	}
 	defer resp.Body.Close()
@@ -572,7 +413,7 @@ func doOperateCheck(ctx context.Context, url string, requested int, timeout time
 		return result
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBody+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(MaxResponseBody+1)))
 	if err != nil {
 		result.ErrorClass = ErrMalformedJSON
 		return result
@@ -583,67 +424,59 @@ func doOperateCheck(ctx context.Context, url string, requested int, timeout time
 		return result
 	}
 
-	workload, err := strictDecodeWorkload(body)
+	w, err := canarycontrol.DecodeWorkload(body, requested)
 	if err != nil {
-		if decodeErr, ok := err.(*DecodeError); ok {
-			result.ErrorClass = decodeErr.ErrClass
+		if pe, ok := canarycontrol.AsProtocolError(err); ok {
+			result.ErrorClass = pe.ErrClass
 		} else {
 			result.ErrorClass = ErrMalformedJSON
 		}
 		return result
 	}
 
-	// Validate workload counts - CORRECTION30 P0-3
-	if workload.Requested != requested || workload.Attempted != requested || workload.Completed != workload.Attempted {
-		result.ErrorClass = ErrWorkloadCountMismatch
-		return result
-	}
-
-	result.Workload = workload
+	result.Workload = w
 	result.ExitCode = 0
 	return result
 }
 
-// strictDecodeWorkload strictly decodes a workload payload.
-func strictDecodeWorkload(data []byte) (*WorkloadPayload, error) {
-	if len(data) == 0 {
-		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: "empty body"}
+// classifyTransportErr converts a transport error into a typed ErrorClass.
+// Timeout errors map to ErrRequestTimeout; everything else maps to ErrConnectionFailed.
+func classifyTransportErr(opCtx context.Context, err error) ErrorClass {
+	if opCtx.Err() == context.DeadlineExceeded {
+		return ErrRequestTimeout
 	}
-
-	// Check required fields
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: "invalid JSON"}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return ErrRequestTimeout
 	}
-
-	requiredFields := []string{"requested", "attempted", "completed"}
-	for _, field := range requiredFields {
-		if v, ok := raw[field]; !ok || v == nil || string(v) == "null" {
-			return nil, &DecodeError{ErrClass: ErrMissingRequiredField, Message: "missing " + field}
-		}
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		return ErrRequestTimeout
 	}
+	return ErrConnectionFailed
+}
 
-	// Strict decode
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
+// IsProtocolRetryable reports whether err represents a transient failure
+// that should be retried. Delegates to the shared authority.
+func IsProtocolRetryable(err error) bool {
+	return canarycontrol.IsRetryable(err)
+}
 
-	var workload WorkloadPayload
-	if err := dec.Decode(&workload); err != nil {
-		if strings.Contains(err.Error(), "unknown field") {
-			return nil, &DecodeError{ErrClass: ErrUnknownJSONField, Message: err.Error()}
-		}
-		return nil, &DecodeError{ErrClass: ErrMalformedJSON, Message: err.Error()}
-	}
+// ValidateControlEnvelope validates a control envelope. Delegates to the
+// shared authority.
+func ValidateControlEnvelope(env *ControlEnvelope) error {
+	return canarycontrol.ValidateControlEnvelope(env)
+}
 
-	// Require exactly one value
-	var extra json.RawMessage
-	decodeErr := dec.Decode(&extra)
-	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
-		return nil, &DecodeError{ErrClass: ErrTrailingJSON, Message: "trailing data"}
-	}
-	if decodeErr == nil && len(extra) > 0 {
-		return nil, &DecodeError{ErrClass: ErrTrailingJSON, Message: "second JSON value"}
-	}
+// buildArgv exposes the shared typed-operation argv authority for the
+// in-package tests. The shared package already provides BuildArgv on the
+// canonical ControlOperation type; this thin wrapper preserves the lowercase
+// accessor used by existing tests.
+func buildArgv(op ControlOperation) []string {
+	return op.BuildArgv()
+}
 
-	return &workload, nil
+// decodeExactJSONObject exposes the shared strict exact-object decoder for
+// the in-package tests. The shared package owns the canonical implementation;
+// this thin wrapper preserves the lowercase accessor used by existing tests.
+func decodeExactJSONObject(data []byte, requiredFields []string, target any) error {
+	return canarycontrol.DecodeExactJSONObjectForTest(data, requiredFields, target)
 }

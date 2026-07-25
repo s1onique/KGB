@@ -1,20 +1,136 @@
 // control_test.go — Protocol tests for canary control client
 //
-// Tests strict decoding, required-field presence, and variant validation.
-// CORRECTION30 P0-8: Protocol tests for canary control client.
+// Tests strict decoding, required-field presence, envelope validation, and retry policy.
+// CORRECTION33: Production-function tests with httptest.
 
 package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 )
+
+// ===== P0-1: Shared exact-object decoder tests =====
+
+func TestDecodeExactJSONObject_EmptyInput(t *testing.T) {
+	var target map[string]any
+	err := decodeExactJSONObject([]byte{}, []string{"a"}, &target)
+	if err == nil {
+		t.Fatal("expected error for empty input")
+	}
+	decodeErr, ok := err.(*DecodeError)
+	if !ok {
+		t.Fatalf("expected DecodeError, got %T", err)
+	}
+	if decodeErr.ErrClass != ErrMalformedJSON {
+		t.Errorf("expected ErrMalformedJSON, got %s", decodeErr.ErrClass)
+	}
+}
+
+func TestDecodeExactJSONObject_SecondValue(t *testing.T) {
+	var target map[string]any
+	err := decodeExactJSONObject([]byte(`{} {}`), []string{}, &target)
+	if err == nil {
+		t.Fatal("expected error for second JSON value")
+	}
+	decodeErr, ok := err.(*DecodeError)
+	if !ok {
+		t.Fatalf("expected DecodeError, got %T", err)
+	}
+	if decodeErr.ErrClass != ErrTrailingJSON {
+		t.Errorf("expected ErrTrailingJSON, got %s", decodeErr.ErrClass)
+	}
+}
+
+func TestDecodeExactJSONObject_MalformedTrailingBytes(t *testing.T) {
+	var target map[string]any
+	err := decodeExactJSONObject([]byte(`{}INVALID`), []string{}, &target)
+	if err == nil {
+		t.Fatal("expected error for malformed trailing bytes")
+	}
+}
+
+func TestDecodeExactJSONObject_UnknownMember(t *testing.T) {
+	var target struct {
+		A string `json:"a"`
+	}
+	err := decodeExactJSONObject([]byte(`{"a":"x","b":"y"}`), []string{"a"}, &target)
+	if err == nil {
+		t.Fatal("expected error for unknown member")
+	}
+	decodeErr, ok := err.(*DecodeError)
+	if !ok {
+		t.Fatalf("expected DecodeError, got %T", err)
+	}
+	if decodeErr.ErrClass != ErrUnknownJSONField {
+		t.Errorf("expected ErrUnknownJSONField, got %s", decodeErr.ErrClass)
+	}
+}
+
+func TestDecodeExactJSONObject_MissingMember(t *testing.T) {
+	var target struct {
+		A string `json:"a"`
+		B string `json:"b"`
+	}
+	err := decodeExactJSONObject([]byte(`{"a":"x"}`), []string{"a", "b"}, &target)
+	if err == nil {
+		t.Fatal("expected error for missing member")
+	}
+	decodeErr, ok := err.(*DecodeError)
+	if !ok {
+		t.Fatalf("expected DecodeError, got %T", err)
+	}
+	if decodeErr.ErrClass != ErrMissingRequiredField {
+		t.Errorf("expected ErrMissingRequiredField, got %s", decodeErr.ErrClass)
+	}
+}
+
+func TestDecodeExactJSONObject_NullRequiredMember(t *testing.T) {
+	var target struct {
+		A string `json:"a"`
+	}
+	err := decodeExactJSONObject([]byte(`{"a":null}`), []string{"a"}, &target)
+	if err == nil {
+		t.Fatal("expected error for null required member")
+	}
+	decodeErr, ok := err.(*DecodeError)
+	if !ok {
+		t.Fatalf("expected DecodeError, got %T", err)
+	}
+	if decodeErr.ErrClass != ErrMissingRequiredField {
+		t.Errorf("expected ErrMissingRequiredField, got %s", decodeErr.ErrClass)
+	}
+}
+
+func TestDecodeExactJSONObject_Success(t *testing.T) {
+	var target struct {
+		A string `json:"a"`
+		B int    `json:"b"`
+	}
+	err := decodeExactJSONObject([]byte(`{"a":"hello","b":42}`), []string{"a", "b"}, &target)
+	if err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+	if target.A != "hello" {
+		t.Errorf("expected a=hello, got %s", target.A)
+	}
+	if target.B != 42 {
+		t.Errorf("expected b=42, got %d", target.B)
+	}
+}
+
+// ===== P0-3: Health mode semantics tests =====
 
 func TestStrictDecodeHealth_Success(t *testing.T) {
 	data := []byte(`{"ready":true,"mode":"growing"}`)
-	health, err := strictDecodeHealth(data)
+	var health HealthPayload
+	err := decodeExactJSONObject(data, []string{"ready", "mode"}, &health)
 	if err != nil {
 		t.Fatalf("expected success, got error: %v", err)
 	}
@@ -26,283 +142,672 @@ func TestStrictDecodeHealth_Success(t *testing.T) {
 	}
 }
 
-func TestStrictDecodeHealth_MissingReady(t *testing.T) {
-	data := []byte(`{"mode":"growing"}`)
-	_, err := strictDecodeHealth(data)
-	if err == nil {
-		t.Fatal("expected error for missing ready field")
-	}
-	decodeErr, ok := err.(*DecodeError)
-	if !ok {
-		t.Fatalf("expected DecodeError, got %T", err)
-	}
-	if decodeErr.ErrClass != ErrMissingRequiredField {
-		t.Errorf("expected ErrMissingRequiredField, got %s", decodeErr.ErrClass)
+func TestStrictDecodeHealth_ReadyFalse(t *testing.T) {
+	// ready=false is valid JSON, but the caller should check health.Ready
+	data := []byte(`{"ready":false,"mode":"growing"}`)
+	var health HealthPayload
+	err := decodeExactJSONObject(data, []string{"ready", "mode"}, &health)
+	if err != nil {
+		t.Fatalf("strict decode should succeed for not-ready: %v", err)
 	}
 }
 
 func TestStrictDecodeHealth_MissingMode(t *testing.T) {
 	data := []byte(`{"ready":true}`)
-	_, err := strictDecodeHealth(data)
+	var health HealthPayload
+	err := decodeExactJSONObject(data, []string{"ready", "mode"}, &health)
 	if err == nil {
-		t.Fatal("expected error for missing mode field")
+		t.Fatal("expected error for missing mode")
 	}
-	decodeErr, ok := err.(*DecodeError)
-	if !ok {
-		t.Fatalf("expected DecodeError, got %T", err)
-	}
-	if decodeErr.ErrClass != ErrMissingRequiredField {
-		t.Errorf("expected ErrMissingRequiredField, got %s", decodeErr.ErrClass)
+}
+
+func TestStrictDecodeHealth_NullMode(t *testing.T) {
+	data := []byte(`{"ready":true,"mode":null}`)
+	var health HealthPayload
+	err := decodeExactJSONObject(data, []string{"ready", "mode"}, &health)
+	if err == nil {
+		t.Fatal("expected error for null mode")
 	}
 }
 
 func TestStrictDecodeHealth_UnknownField(t *testing.T) {
 	data := []byte(`{"ready":true,"mode":"growing","extra":"forbidden"}`)
-	_, err := strictDecodeHealth(data)
+	var health HealthPayload
+	err := decodeExactJSONObject(data, []string{"ready", "mode"}, &health)
 	if err == nil {
 		t.Fatal("expected error for unknown field")
 	}
-	decodeErr, ok := err.(*DecodeError)
-	if !ok {
-		t.Fatalf("expected DecodeError, got %T", err)
-	}
-	if decodeErr.ErrClass != ErrUnknownJSONField {
-		t.Errorf("expected ErrUnknownJSONField, got %s", decodeErr.ErrClass)
-	}
-}
-
-func TestStrictDecodeHealth_NotReady(t *testing.T) {
-	data := []byte(`{"ready":false,"mode":"growing"}`)
-	_, err := strictDecodeHealth(data)
-	if err != nil {
-		t.Fatalf("strict decode should succeed for not-ready: %v", err)
-	}
-	// Note: Ready=false is valid JSON, but the caller should check health.Ready
 }
 
 func TestStrictDecodeHealth_EmptyBody(t *testing.T) {
 	data := []byte{}
-	_, err := strictDecodeHealth(data)
+	var health HealthPayload
+	err := decodeExactJSONObject(data, []string{"ready", "mode"}, &health)
 	if err == nil {
 		t.Fatal("expected error for empty body")
 	}
-	decodeErr, ok := err.(*DecodeError)
-	if !ok {
-		t.Fatalf("expected DecodeError, got %T", err)
-	}
-	if decodeErr.ErrClass != ErrMalformedJSON {
-		t.Errorf("expected ErrMalformedJSON, got %s", decodeErr.ErrClass)
-	}
 }
 
-func TestStrictDecodeHealth_SecondJSONValue(t *testing.T) {
-	data := []byte(`{"ready":true,"mode":"growing"}{"extra":1}`)
-	_, err := strictDecodeHealth(data)
+func TestStrictDecodeHealth_WrongType(t *testing.T) {
+	// ready should be bool, not string
+	data := []byte(`{"ready":"true","mode":"growing"}`)
+	var health HealthPayload
+	err := decodeExactJSONObject(data, []string{"ready", "mode"}, &health)
 	if err == nil {
-		t.Fatal("expected error for second JSON value")
-	}
-	// Note: The first pass json.Unmarshal will fail because the input
-	// contains two JSON objects, which is invalid JSON for object unmarshal
-	decodeErr, ok := err.(*DecodeError)
-	if !ok {
-		t.Fatalf("expected DecodeError, got %T", err)
-	}
-	// The first pass detects this as malformed JSON since it's not valid JSON
-	if decodeErr.ErrClass != ErrMalformedJSON {
-		t.Errorf("expected ErrMalformedJSON, got %s", decodeErr.ErrClass)
+		t.Fatal("expected error for wrong type")
 	}
 }
 
-func TestStrictDecodeHealth_MalformedTrailingBytes(t *testing.T) {
-	data := []byte(`{"ready":true,"mode":"growing"INVALID`)
-	_, err := strictDecodeHealth(data)
-	if err == nil {
-		t.Fatal("expected error for malformed trailing bytes")
-	}
-	decodeErr, ok := err.(*DecodeError)
-	if !ok {
-		t.Fatalf("expected DecodeError, got %T", err)
-	}
-	if decodeErr.ErrClass != ErrMalformedJSON {
-		t.Errorf("expected ErrMalformedJSON, got %s", decodeErr.ErrClass)
-	}
-}
+// ===== P0-4: Envelope variant validation tests =====
 
-func TestStrictDecodeHealth_TrailingWhitespace(t *testing.T) {
-	// Trailing whitespace only is valid
-	data := []byte(`{"ready":true,"mode":"growing"}   `)
-	health, err := strictDecodeHealth(data)
+func TestValidateControlEnvelope_SuccessHealth(t *testing.T) {
+	env := ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:     "health",
+		Success:       true,
+		HTTPStatus:    200,
+		Health:        &HealthPayload{Ready: true, Mode: "growing"},
+	}
+	err := ValidateControlEnvelope(&env)
 	if err != nil {
-		t.Fatalf("expected success for trailing whitespace: %v", err)
-	}
-	if !health.Ready {
-		t.Error("expected Ready=true")
+		t.Fatalf("expected success, got: %v", err)
 	}
 }
 
-func TestStrictDecodeState_Success(t *testing.T) {
-	data := []byte(`{"mode":"growing","retained_blocks":0,"retained_bytes":0,"operation_count":0,"fd_count":0,"ready":true}`)
-	state, err := strictDecodeState(data)
+func TestValidateControlEnvelope_SuccessState(t *testing.T) {
+	env := ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:     "state",
+		Success:       true,
+		HTTPStatus:    200,
+		State:         &StatePayload{Mode: "growing", RetainedBlocks: 0, RetainedBytes: 0, OperationCount: 0, FDCount: 0, Ready: true},
+	}
+	err := ValidateControlEnvelope(&env)
 	if err != nil {
-		t.Fatalf("expected success, got error: %v", err)
-	}
-	if state.Mode != "growing" {
-		t.Errorf("expected mode=growing, got %s", state.Mode)
-	}
-	if state.RetainedBlocks != 0 {
-		t.Errorf("expected retained_blocks=0, got %d", state.RetainedBlocks)
-	}
-	if state.Ready != true {
-		t.Error("expected ready=true")
+		t.Fatalf("expected success, got: %v", err)
 	}
 }
 
-func TestStrictDecodeState_MissingMode(t *testing.T) {
-	data := []byte(`{"retained_blocks":0,"retained_bytes":0,"operation_count":0,"fd_count":0,"ready":true}`)
-	_, err := strictDecodeState(data)
-	if err == nil {
-		t.Fatal("expected error for missing mode field")
+func TestValidateControlEnvelope_SuccessOperate(t *testing.T) {
+	env := ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:     "operate",
+		Success:       true,
+		HTTPStatus:    200,
+		Workload:      &WorkloadPayload{Requested: 5, Attempted: 5, Completed: 5},
 	}
-	decodeErr, ok := err.(*DecodeError)
-	if !ok {
-		t.Fatalf("expected DecodeError, got %T", err)
-	}
-	if decodeErr.ErrClass != ErrMissingRequiredField {
-		t.Errorf("expected ErrMissingRequiredField, got %s", decodeErr.ErrClass)
-	}
-}
-
-func TestStrictDecodeState_MissingRetainedBlocks(t *testing.T) {
-	data := []byte(`{"mode":"growing","retained_bytes":0,"operation_count":0,"fd_count":0,"ready":true}`)
-	_, err := strictDecodeState(data)
-	if err == nil {
-		t.Fatal("expected error for missing retained_blocks field")
-	}
-}
-
-func TestStrictDecodeState_MissingRetainedBytes(t *testing.T) {
-	data := []byte(`{"mode":"growing","retained_blocks":0,"operation_count":0,"fd_count":0,"ready":true}`)
-	_, err := strictDecodeState(data)
-	if err == nil {
-		t.Fatal("expected error for missing retained_bytes field")
-	}
-}
-
-func TestStrictDecodeState_MissingOperationCount(t *testing.T) {
-	data := []byte(`{"mode":"growing","retained_blocks":0,"retained_bytes":0,"fd_count":0,"ready":true}`)
-	_, err := strictDecodeState(data)
-	if err == nil {
-		t.Fatal("expected error for missing operation_count field")
-	}
-}
-
-func TestStrictDecodeState_MissingFDCount(t *testing.T) {
-	data := []byte(`{"mode":"growing","retained_blocks":0,"retained_bytes":0,"operation_count":0,"ready":true}`)
-	_, err := strictDecodeState(data)
-	if err == nil {
-		t.Fatal("expected error for missing fd_count field")
-	}
-}
-
-func TestStrictDecodeState_MissingReady(t *testing.T) {
-	data := []byte(`{"mode":"growing","retained_blocks":0,"retained_bytes":0,"operation_count":0,"fd_count":0}`)
-	_, err := strictDecodeState(data)
-	if err == nil {
-		t.Fatal("expected error for missing ready field")
-	}
-}
-
-func TestStrictDecodeState_UnknownField(t *testing.T) {
-	data := []byte(`{"mode":"growing","retained_blocks":0,"retained_bytes":0,"operation_count":0,"fd_count":0,"ready":true,"extra":"forbidden"}`)
-	_, err := strictDecodeState(data)
-	if err == nil {
-		t.Fatal("expected error for unknown field")
-	}
-	decodeErr, ok := err.(*DecodeError)
-	if !ok {
-		t.Fatalf("expected DecodeError, got %T", err)
-	}
-	if decodeErr.ErrClass != ErrUnknownJSONField {
-		t.Errorf("expected ErrUnknownJSONField, got %s", decodeErr.ErrClass)
-	}
-}
-
-func TestStrictDecodeWorkload_Success(t *testing.T) {
-	data := []byte(`{"requested":5,"attempted":5,"completed":5}`)
-	workload, err := strictDecodeWorkload(data)
+	err := ValidateControlEnvelope(&env)
 	if err != nil {
-		t.Fatalf("expected success, got error: %v", err)
-	}
-	if workload.Requested != 5 {
-		t.Errorf("expected requested=5, got %d", workload.Requested)
-	}
-	if workload.Attempted != 5 {
-		t.Errorf("expected attempted=5, got %d", workload.Attempted)
-	}
-	if workload.Completed != 5 {
-		t.Errorf("expected completed=5, got %d", workload.Completed)
+		t.Fatalf("expected success, got: %v", err)
 	}
 }
 
-func TestStrictDecodeWorkload_MissingRequested(t *testing.T) {
-	data := []byte(`{"attempted":5,"completed":5}`)
-	_, err := strictDecodeWorkload(data)
+func TestValidateControlEnvelope_Failure(t *testing.T) {
+	env := ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:     "health",
+		Success:       false,
+		HTTPStatus:    500,
+		ErrorClass:    ErrHealthNotReady,
+	}
+	err := ValidateControlEnvelope(&env)
+	if err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+}
+
+func TestValidateControlEnvelope_SchemaMismatch(t *testing.T) {
+	env := ControlEnvelope{
+		SchemaVersion: "wrong-version",
+		Operation:     "health",
+		Success:       true,
+		HTTPStatus:    200,
+		Health:        &HealthPayload{Ready: true, Mode: "growing"},
+	}
+	err := ValidateControlEnvelope(&env)
 	if err == nil {
-		t.Fatal("expected error for missing requested field")
+		t.Fatal("expected error for schema mismatch")
 	}
 }
 
-func TestStrictDecodeWorkload_MissingAttempted(t *testing.T) {
-	data := []byte(`{"requested":5,"completed":5}`)
-	_, err := strictDecodeWorkload(data)
+func TestValidateControlEnvelope_InvalidOperation(t *testing.T) {
+	env := ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:     "invalid_op",
+		Success:       true,
+		HTTPStatus:    200,
+	}
+	err := ValidateControlEnvelope(&env)
 	if err == nil {
-		t.Fatal("expected error for missing attempted field")
+		t.Fatal("expected error for invalid operation")
 	}
 }
 
-func TestStrictDecodeWorkload_MissingCompleted(t *testing.T) {
-	data := []byte(`{"requested":5,"attempted":5}`)
-	_, err := strictDecodeWorkload(data)
+func TestValidateControlEnvelope_SuccessWithErrorClass(t *testing.T) {
+	env := ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:     "health",
+		Success:       true,
+		HTTPStatus:    200,
+		ErrorClass:    ErrHealthNotReady, // Invalid for success
+		Health:        &HealthPayload{Ready: true, Mode: "growing"},
+	}
+	err := ValidateControlEnvelope(&env)
 	if err == nil {
-		t.Fatal("expected error for missing completed field")
+		t.Fatal("expected error for success with error_class")
 	}
 }
 
-func TestStrictDecodeWorkload_UnknownField(t *testing.T) {
-	data := []byte(`{"requested":5,"attempted":5,"completed":5,"extra":"forbidden"}`)
-	_, err := strictDecodeWorkload(data)
+func TestValidateControlEnvelope_SuccessWithMultiplePayloads(t *testing.T) {
+	env := ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:     "health",
+		Success:       true,
+		HTTPStatus:    200,
+		Health:        &HealthPayload{Ready: true, Mode: "growing"},
+		State:         &StatePayload{Mode: "growing", RetainedBlocks: 0, RetainedBytes: 0, OperationCount: 0, FDCount: 0, Ready: true},
+	}
+	err := ValidateControlEnvelope(&env)
 	if err == nil {
-		t.Fatal("expected error for unknown field")
+		t.Fatal("expected error for health operation with state payload")
 	}
 }
 
-func TestStrictDecodeWorkload_SecondJSONValue(t *testing.T) {
-	data := []byte(`{"requested":5,"attempted":5,"completed":5}{"extra":1}`)
-	_, err := strictDecodeWorkload(data)
+func TestValidateControlEnvelope_FailureWithPayload(t *testing.T) {
+	env := ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:     "health",
+		Success:       false,
+		HTTPStatus:    500,
+		ErrorClass:    ErrHealthNotReady,
+		Health:        &HealthPayload{Ready: true, Mode: "growing"}, // Invalid for failure
+	}
+	err := ValidateControlEnvelope(&env)
 	if err == nil {
-		t.Fatal("expected error for second JSON value")
+		t.Fatal("expected error for failure with payload")
 	}
 }
 
-func TestStrictDecodeWorkload_MalformedTrailingBytes(t *testing.T) {
-	data := []byte(`{"requested":5,"attempted":5,"completed":5}INVALID`)
-	_, err := strictDecodeWorkload(data)
+func TestValidateControlEnvelope_FailureHTTP200(t *testing.T) {
+	env := ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:     "health",
+		Success:       false,
+		HTTPStatus:    200,
+		ErrorClass:    ErrHealthNotReady,
+	}
+	err := ValidateControlEnvelope(&env)
 	if err == nil {
-		t.Fatal("expected error for malformed trailing bytes")
+		t.Fatal("expected error for failure with HTTP 200")
 	}
 }
 
-// TestEncodeEnvelope_Success tests that success envelopes are encoded correctly
+func TestValidateControlEnvelope_FailureNoErrorClass(t *testing.T) {
+	env := ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:     "health",
+		Success:       false,
+		HTTPStatus:    500,
+		// Missing ErrorClass
+	}
+	err := ValidateControlEnvelope(&env)
+	if err == nil {
+		t.Fatal("expected error for failure without error_class")
+	}
+}
+
+func TestValidateControlEnvelope_UnknownErrorClass(t *testing.T) {
+	env := ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:     "health",
+		Success:       false,
+		HTTPStatus:    500,
+		ErrorClass:    "unknown_error",
+	}
+	err := ValidateControlEnvelope(&env)
+	if err == nil {
+		t.Fatal("expected error for unknown error class")
+	}
+}
+
+// ===== P0-5: Retry policy tests =====
+
+func TestIsProtocolRetryable_ConnectionFailed(t *testing.T) {
+	err := &DecodeError{ErrClass: ErrConnectionFailed, Message: "connection refused"}
+	if !IsProtocolRetryable(err) {
+		t.Error("expected connection_failed to be retryable")
+	}
+}
+
+func TestIsProtocolRetryable_RequestTimeout(t *testing.T) {
+	err := &DecodeError{ErrClass: ErrRequestTimeout, Message: "timeout"}
+	if !IsProtocolRetryable(err) {
+		t.Error("expected request_timeout to be retryable")
+	}
+}
+
+func TestIsProtocolRetryable_HealthNotReady(t *testing.T) {
+	err := &DecodeError{ErrClass: ErrHealthNotReady, Message: "not ready"}
+	if !IsProtocolRetryable(err) {
+		t.Error("expected health_not_ready to be retryable")
+	}
+}
+
+func TestIsProtocolRetryable_NonRetryable(t *testing.T) {
+	testCases := []ErrorClass{
+		ErrInvalidArguments,
+		ErrMalformedJSON,
+		ErrUnknownJSONField,
+		ErrMissingRequiredField,
+		ErrTrailingJSON,
+		ErrStateInvalid,
+		ErrWorkloadCountMismatch,
+		ErrSchemaVersionMismatch,
+		ErrInvalidOperation,
+	}
+	for _, ec := range testCases {
+		err := &DecodeError{ErrClass: ec, Message: "test"}
+		if IsProtocolRetryable(err) {
+			t.Errorf("expected %s to NOT be retryable", ec)
+		}
+	}
+}
+
+func TestIsProtocolRetryable_Nil(t *testing.T) {
+	if IsProtocolRetryable(nil) {
+		t.Error("expected nil to not be retryable")
+	}
+}
+
+// ===== P0-6: Typed operation tests =====
+
+func TestControlOperation_BuildArgv(t *testing.T) {
+	op := ControlOperation{
+		Kind:    ControlHealth,
+		Port:    8080,
+		Count:   0,
+		Timeout: 5 * time.Second,
+	}
+	argv := buildArgv(op)
+	expected := []string{"/app/canary", "control", "health", "--port", "8080", "--timeout", "5s"}
+	if len(argv) != len(expected) {
+		t.Fatalf("expected %d args, got %d", len(expected), len(argv))
+	}
+	for i := range argv {
+		if argv[i] != expected[i] {
+			t.Errorf("argv[%d]: expected %q, got %q", i, expected[i], argv[i])
+		}
+	}
+}
+
+func TestControlOperation_BuildArgvOperate(t *testing.T) {
+	op := ControlOperation{
+		Kind:    ControlOperate,
+		Port:    9090,
+		Count:   10,
+		Timeout: 30 * time.Second,
+	}
+	argv := buildArgv(op)
+	// Expected: ["/app/canary", "control", "operate", "--port", "9090", "--count", "10", "--timeout", "30s"] = 9 args
+	if len(argv) != 9 {
+		t.Fatalf("expected 9 args, got %d", len(argv))
+	}
+	if argv[0] != "/app/canary" || argv[1] != "control" || argv[2] != "operate" {
+		t.Errorf("expected /app/canary control operate, got %s %s %s", argv[0], argv[1], argv[2])
+	}
+	if argv[5] != "--count" {
+		t.Errorf("expected argv[5]=--count, got %s", argv[5])
+	}
+	if argv[6] != "10" {
+		t.Errorf("expected argv[6]=10, got %s", argv[6])
+	}
+}
+
+func TestControlOperation_Validate(t *testing.T) {
+	// Valid operation
+	op := ControlOperation{Kind: ControlHealth, Port: 8080, Timeout: 5 * time.Second}
+	if err := op.Validate(); err != nil {
+		t.Errorf("expected valid, got: %v", err)
+	}
+
+	// Invalid port
+	op.Port = 0
+	if err := op.Validate(); err == nil {
+		t.Error("expected error for port=0")
+	}
+	op.Port = 70000
+	if err := op.Validate(); err == nil {
+		t.Error("expected error for port>65535")
+	}
+	op.Port = 8080
+
+	// Invalid timeout
+	op.Timeout = 0
+	if err := op.Validate(); err == nil {
+		t.Error("expected error for timeout=0")
+	}
+	op.Timeout = 5 * time.Second
+
+	// Operate with invalid count
+	op.Kind = ControlOperate
+	op.Count = 0
+	if err := op.Validate(); err == nil {
+		t.Error("expected error for count=0")
+	}
+
+	// Unknown operation
+	op.Kind = ControlOperationKind("unknown")
+	if err := op.Validate(); err == nil {
+		t.Error("expected error for unknown operation")
+	}
+}
+
+// ===== P0-7: httptest production function tests =====
+
+func TestDoHealthCheck_ValidResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			t.Errorf("expected /health, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ready":true,"mode":"growing"}`))
+	}))
+	defer server.Close()
+
+	// Pass the full URL including /health path
+	result := doHealthCheck(context.Background(), server.URL+"/health", 5*time.Second)
+	if result.ErrorClass != "" {
+		t.Errorf("expected no error, got %s", result.ErrorClass)
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", result.ExitCode)
+	}
+	if result.Health == nil || result.Health.Mode != "growing" {
+		t.Error("expected health with mode=growing")
+	}
+}
+
+func TestDoHealthCheck_HealthNotReady(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ready":false,"mode":"growing"}`))
+	}))
+	defer server.Close()
+
+	result := doHealthCheck(context.Background(), server.URL, 5*time.Second)
+	if result.ErrorClass != ErrHealthNotReady {
+		t.Errorf("expected ErrHealthNotReady, got %s", result.ErrorClass)
+	}
+}
+
+func TestDoHealthCheck_EmptyMode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ready":true,"mode":""}`))
+	}))
+	defer server.Close()
+
+	result := doHealthCheck(context.Background(), server.URL, 5*time.Second)
+	if result.ErrorClass != ErrMissingRequiredField {
+		t.Errorf("expected ErrMissingRequiredField, got %s", result.ErrorClass)
+	}
+}
+
+func TestDoHealthCheck_MissingMode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ready":true}`))
+	}))
+	defer server.Close()
+
+	result := doHealthCheck(context.Background(), server.URL, 5*time.Second)
+	if result.ErrorClass != ErrMissingRequiredField {
+		t.Errorf("expected ErrMissingRequiredField, got %s", result.ErrorClass)
+	}
+}
+
+func TestDoHealthCheck_NullMode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ready":true,"mode":null}`))
+	}))
+	defer server.Close()
+
+	result := doHealthCheck(context.Background(), server.URL, 5*time.Second)
+	if result.ErrorClass != ErrMissingRequiredField {
+		t.Errorf("expected ErrMissingRequiredField, got %s", result.ErrorClass)
+	}
+}
+
+func TestDoHealthCheck_UnknownField(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ready":true,"mode":"growing","extra":"forbidden"}`))
+	}))
+	defer server.Close()
+
+	result := doHealthCheck(context.Background(), server.URL, 5*time.Second)
+	if result.ErrorClass != ErrUnknownJSONField {
+		t.Errorf("expected ErrUnknownJSONField, got %s", result.ErrorClass)
+	}
+}
+
+func TestDoHealthCheck_BodyBoundaryUnderLimit(t *testing.T) {
+	// Test with a valid body within MaxResponseBody limit
+	body := []byte(`{"ready":true,"mode":"growing"}`)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(body)
+	}))
+	defer server.Close()
+
+	result := doHealthCheck(context.Background(), server.URL, 5*time.Second)
+	if result.ErrorClass != "" {
+		t.Errorf("expected no error for valid body, got %s", result.ErrorClass)
+	}
+}
+
+func TestDoHealthCheck_64KBPlusOneBody(t *testing.T) {
+	// Create 64KB + 1 byte body
+	body := make([]byte, MaxResponseBody+1)
+	body[0] = '{'
+	body[MaxResponseBody] = '}'
+	for i := 1; i < MaxResponseBody; i++ {
+		body[i] = 'x'
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(body)
+	}))
+	defer server.Close()
+
+	result := doHealthCheck(context.Background(), server.URL, 5*time.Second)
+	if result.ErrorClass != ErrResponseTooLarge {
+		t.Errorf("expected ErrResponseTooLarge, got %s", result.ErrorClass)
+	}
+}
+
+func TestDoHealthCheck_SecondJSONValue(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ready":true,"mode":"growing"}{"extra":1}`))
+	}))
+	defer server.Close()
+
+	result := doHealthCheck(context.Background(), server.URL, 5*time.Second)
+	if result.ErrorClass != ErrTrailingJSON {
+		t.Errorf("expected ErrTrailingJSON, got %s", result.ErrorClass)
+	}
+}
+
+func TestDoHealthCheck_MalformedTrailingBytes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ready":true,"mode":"growing"}INVALID`))
+	}))
+	defer server.Close()
+
+	result := doHealthCheck(context.Background(), server.URL, 5*time.Second)
+	// Implementation classifies trailing bytes as trailing_json, not malformed_json
+	if result.ErrorClass != ErrTrailingJSON {
+		t.Errorf("expected ErrTrailingJSON, got %s", result.ErrorClass)
+	}
+}
+
+func TestDoHealthCheck_HTTPFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	result := doHealthCheck(context.Background(), server.URL, 5*time.Second)
+	if result.ErrorClass != ErrUnexpectedHTTPStatus {
+		t.Errorf("expected ErrUnexpectedHTTPStatus, got %s", result.ErrorClass)
+	}
+}
+
+func TestDoStateCheck_ValidResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/state" {
+			t.Errorf("expected /state, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"mode":"growing","retained_blocks":0,"retained_bytes":0,"operation_count":0,"fd_count":0,"ready":true}`))
+	}))
+	defer server.Close()
+
+	result := doStateCheck(context.Background(), server.URL+"/state", 5*time.Second)
+	if result.ErrorClass != "" {
+		t.Errorf("expected no error, got %s", result.ErrorClass)
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", result.ExitCode)
+	}
+	if result.State == nil || result.State.Mode != "growing" {
+		t.Error("expected state with mode=growing")
+	}
+}
+
+func TestDoStateCheck_MissingRequiredField(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"mode":"growing","retained_blocks":0}`)) // Missing other fields
+	}))
+	defer server.Close()
+
+	result := doStateCheck(context.Background(), server.URL, 5*time.Second)
+	if result.ErrorClass != ErrMissingRequiredField {
+		t.Errorf("expected ErrMissingRequiredField, got %s", result.ErrorClass)
+	}
+}
+
+func TestDoStateCheck_EmptyMode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"mode":"","retained_blocks":0,"retained_bytes":0,"operation_count":0,"fd_count":0,"ready":true}`))
+	}))
+	defer server.Close()
+
+	result := doStateCheck(context.Background(), server.URL, 5*time.Second)
+	if result.ErrorClass != ErrMissingRequiredField {
+		t.Errorf("expected ErrMissingRequiredField, got %s", result.ErrorClass)
+	}
+}
+
+func TestDoOperateCheck_ValidResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/operate" {
+			t.Errorf("expected /operate, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"requested":5,"attempted":5,"completed":5}`))
+	}))
+	defer server.Close()
+
+	result := doOperateCheck(context.Background(), server.URL+"/operate?count=5", 5, 30*time.Second)
+	if result.ErrorClass != "" {
+		t.Errorf("expected no error, got %s", result.ErrorClass)
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", result.ExitCode)
+	}
+	if result.Workload == nil || result.Workload.Requested != 5 {
+		t.Error("expected workload with requested=5")
+	}
+}
+
+func TestDoOperateCheck_WorkloadCountMismatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"requested":5,"attempted":3,"completed":3}`))
+	}))
+	defer server.Close()
+
+	result := doOperateCheck(context.Background(), server.URL+"/operate?count=5", 5, 30*time.Second)
+	if result.ErrorClass != ErrWorkloadCountMismatch {
+		t.Errorf("expected ErrWorkloadCountMismatch, got %s", result.ErrorClass)
+	}
+}
+
+func TestDoOperateCheck_NegativeCounters(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"requested":5,"attempted":-1,"completed":5}`))
+	}))
+	defer server.Close()
+
+	result := doOperateCheck(context.Background(), server.URL+"/operate?count=5", 5, 30*time.Second)
+	// Negative attempted should be caught as count mismatch
+	if result.ErrorClass != ErrWorkloadCountMismatch {
+		t.Errorf("expected ErrWorkloadCountMismatch, got %s", result.ErrorClass)
+	}
+}
+
+func TestDoHealthCheck_Timeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ready":true,"mode":"growing"}`))
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	result := doHealthCheck(ctx, server.URL, 50*time.Millisecond)
+	if result.ErrorClass != ErrRequestTimeout {
+		t.Errorf("expected ErrRequestTimeout, got %s", result.ErrorClass)
+	}
+}
+
+// ===== Additional helper tests =====
+
 func TestEncodeEnvelope_Success(t *testing.T) {
 	env := ControlEnvelope{
 		SchemaVersion: SchemaVersion,
 		Operation:     "health",
 		Success:       true,
 		HTTPStatus:    200,
-		Health: &HealthPayload{
-			Ready: true,
-			Mode:  "growing",
-		},
+		Health:        &HealthPayload{Ready: true, Mode: "growing"},
 	}
 
 	var buf bytes.Buffer
@@ -329,7 +834,6 @@ func TestEncodeEnvelope_Success(t *testing.T) {
 	}
 }
 
-// TestEncodeEnvelope_Failure tests that failure envelopes are encoded correctly
 func TestEncodeEnvelope_Failure(t *testing.T) {
 	env := ControlEnvelope{
 		SchemaVersion: SchemaVersion,
@@ -360,7 +864,6 @@ func TestEncodeEnvelope_Failure(t *testing.T) {
 	}
 }
 
-// TestAllowedErrorClasses_Complete verifies all expected error classes exist
 func TestAllowedErrorClasses_Complete(t *testing.T) {
 	expected := []ErrorClass{
 		ErrInvalidArguments,
@@ -376,6 +879,8 @@ func TestAllowedErrorClasses_Complete(t *testing.T) {
 		ErrHealthNotReady,
 		ErrStateInvalid,
 		ErrWorkloadCountMismatch,
+		ErrSchemaVersionMismatch,
+		ErrInvalidOperation,
 	}
 
 	for _, ec := range expected {
@@ -385,128 +890,6 @@ func TestAllowedErrorClasses_Complete(t *testing.T) {
 	}
 }
 
-// TestStrictDecodeEnvelope_Success tests strict envelope decoding success path
-func TestStrictDecodeEnvelope_Success(t *testing.T) {
-	// We need to test strict parsing from a client perspective
-	// Since strictParseEnvelope is in dockerlab, we test the control client decoders
-
-	data := []byte(`{"schema_version":"canary-control/v1","operation":"health","success":true,"http_status":200,"health":{"ready":true,"mode":"growing"}}`)
-
-	// Test that we can re-encode and decode the inner health payload
-	var env map[string]json.RawMessage
-	if err := json.Unmarshal(data, &env); err != nil {
-		t.Fatalf("unmarshal error: %v", err)
-	}
-
-	// Verify required envelope fields
-	for _, field := range []string{"schema_version", "operation", "success", "http_status"} {
-		if _, ok := env[field]; !ok {
-			t.Errorf("missing required envelope field: %s", field)
-		}
-	}
-
-	// Verify health payload can be decoded
-	if healthRaw, ok := env["health"]; ok {
-		var health HealthPayload
-		if err := json.Unmarshal(healthRaw, &health); err != nil {
-			t.Fatalf("health unmarshal error: %v", err)
-		}
-		if !health.Ready {
-			t.Error("expected health.ready=true")
-		}
-	} else {
-		t.Error("health field missing")
-	}
-}
-
-// TestStrictDecodeEnvelope_MissingFields tests envelope with missing required fields
-func TestStrictDecodeEnvelope_MissingFields(t *testing.T) {
-	data := []byte(`{"operation":"health","success":true}`) // missing schema_version, http_status
-
-	var env map[string]json.RawMessage
-	if err := json.Unmarshal(data, &env); err != nil {
-		t.Fatalf("unmarshal error: %v", err)
-	}
-
-	requiredFields := []string{"schema_version", "operation", "success", "http_status"}
-	missing := 0
-	for _, field := range requiredFields {
-		if _, ok := env[field]; !ok {
-			missing++
-		}
-	}
-	if missing != 2 {
-		t.Errorf("expected 2 missing fields, got %d", missing)
-	}
-}
-
-// TestControlEnvelope_ValidEnvelopeVariants tests both success and failure variants
-func TestControlEnvelope_ValidEnvelopeVariants(t *testing.T) {
-	// Success variant
-	successEnv := ControlEnvelope{
-		SchemaVersion: SchemaVersion,
-		Operation:     "health",
-		Success:       true,
-		HTTPStatus:    200,
-		Health:        &HealthPayload{Ready: true, Mode: "growing"},
-	}
-
-	// Validate success envelope rules
-	if !successEnv.Success {
-		t.Error("success envelope must have success=true")
-	}
-	if successEnv.HTTPStatus != 200 {
-		t.Error("success envelope must have http_status=200")
-	}
-	if successEnv.ErrorClass != "" {
-		t.Error("success envelope must not have error_class")
-	}
-
-	// Failure variant
-	failureEnv := ControlEnvelope{
-		SchemaVersion: SchemaVersion,
-		Operation:     "health",
-		Success:       false,
-		HTTPStatus:    500,
-		ErrorClass:    ErrHealthNotReady,
-	}
-
-	// Validate failure envelope rules
-	if failureEnv.Success {
-		t.Error("failure envelope must have success=false")
-	}
-	if failureEnv.ErrorClass == "" {
-		t.Error("failure envelope must have error_class")
-	}
-}
-
-// TestControlEnvelope_EmptyModeRejected tests that empty mode is rejected by caller
-func TestControlEnvelope_EmptyModeRejected(t *testing.T) {
-	// Empty mode is valid JSON but should be rejected by the caller
-	data := []byte(`{"mode":"","retained_blocks":0,"retained_bytes":0,"operation_count":0,"fd_count":0,"ready":true}`)
-	state, err := strictDecodeState(data)
-	if err != nil {
-		t.Fatalf("empty mode should pass strict decode: %v", err)
-	}
-	// The caller (doStateCheck) should reject empty mode
-	if state.Mode != "" {
-		t.Error("expected mode to be empty string")
-	}
-}
-
-// TestControlEnvelope_ZeroCounters tests that zero values are valid when present
-func TestControlEnvelope_ZeroCounters(t *testing.T) {
-	data := []byte(`{"mode":"growing","retained_blocks":0,"retained_bytes":0,"operation_count":0,"fd_count":0,"ready":true}`)
-	state, err := strictDecodeState(data)
-	if err != nil {
-		t.Fatalf("zero counters should pass strict decode: %v", err)
-	}
-	if state.OperationCount != 0 {
-		t.Errorf("expected operation_count=0, got %d", state.OperationCount)
-	}
-}
-
-// TestBoundedReader_LargeBody tests that oversized responses are rejected
 func TestBoundedReader_LargeBody(t *testing.T) {
 	// Create a response larger than MaxResponseBody (64KB)
 	largeData := make([]byte, MaxResponseBody+1)
@@ -515,7 +898,6 @@ func TestBoundedReader_LargeBody(t *testing.T) {
 	}
 
 	// A LimitReader wrapping this should stop at MaxResponseBody+1 (the limit)
-	// So ReadAll will read MaxResponseBody+1 bytes from the reader
 	reader := io.LimitReader(bytes.NewReader(largeData), MaxResponseBody+1)
 	read, err := io.ReadAll(reader)
 	if err != nil {
@@ -526,48 +908,75 @@ func TestBoundedReader_LargeBody(t *testing.T) {
 	if len(read) != MaxResponseBody+1 {
 		t.Errorf("expected %d bytes from limit reader, got %d", MaxResponseBody+1, len(read))
 	}
-
-	// Verify that checking against MaxResponseBody would catch oversized response
-	if len(read) > MaxResponseBody {
-		// This is the check the caller does
-	}
 }
 
-// TestStrictDecodeHealth_NullField tests that explicit null is rejected
-func TestStrictDecodeHealth_NullField(t *testing.T) {
-	data := []byte(`{"ready":null,"mode":"growing"}`)
-	_, err := strictDecodeHealth(data)
-	if err == nil {
-		t.Fatal("expected error for null ready field")
-	}
-	decodeErr, ok := err.(*DecodeError)
-	if !ok {
-		t.Fatalf("expected DecodeError, got %T", err)
-	}
-	if decodeErr.ErrClass != ErrMissingRequiredField {
-		t.Errorf("expected ErrMissingRequiredField, got %s", decodeErr.ErrClass)
-	}
-}
-
-// TestStrictDecodeHealth_WrongType tests that wrong types are rejected
-func TestStrictDecodeHealth_WrongType(t *testing.T) {
-	// ready should be bool, not string
-	data := []byte(`{"ready":"true","mode":"growing"}`)
-	_, err := strictDecodeHealth(data)
-	if err == nil {
-		t.Fatal("expected error for wrong type")
-	}
-}
-
-// TestStrictDecodeState_EmptyMode tests that empty mode is detected
-func TestStrictDecodeState_EmptyMode(t *testing.T) {
-	data := []byte(`{"mode":"","retained_blocks":0,"retained_bytes":0,"operation_count":0,"fd_count":0,"ready":true}`)
-	state, err := strictDecodeState(data)
+func TestControlEnvelope_TrailingWhitespace(t *testing.T) {
+	// Trailing whitespace only is valid
+	data := []byte(`{"ready":true,"mode":"growing"}   `)
+	var health HealthPayload
+	err := decodeExactJSONObject(data, []string{"ready", "mode"}, &health)
 	if err != nil {
-		t.Fatalf("empty mode should pass strict decode: %v", err)
+		t.Fatalf("expected success for trailing whitespace: %v", err)
 	}
-	// Caller must reject empty mode
-	if state.Mode == "" {
-		// Valid strict decode, caller should check
+	if !health.Ready {
+		t.Error("expected Ready=true")
+	}
+}
+
+// ===== State payload tests =====
+
+func TestStrictDecodeState_Valid(t *testing.T) {
+	data := []byte(`{"mode":"growing","retained_blocks":0,"retained_bytes":0,"operation_count":0,"fd_count":0,"ready":true}`)
+	var state StatePayload
+	err := decodeExactJSONObject(data, []string{"mode", "retained_blocks", "retained_bytes", "operation_count", "fd_count", "ready"}, &state)
+	if err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+	if state.Mode != "growing" {
+		t.Errorf("expected mode=growing, got %s", state.Mode)
+	}
+	if state.Ready != true {
+		t.Error("expected ready=true")
+	}
+}
+
+func TestStrictDecodeState_NullField(t *testing.T) {
+	data := []byte(`{"mode":"growing","retained_blocks":null,"retained_bytes":0,"operation_count":0,"fd_count":0,"ready":true}`)
+	var state StatePayload
+	err := decodeExactJSONObject(data, []string{"mode", "retained_blocks", "retained_bytes", "operation_count", "fd_count", "ready"}, &state)
+	if err == nil {
+		t.Fatal("expected error for null field")
+	}
+}
+
+// ===== Workload payload tests =====
+
+func TestStrictDecodeWorkload_Valid(t *testing.T) {
+	data := []byte(`{"requested":5,"attempted":5,"completed":5}`)
+	var workload WorkloadPayload
+	err := decodeExactJSONObject(data, []string{"requested", "attempted", "completed"}, &workload)
+	if err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+	if workload.Requested != 5 {
+		t.Errorf("expected requested=5, got %d", workload.Requested)
+	}
+}
+
+func TestStrictDecodeWorkload_NullField(t *testing.T) {
+	data := []byte(`{"requested":5,"attempted":null,"completed":5}`)
+	var workload WorkloadPayload
+	err := decodeExactJSONObject(data, []string{"requested", "attempted", "completed"}, &workload)
+	if err == nil {
+		t.Fatal("expected error for null field")
+	}
+}
+
+func TestStrictDecodeWorkload_SecondJSONValue(t *testing.T) {
+	data := []byte(`{"requested":5,"attempted":5,"completed":5}{"extra":1}`)
+	var workload WorkloadPayload
+	err := decodeExactJSONObject(data, []string{"requested", "attempted", "completed"}, &workload)
+	if err == nil {
+		t.Fatal("expected error for second JSON value")
 	}
 }

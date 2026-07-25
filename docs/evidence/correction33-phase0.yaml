@@ -1,0 +1,64 @@
+# CORRECTION33 Phase 0 Preflight
+
+## Baseline Identities
+
+```yaml
+S32_commit: 051018cabfefa63e5f7cfeb45b01450eecbe7acb
+S32_tree: 991458709f5d8593930334c672c10641897b338d
+S32_parent: 43243667535b4604dc548646c12f42b9393c914f
+```
+
+## Phase 0 Results
+
+```yaml
+working_tree_clean: false
+working_tree_dirty_files:
+  - tovarisch/labs/memory/cmd/canary/control.go
+  - tovarisch/labs/memory/cmd/canary/control_test.go
+  - docs/evidence/correction33-phase0.yaml (this file)
+untracked_files:
+  - docs/evidence/correction33-phase0.yaml
+git_diff_check: pending (run in Phase 0)
+patch_hygiene: pending (run in Phase 0)
+note: This Phase 0 evidence was created mid-work and reflects the dirty
+      state honestly. CORRECTION34 reconciles this and produces S34.
+```
+
+## Completed by CORRECTION32
+
+```yaml
+completed:
+  patch_hygiene: true
+  payload_null_rejection: true
+  focused_protocol_tests: true
+```
+
+## Completed in CORRECTION33 dirty checkpoint
+
+```yaml
+completed:
+  shared_payload_decoder: partial (lives in cmd/canary, pending extraction)
+  payload_presence_and_null_checks: true
+  health_mode_validation: true
+  canary_envelope_validation: true
+  canary_retry_classification: true
+  canary_typed_operation: true
+  httptest_production_functions: true
+```
+
+## Remaining Work for CORRECTION33/34
+
+```yaml
+open:
+  immutable_S34: true
+  shared_package_authority: true
+  controller_envelope_presence: true
+  controller_retry_integration: true
+  exact_Docker_exec_argv: true
+  canonical_reachability: true
+  qualified_evidence_strictness: true
+  image_rebuild: true
+  helper_live_qualification: true
+  production_cli_qualification: true
+  current_make_gate: true
+  immutable_evidence: true
