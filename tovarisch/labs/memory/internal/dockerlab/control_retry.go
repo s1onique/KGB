@@ -16,7 +16,6 @@ package dockerlab
 import (
 	"context"
 	"errors"
-	"sync"
 	"time"
 
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/canarycontrol"
@@ -44,26 +43,6 @@ func (realSleeper) Sleep(ctx context.Context, d time.Duration) error {
 	case <-t.C:
 		return nil
 	}
-}
-
-// FakeSleeper records the sleep calls without actually sleeping.
-// Tests use this to avoid real-time waits.
-type FakeSleeper struct {
-	mu       sync.Mutex
-	Calls    []time.Duration
-	BlockCtx context.Context // if non-nil, this Sleep blocks until ctx is done
-}
-
-func (f *FakeSleeper) Sleep(ctx context.Context, d time.Duration) error {
-	f.mu.Lock()
-	f.Calls = append(f.Calls, d)
-	block := f.BlockCtx
-	f.mu.Unlock()
-	if block != nil {
-		<-block.Done()
-		return block.Err()
-	}
-	return nil
 }
 
 // RetryPolicy controls the readiness retry loop.

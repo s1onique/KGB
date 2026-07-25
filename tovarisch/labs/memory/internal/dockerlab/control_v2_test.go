@@ -169,7 +169,7 @@ func TestEngineSeam_ExecInspectFailure(t *testing.T) {
 
 func TestEngineSeam_StdoutOverflow(t *testing.T) {
 	fake := &FakeControlExecRuntime{}
-	fake.AttachExceedsMaxStdout = true
+	fake.NextAttachStdout = make([]byte, MaxControlStdout+1)
 	r := NewControlRunner(fake)
 	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)
 	if !errors.Is(err, ErrStdoutOverflow) {
@@ -180,7 +180,7 @@ func TestEngineSeam_StdoutOverflow(t *testing.T) {
 func TestEngineSeam_StderrOverflow(t *testing.T) {
 	fake := &FakeControlExecRuntime{}
 	fake.NextAttachStdout = []byte(`{"schema_version":"canary-control/v1","operation":"health","success":true,"http_status":200,"health":{"ready":true,"mode":"growing"}}`)
-	fake.AttachExceedsMaxStderr = true
+	fake.NextAttachStderr = make([]byte, MaxControlStderr+1)
 	fake.NextInspectResult = ExecInspectResult{ExitCode: 0}
 	r := NewControlRunner(fake)
 	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)
@@ -191,7 +191,7 @@ func TestEngineSeam_StderrOverflow(t *testing.T) {
 
 func TestEngineSeam_EmptyStdout(t *testing.T) {
 	fake := &FakeControlExecRuntime{}
-	fake.AttachEmptyStdout = true
+	fake.NextAttachStdout = nil
 	r := NewControlRunner(fake)
 	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)
 	if !errors.Is(err, ErrEmptyStdout) {
