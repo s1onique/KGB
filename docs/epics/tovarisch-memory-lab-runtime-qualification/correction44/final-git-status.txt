@@ -1,10 +1,6 @@
-E44 final git status (pre-commit):
-A  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/changed-files.txt
-A  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/close-report.md
-A  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/evidence-file-sha256s.txt
-A  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/reachability-observation-tests.txt
-A  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/reachability-verifier-tests.txt
-A  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/subject-identities.txt
-?? docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/final-git-status.txt
+Final git status at A44:
+ M docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/final-git-status.txt
+?? docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/attestation.md
+?? docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/s44-source-sha256s.txt
 ---
-E44 final git diff check:
+Final diff check at A44:
