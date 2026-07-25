@@ -1,0 +1,6 @@
+=== RUN   TestControlRunner_NilRuntimeRejected
+--- PASS: TestControlRunner_NilRuntimeRejected (0.00s)
+=== RUN   TestControlRunner_NilRuntimeZeroEngineCalls
+--- PASS: TestControlRunner_NilRuntimeZeroEngineCalls (0.00s)
+PASS
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	0.006s

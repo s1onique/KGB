@@ -1,0 +1,8 @@
+=== RUN   TestControlStream_ManyValidStdoutFramesCumulativeOverflow
+--- PASS: TestControlStream_ManyValidStdoutFramesCumulativeOverflow (0.00s)
+=== RUN   TestControlStream_ManyValidStderrFramesCumulativeOverflow
+--- PASS: TestControlStream_ManyValidStderrFramesCumulativeOverflow (0.00s)
+=== RUN   TestControlStream_AtBothCumulativeLimits
+--- PASS: TestControlStream_AtBothCumulativeLimits (0.00s)
+PASS
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	0.008s

@@ -1,0 +1,22 @@
+=== RUN   TestFrameGuard_ValidFragmentedHeader
+--- PASS: TestFrameGuard_ValidFragmentedHeader (0.00s)
+=== RUN   TestFrameGuard_ValidFragmentedPayload
+--- PASS: TestFrameGuard_ValidFragmentedPayload (0.00s)
+=== RUN   TestFrameGuard_MultipleFrames
+--- PASS: TestFrameGuard_MultipleFrames (0.00s)
+=== RUN   TestFrameGuard_StdoutFrameAtLimit
+--- PASS: TestFrameGuard_StdoutFrameAtLimit (0.00s)
+=== RUN   TestFrameGuard_StdoutFrameOneOver
+--- PASS: TestFrameGuard_StdoutFrameOneOver (0.00s)
+=== RUN   TestFrameGuard_StderrFrameAtLimit
+--- PASS: TestFrameGuard_StderrFrameAtLimit (0.00s)
+=== RUN   TestFrameGuard_StderrFrameOneOver
+--- PASS: TestFrameGuard_StderrFrameOneOver (0.00s)
+=== RUN   TestFrameGuard_InvalidStreamRejected
+--- PASS: TestFrameGuard_InvalidStreamRejected (0.00s)
+=== RUN   TestFrameGuard_DeclaredUint32MaxRejectedWithoutPayload
+--- PASS: TestFrameGuard_DeclaredUint32MaxRejectedWithoutPayload (0.00s)
+=== RUN   TestFrameGuard_NoLargeAllocationOnOversizedHeader
+--- PASS: TestFrameGuard_NoLargeAllocationOnOversizedHeader (0.00s)
+PASS
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	0.009s

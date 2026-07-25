@@ -1,0 +1,6 @@
+=== RUN   TestControlAdapter_ExactAttachOptions
+--- PASS: TestControlAdapter_ExactAttachOptions (0.00s)
+=== RUN   TestControlAdapter_CreateAndAttachTTYCannotDiverge
+--- PASS: TestControlAdapter_CreateAndAttachTTYCannotDiverge (0.00s)
+PASS
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	0.006s

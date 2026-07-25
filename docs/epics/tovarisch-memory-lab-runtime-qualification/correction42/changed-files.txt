@@ -1,0 +1,8 @@
+S42 source-and-tests delta from checkpoint 08b5d4f5aa81db71483bd118dbfe2fbcba197b24:
+A	tovarisch/labs/memory/internal/dockerlab/control_frame_guard.go
+M	tovarisch/labs/memory/internal/dockerlab/control_protocol_v2.go
+M	tovarisch/labs/memory/internal/dockerlab/control_seam.go
+M	tovarisch/labs/memory/internal/dockerlab/control_test_support_test.go
+A	tovarisch/labs/memory/internal/dockerlab/control_transport_correction42_test.go
+M	tovarisch/labs/memory/internal/dockerlab/control_transport_test.go
+M	tovarisch/labs/memory/internal/dockerlab/control_v2_test.go

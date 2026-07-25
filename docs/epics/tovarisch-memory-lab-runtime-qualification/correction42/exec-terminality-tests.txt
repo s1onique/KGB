@@ -1,0 +1,8 @@
+=== RUN   TestControlInspect_RunningTrueRejected
+--- PASS: TestControlInspect_RunningTrueRejected (0.00s)
+=== RUN   TestControlInspect_RunningFalseAccepted
+--- PASS: TestControlInspect_RunningFalseAccepted (0.00s)
+=== RUN   TestControlInspect_RunningTruePreservesExitAndStderr
+--- PASS: TestControlInspect_RunningTruePreservesExitAndStderr (0.00s)
+PASS
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	0.008s

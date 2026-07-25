@@ -1,0 +1,12 @@
+=== RUN   TestControlStream_ParentCancellationDuringRead
+--- PASS: TestControlStream_ParentCancellationDuringRead (0.00s)
+=== RUN   TestControlStream_ParentDeadlineDuringRead
+--- PASS: TestControlStream_ParentDeadlineDuringRead (0.02s)
+=== RUN   TestControlStream_AttemptTimeoutDuringRead
+--- PASS: TestControlStream_AttemptTimeoutDuringRead (0.02s)
+=== RUN   TestControlStream_CopyErrorPlusContext
+--- PASS: TestControlStream_CopyErrorPlusContext (0.00s)
+=== RUN   TestControlStream_CloseErrorPlusContext
+--- PASS: TestControlStream_CloseErrorPlusContext (0.00s)
+PASS
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	0.049s

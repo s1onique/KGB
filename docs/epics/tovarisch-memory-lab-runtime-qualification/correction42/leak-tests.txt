@@ -1,0 +1,10 @@
+=== RUN   TestControlStream_CancelDuringRead_Count100
+--- PASS: TestControlStream_CancelDuringRead_Count100 (0.01s)
+=== RUN   TestControlStream_AttemptTimeoutDuringRead_Count100
+--- PASS: TestControlStream_AttemptTimeoutDuringRead_Count100 (0.11s)
+=== RUN   TestControlStream_NoGoroutineGrowth
+--- PASS: TestControlStream_NoGoroutineGrowth (0.01s)
+=== RUN   TestControlStream_NoConnectionLeak
+--- PASS: TestControlStream_NoConnectionLeak (0.01s)
+PASS
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	0.153s
