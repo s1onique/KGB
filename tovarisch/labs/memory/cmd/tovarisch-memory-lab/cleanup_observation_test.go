@@ -372,7 +372,6 @@ func TestNewCleanupObserverWithRunner_AcceptsValidRunner(t *testing.T) {
 // BOUNDED WRITER TESTS
 // =============================================================================
 
-
 // =============================================================================
 // NETWORK IDENTITY TESTS
 // =============================================================================
@@ -751,7 +750,7 @@ func TestMatrixCommandWithDeps_RejectsNilObserveCleanup(t *testing.T) {
 		[]string{"memory-lab", "matrix", "--artifacts-dir", "/nonexistent"},
 		MatrixCommandDeps{
 			ObserveCleanup: nil,
-			Now:           time.Now,
+			Now:            time.Now,
 		},
 	)
 	if err == nil {

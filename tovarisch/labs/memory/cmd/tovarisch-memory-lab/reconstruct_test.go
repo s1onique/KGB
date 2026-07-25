@@ -33,15 +33,15 @@ func goodManifest() *MatrixManifest {
 		StartedAt:     time.Now().Add(-10 * time.Minute),
 		FinishedAt:    time.Now(),
 		ExecutionIdentity: &MatrixExecutionIdentity{
-			ImplementationCommitOID:     "abc123def456",
-			ImplementationTreeOID:       "tree789",
-			GitObjectFormat:             "sha256",
-			ControllerPID:               12345,
-			ControllerExecutableSHA256:  "hash123",
-			RunManifestSchemaVersion:    "1.1.0",
-			ImageReference:              "test-image:latest",
+			ImplementationCommitOID:    "abc123def456",
+			ImplementationTreeOID:      "tree789",
+			GitObjectFormat:            "sha256",
+			ControllerPID:              12345,
+			ControllerExecutableSHA256: "hash123",
+			RunManifestSchemaVersion:   "1.1.0",
+			ImageReference:             "test-image:latest",
 			ImageID:                    "sha256:abc123",
-			CanaryBinarySHA256:          "binaryhash",
+			CanaryBinarySHA256:         "binaryhash",
 			HostKernelRelease:          "6.1.0",
 			HostKernelVersion:          "Linux 6.1.0",
 			HostCgroupMode:             "2",
@@ -79,23 +79,23 @@ func goodChildManifest(runID, scenario string) *evidence.Manifest {
 
 	return &evidence.Manifest{
 		SchemaVersion: "1.1.0",
-		RunID:        runID,
-		Scenario:     scenario,
-		ControllerID: "12345",
+		RunID:         runID,
+		Scenario:      scenario,
+		ControllerID:  "12345",
 		SubjectIdentity: &evidence.SubjectIdentity{
-			GitCommit:                 "abc123def456",
-			GitTree:                  "tree789",
-			GitObjectFormat:          "sha256",
+			GitCommit:                  "abc123def456",
+			GitTree:                    "tree789",
+			GitObjectFormat:            "sha256",
 			ControllerExecutableSHA256: "hash123",
 		},
 		SubjectImageIdentity: &evidence.SubjectImageIdentity{
-			ImageReference:        "test-image:latest",
+			ImageReference:       "test-image:latest",
 			ImageID:              "sha256:abc123",
 			PrebuildBinarySHA256: "binaryhash",
 		},
 		HostID: &evidence.HostIdentity{
 			KernelRelease: "6.1.0",
-			CgroupMode:   "2",
+			CgroupMode:    "2",
 		},
 		DockerID: &evidence.DockerIdentity{
 			EngineVersion: "24.0.0",
@@ -155,8 +155,8 @@ func goodCleanupEvidence(matrixID string) *MatrixCleanupEvidence {
 
 	return &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        matrixID,
-		ObservedAt:      time.Now(),
+		MatrixID:         matrixID,
+		ObservedAt:       time.Now(),
 		NetworkOwnership: "per_run",
 		Runs: []RunCleanupRecord{
 			{
@@ -242,19 +242,19 @@ func goodVerifiedRun(index int, scenario, runID string) *VerifiedRun {
 	}
 
 	return &VerifiedRun{
-		DeclaredRunID:        runID,
-		DeclaredScenario:     scenario,
-		RunIndex:            index,
-		ActualManifest:      manifest,
-		ActualVerdict:       verdict,
-		ContainerID:         containerIDs[idx],
-		NetworkID:           networkIDs[idx],
-		SubjectPID:          pids[idx],
-		SubjectStartTime:    startTimes[idx],
-		ProcessCleanupStatus: ProcessGone,
-		ChildVerified:      true, // P0-8 FIX: Valid runs are verified
+		DeclaredRunID:         runID,
+		DeclaredScenario:      scenario,
+		RunIndex:              index,
+		ActualManifest:        manifest,
+		ActualVerdict:         verdict,
+		ContainerID:           containerIDs[idx],
+		NetworkID:             networkIDs[idx],
+		SubjectPID:            pids[idx],
+		SubjectStartTime:      startTimes[idx],
+		ProcessCleanupStatus:  ProcessGone,
+		ChildVerified:         true, // P0-8 FIX: Valid runs are verified
 		CleanupEvidenceLoaded: true,
-		CleanupEvidenceValid: true,
+		CleanupEvidenceValid:  true,
 	}
 }
 
@@ -394,17 +394,17 @@ func TestDecodeStrictJSON_RejectsEmptyInput(t *testing.T) {
 func TestValidateCleanupEvidence_RequiresNetworkIDsForPerRunMode(t *testing.T) {
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "test-matrix",
-		ObservedAt:      time.Now(),
+		MatrixID:         "test-matrix",
+		ObservedAt:       time.Now(),
 		NetworkOwnership: "per_run",
 		Runs: []RunCleanupRecord{
 			{
-				Index:    0,
-				Scenario: "canary-growing",
-				RunID:    "run-1",
+				Index:     0,
+				Scenario:  "canary-growing",
+				RunID:     "run-1",
 				Container: ContainerCleanupRecord{ID: "c1", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "", Status: "gone"}, // Empty ID!
-				Process:  ProcessCleanupRecord{PID: 1, StartTime: 1, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "", Status: "gone"}, // Empty ID!
+				Process:   ProcessCleanupRecord{PID: 1, StartTime: 1, Status: "gone"},
 			},
 		},
 	}
@@ -429,25 +429,25 @@ func TestValidateCleanupEvidence_RequiresNetworkIDsForPerRunMode(t *testing.T) {
 func TestValidateCleanupEvidence_RejectsDuplicateNetworkIDs(t *testing.T) {
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "test-matrix",
-		ObservedAt:      time.Now(),
+		MatrixID:         "test-matrix",
+		ObservedAt:       time.Now(),
 		NetworkOwnership: "per_run",
 		Runs: []RunCleanupRecord{
 			{
-				Index:    0,
-				Scenario: "canary-growing",
-				RunID:    "run-1",
+				Index:     0,
+				Scenario:  "canary-growing",
+				RunID:     "run-1",
 				Container: ContainerCleanupRecord{ID: "c1", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "same-id", Status: "gone"},
-				Process:  ProcessCleanupRecord{PID: 1, StartTime: 1, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "same-id", Status: "gone"},
+				Process:   ProcessCleanupRecord{PID: 1, StartTime: 1, Status: "gone"},
 			},
 			{
-				Index:    1,
-				Scenario: "canary-bounded",
-				RunID:    "run-2",
+				Index:     1,
+				Scenario:  "canary-bounded",
+				RunID:     "run-2",
 				Container: ContainerCleanupRecord{ID: "c2", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "same-id", Status: "gone"}, // Duplicate!
-				Process:  ProcessCleanupRecord{PID: 2, StartTime: 2, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "same-id", Status: "gone"}, // Duplicate!
+				Process:   ProcessCleanupRecord{PID: 2, StartTime: 2, Status: "gone"},
 			},
 		},
 	}
@@ -473,17 +473,17 @@ func TestValidateCleanupEvidence_RejectsDuplicateNetworkIDs(t *testing.T) {
 func TestValidateCleanupEvidence_RejectsMatrixIDMismatch(t *testing.T) {
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "different-matrix-id",
-		ObservedAt:      time.Now(),
+		MatrixID:         "different-matrix-id",
+		ObservedAt:       time.Now(),
 		NetworkOwnership: "per_run",
 		Runs: []RunCleanupRecord{
 			{
-				Index:    0,
-				Scenario: "canary-growing",
-				RunID:    "run-1",
+				Index:     0,
+				Scenario:  "canary-growing",
+				RunID:     "run-1",
 				Container: ContainerCleanupRecord{ID: "c1", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "n1", Status: "gone"},
-				Process:  ProcessCleanupRecord{PID: 1, StartTime: 1, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "n1", Status: "gone"},
+				Process:   ProcessCleanupRecord{PID: 1, StartTime: 1, Status: "gone"},
 			},
 		},
 	}
@@ -508,10 +508,10 @@ func TestValidateCleanupEvidence_RejectsMatrixIDMismatch(t *testing.T) {
 func TestValidateCleanupEvidence_RejectsUnsupportedSchema(t *testing.T) {
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "99.99.99",
-		MatrixID:        "test-matrix",
-		ObservedAt:      time.Now(),
+		MatrixID:         "test-matrix",
+		ObservedAt:       time.Now(),
 		NetworkOwnership: "per_run",
-		Runs:            []RunCleanupRecord{},
+		Runs:             []RunCleanupRecord{},
 	}
 
 	manifest := &MatrixManifest{
@@ -532,17 +532,17 @@ func TestValidateCleanupEvidence_RejectsUnsupportedSchema(t *testing.T) {
 func TestValidateCleanupEvidence_RejectsWrongIndex(t *testing.T) {
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "test-matrix",
-		ObservedAt:      time.Now(),
+		MatrixID:         "test-matrix",
+		ObservedAt:       time.Now(),
 		NetworkOwnership: "per_run",
 		Runs: []RunCleanupRecord{
 			{
-				Index:    99, // Wrong index!
-				Scenario: "canary-growing",
-				RunID:    "run-1",
+				Index:     99, // Wrong index!
+				Scenario:  "canary-growing",
+				RunID:     "run-1",
 				Container: ContainerCleanupRecord{ID: "c1", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "n1", Status: "gone"},
-				Process:  ProcessCleanupRecord{PID: 1, StartTime: 1, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "n1", Status: "gone"},
+				Process:   ProcessCleanupRecord{PID: 1, StartTime: 1, Status: "gone"},
 			},
 		},
 	}
@@ -729,21 +729,21 @@ func TestReconstructScenarioResults_SetsVerifiedFromChildVerified(t *testing.T) 
 			DeclaredScenario: "canary-growing",
 			ActualManifest:   &evidence.Manifest{SchemaVersion: "1.1.0"},
 			ActualVerdict:    &evidence.Verdict{},
-			ChildVerified:   true, // Verified via complete child bundle verification
+			ChildVerified:    true, // Verified via complete child bundle verification
 		},
 		{
 			DeclaredRunID:    "run-2",
 			DeclaredScenario: "canary-bounded",
 			ActualManifest:   &evidence.Manifest{SchemaVersion: "1.0.0"},
 			ActualVerdict:    &evidence.Verdict{},
-			ChildVerified:   false, // Failed child verification
+			ChildVerified:    false, // Failed child verification
 		},
 		{
 			DeclaredRunID:    "run-3",
 			DeclaredScenario: "canary-descriptor",
 			ActualManifest:   &evidence.Manifest{SchemaVersion: "1.1.0"},
 			ActualVerdict:    &evidence.Verdict{},
-			ChildVerified:   true, // Verified via complete child bundle verification
+			ChildVerified:    true, // Verified via complete child bundle verification
 		},
 	}
 
@@ -816,16 +816,16 @@ func TestReconstructCleanupComplete_RejectsStillAliveProcess(t *testing.T) {
 
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "test",
+		MatrixID:         "test",
 		NetworkOwnership: "per_run",
 		Runs: []RunCleanupRecord{
 			{
-				Index:    0,
-				Scenario: "canary-growing",
-				RunID:    "run-1",
+				Index:     0,
+				Scenario:  "canary-growing",
+				RunID:     "run-1",
 				Container: ContainerCleanupRecord{ID: "container-abc123", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "network-def456", Status: "gone"},
-				Process:  ProcessCleanupRecord{PID: 54321, StartTime: 1234567890, Status: "still_alive"}, // Alive!
+				Network:   NetworkCleanupRecord{ID: "network-def456", Status: "gone"},
+				Process:   ProcessCleanupRecord{PID: 54321, StartTime: 1234567890, Status: "still_alive"}, // Alive!
 			},
 		},
 	}
@@ -847,16 +847,16 @@ func TestReconstructCleanupComplete_RejectsExistingContainer(t *testing.T) {
 
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "test",
+		MatrixID:         "test",
 		NetworkOwnership: "per_run",
 		Runs: []RunCleanupRecord{
 			{
-				Index:    0,
-				Scenario: "canary-growing",
-				RunID:    "run-1",
+				Index:     0,
+				Scenario:  "canary-growing",
+				RunID:     "run-1",
 				Container: ContainerCleanupRecord{ID: "container-abc123", Status: "exists"}, // Still exists!
-				Network:  NetworkCleanupRecord{ID: "network-def456", Status: "gone"},
-				Process:  ProcessCleanupRecord{PID: 54321, StartTime: 1234567890, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "network-def456", Status: "gone"},
+				Process:   ProcessCleanupRecord{PID: 54321, StartTime: 1234567890, Status: "gone"},
 			},
 		},
 	}
@@ -878,16 +878,16 @@ func TestReconstructCleanupComplete_RejectsPIDMismatch(t *testing.T) {
 
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "test",
+		MatrixID:         "test",
 		NetworkOwnership: "per_run",
 		Runs: []RunCleanupRecord{
 			{
-				Index:    0,
-				Scenario: "canary-growing",
-				RunID:    "run-1",
+				Index:     0,
+				Scenario:  "canary-growing",
+				RunID:     "run-1",
 				Container: ContainerCleanupRecord{ID: "container-abc123", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "network-def456", Status: "gone"},
-				Process:  ProcessCleanupRecord{PID: 99999, StartTime: 1234567890, Status: "gone"}, // Wrong PID!
+				Network:   NetworkCleanupRecord{ID: "network-def456", Status: "gone"},
+				Process:   ProcessCleanupRecord{PID: 99999, StartTime: 1234567890, Status: "gone"}, // Wrong PID!
 			},
 		},
 	}
@@ -951,25 +951,25 @@ func TestReconstructMatrixVerdict_FailsWithWrongOverallClassification(t *testing
 func TestValidateCleanupEvidence_AcceptsSharedNetworkMode(t *testing.T) {
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "test-matrix",
-		ObservedAt:      time.Now(),
+		MatrixID:         "test-matrix",
+		ObservedAt:       time.Now(),
 		NetworkOwnership: "matrix_shared",
 		Runs: []RunCleanupRecord{
 			{
-				Index:    0,
-				Scenario: "canary-growing",
-				RunID:    "run-1",
+				Index:     0,
+				Scenario:  "canary-growing",
+				RunID:     "run-1",
 				Container: ContainerCleanupRecord{ID: "c1", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "gone"},
-				Process:  ProcessCleanupRecord{PID: 1, StartTime: 1, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "shared-net", Status: "gone"},
+				Process:   ProcessCleanupRecord{PID: 1, StartTime: 1, Status: "gone"},
 			},
 			{
-				Index:    1,
-				Scenario: "canary-bounded",
-				RunID:    "run-2",
+				Index:     1,
+				Scenario:  "canary-bounded",
+				RunID:     "run-2",
 				Container: ContainerCleanupRecord{ID: "c2", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "gone"}, // Same shared ID
-				Process:  ProcessCleanupRecord{PID: 2, StartTime: 2, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "shared-net", Status: "gone"}, // Same shared ID
+				Process:   ProcessCleanupRecord{PID: 2, StartTime: 2, Status: "gone"},
 			},
 		},
 	}
@@ -995,25 +995,25 @@ func TestValidateCleanupEvidence_AcceptsSharedNetworkMode(t *testing.T) {
 func TestValidateCleanupEvidence_RejectsDifferentNetworkIDsInSharedMode(t *testing.T) {
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "test-matrix",
-		ObservedAt:      time.Now(),
+		MatrixID:         "test-matrix",
+		ObservedAt:       time.Now(),
 		NetworkOwnership: "matrix_shared",
 		Runs: []RunCleanupRecord{
 			{
-				Index:    0,
-				Scenario: "canary-growing",
-				RunID:    "run-1",
+				Index:     0,
+				Scenario:  "canary-growing",
+				RunID:     "run-1",
 				Container: ContainerCleanupRecord{ID: "c1", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "net-1", Status: "gone"},
-				Process:  ProcessCleanupRecord{PID: 1, StartTime: 1, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "net-1", Status: "gone"},
+				Process:   ProcessCleanupRecord{PID: 1, StartTime: 1, Status: "gone"},
 			},
 			{
-				Index:    1,
-				Scenario: "canary-bounded",
-				RunID:    "run-2",
+				Index:     1,
+				Scenario:  "canary-bounded",
+				RunID:     "run-2",
 				Container: ContainerCleanupRecord{ID: "c2", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "net-2", Status: "gone"}, // Different!
-				Process:  ProcessCleanupRecord{PID: 2, StartTime: 2, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "net-2", Status: "gone"}, // Different!
+				Process:   ProcessCleanupRecord{PID: 2, StartTime: 2, Status: "gone"},
 			},
 		},
 	}
@@ -1039,17 +1039,17 @@ func TestValidateCleanupEvidence_RejectsDifferentNetworkIDsInSharedMode(t *testi
 func TestValidateCleanupEvidence_RequiresContainerID(t *testing.T) {
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "test-matrix",
-		ObservedAt:      time.Now(),
+		MatrixID:         "test-matrix",
+		ObservedAt:       time.Now(),
 		NetworkOwnership: "per_run",
 		Runs: []RunCleanupRecord{
 			{
-				Index:    0,
-				Scenario: "canary-growing",
-				RunID:    "run-1",
+				Index:     0,
+				Scenario:  "canary-growing",
+				RunID:     "run-1",
 				Container: ContainerCleanupRecord{ID: "", Status: "gone"}, // Empty!
-				Network:  NetworkCleanupRecord{ID: "n1", Status: "gone"},
-				Process:  ProcessCleanupRecord{PID: 1, StartTime: 1, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "n1", Status: "gone"},
+				Process:   ProcessCleanupRecord{PID: 1, StartTime: 1, Status: "gone"},
 			},
 		},
 	}
@@ -1074,17 +1074,17 @@ func TestValidateCleanupEvidence_RequiresContainerID(t *testing.T) {
 func TestValidateCleanupEvidence_RequiresProcessPID(t *testing.T) {
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "test-matrix",
-		ObservedAt:      time.Now(),
+		MatrixID:         "test-matrix",
+		ObservedAt:       time.Now(),
 		NetworkOwnership: "per_run",
 		Runs: []RunCleanupRecord{
 			{
-				Index:    0,
-				Scenario: "canary-growing",
-				RunID:    "run-1",
+				Index:     0,
+				Scenario:  "canary-growing",
+				RunID:     "run-1",
 				Container: ContainerCleanupRecord{ID: "c1", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "n1", Status: "gone"},
-				Process:  ProcessCleanupRecord{PID: 0, StartTime: 1, Status: "gone"}, // Zero PID!
+				Network:   NetworkCleanupRecord{ID: "n1", Status: "gone"},
+				Process:   ProcessCleanupRecord{PID: 0, StartTime: 1, Status: "gone"}, // Zero PID!
 			},
 		},
 	}
@@ -1109,10 +1109,10 @@ func TestValidateCleanupEvidence_RequiresProcessPID(t *testing.T) {
 func TestValidateCleanupEvidence_RejectsUnknownNetworkMode(t *testing.T) {
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "test-matrix",
-		ObservedAt:      time.Now(),
+		MatrixID:         "test-matrix",
+		ObservedAt:       time.Now(),
 		NetworkOwnership: "unknown_mode",
-		Runs:            []RunCleanupRecord{},
+		Runs:             []RunCleanupRecord{},
 	}
 
 	manifest := &MatrixManifest{
@@ -1133,10 +1133,10 @@ func TestValidateCleanupEvidence_RejectsUnknownNetworkMode(t *testing.T) {
 func TestValidateCleanupEvidence_RejectsRunCountMismatch(t *testing.T) {
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "test-matrix",
-		ObservedAt:      time.Now(),
+		MatrixID:         "test-matrix",
+		ObservedAt:       time.Now(),
 		NetworkOwnership: "per_run",
-		Runs:            []RunCleanupRecord{}, // No runs
+		Runs:             []RunCleanupRecord{}, // No runs
 	}
 
 	manifest := &MatrixManifest{
@@ -1204,22 +1204,22 @@ func TestCanonicalCrossRunCheckNames_ContainsAllChecks(t *testing.T) {
 
 func TestCountCanonicalChecks_ReturnsCorrectCounts(t *testing.T) {
 	checks := &CrossRunChecks{
-		SameCommitTree:       true,
-		SameControllerPID:    true,
-		SameControllerHash:   true,
-		SameSchema:           true,
-		SameThresholds:       true,
-		SamePhaseConfig:      true,
-		SameHostIdentity:     true,
-		SameDockerIdentity:   true,
-		SameImageIdentity:    true,
-		SameCanaryBinary:     true,
-		UniqueRunIDs:         true,
+		SameCommitTree:         true,
+		SameControllerPID:      true,
+		SameControllerHash:     true,
+		SameSchema:             true,
+		SameThresholds:         true,
+		SamePhaseConfig:        true,
+		SameHostIdentity:       true,
+		SameDockerIdentity:     true,
+		SameImageIdentity:      true,
+		SameCanaryBinary:       true,
+		UniqueRunIDs:           true,
 		UniqueSubjectProcesses: true,
-		UniqueContainerIDs:   true,
-		FixedOrder:           true,
-		NonOverlapping:       true,
-		CleanupComplete:      true,
+		UniqueContainerIDs:     true,
+		FixedOrder:             true,
+		NonOverlapping:         true,
+		CleanupComplete:        true,
 	}
 
 	total, passed, failed := CountCanonicalChecks(checks)
@@ -1240,22 +1240,22 @@ func TestCountCanonicalChecks_ReturnsCorrectCounts(t *testing.T) {
 
 func TestCountCanonicalChecks_WithFailures(t *testing.T) {
 	checks := &CrossRunChecks{
-		SameCommitTree:       true,
-		SameControllerPID:    true,
-		SameControllerHash:   true,
-		SameSchema:           false, // Failed
-		SameThresholds:       true,
-		SamePhaseConfig:      true,
-		SameHostIdentity:     true,
-		SameDockerIdentity:   true,
-		SameImageIdentity:    true,
-		SameCanaryBinary:     true,
-		UniqueRunIDs:         true,
+		SameCommitTree:         true,
+		SameControllerPID:      true,
+		SameControllerHash:     true,
+		SameSchema:             false, // Failed
+		SameThresholds:         true,
+		SamePhaseConfig:        true,
+		SameHostIdentity:       true,
+		SameDockerIdentity:     true,
+		SameImageIdentity:      true,
+		SameCanaryBinary:       true,
+		UniqueRunIDs:           true,
 		UniqueSubjectProcesses: true,
-		UniqueContainerIDs:   true,
-		FixedOrder:           true,
-		NonOverlapping:       true,
-		CleanupComplete:      true,
+		UniqueContainerIDs:     true,
+		FixedOrder:             true,
+		NonOverlapping:         true,
+		CleanupComplete:        true,
 	}
 
 	total, passed, failed := CountCanonicalChecks(checks)
@@ -1295,16 +1295,16 @@ func TestReconstructSameSchema_RequiresMatchingSchemas(t *testing.T) {
 	manifest := goodManifest()
 	verifiedRuns := []*VerifiedRun{
 		{
-			DeclaredRunID:    "run-1",
-			ActualManifest:   &evidence.Manifest{SchemaVersion: "1.1.0"},
+			DeclaredRunID:  "run-1",
+			ActualManifest: &evidence.Manifest{SchemaVersion: "1.1.0"},
 		},
 		{
-			DeclaredRunID:    "run-2",
-			ActualManifest:   &evidence.Manifest{SchemaVersion: "1.0.0"}, // Different!
+			DeclaredRunID:  "run-2",
+			ActualManifest: &evidence.Manifest{SchemaVersion: "1.0.0"}, // Different!
 		},
 		{
-			DeclaredRunID:    "run-3",
-			ActualManifest:   &evidence.Manifest{SchemaVersion: "1.1.0"},
+			DeclaredRunID:  "run-3",
+			ActualManifest: &evidence.Manifest{SchemaVersion: "1.1.0"},
 		},
 	}
 
@@ -1325,16 +1325,16 @@ func TestReconstructSameSchema_RequiresDeclaredSchemaMatch(t *testing.T) {
 
 	verifiedRuns := []*VerifiedRun{
 		{
-			DeclaredRunID:    "run-1",
-			ActualManifest:   &evidence.Manifest{SchemaVersion: "1.1.0"},
+			DeclaredRunID:  "run-1",
+			ActualManifest: &evidence.Manifest{SchemaVersion: "1.1.0"},
 		},
 		{
-			DeclaredRunID:    "run-2",
-			ActualManifest:   &evidence.Manifest{SchemaVersion: "1.1.0"},
+			DeclaredRunID:  "run-2",
+			ActualManifest: &evidence.Manifest{SchemaVersion: "1.1.0"},
 		},
 		{
-			DeclaredRunID:    "run-3",
-			ActualManifest:   &evidence.Manifest{SchemaVersion: "1.1.0"},
+			DeclaredRunID:  "run-3",
+			ActualManifest: &evidence.Manifest{SchemaVersion: "1.1.0"},
 		},
 	}
 
@@ -1489,8 +1489,8 @@ func TestReconstructMatrixVerdict_SemanticClassificationStored(t *testing.T) {
 func TestCompareVerdicts_DetectsEqualInvalidBothFalse(t *testing.T) {
 	// P0-8 FIX: Test that CompareVerdicts detects equal-invalid terminal case
 	stored := &MatrixVerdict{
-		MatrixID:       "test-matrix",
-		MatrixValid:    false,
+		MatrixID:    "test-matrix",
+		MatrixValid: false,
 		ScenarioResults: map[string]*ScenarioResult{
 			"canary-growing": {
 				RunID:    "run-1",
@@ -1502,23 +1502,23 @@ func TestCompareVerdicts_DetectsEqualInvalidBothFalse(t *testing.T) {
 			},
 		},
 		CrossRunChecks: &CrossRunChecks{
-			SameCommitTree:        true,
-			SameControllerPID:     true,
-			SameControllerHash:    true,
-			SameSchema:            true,
-			SameThresholds:        true,
-			SamePhaseConfig:       true,
-			SameHostIdentity:      true,
-			SameDockerIdentity:    true,
-			SameImageIdentity:     true,
-			SameCanaryBinary:      true,
-			UniqueRunIDs:          true,
+			SameCommitTree:         true,
+			SameControllerPID:      true,
+			SameControllerHash:     true,
+			SameSchema:             true,
+			SameThresholds:         true,
+			SamePhaseConfig:        true,
+			SameHostIdentity:       true,
+			SameDockerIdentity:     true,
+			SameImageIdentity:      true,
+			SameCanaryBinary:       true,
+			UniqueRunIDs:           true,
 			UniqueSubjectProcesses: true,
-			UniqueContainerIDs:    true,
-			FixedOrder:           true,
-			NonOverlapping:       true,
-			CleanupComplete:      true,
-			ChecksPassed:         16,
+			UniqueContainerIDs:     true,
+			FixedOrder:             true,
+			NonOverlapping:         true,
+			CleanupComplete:        true,
+			ChecksPassed:           16,
 		},
 		ChecksTotal:  16,
 		ChecksPassed: 16,
@@ -1527,8 +1527,8 @@ func TestCompareVerdicts_DetectsEqualInvalidBothFalse(t *testing.T) {
 
 	// Reconstructed is identical in every way - both are invalid
 	reconstructed := &MatrixVerdict{
-		MatrixID:       "test-matrix",
-		MatrixValid:    false,
+		MatrixID:    "test-matrix",
+		MatrixValid: false,
 		ScenarioResults: map[string]*ScenarioResult{
 			"canary-growing": {
 				RunID:    "run-1",
@@ -1540,23 +1540,23 @@ func TestCompareVerdicts_DetectsEqualInvalidBothFalse(t *testing.T) {
 			},
 		},
 		CrossRunChecks: &CrossRunChecks{
-			SameCommitTree:        true,
-			SameControllerPID:     true,
-			SameControllerHash:    true,
-			SameSchema:            true,
-			SameThresholds:        true,
-			SamePhaseConfig:       true,
-			SameHostIdentity:      true,
-			SameDockerIdentity:    true,
-			SameImageIdentity:     true,
-			SameCanaryBinary:      true,
-			UniqueRunIDs:          true,
+			SameCommitTree:         true,
+			SameControllerPID:      true,
+			SameControllerHash:     true,
+			SameSchema:             true,
+			SameThresholds:         true,
+			SamePhaseConfig:        true,
+			SameHostIdentity:       true,
+			SameDockerIdentity:     true,
+			SameImageIdentity:      true,
+			SameCanaryBinary:       true,
+			UniqueRunIDs:           true,
 			UniqueSubjectProcesses: true,
-			UniqueContainerIDs:    true,
-			FixedOrder:           true,
-			NonOverlapping:       true,
-			CleanupComplete:      true,
-			ChecksPassed:         16,
+			UniqueContainerIDs:     true,
+			FixedOrder:             true,
+			NonOverlapping:         true,
+			CleanupComplete:        true,
+			ChecksPassed:           16,
 		},
 		ChecksTotal:  16,
 		ChecksPassed: 16,
@@ -1751,12 +1751,12 @@ func TestVerifyDeclaredChildRuns_SetsChildVerifiedCorrectly(t *testing.T) {
 		return &VerifiedChildBundle{
 			Manifest: &evidence.Manifest{
 				SchemaVersion: "1.1.0",
-				RunID:        runID,
-				Scenario:     scenario,
+				RunID:         runID,
+				Scenario:      scenario,
 			},
 			Verdict:        &evidence.Verdict{Scenario: scenario},
 			ContainerID:    containerID,
-			NetworkID:     networkID,
+			NetworkID:      networkID,
 			SubjectPID:     12345,
 			SubjectStart:   1234567890,
 			ChecksVerified: true,
@@ -1779,8 +1779,8 @@ func TestVerifyDeclaredChildRuns_SetsChildVerifiedCorrectly(t *testing.T) {
 	}
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "test-matrix",
-		ObservedAt:      time.Now(),
+		MatrixID:         "test-matrix",
+		ObservedAt:       time.Now(),
 		NetworkOwnership: "per_run",
 		Runs: []RunCleanupRecord{
 			{Index: 0, Scenario: "canary-growing", RunID: "run-1", Container: ContainerCleanupRecord{ID: "test-container-1", Status: "gone"}, Network: NetworkCleanupRecord{ID: "test-network-1", Status: "gone"}, Process: ProcessCleanupRecord{PID: 12345, StartTime: 1234567890, Status: "gone"}},
@@ -1908,8 +1908,8 @@ func TestVerifyDeclaredChildRuns_RejectsUnverifiedBundle(t *testing.T) {
 		return &VerifiedChildBundle{
 			Manifest: &evidence.Manifest{
 				SchemaVersion: "1.1.0",
-				RunID:        "run-1",
-				Scenario:     "canary-growing",
+				RunID:         "run-1",
+				Scenario:      "canary-growing",
 			},
 			Verdict:        &evidence.Verdict{Scenario: "canary-growing"},
 			ChecksVerified: false, // NOT verified
@@ -1951,8 +1951,8 @@ func TestVerifyDeclaredChildRuns_RejectsRunIDMismatch(t *testing.T) {
 		return &VerifiedChildBundle{
 			Manifest: &evidence.Manifest{
 				SchemaVersion: "1.1.0",
-				RunID:        "wrong-run-id", // Does NOT match declaration
-				Scenario:     "canary-growing",
+				RunID:         "wrong-run-id", // Does NOT match declaration
+				Scenario:      "canary-growing",
 			},
 			Verdict:        &evidence.Verdict{Scenario: "canary-growing"},
 			ChecksVerified: true,
@@ -1999,8 +1999,8 @@ func TestVerifyDeclaredChildRuns_RejectsScenarioMismatch(t *testing.T) {
 		return &VerifiedChildBundle{
 			Manifest: &evidence.Manifest{
 				SchemaVersion: "1.1.0",
-				RunID:        "run-1",
-				Scenario:     "wrong-scenario", // Does NOT match declaration
+				RunID:         "run-1",
+				Scenario:      "wrong-scenario", // Does NOT match declaration
 			},
 			Verdict:        &evidence.Verdict{Scenario: "wrong-scenario"},
 			ChecksVerified: true,
@@ -2358,12 +2358,12 @@ func makeTestVerifiedRun(i int) *VerifiedRun {
 	return &VerifiedRun{
 		DeclaredRunID:    fmt.Sprintf("run-%d", i),
 		DeclaredScenario: CanonicalScenarioOrder[i],
-		RunIndex:        i,
-		ContainerID:     fmt.Sprintf("container-%d", i),
-		NetworkID:       fmt.Sprintf("network-%d", i),
-		SubjectPID:      1000 + i,
+		RunIndex:         i,
+		ContainerID:      fmt.Sprintf("container-%d", i),
+		NetworkID:        fmt.Sprintf("network-%d", i),
+		SubjectPID:       1000 + i,
 		SubjectStartTime: uint64(5000 + i),
-		ChildVerified:   true,
+		ChildVerified:    true,
 	}
 }
 
@@ -2407,7 +2407,7 @@ func makeTestManifest() *MatrixManifest {
 // makeTestCleanup creates a MatrixCleanupEvidence for testing.
 func makeTestCleanup(matrixID string) *MatrixCleanupEvidence {
 	return &MatrixCleanupEvidence{
-		SchemaVersion:     "1.0.0",
+		SchemaVersion:    "1.0.0",
 		MatrixID:         matrixID,
 		ObservedAt:       time.Now(),
 		NetworkOwnership: "per_run",
@@ -2446,8 +2446,8 @@ func TestVerifyDeclaredChildBundles_PopulatesIdentities(t *testing.T) {
 			},
 			Verdict:        &evidence.Verdict{Scenario: CanonicalScenarioOrder[i]},
 			ContainerID:    fmt.Sprintf("container-%d", i),
-			NetworkID:       fmt.Sprintf("network-%d", i),
-			SubjectPID:      1000 + i,
+			NetworkID:      fmt.Sprintf("network-%d", i),
+			SubjectPID:     1000 + i,
 			SubjectStart:   uint64(5000 + i),
 			ChecksVerified: true,
 		}, nil
@@ -2651,8 +2651,8 @@ func TestVerifyDeclaredChildRuns_IsCompositeWrapper(t *testing.T) {
 			},
 			Verdict:        &evidence.Verdict{Scenario: CanonicalScenarioOrder[i]},
 			ContainerID:    fmt.Sprintf("container-%d", i),
-			NetworkID:       fmt.Sprintf("network-%d", i),
-			SubjectPID:      1000 + i,
+			NetworkID:      fmt.Sprintf("network-%d", i),
+			SubjectPID:     1000 + i,
 			SubjectStart:   uint64(5000 + i),
 			ChecksVerified: true,
 		}, nil
@@ -2870,33 +2870,33 @@ func TestValidateCleanupBinding_RequiresMatrixSharedNetworkGone(t *testing.T) {
 	// Create matrix_shared cleanup with network status "exists"
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "test-matrix-1",
-		ObservedAt:      time.Now(),
+		MatrixID:         "test-matrix-1",
+		ObservedAt:       time.Now(),
 		NetworkOwnership: "matrix_shared",
 		Runs: []RunCleanupRecord{
 			{
-				Index:    0,
-				Scenario: "canary-growing",
-				RunID:    "run-0",
+				Index:     0,
+				Scenario:  "canary-growing",
+				RunID:     "run-0",
 				Container: ContainerCleanupRecord{ID: "container-0", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "exists"}, // Should be gone!
-				Process:  ProcessCleanupRecord{PID: 1000, StartTime: 5000, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "shared-net", Status: "exists"}, // Should be gone!
+				Process:   ProcessCleanupRecord{PID: 1000, StartTime: 5000, Status: "gone"},
 			},
 			{
-				Index:    1,
-				Scenario: "canary-bounded",
-				RunID:    "run-1",
+				Index:     1,
+				Scenario:  "canary-bounded",
+				RunID:     "run-1",
 				Container: ContainerCleanupRecord{ID: "container-1", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "exists"}, // Should be gone!
-				Process:  ProcessCleanupRecord{PID: 1001, StartTime: 5001, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "shared-net", Status: "exists"}, // Should be gone!
+				Process:   ProcessCleanupRecord{PID: 1001, StartTime: 5001, Status: "gone"},
 			},
 			{
-				Index:    2,
-				Scenario: "canary-descriptor",
-				RunID:    "run-2",
+				Index:     2,
+				Scenario:  "canary-descriptor",
+				RunID:     "run-2",
 				Container: ContainerCleanupRecord{ID: "container-2", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "exists"}, // Should be gone!
-				Process:  ProcessCleanupRecord{PID: 1002, StartTime: 5002, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "shared-net", Status: "exists"}, // Should be gone!
+				Process:   ProcessCleanupRecord{PID: 1002, StartTime: 5002, Status: "gone"},
 			},
 		},
 	}
@@ -2925,33 +2925,33 @@ func TestValidateCleanupBinding_AcceptsMatrixSharedNetworkGone(t *testing.T) {
 	// Create valid matrix_shared cleanup
 	cleanup := &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "test-matrix-1",
-		ObservedAt:      time.Now(),
+		MatrixID:         "test-matrix-1",
+		ObservedAt:       time.Now(),
 		NetworkOwnership: "matrix_shared",
 		Runs: []RunCleanupRecord{
 			{
-				Index:    0,
-				Scenario: "canary-growing",
-				RunID:    "run-0",
+				Index:     0,
+				Scenario:  "canary-growing",
+				RunID:     "run-0",
 				Container: ContainerCleanupRecord{ID: "container-0", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "gone"}, // Valid
-				Process:  ProcessCleanupRecord{PID: 1000, StartTime: 5000, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "shared-net", Status: "gone"}, // Valid
+				Process:   ProcessCleanupRecord{PID: 1000, StartTime: 5000, Status: "gone"},
 			},
 			{
-				Index:    1,
-				Scenario: "canary-bounded",
-				RunID:    "run-1",
+				Index:     1,
+				Scenario:  "canary-bounded",
+				RunID:     "run-1",
 				Container: ContainerCleanupRecord{ID: "container-1", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "gone"}, // Valid
-				Process:  ProcessCleanupRecord{PID: 1001, StartTime: 5001, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "shared-net", Status: "gone"}, // Valid
+				Process:   ProcessCleanupRecord{PID: 1001, StartTime: 5001, Status: "gone"},
 			},
 			{
-				Index:    2,
-				Scenario: "canary-descriptor",
-				RunID:    "run-2",
+				Index:     2,
+				Scenario:  "canary-descriptor",
+				RunID:     "run-2",
 				Container: ContainerCleanupRecord{ID: "container-2", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "gone"}, // Valid
-				Process:  ProcessCleanupRecord{PID: 1002, StartTime: 5002, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "shared-net", Status: "gone"}, // Valid
+				Process:   ProcessCleanupRecord{PID: 1002, StartTime: 5002, Status: "gone"},
 			},
 		},
 	}
@@ -2972,34 +2972,34 @@ func TestValidateCleanupBinding_RejectsMatrixSharedNetworkUnavailable(t *testing
 	}
 
 	cleanup := &MatrixCleanupEvidence{
-		SchemaVersion:     "1.0.0",
+		SchemaVersion:    "1.0.0",
 		MatrixID:         "test-matrix-1",
 		ObservedAt:       time.Now(),
 		NetworkOwnership: "matrix_shared",
 		Runs: []RunCleanupRecord{
 			{
-				Index:    0,
-				Scenario: "canary-growing",
-				RunID:    "run-0",
+				Index:     0,
+				Scenario:  "canary-growing",
+				RunID:     "run-0",
 				Container: ContainerCleanupRecord{ID: "container-0", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "unavailable"},
-				Process:  ProcessCleanupRecord{PID: 1000, StartTime: 5000, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "shared-net", Status: "unavailable"},
+				Process:   ProcessCleanupRecord{PID: 1000, StartTime: 5000, Status: "gone"},
 			},
 			{
-				Index:    1,
-				Scenario: "canary-bounded",
-				RunID:    "run-1",
+				Index:     1,
+				Scenario:  "canary-bounded",
+				RunID:     "run-1",
 				Container: ContainerCleanupRecord{ID: "container-1", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "gone"},
-				Process:  ProcessCleanupRecord{PID: 1001, StartTime: 5001, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "shared-net", Status: "gone"},
+				Process:   ProcessCleanupRecord{PID: 1001, StartTime: 5001, Status: "gone"},
 			},
 			{
-				Index:    2,
-				Scenario: "canary-descriptor",
-				RunID:    "run-2",
+				Index:     2,
+				Scenario:  "canary-descriptor",
+				RunID:     "run-2",
 				Container: ContainerCleanupRecord{ID: "container-2", Status: "gone"},
-				Network:  NetworkCleanupRecord{ID: "shared-net", Status: "gone"},
-				Process:  ProcessCleanupRecord{PID: 1002, StartTime: 5002, Status: "gone"},
+				Network:   NetworkCleanupRecord{ID: "shared-net", Status: "gone"},
+				Process:   ProcessCleanupRecord{PID: 1002, StartTime: 5002, Status: "gone"},
 			},
 		},
 	}

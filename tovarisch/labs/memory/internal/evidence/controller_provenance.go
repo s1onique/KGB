@@ -162,14 +162,14 @@ func CollectControllerProvenance(opts ProvenanceOptions) (ControllerProvenance, 
 	}
 
 	cp := ControllerProvenance{
-		VCSRevision:      vcsRevision,
-		VCSTree:          tree,
-		VCSModified:      vcsModified,
-		WorkingTreeDirty: workingDirty,
+		VCSRevision:       vcsRevision,
+		VCSTree:           tree,
+		VCSModified:       vcsModified,
+		WorkingTreeDirty:  workingDirty,
 		SourceCommitDirty: headMismatch,
-		GitObjectFormat:  gitFormat,
-		ExecutableSHA256: execSHA256,
-		ProducerVersion:  opts.ProducerVersion,
+		GitObjectFormat:   gitFormat,
+		ExecutableSHA256:  execSHA256,
+		ProducerVersion:   opts.ProducerVersion,
 	}
 	if opts.RequireClean {
 		if cp.VCSModified || cp.WorkingTreeDirty || cp.SourceCommitDirty {

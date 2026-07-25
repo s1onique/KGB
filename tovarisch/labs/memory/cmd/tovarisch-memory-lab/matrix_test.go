@@ -74,9 +74,9 @@ func TestValidateScenarioContractGrowing(t *testing.T) {
 		MemoryClassification:   analysis.ClassificationGrowing,
 		ResourceClassification: analysis.ClassificationStable,
 		SemanticClassification: analysis.ClassificationStable,
-		ScenarioValid:         true,
-		CanariesValid:         true,
-		ProvenanceValid:       true,
+		ScenarioValid:          true,
+		CanariesValid:          true,
+		ProvenanceValid:        true,
 	}
 
 	errors := ValidateScenarioContract("canary-growing", workload, initialState, finalState, verdict)
@@ -96,9 +96,9 @@ func TestValidateScenarioContractBounded(t *testing.T) {
 		MemoryClassification:   analysis.ClassificationStable,
 		ResourceClassification: analysis.ClassificationStable,
 		SemanticClassification: analysis.ClassificationStable,
-		ScenarioValid:         true,
-		CanariesValid:         true,
-		ProvenanceValid:       true,
+		ScenarioValid:          true,
+		CanariesValid:          true,
+		ProvenanceValid:        true,
 	}
 
 	errors := ValidateScenarioContract("canary-bounded", workload, initialState, finalState, verdict)
@@ -118,9 +118,9 @@ func TestValidateScenarioContractDescriptor(t *testing.T) {
 		MemoryClassification:   analysis.ClassificationStable,
 		ResourceClassification: analysis.ClassificationResourceGrowth,
 		SemanticClassification: analysis.ClassificationStable,
-		ScenarioValid:         true,
-		CanariesValid:         true,
-		ProvenanceValid:       true,
+		ScenarioValid:          true,
+		CanariesValid:          true,
+		ProvenanceValid:        true,
 		SignalSummaries: []analysis.SignalSummary{
 			{
 				Name:           "descriptor_state_invariant",
@@ -157,9 +157,9 @@ func TestValidateScenarioContractGrowingWrongWorkload(t *testing.T) {
 		MemoryClassification:   analysis.ClassificationGrowing,
 		ResourceClassification: analysis.ClassificationStable,
 		SemanticClassification: analysis.ClassificationStable,
-		ScenarioValid:         true,
-		CanariesValid:         true,
-		ProvenanceValid:       true,
+		ScenarioValid:          true,
+		CanariesValid:          true,
+		ProvenanceValid:        true,
 	}
 
 	errors := ValidateScenarioContract("canary-growing", workload, initialState, finalState, verdict)
@@ -179,9 +179,9 @@ func TestValidateScenarioContractGrowingWrongClassification(t *testing.T) {
 		MemoryClassification:   analysis.ClassificationGrowing,
 		ResourceClassification: analysis.ClassificationStable,
 		SemanticClassification: analysis.ClassificationStable,
-		ScenarioValid:         true,
-		CanariesValid:         true,
-		ProvenanceValid:       true,
+		ScenarioValid:          true,
+		CanariesValid:          true,
+		ProvenanceValid:        true,
 	}
 
 	errors := ValidateScenarioContract("canary-growing", workload, initialState, finalState, verdict)
@@ -201,9 +201,9 @@ func TestValidateScenarioContractBoundedRetainedBlocks(t *testing.T) {
 		MemoryClassification:   analysis.ClassificationStable,
 		ResourceClassification: analysis.ClassificationStable,
 		SemanticClassification: analysis.ClassificationStable,
-		ScenarioValid:         true,
-		CanariesValid:         true,
-		ProvenanceValid:       true,
+		ScenarioValid:          true,
+		CanariesValid:          true,
+		ProvenanceValid:        true,
 	}
 
 	errors := ValidateScenarioContract("canary-bounded", workload, initialState, finalState, verdict)
@@ -223,9 +223,9 @@ func TestValidateScenarioContractDescriptorWrongFDDelta(t *testing.T) {
 		MemoryClassification:   analysis.ClassificationStable,
 		ResourceClassification: analysis.ClassificationResourceGrowth,
 		SemanticClassification: analysis.ClassificationStable,
-		ScenarioValid:         true,
-		CanariesValid:         true,
-		ProvenanceValid:       true,
+		ScenarioValid:          true,
+		CanariesValid:          true,
+		ProvenanceValid:        true,
 		SignalSummaries: []analysis.SignalSummary{
 			{
 				Name:           "descriptor_state_invariant",
@@ -413,9 +413,9 @@ func TestLoadMatrixManifest(t *testing.T) {
 
 	manifest := &MatrixManifest{
 		SchemaVersion: MatrixSchemaVersion,
-		MatrixID:     "test-matrix-123",
-		StartedAt:    time.Now(),
-		FinishedAt:   time.Now().Add(10 * time.Minute),
+		MatrixID:      "test-matrix-123",
+		StartedAt:     time.Now(),
+		FinishedAt:    time.Now().Add(10 * time.Minute),
 		Runs: []MatrixRunDeclaration{
 			{Index: 1, Scenario: "canary-growing", RunID: "run-1", ChecksumsSHA256: "abc123"},
 			{Index: 2, Scenario: "canary-bounded", RunID: "run-2", ChecksumsSHA256: "def456"},
@@ -493,9 +493,9 @@ func TestLoadMatrixVerdict(t *testing.T) {
 
 func TestCrossRunChecksAllTrue(t *testing.T) {
 	checks := &CrossRunChecks{
-		SameCommitTree:          true,
-		SameControllerPID:       true,
-		SameControllerHash:      true,
+		SameCommitTree:         true,
+		SameControllerPID:      true,
+		SameControllerHash:     true,
 		SameSchema:             true,
 		SameThresholds:         true,
 		SamePhaseConfig:        true,

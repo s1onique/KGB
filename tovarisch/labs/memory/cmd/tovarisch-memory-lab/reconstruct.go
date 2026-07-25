@@ -172,41 +172,41 @@ type VerifiedRun struct {
 // MatrixCleanupEvidence is the canonical cleanup artifact persisted as matrix-cleanup.json.
 type MatrixCleanupEvidence struct {
 	SchemaVersion    string             `json:"schema_version"`
-	MatrixID        string             `json:"matrix_id"`
-	ObservedAt      time.Time          `json:"observed_at"`
+	MatrixID         string             `json:"matrix_id"`
+	ObservedAt       time.Time          `json:"observed_at"`
 	NetworkOwnership string             `json:"network_ownership"` // "per_run" or "matrix_shared"
-	Runs            []RunCleanupRecord `json:"runs"`
+	Runs             []RunCleanupRecord `json:"runs"`
 }
 
 // RunCleanupRecord represents cleanup evidence for a single run.
 type RunCleanupRecord struct {
-	Index      int                    `json:"index"`
-	Scenario   string                 `json:"scenario"`
-	RunID      string                 `json:"run_id"`
-	Container  ContainerCleanupRecord `json:"container"`
-	Network    NetworkCleanupRecord   `json:"network"`
-	Process    ProcessCleanupRecord   `json:"process"`
+	Index     int                    `json:"index"`
+	Scenario  string                 `json:"scenario"`
+	RunID     string                 `json:"run_id"`
+	Container ContainerCleanupRecord `json:"container"`
+	Network   NetworkCleanupRecord   `json:"network"`
+	Process   ProcessCleanupRecord   `json:"process"`
 }
 
 // ContainerCleanupRecord captures container cleanup evidence.
 type ContainerCleanupRecord struct {
-	ID     string `json:"id"`      // Full container ID (required)
+	ID     string `json:"id"`     // Full container ID (required)
 	Name   string `json:"name"`   // Diagnostic name
 	Status string `json:"status"` // "gone", "exists", "unavailable"
 }
 
 // NetworkCleanupRecord captures network cleanup evidence.
 type NetworkCleanupRecord struct {
-	ID     string `json:"id"`      // Full network ID (required)
+	ID     string `json:"id"`     // Full network ID (required)
 	Name   string `json:"name"`   // Diagnostic name
 	Status string `json:"status"` // "gone", "exists", "unavailable"
 }
 
 // ProcessCleanupRecord captures process cleanup evidence.
 type ProcessCleanupRecord struct {
-	PID        int    `json:"pid"`         // Process PID (required)
-	StartTime  uint64 `json:"start_time"` // Process start time (required)
-	Status     string `json:"status"`     // "gone", "pid_reused", "still_alive", "unavailable"
+	PID       int    `json:"pid"`        // Process PID (required)
+	StartTime uint64 `json:"start_time"` // Process start time (required)
+	Status    string `json:"status"`     // "gone", "pid_reused", "still_alive", "unavailable"
 }
 
 // LoadMatrixCleanupEvidence loads and parses matrix-cleanup.json.
@@ -891,8 +891,8 @@ func verifyFourFieldClassifications(results map[string]*ScenarioResult) bool {
 
 // VerdictDiff represents a single field-level difference between verdicts.
 type VerdictDiff struct {
-	Path    string // Dot-separated path to the field
-	Stored  string // Value in stored verdict
+	Path          string // Dot-separated path to the field
+	Stored        string // Value in stored verdict
 	Reconstructed string // Value in reconstructed verdict
 }
 
@@ -904,37 +904,37 @@ func CompareVerdicts(stored, reconstructed *MatrixVerdict) []VerdictDiff {
 	// Top-level fields
 	if stored.MatrixID != reconstructed.MatrixID {
 		diffs = append(diffs, VerdictDiff{
-			Path:           "matrix_id",
-			Stored:         stored.MatrixID,
-			Reconstructed:  reconstructed.MatrixID,
+			Path:          "matrix_id",
+			Stored:        stored.MatrixID,
+			Reconstructed: reconstructed.MatrixID,
 		})
 	}
 	if stored.MatrixValid != reconstructed.MatrixValid {
 		diffs = append(diffs, VerdictDiff{
-			Path:           "matrix_valid",
-			Stored:         fmt.Sprintf("%v", stored.MatrixValid),
-			Reconstructed:  fmt.Sprintf("%v", reconstructed.MatrixValid),
+			Path:          "matrix_valid",
+			Stored:        fmt.Sprintf("%v", stored.MatrixValid),
+			Reconstructed: fmt.Sprintf("%v", reconstructed.MatrixValid),
 		})
 	}
 	if stored.ChecksTotal != reconstructed.ChecksTotal {
 		diffs = append(diffs, VerdictDiff{
-			Path:           "checks_total",
-			Stored:         fmt.Sprintf("%d", stored.ChecksTotal),
-			Reconstructed:  fmt.Sprintf("%d", reconstructed.ChecksTotal),
+			Path:          "checks_total",
+			Stored:        fmt.Sprintf("%d", stored.ChecksTotal),
+			Reconstructed: fmt.Sprintf("%d", reconstructed.ChecksTotal),
 		})
 	}
 	if stored.ChecksPassed != reconstructed.ChecksPassed {
 		diffs = append(diffs, VerdictDiff{
-			Path:           "checks_passed",
-			Stored:         fmt.Sprintf("%d", stored.ChecksPassed),
-			Reconstructed:  fmt.Sprintf("%d", reconstructed.ChecksPassed),
+			Path:          "checks_passed",
+			Stored:        fmt.Sprintf("%d", stored.ChecksPassed),
+			Reconstructed: fmt.Sprintf("%d", reconstructed.ChecksPassed),
 		})
 	}
 	if stored.ChecksFailed != reconstructed.ChecksFailed {
 		diffs = append(diffs, VerdictDiff{
-			Path:           "checks_failed",
-			Stored:         fmt.Sprintf("%d", stored.ChecksFailed),
-			Reconstructed:  fmt.Sprintf("%d", reconstructed.ChecksFailed),
+			Path:          "checks_failed",
+			Stored:        fmt.Sprintf("%d", stored.ChecksFailed),
+			Reconstructed: fmt.Sprintf("%d", reconstructed.ChecksFailed),
 		})
 	}
 
@@ -1077,10 +1077,10 @@ func BuildMatrixCleanupEvidence(
 
 	return &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        matrixID,
-		ObservedAt:      observedAt,
+		MatrixID:         matrixID,
+		ObservedAt:       observedAt,
 		NetworkOwnership: networkOwnership,
-		Runs:            records,
+		Runs:             records,
 	}
 }
 
@@ -1172,7 +1172,7 @@ func ComputeMatrixChecksums(matrixDir string) (string, error) {
 	entries := map[string]string{
 		"matrix-manifest.json": hex.EncodeToString(manifestHash[:]),
 		"matrix-verdict.json":  hex.EncodeToString(verdictHash[:]),
-		"matrix-cleanup.json": hex.EncodeToString(cleanupHash[:]),
+		"matrix-cleanup.json":  hex.EncodeToString(cleanupHash[:]),
 	}
 
 	// Sort for determinism
@@ -1204,9 +1204,9 @@ func BuildVerifiedRunsFromMatrix(matrixDir string, manifest *MatrixManifest, cle
 	for i, decl := range manifest.Runs {
 		runPath := filepath.Join(runsDir, decl.RunID)
 		run := &VerifiedRun{
-			DeclaredRunID:   decl.RunID,
+			DeclaredRunID:    decl.RunID,
 			DeclaredScenario: decl.Scenario,
-			RunIndex:        i,
+			RunIndex:         i,
 		}
 
 		// Load manifest with strict JSON parsing
@@ -1252,7 +1252,7 @@ func BuildVerifiedRunsFromMatrix(matrixDir string, manifest *MatrixManifest, cle
 		run.SubjectPID = pid
 		run.SubjectStartTime = startTime
 
-			// P0-1 FIX: Hydrate cleanup status from cleanup evidence
+		// P0-1 FIX: Hydrate cleanup status from cleanup evidence
 		if cleanup != nil && i < len(cleanup.Runs) {
 			rec := cleanup.Runs[i]
 			run.ContainerName = rec.Container.Name

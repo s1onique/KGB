@@ -51,6 +51,29 @@ var (
 	_ DockerExecAPI      = (*client.Client)(nil)
 )
 
+// ControlConstructionError reports a typed failure while binding the real
+// Docker exec API to the canonical control path.
+type ControlConstructionError struct {
+	Cause error
+}
+
+func (e *ControlConstructionError) Error() string {
+	return "dockerlab: construct Docker control: " + e.Cause.Error()
+}
+
+func (e *ControlConstructionError) Unwrap() error { return e.Cause }
+
+var ErrDockerExecClientRequired = errors.New("dockerlab: Docker exec client required")
+
+// NewDockerControl binds a Docker exec API exactly once to the production
+// transport and canonical ControlRunner.
+func NewDockerControl(client DockerExecAPI) (*ControlRunner, error) {
+	if client == nil {
+		return nil, &ControlConstructionError{Cause: ErrDockerExecClientRequired}
+	}
+	return NewControlRunner(&ProductionControlExecRuntime{Client: client}), nil
+}
+
 type ProductionControlExecRuntime struct {
 	Client DockerExecAPI
 }
@@ -60,7 +83,7 @@ func (p *ProductionControlExecRuntime) ExecCreate(ctx context.Context, container
 		return "", ErrContainerIDRequired
 	}
 	if p == nil || p.Client == nil {
-		return "", errors.New("dockerlab: Docker exec client required")
+		return "", ErrDockerExecClientRequired
 	}
 	response, err := p.Client.ContainerExecCreate(ctx, containerID, types.ExecConfig{
 		Cmd:          append([]string(nil), opts.Command...),
@@ -86,7 +109,7 @@ func (p *ProductionControlExecRuntime) ExecAttach(ctx context.Context, container
 		return nil, ErrExecIDRequired
 	}
 	if p == nil || p.Client == nil {
-		return nil, errors.New("dockerlab: Docker exec client required")
+		return nil, ErrDockerExecClientRequired
 	}
 	response, err := p.Client.ContainerExecAttach(ctx, execID, types.ExecStartCheck{Detach: false, Tty: false})
 	if err != nil {
@@ -109,7 +132,7 @@ func (p *ProductionControlExecRuntime) ExecInspect(ctx context.Context, containe
 		return ExecInspectResult{}, ErrExecIDRequired
 	}
 	if p == nil || p.Client == nil {
-		return ExecInspectResult{}, errors.New("dockerlab: Docker exec client required")
+		return ExecInspectResult{}, ErrDockerExecClientRequired
 	}
 	inspect, err := p.Client.ContainerExecInspect(ctx, execID)
 	if err != nil {

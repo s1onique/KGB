@@ -342,6 +342,14 @@ type QualifiedLifecycleOutcome struct {
 	Observations     *QualifiedExecutionObservations
 }
 
+// QualifiedLifecycleDependencies binds all authoritative lifecycle dependencies.
+type QualifiedLifecycleDependencies struct {
+	Runtime DockerRuntime
+	Control *ControlRunner
+}
+
+var ErrQualifiedControlRequired = errors.New("qualified lifecycle requires canonical control")
+
 // LifecycleOptions controls the production qualified lifecycle.
 type LifecycleOptions struct {
 	ImageReference string
@@ -417,6 +425,10 @@ func ExecuteQualifiedDockerLifecycle(
 	if cli == nil {
 		return nil, errors.New("docker client is nil")
 	}
+	control, err := NewDockerControl(cli.Client)
+	if err != nil {
+		return nil, err
+	}
 	audited := NewAuditedDockerRuntime(cli.Client)
 	terminalObs := opts.TerminalObserver
 	if terminalObs == nil {
@@ -424,24 +436,42 @@ func ExecuteQualifiedDockerLifecycle(
 			return waitForTerminalState(c, cli, id)
 		}
 	}
-	return executeQualifiedLifecycle(
-		ctx,
-		audited,
-		terminalObs,
-		opts,
-	)
+	return executeQualifiedLifecycleWithDependencies(ctx, QualifiedLifecycleDependencies{Runtime: audited, Control: control}, terminalObs, opts)
 }
 
 // executeQualifiedLifecycle is the runtime-agnostic core. It
 // accepts an already-installed AuditedDockerRuntime and a
 // terminal-state observer. Tests drive it directly with the
 // recording fake.
-func executeQualifiedLifecycle(
+func executeQualifiedLifecycle(ctx context.Context, audited *AuditedDockerRuntime, terminalObs func(context.Context, string) bool, opts LifecycleOptions) (*QualifiedLifecycleOutcome, error) {
+	return executeQualifiedLifecycleWithDependencies(ctx, QualifiedLifecycleDependencies{Runtime: audited, Control: NewControlRunner(noopControlRuntime{})}, terminalObs, opts)
+}
+
+type noopControlRuntime struct{}
+
+func (noopControlRuntime) ExecCreate(context.Context, string, ExecCreateOptions) (string, error) {
+	return "", ErrControlRuntimeRequired
+}
+func (noopControlRuntime) ExecAttach(context.Context, string, string) (ControlExecAttachment, error) {
+	return nil, ErrControlRuntimeRequired
+}
+func (noopControlRuntime) ExecInspect(context.Context, string, string) (ExecInspectResult, error) {
+	return ExecInspectResult{}, ErrControlRuntimeRequired
+}
+
+func executeQualifiedLifecycleWithDependencies(
 	ctx context.Context,
-	audited *AuditedDockerRuntime,
+	deps QualifiedLifecycleDependencies,
 	terminalObs func(context.Context, string) bool,
 	opts LifecycleOptions,
 ) (*QualifiedLifecycleOutcome, error) {
+	audited, ok := deps.Runtime.(*AuditedDockerRuntime)
+	if !ok || audited == nil {
+		return nil, errors.New("audited runtime is nil")
+	}
+	if deps.Control == nil {
+		return nil, ErrQualifiedControlRequired
+	}
 	if audited == nil {
 		return nil, errors.New("audited runtime is nil")
 	}

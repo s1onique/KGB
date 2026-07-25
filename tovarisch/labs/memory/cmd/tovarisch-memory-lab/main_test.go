@@ -67,9 +67,9 @@ func TestClassifyCgroupFailureWithReader_TargetTopLevelError(t *testing.T) {
 		}
 		// controller succeeds
 		return &procfs.NamespaceInfo{
-			MountNamespace:   "4026532135",
-			CgroupNamespace:  "4026532135",
-			MountNamespaceErr: nil,
+			MountNamespace:     "4026532135",
+			CgroupNamespace:    "4026532135",
+			MountNamespaceErr:  nil,
 			CgroupNamespaceErr: nil,
 		}, nil
 	}
@@ -96,9 +96,9 @@ func TestClassifyCgroupFailureWithReader_ControllerTopLevelError(t *testing.T) {
 			return nil, controllerError
 		}
 		return &procfs.NamespaceInfo{
-			MountNamespace:   "4026532135",
-			CgroupNamespace:  "4026532135",
-			MountNamespaceErr: nil,
+			MountNamespace:     "4026532135",
+			CgroupNamespace:    "4026532135",
+			MountNamespaceErr:  nil,
 			CgroupNamespaceErr: nil,
 		}, nil
 	}
@@ -185,10 +185,10 @@ func TestCollectProvenance_AllFieldsRequired(t *testing.T) {
 // TestValidateHexString tests hex string validation
 func TestValidateHexString(t *testing.T) {
 	validCases := []string{
-		"abcd1234abcd1234abcd1234abcd1234abcd1234",                                          // 40 hex (git commit)
-		"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",                 // 64 hex (SHA256)
-		"DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF",                 // uppercase
-		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123",            // mixed
+		"abcd1234abcd1234abcd1234abcd1234abcd1234",                             // 40 hex (git commit)
+		"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",     // 64 hex (SHA256)
+		"DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF",     // uppercase
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123", // mixed
 	}
 
 	for _, input := range validCases {
@@ -198,8 +198,8 @@ func TestValidateHexString(t *testing.T) {
 	}
 
 	invalidCases := []string{
-		"xyz12345xyz12345xyz12345xyz12345xyz12345",  // non-hex chars
-		"gggggggggggggggggggggggggggggggggggggggg",   // invalid hex chars
+		"xyz12345xyz12345xyz12345xyz12345xyz12345",     // non-hex chars
+		"gggggggggggggggggggggggggggggggggggggggg",     // invalid hex chars
 		"abcd-1234-abcd-1234-abcd-1234-abcd-1234-abcd", // dashes
 	}
 
@@ -300,7 +300,7 @@ func TestValidateProvenanceEvidence_RejectsInvalidFields(t *testing.T) {
 				}(),
 				HostID: &evidence.HostIdentity{CollectionStatus: "complete"},
 			},
-			verdict:  &evidence.Verdict{ProvenanceValid: true, ProvenanceError: ""},
+			verdict: &evidence.Verdict{ProvenanceValid: true, ProvenanceError: ""},
 			// git_commit empty AND git_object_format consistency fails (commit len 0 != 20)
 			wantErrs: 2,
 		},
@@ -314,7 +314,7 @@ func TestValidateProvenanceEvidence_RejectsInvalidFields(t *testing.T) {
 				}(),
 				HostID: &evidence.HostIdentity{CollectionStatus: "complete"},
 			},
-			verdict:  &evidence.Verdict{ProvenanceValid: true, ProvenanceError: ""},
+			verdict: &evidence.Verdict{ProvenanceValid: true, ProvenanceError: ""},
 			// git_commit not-hex AND git_object_format consistency fails (hex decode fails)
 			wantErrs: 2,
 		},
@@ -328,7 +328,7 @@ func TestValidateProvenanceEvidence_RejectsInvalidFields(t *testing.T) {
 				}(),
 				HostID: &evidence.HostIdentity{CollectionStatus: "complete"},
 			},
-			verdict:  &evidence.Verdict{ProvenanceValid: true, ProvenanceError: ""},
+			verdict: &evidence.Verdict{ProvenanceValid: true, ProvenanceError: ""},
 			// git_commit wrong length AND git_object_format consistency fails (hex decode fails)
 			wantErrs: 2,
 		},
@@ -419,17 +419,17 @@ func TestClassifyCgroupFailureWithReader_MountNamespaceMismatch(t *testing.T) {
 	fakeReader := func(pid int) (*procfs.NamespaceInfo, error) {
 		if pid == 1234 {
 			return &procfs.NamespaceInfo{
-				MountNamespace:   "4026532135",
-				CgroupNamespace:  "4026532135",
-				MountNamespaceErr: nil,
+				MountNamespace:     "4026532135",
+				CgroupNamespace:    "4026532135",
+				MountNamespaceErr:  nil,
 				CgroupNamespaceErr: nil,
 			}, nil
 		}
 		// Controller has different mount namespace
 		return &procfs.NamespaceInfo{
-			MountNamespace:   "4026532999",
-			CgroupNamespace:  "4026532135",
-			MountNamespaceErr: nil,
+			MountNamespace:     "4026532999",
+			CgroupNamespace:    "4026532135",
+			MountNamespaceErr:  nil,
 			CgroupNamespaceErr: nil,
 		}, nil
 	}
@@ -452,17 +452,17 @@ func TestClassifyCgroupFailureWithReader_CgroupNamespaceMismatch(t *testing.T) {
 	fakeReader := func(pid int) (*procfs.NamespaceInfo, error) {
 		if pid == 1234 {
 			return &procfs.NamespaceInfo{
-				MountNamespace:   "4026532135",
-				CgroupNamespace:  "4026532135",
-				MountNamespaceErr: nil,
+				MountNamespace:     "4026532135",
+				CgroupNamespace:    "4026532135",
+				MountNamespaceErr:  nil,
 				CgroupNamespaceErr: nil,
 			}, nil
 		}
 		// Controller has different cgroup namespace
 		return &procfs.NamespaceInfo{
-			MountNamespace:   "4026532135",
-			CgroupNamespace:  "4026532999",
-			MountNamespaceErr: nil,
+			MountNamespace:     "4026532135",
+			CgroupNamespace:    "4026532999",
+			MountNamespaceErr:  nil,
 			CgroupNamespaceErr: nil,
 		}, nil
 	}
@@ -485,9 +485,9 @@ func TestClassifyCgroupFailureWithReader_NamespacesEqual(t *testing.T) {
 	fakeReader := func(pid int) (*procfs.NamespaceInfo, error) {
 		// Both processes in same namespace
 		return &procfs.NamespaceInfo{
-			MountNamespace:   "4026532135",
-			CgroupNamespace:  "4026532135",
-			MountNamespaceErr: nil,
+			MountNamespace:     "4026532135",
+			CgroupNamespace:    "4026532135",
+			MountNamespaceErr:  nil,
 			CgroupNamespaceErr: nil,
 		}, nil
 	}
@@ -510,9 +510,9 @@ func TestClassifyCgroupFailureWithReader_EmptyNamespaceValues(t *testing.T) {
 	fakeReader := func(pid int) (*procfs.NamespaceInfo, error) {
 		// Returns nil errors but empty namespace values
 		return &procfs.NamespaceInfo{
-			MountNamespace:    "",
-			CgroupNamespace:   "",
-			MountNamespaceErr: nil,
+			MountNamespace:     "",
+			CgroupNamespace:    "",
+			MountNamespaceErr:  nil,
 			CgroupNamespaceErr: nil,
 		}, nil
 	}
@@ -534,9 +534,9 @@ func TestVerifierRequiresValidGitCommitLength(t *testing.T) {
 		commit    string
 		wantError bool
 	}{
-		{"", true},                                             // empty
-		{"abc", true},                                          // too short
-		{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true},   // 40 chars
+		{"", true},    // empty
+		{"abc", true}, // too short
+		{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true}, // 40 chars
 		{"abcd1234abcd1234abcd1234abcd1234abcd1234", false},    // 40 chars valid
 	}
 
@@ -563,7 +563,7 @@ func TestVerifierRequiresValidExecutableHashLength(t *testing.T) {
 		hash      string
 		wantError bool
 	}{
-		{"", true},  // empty
+		{"", true},    // empty
 		{"abc", true}, // too short
 		{"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef", false}, // 64 chars valid
 	}
@@ -642,7 +642,7 @@ func TestValidateGitObjectFormatConsistency_NoFormatSpecified(t *testing.T) {
 	subject := &evidence.SubjectIdentity{
 		GitCommit:       strings.Repeat("a", 40), // SHA-1
 		GitTree:         strings.Repeat("b", 40), // SHA-1
-		GitObjectFormat: "",                     // Not specified
+		GitObjectFormat: "",                      // Not specified
 	}
 	err := validateGitObjectFormatConsistency(subject)
 	if err == nil {
@@ -774,10 +774,10 @@ func TestValidateSHA256_Empty(t *testing.T) {
 func TestValidateProvenanceEvidence_GitObjectFormatSHA1Consistent(t *testing.T) {
 	manifest := evidence.Manifest{
 		SubjectIdentity: &evidence.SubjectIdentity{
-			GitCommit:               strings.Repeat("a", 40),
-			GitTree:                 strings.Repeat("b", 40),
-			GitObjectFormat:         "sha1",
-			ControllerExecutablePath: "/path/to/binary",
+			GitCommit:                  strings.Repeat("a", 40),
+			GitTree:                    strings.Repeat("b", 40),
+			GitObjectFormat:            "sha1",
+			ControllerExecutablePath:   "/path/to/binary",
 			ControllerExecutableSHA256: strings.Repeat("a", 64),
 		},
 		HostID: &evidence.HostIdentity{
@@ -796,10 +796,10 @@ func TestValidateProvenanceEvidence_GitObjectFormatSHA1Consistent(t *testing.T) 
 func TestValidateProvenanceEvidence_GitObjectFormatSHA256Consistent(t *testing.T) {
 	manifest := evidence.Manifest{
 		SubjectIdentity: &evidence.SubjectIdentity{
-			GitCommit:               strings.Repeat("a", 64),
-			GitTree:                 strings.Repeat("b", 64),
-			GitObjectFormat:         "sha256",
-			ControllerExecutablePath: "/path/to/binary",
+			GitCommit:                  strings.Repeat("a", 64),
+			GitTree:                    strings.Repeat("b", 64),
+			GitObjectFormat:            "sha256",
+			ControllerExecutablePath:   "/path/to/binary",
 			ControllerExecutableSHA256: strings.Repeat("a", 64),
 		},
 		HostID: &evidence.HostIdentity{
@@ -819,10 +819,10 @@ func TestValidateProvenanceEvidence_GitObjectFormatInconsistent(t *testing.T) {
 	// sha1 format but tree is wrong length
 	manifest := evidence.Manifest{
 		SubjectIdentity: &evidence.SubjectIdentity{
-			GitCommit:               strings.Repeat("a", 40),
-			GitTree:                 strings.Repeat("b", 64), // Wrong length
-			GitObjectFormat:         "sha1",
-			ControllerExecutablePath: "/path/to/binary",
+			GitCommit:                  strings.Repeat("a", 40),
+			GitTree:                    strings.Repeat("b", 64), // Wrong length
+			GitObjectFormat:            "sha1",
+			ControllerExecutablePath:   "/path/to/binary",
 			ControllerExecutableSHA256: strings.Repeat("a", 64),
 		},
 		HostID: &evidence.HostIdentity{
@@ -851,10 +851,10 @@ func TestValidateProvenanceEvidence_GitObjectFormatInconsistent(t *testing.T) {
 func TestValidateProvenanceEvidence_UnsupportedGitObjectFormat(t *testing.T) {
 	manifest := evidence.Manifest{
 		SubjectIdentity: &evidence.SubjectIdentity{
-			GitCommit:               strings.Repeat("a", 40),
-			GitTree:                 strings.Repeat("b", 40),
-			GitObjectFormat:         "md5", // Unsupported
-			ControllerExecutablePath: "/path/to/binary",
+			GitCommit:                  strings.Repeat("a", 40),
+			GitTree:                    strings.Repeat("b", 40),
+			GitObjectFormat:            "md5", // Unsupported
+			ControllerExecutablePath:   "/path/to/binary",
 			ControllerExecutableSHA256: strings.Repeat("a", 64),
 		},
 		HostID: &evidence.HostIdentity{

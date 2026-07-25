@@ -70,23 +70,23 @@ type Manifest struct {
 
 // SubjectIdentity captures the subject's identity for binding.
 type SubjectIdentity struct {
-	GitCommit                    string `json:"git_commit,omitempty"`
-	GitTree                      string `json:"git_tree,omitempty"`
-	GitObjectFormat              string `json:"git_object_format,omitempty"` // "sha1" or "sha256"
-	Version                      string `json:"version,omitempty"`
-	ImageID                      string `json:"image_id,omitempty"`
-	ImageDigest                  string `json:"image_digest,omitempty"`
-	ControllerExecutablePath     string `json:"controller_executable_path,omitempty"`
-	ControllerExecutableSHA256  string `json:"controller_executable_sha256,omitempty"`
-	ExecHash                    string `json:"exec_hash,omitempty"`
-	ConfigHash                  string `json:"config_hash,omitempty"`
+	GitCommit                  string `json:"git_commit,omitempty"`
+	GitTree                    string `json:"git_tree,omitempty"`
+	GitObjectFormat            string `json:"git_object_format,omitempty"` // "sha1" or "sha256"
+	Version                    string `json:"version,omitempty"`
+	ImageID                    string `json:"image_id,omitempty"`
+	ImageDigest                string `json:"image_digest,omitempty"`
+	ControllerExecutablePath   string `json:"controller_executable_path,omitempty"`
+	ControllerExecutableSHA256 string `json:"controller_executable_sha256,omitempty"`
+	ExecHash                   string `json:"exec_hash,omitempty"`
+	ConfigHash                 string `json:"config_hash,omitempty"`
 }
 
 // HostIdentity captures the host environment.
 type HostIdentity struct {
 	KernelRelease    string `json:"kernel_release"`
 	KernelVersion    string `json:"kernel_version,omitempty"`
-	CgroupMode      string `json:"cgroup_mode"`
+	CgroupMode       string `json:"cgroup_mode"`
 	CollectionStatus string `json:"collection_status,omitempty"`
 }
 
@@ -112,15 +112,15 @@ type LabConfiguration struct {
 type SubjectImageIdentity struct {
 	// Image identity (actual docker image inspect output, never
 	// synthesized).
-	ImageReference     string   `json:"image_reference,omitempty"`
-	ImageID            string   `json:"image_id,omitempty"`
-	RepoDigests        []string `json:"repo_digests,omitempty"`
-	RepoDigestStatus   string   `json:"repo_digest_status,omitempty"` // "available" | "unavailable_local_image"
+	ImageReference   string   `json:"image_reference,omitempty"`
+	ImageID          string   `json:"image_id,omitempty"`
+	RepoDigests      []string `json:"repo_digests,omitempty"`
+	RepoDigestStatus string   `json:"repo_digest_status,omitempty"` // "available" | "unavailable_local_image"
 
 	// Source-tree binding (captured at image-build time via
 	// `git rev-parse`).
-	SourceCommitOID      string `json:"source_commit_oid,omitempty"`
-	RepositoryTreeOID    string `json:"repository_tree_oid,omitempty"`
+	SourceCommitOID        string `json:"source_commit_oid,omitempty"`
+	RepositoryTreeOID      string `json:"repository_tree_oid,omitempty"`
 	CanarySourceSubtreeOID string `json:"canary_source_subtree_oid,omitempty"`
 
 	// Binary hash binding. PrebuildBinarySHA256 is computed
@@ -128,16 +128,16 @@ type SubjectImageIdentity struct {
 	// computed by `docker create` + `docker cp` + `sha256sum`
 	// of /app/canary inside the built image. The two MUST be
 	// equal; the producer fails closed if they disagree.
-	PrebuildBinarySHA256        string `json:"prebuild_binary_sha256,omitempty"`
-	ExtractedImageBinarySHA256  string `json:"extracted_image_binary_sha256,omitempty"`
+	PrebuildBinarySHA256       string `json:"prebuild_binary_sha256,omitempty"`
+	ExtractedImageBinarySHA256 string `json:"extracted_image_binary_sha256,omitempty"`
 
 	// OCI + kgb.dev provenance labels captured at build time.
 	// Verified against the source-tree identity and the
 	// extracted binary hash.
-	RevisionLabel         string `json:"revision_label,omitempty"`
-	RepositoryTreeLabel   string `json:"repository_tree_label,omitempty"`
-	SourceSubtreeLabel    string `json:"source_subtree_label,omitempty"`
-	BinarySHA256Label     string `json:"binary_sha256_label,omitempty"`
+	RevisionLabel       string `json:"revision_label,omitempty"`
+	RepositoryTreeLabel string `json:"repository_tree_label,omitempty"`
+	SourceSubtreeLabel  string `json:"source_subtree_label,omitempty"`
+	BinarySHA256Label   string `json:"binary_sha256_label,omitempty"`
 
 	// Container image ID (after `docker create`).
 	ContainerImageID string `json:"container_image_id,omitempty"`
@@ -145,20 +145,20 @@ type SubjectImageIdentity struct {
 
 // Verdict represents the verdict.json structure.
 type Verdict struct {
-	OverallClassification  analysis.Classification        `json:"overall_classification"`
-	Scenario               string                `json:"scenario"`
-	ScenarioValid          bool                  `json:"scenario_valid"`
-	CanariesValid          bool                  `json:"canaries_valid"`
-	MemoryClassification   analysis.Classification       `json:"memory_classification"`
-	ResourceClassification analysis.Classification       `json:"resource_classification"`
-	SemanticClassification analysis.Classification       `json:"semantic_classification"`
-	SignalSummaries        []analysis.SignalSummary       `json:"signal_summaries"`
-	Thresholds             *analysis.Thresholds           `json:"thresholds"`
-	Failures               []string              `json:"failures,omitempty"`
-	Warnings               []string              `json:"warnings,omitempty"`
-	Unknowns               []string              `json:"unknowns,omitempty"`
-	ProvenanceValid        bool                  `json:"provenance_valid"`
-	ProvenanceError        string                `json:"provenance_error,omitempty"`
+	OverallClassification  analysis.Classification  `json:"overall_classification"`
+	Scenario               string                   `json:"scenario"`
+	ScenarioValid          bool                     `json:"scenario_valid"`
+	CanariesValid          bool                     `json:"canaries_valid"`
+	MemoryClassification   analysis.Classification  `json:"memory_classification"`
+	ResourceClassification analysis.Classification  `json:"resource_classification"`
+	SemanticClassification analysis.Classification  `json:"semantic_classification"`
+	SignalSummaries        []analysis.SignalSummary `json:"signal_summaries"`
+	Thresholds             *analysis.Thresholds     `json:"thresholds"`
+	Failures               []string                 `json:"failures,omitempty"`
+	Warnings               []string                 `json:"warnings,omitempty"`
+	Unknowns               []string                 `json:"unknowns,omitempty"`
+	ProvenanceValid        bool                     `json:"provenance_valid"`
+	ProvenanceError        string                   `json:"provenance_error,omitempty"`
 }
 
 // WriteManifest writes the manifest.json file.

@@ -15,8 +15,8 @@ import (
 
 // mockNamespaceInfo mirrors procfs.NamespaceInfo for test fixtures.
 type mockNamespaceInfo struct {
-	mountNS      string
-	cgroupNS     string
+	mountNS     string
+	cgroupNS    string
 	mountNSErr  error
 	cgroupNSErr error
 }
@@ -26,9 +26,9 @@ func fakeNamespaceReader(responses map[int]*mockNamespaceInfo) namespaceReader {
 	return func(pid int) (*procfs.NamespaceInfo, error) {
 		if mock, ok := responses[pid]; ok && mock != nil {
 			ns := &procfs.NamespaceInfo{
-				MountNamespace:   mock.mountNS,
-				CgroupNamespace:  mock.cgroupNS,
-				MountNamespaceErr: mock.mountNSErr,
+				MountNamespace:     mock.mountNS,
+				CgroupNamespace:    mock.cgroupNS,
+				MountNamespaceErr:  mock.mountNSErr,
 				CgroupNamespaceErr: mock.cgroupNSErr,
 			}
 			return ns, nil

@@ -528,8 +528,8 @@ func TestOverflowWriter_MultipleWrites(t *testing.T) {
 		limit: 10,
 	}
 
-	w.Write([]byte("hello"))  // 5 bytes
-	w.Write([]byte("world"))  // 5 bytes
+	w.Write([]byte("hello")) // 5 bytes
+	w.Write([]byte("world")) // 5 bytes
 	if w.HasOverflow() {
 		t.Error("should not overflow at limit")
 	}

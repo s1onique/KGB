@@ -1,0 +1,1 @@
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	0.008s

@@ -113,10 +113,10 @@ type MatrixVerificationResult struct {
 	StoredVerdict        *MatrixVerdict
 	ReconstructedVerdict *MatrixVerdict
 	VerifiedRuns         []*VerifiedRun
-	Cleanup             *MatrixCleanupEvidence
-	AllChildrenVerified bool
-	ChecksumVerified    bool
-	CleanupValid        bool
+	Cleanup              *MatrixCleanupEvidence
+	AllChildrenVerified  bool
+	ChecksumVerified     bool
+	CleanupValid         bool
 }
 
 // MatrixVerificationDeps holds dependencies for matrix verification.
@@ -537,11 +537,11 @@ func validateRunCleanupRecord(rec RunCleanupRecord, run *VerifiedRun) bool {
 // VerifyDeclaredChildBundles authoritatively verifies all child bundles WITHOUT
 // requiring cleanup evidence. This enables the correct producer authority order:
 //
-//   1. verify child artifacts (checksums, inventory, manifests, identities)
-//   2. observe runtime cleanup state
-//   3. write cleanup evidence
-//   4. bind cleanup to verified runs
-//   5. reconstruct and verify matrix verdict
+//  1. verify child artifacts (checksums, inventory, manifests, identities)
+//  2. observe runtime cleanup state
+//  3. write cleanup evidence
+//  4. bind cleanup to verified runs
+//  5. reconstruct and verify matrix verdict
 //
 // Returns verified runs with runtime identities populated from child artifacts.
 // Each VerifiedRun has ChildVerified=true on success.
@@ -686,10 +686,10 @@ func VerifyDeclaredChildBundles(
 
 		// Build VerifiedRun from VerifiedChildBundle
 		vr := &VerifiedRun{
-			DeclaredRunID:     decl.RunID,
-			DeclaredScenario:  decl.Scenario,
+			DeclaredRunID:    decl.RunID,
+			DeclaredScenario: decl.Scenario,
 			RunIndex:         i,
-			ActualManifest:    child.Manifest,
+			ActualManifest:   child.Manifest,
 			ActualVerdict:    child.Verdict,
 			ContainerID:      child.ContainerID,
 			ContainerName:    child.ContainerName,
@@ -993,8 +993,8 @@ func BindVerifiedRunsToCleanup(
 
 		// Clone the VerifiedRun to avoid mutation
 		hydratedRun := &VerifiedRun{
-			DeclaredRunID:          vr.DeclaredRunID,
-			DeclaredScenario:       vr.DeclaredScenario,
+			DeclaredRunID:         vr.DeclaredRunID,
+			DeclaredScenario:      vr.DeclaredScenario,
 			RunIndex:              vr.RunIndex,
 			ActualManifest:        vr.ActualManifest,
 			ActualVerdict:         vr.ActualVerdict,
@@ -1028,8 +1028,8 @@ func BindVerifiedRunsToCleanup(
 
 // VerifyDeclaredChildRuns is the single authoritative function for child verification.
 // It is a COMPOSITE wrapper that calls exactly two phases:
-//   1. VerifyDeclaredChildBundles - verifies child artifacts (no cleanup required)
-//   2. BindVerifiedRunsToCleanup  - binds cleanup evidence to verified runs
+//  1. VerifyDeclaredChildBundles - verifies child artifacts (no cleanup required)
+//  2. BindVerifiedRunsToCleanup  - binds cleanup evidence to verified runs
 //
 // Both producer and verifier MUST use this function for child verification.
 // No independent verification loop may remain inside this function.
@@ -1203,39 +1203,39 @@ func CompareVerdictsComplete(stored, reconstructed *MatrixVerdict) ([]VerdictDif
 	// Top-level fields
 	if stored.MatrixID != reconstructed.MatrixID {
 		diffs = append(diffs, VerdictDiff{
-			Path:           "matrix_id",
-			Stored:         stored.MatrixID,
-			Reconstructed:  reconstructed.MatrixID,
+			Path:          "matrix_id",
+			Stored:        stored.MatrixID,
+			Reconstructed: reconstructed.MatrixID,
 		})
 	}
 	// P0-8 FIX: Check matrix_valid for normal mismatch (stored != reconstructed).
 	// The equal-invalid case (both false) is handled separately below.
 	if stored.MatrixValid != reconstructed.MatrixValid {
 		diffs = append(diffs, VerdictDiff{
-			Path:           "matrix_valid",
-			Stored:         fmt.Sprintf("%v", stored.MatrixValid),
-			Reconstructed:  fmt.Sprintf("%v", reconstructed.MatrixValid),
+			Path:          "matrix_valid",
+			Stored:        fmt.Sprintf("%v", stored.MatrixValid),
+			Reconstructed: fmt.Sprintf("%v", reconstructed.MatrixValid),
 		})
 	}
 	if stored.ChecksTotal != reconstructed.ChecksTotal {
 		diffs = append(diffs, VerdictDiff{
-			Path:           "checks_total",
-			Stored:         fmt.Sprintf("%d", stored.ChecksTotal),
-			Reconstructed:  fmt.Sprintf("%d", reconstructed.ChecksTotal),
+			Path:          "checks_total",
+			Stored:        fmt.Sprintf("%d", stored.ChecksTotal),
+			Reconstructed: fmt.Sprintf("%d", reconstructed.ChecksTotal),
 		})
 	}
 	if stored.ChecksPassed != reconstructed.ChecksPassed {
 		diffs = append(diffs, VerdictDiff{
-			Path:           "checks_passed",
-			Stored:         fmt.Sprintf("%d", stored.ChecksPassed),
-			Reconstructed:  fmt.Sprintf("%d", reconstructed.ChecksPassed),
+			Path:          "checks_passed",
+			Stored:        fmt.Sprintf("%d", stored.ChecksPassed),
+			Reconstructed: fmt.Sprintf("%d", reconstructed.ChecksPassed),
 		})
 	}
 	if stored.ChecksFailed != reconstructed.ChecksFailed {
 		diffs = append(diffs, VerdictDiff{
-			Path:           "checks_failed",
-			Stored:         fmt.Sprintf("%d", stored.ChecksFailed),
-			Reconstructed:  fmt.Sprintf("%d", reconstructed.ChecksFailed),
+			Path:          "checks_failed",
+			Stored:        fmt.Sprintf("%d", stored.ChecksFailed),
+			Reconstructed: fmt.Sprintf("%d", reconstructed.ChecksFailed),
 		})
 	}
 

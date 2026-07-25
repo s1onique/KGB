@@ -75,13 +75,15 @@ func buildValidObservations() *dockerlab.QualifiedExecutionObservations {
 		},
 		// CORRECTION27: Valid reachability observations
 		Reachability: dockerlab.ReachabilityObservations{
-			Method:      dockerlab.ReachabilityMethodDockerExec,
-			NetworkID:   validCanonicalNetworkID,
-			ExecExitCode: 0,
-			TargetHost: "localhost",
-			TargetPort: 8080,
-			HTTPResponseCode: 200,
-			Success:    true,
+			Method:       dockerlab.ReachabilityMethodDockerExec,
+			NetworkID:    validCanonicalNetworkID,
+			TargetHost:   "127.0.0.1",
+			TargetPort:   8080,
+			Health:       dockerlab.ReachabilityOperationObservation{Operation: "health", ExecExitCode: 0, HTTPStatus: 200, ResponseValidated: true, Mode: "growing"},
+			InitialState: dockerlab.ReachabilityOperationObservation{Operation: "state", ExecExitCode: 0, HTTPStatus: 200, ResponseValidated: true, Mode: "growing"},
+			Operate:      dockerlab.ReachabilityOperateObservation{Operation: "operate", ExecExitCode: 0, HTTPStatus: 200, Requested: 5, Attempted: 5, Completed: 5, ResponseValidated: true},
+			FinalState:   dockerlab.ReachabilityOperationObservation{Operation: "state", ExecExitCode: 0, HTTPStatus: 200, ResponseValidated: true, Mode: "growing"},
+			Success:      true,
 		},
 	}
 }
@@ -507,11 +509,11 @@ func TestVerifyQualifiedExecutionBytes_MissingImageObjectFails(t *testing.T) {
 // TestVerifyQualifiedExecutionBytes_RoundTripPersisted exercises the
 // full persistence loop with the canonical happy-path fixture.
 // It must:
-//   1. pass the same ev to persistence;
-//   2. read the exact output path;
-//   3. unmarshal those exact bytes;
-//   4. assert the four physical claims are true;
-//   5. pass those exact bytes to the independent bytes verifier.
+//  1. pass the same ev to persistence;
+//  2. read the exact output path;
+//  3. unmarshal those exact bytes;
+//  4. assert the four physical claims are true;
+//  5. pass those exact bytes to the independent bytes verifier.
 func TestVerifyQualifiedExecutionBytes_RoundTripPersisted(t *testing.T) {
 	ev := buildValidEvidence()
 	if err := PersistQualifiedExecutionEvidence("/tmp", ev); err != nil {

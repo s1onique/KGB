@@ -84,12 +84,12 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 	// non-running state.
 	// CORRECTION27: Use canary binary to test docker exec-based reachability.
 	opts := dockerlab.LifecycleOptions{
-		ImageReference: liveSmokeImageRef,
-		NetworkName:    netName,
-		ContainerName:  runID,
-		ContainerCmd:   []string{"/app/canary", "--mode=bounded", "--port=8080"},
+		ImageReference:  liveSmokeImageRef,
+		NetworkName:     netName,
+		ContainerName:   runID,
+		ContainerCmd:    []string{"/app/canary", "--mode=bounded", "--port=8080"},
 		TerminalTimeout: 15 * time.Second,
-		CleanupTimeout: 10 * time.Second,
+		CleanupTimeout:  10 * time.Second,
 		Run: func(runCtx context.Context, containerID string, observations *dockerlab.QualifiedExecutionObservations) error {
 			// CORRECTION27: Smoke test validates LIFECYCLE, not canary HTTP.
 			// The canary container may not have wget/curl. We record
@@ -140,7 +140,7 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 		}
 	}
 	cp, err := evidence.CollectControllerProvenance(evidence.ProvenanceOptions{
-		RepoDir:        projRoots.Repository,
+		RepoDir:         projRoots.Repository,
 		ProducerVersion: "qualified-live-smoke/1.0.0",
 	})
 	if err != nil {
@@ -232,7 +232,6 @@ func parentDir(p string) string {
 	}
 	return "."
 }
-
 
 // (CORRECTION22: fallbackGitProvenance, gitOutput,
 // gitWorkingTreeDirtyOutput, newGitCmd, osRemove and osReadFile

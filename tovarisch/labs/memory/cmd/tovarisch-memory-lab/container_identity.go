@@ -28,8 +28,8 @@ import (
 // This is the schema-versioned projection used for binding and verification.
 type ContainerIdentity struct {
 	SchemaVersion string `json:"schema_version"` // "1.0.0"
-	ID           string `json:"id"`             // Full container ID
-	Name         string `json:"name"`           // Container name (without leading /)
+	ID            string `json:"id"`             // Full container ID
+	Name          string `json:"name"`           // Container name (without leading /)
 }
 
 // SupportedContainerIdentityVersions defines supported schema versions.
@@ -73,8 +73,8 @@ func ProjectContainerIdentity(inspectData []byte) (*ContainerIdentity, error) {
 
 	return &ContainerIdentity{
 		SchemaVersion: "1.0.0",
-		ID:           id,
-		Name:         name,
+		ID:            id,
+		Name:          name,
 	}, nil
 }
 
@@ -86,8 +86,8 @@ func ProjectContainerIdentity(inspectData []byte) (*ContainerIdentity, error) {
 func WriteContainerIdentity(runDir, containerID, containerName string) error {
 	identity := ContainerIdentity{
 		SchemaVersion: "1.0.0",
-		ID:           containerID,
-		Name:         containerName,
+		ID:            containerID,
+		Name:          containerName,
 	}
 
 	data, err := json.MarshalIndent(identity, "", "  ")
@@ -168,7 +168,7 @@ var CanonicalChildArtifactInventory = []string{
 	"final-canary-state.json",
 	"initial-canary-state.json",
 	"manifest.json",
-	"network-identity.json",   // P0-5 FIX: Network identity is mandatory in per_run mode
+	"network-identity.json", // P0-5 FIX: Network identity is mandatory in per_run mode
 	"samples.csv",
 	"verdict.json",
 	"workload-result.json",

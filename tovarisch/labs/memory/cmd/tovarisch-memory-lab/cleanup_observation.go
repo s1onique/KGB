@@ -537,10 +537,10 @@ var ValidNetworkStatus = map[string]bool{
 
 // ValidProcessStatus defines allowed process cleanup statuses.
 var ValidProcessStatus = map[string]bool{
-	"gone":           true,
-	"pid_reused":     true,
-	"still_alive":    true,
-	"unavailable":    true,
+	"gone":        true,
+	"pid_reused":  true,
+	"still_alive": true,
+	"unavailable": true,
 }
 
 // BuildObservedMatrixCleanupEvidence constructs cleanup evidence exclusively from observations.
@@ -687,10 +687,10 @@ func BuildObservedMatrixCleanupEvidence(
 
 	return &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        matrixID,
-		ObservedAt:      observedAt,
+		MatrixID:         matrixID,
+		ObservedAt:       observedAt,
 		NetworkOwnership: networkOwnership,
-		Runs:            records,
+		Runs:             records,
 	}, nil
 }
 

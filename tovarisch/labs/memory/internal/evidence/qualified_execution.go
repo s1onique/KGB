@@ -43,6 +43,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/canarycontrol"
 	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab"
 )
 
@@ -78,17 +79,34 @@ const (
 	ReachabilityMethodUnknown    ReachabilityMethod = "unknown"
 )
 
-// ReachabilityObservations mirrors dockerlab.ReachabilityObservations.
-// CORRECTION27 P0-2.
+type ReachabilityOperationObservation struct {
+	Operation         canarycontrol.Operation `json:"operation"`
+	ExecExitCode      int                     `json:"exec_exit_code"`
+	HTTPStatus        int                     `json:"http_status"`
+	ResponseValidated bool                    `json:"response_validated"`
+	Mode              string                  `json:"mode,omitempty"`
+}
+
+type ReachabilityOperateObservation struct {
+	Operation         canarycontrol.Operation `json:"operation"`
+	ExecExitCode      int                     `json:"exec_exit_code"`
+	HTTPStatus        int                     `json:"http_status"`
+	Requested         int                     `json:"requested"`
+	Attempted         int                     `json:"attempted"`
+	Completed         int                     `json:"completed"`
+	ResponseValidated bool                    `json:"response_validated"`
+}
+
 type ReachabilityObservations struct {
-	Method           ReachabilityMethod `json:"method"`
-	TargetHost       string             `json:"target_host,omitempty"`
-	TargetPort       int                `json:"target_port,omitempty"`
-	NetworkID        string             `json:"network_id,omitempty"`
-	HTTPResponseCode int                `json:"http_response_code,omitempty"`
-	ExecExitCode     int                `json:"exec_exit_code,omitempty"`
-	Success          bool               `json:"success"`
-	FailureReason    string             `json:"failure_reason,omitempty"`
+	Method       ReachabilityMethod               `json:"method"`
+	NetworkID    string                           `json:"network_id"`
+	TargetHost   string                           `json:"target_host"`
+	TargetPort   int                              `json:"target_port"`
+	Health       ReachabilityOperationObservation `json:"health"`
+	InitialState ReachabilityOperationObservation `json:"initial_state"`
+	Operate      ReachabilityOperateObservation   `json:"operate"`
+	FinalState   ReachabilityOperationObservation `json:"final_state"`
+	Success      bool                             `json:"success"`
 }
 
 // ImageObservations mirrors dockerlab.ImageObservations.
@@ -113,9 +131,9 @@ type NetworkObservations struct {
 // PullObservations mirrors dockerlab.PullObservations.
 type PullObservations struct {
 	ObservationAvailable bool   `json:"observation_available"`
-	Attempted           bool   `json:"attempted"`
-	AttemptCount        int    `json:"attempt_count"`
-	LastReference       string `json:"last_reference,omitempty"`
+	Attempted            bool   `json:"attempted"`
+	AttemptCount         int    `json:"attempt_count"`
+	LastReference        string `json:"last_reference,omitempty"`
 }
 
 // ContainerObservations mirrors dockerlab.ContainerObservations.
@@ -143,13 +161,13 @@ type ProvenanceBinding struct {
 
 // QualifiedExecutionEvidence is the canonical persisted evidence.
 type QualifiedExecutionEvidence struct {
-	SchemaVersion string                `json:"schema_version"`
-	GeneratedAt   time.Time             `json:"generated_at"`
-	Image         ImageObservations     `json:"image"`
-	Network       NetworkObservations   `json:"network"`
-	Pull          PullObservations     `json:"pull"`
-	Container     ContainerObservations `json:"container"`
-	Provenance    ProvenanceBinding     `json:"provenance"`
+	SchemaVersion string                   `json:"schema_version"`
+	GeneratedAt   time.Time                `json:"generated_at"`
+	Image         ImageObservations        `json:"image"`
+	Network       NetworkObservations      `json:"network"`
+	Pull          PullObservations         `json:"pull"`
+	Container     ContainerObservations    `json:"container"`
+	Provenance    ProvenanceBinding        `json:"provenance"`
 	Reachability  ReachabilityObservations `json:"reachability"`
 
 	// Supplied claims (the producer stamps these after the
@@ -191,9 +209,9 @@ func BuildEvidenceFromObservations(obs *dockerlab.QualifiedExecutionObservations
 		},
 		Pull: PullObservations{
 			ObservationAvailable: cp.Pull.ObservationAvailable,
-			Attempted:           cp.Pull.Attempted,
-			AttemptCount:        cp.Pull.AttemptCount,
-			LastReference:       cp.Pull.LastReference,
+			Attempted:            cp.Pull.Attempted,
+			AttemptCount:         cp.Pull.AttemptCount,
+			LastReference:        cp.Pull.LastReference,
 		},
 		Container: ContainerObservations{
 			ID:                    cp.Container.ID,
@@ -215,14 +233,11 @@ func BuildEvidenceFromObservations(obs *dockerlab.QualifiedExecutionObservations
 			ExecutableSHA256:    cp.Provenance.ExecutableSHA256,
 		},
 		Reachability: ReachabilityObservations{
-			Method:           ReachabilityMethod(cp.Reachability.Method),
-			TargetHost:       cp.Reachability.TargetHost,
-			TargetPort:       cp.Reachability.TargetPort,
-			NetworkID:        cp.Reachability.NetworkID,
-			HTTPResponseCode: cp.Reachability.HTTPResponseCode,
-			ExecExitCode:     cp.Reachability.ExecExitCode,
-			Success:          cp.Reachability.Success,
-			FailureReason:    cp.Reachability.FailureReason,
+			Method: ReachabilityMethod(cp.Reachability.Method), NetworkID: cp.Reachability.NetworkID, TargetHost: cp.Reachability.TargetHost, TargetPort: cp.Reachability.TargetPort,
+			Health:       ReachabilityOperationObservation{Operation: cp.Reachability.Health.Operation, ExecExitCode: cp.Reachability.Health.ExecExitCode, HTTPStatus: cp.Reachability.Health.HTTPStatus, ResponseValidated: cp.Reachability.Health.ResponseValidated, Mode: cp.Reachability.Health.Mode},
+			InitialState: ReachabilityOperationObservation{Operation: cp.Reachability.InitialState.Operation, ExecExitCode: cp.Reachability.InitialState.ExecExitCode, HTTPStatus: cp.Reachability.InitialState.HTTPStatus, ResponseValidated: cp.Reachability.InitialState.ResponseValidated, Mode: cp.Reachability.InitialState.Mode},
+			Operate:      ReachabilityOperateObservation{Operation: cp.Reachability.Operate.Operation, ExecExitCode: cp.Reachability.Operate.ExecExitCode, HTTPStatus: cp.Reachability.Operate.HTTPStatus, Requested: cp.Reachability.Operate.Requested, Attempted: cp.Reachability.Operate.Attempted, Completed: cp.Reachability.Operate.Completed, ResponseValidated: cp.Reachability.Operate.ResponseValidated},
+			FinalState:   ReachabilityOperationObservation{Operation: cp.Reachability.FinalState.Operation, ExecExitCode: cp.Reachability.FinalState.ExecExitCode, HTTPStatus: cp.Reachability.FinalState.HTTPStatus, ResponseValidated: cp.Reachability.FinalState.ResponseValidated, Mode: cp.Reachability.FinalState.Mode}, Success: cp.Reachability.Success,
 		},
 	}
 }
@@ -534,26 +549,47 @@ func verifyUnderlyingObservations(ev *QualifiedExecutionEvidence) VerifyQualifie
 		appendErr(fmt.Sprintf("provenance.executable_sha256 invalid: %v", err))
 	}
 
-	// -- Reachability observations (CORRECTION27 P0-2) -------------
-	// Note: ReachabilityMethodUnknown is allowed for smoke tests that
-	// validate lifecycle but not canary HTTP. Production paths (runCommand)
-	// must use docker_exec or direct_http.
-	if ev.Reachability.Method == "" {
-		appendErr("reachability.method is empty: CORRECTION27 requires a reachability method")
+	derivedReachability, reachabilityErrors := deriveReachability(ev.Reachability)
+	for _, err := range reachabilityErrors {
+		appendErr(err.Error())
 	}
-	if ev.Reachability.Method != "" &&
-		ev.Reachability.Method != ReachabilityMethodDirectHTTP &&
-		ev.Reachability.Method != ReachabilityMethodDockerExec &&
-		ev.Reachability.Method != ReachabilityMethodUnknown {
-		appendErr(fmt.Sprintf("reachability.method=%q invalid: must be %q, %q, or %q",
-			ev.Reachability.Method, ReachabilityMethodDirectHTTP, ReachabilityMethodDockerExec, ReachabilityMethodUnknown))
-	}
-	// Only require success=true when an explicit method was used.
-	if ev.Reachability.Method != ReachabilityMethodUnknown && !ev.Reachability.Success {
-		appendErr("reachability.success=false: canary was not reachable")
+	if ev.Reachability.Success != derivedReachability {
+		appendErr(fmt.Sprintf("reachability.success mismatch: claimed=%v derived=%v", ev.Reachability.Success, derivedReachability))
 	}
 
 	return result
+}
+
+// deriveReachability independently recomputes the reachability claim from raw fields.
+func deriveReachability(observations ReachabilityObservations) (bool, []error) {
+	var errs []error
+	check := func(ok bool, message string) {
+		if !ok {
+			errs = append(errs, errors.New(message))
+		}
+	}
+	check(observations.Method == ReachabilityMethodDockerExec, "reachability.method must be docker_exec")
+	check(canonicalNetworkIDPattern.MatchString(observations.NetworkID), "reachability.network_id must be canonical 64 lowercase hex")
+	check(observations.TargetHost == "127.0.0.1", "reachability.target_host must be 127.0.0.1")
+	check(observations.TargetPort >= 1 && observations.TargetPort <= 65535, "reachability.target_port out of range")
+	checkOperation := func(name string, got ReachabilityOperationObservation, want canarycontrol.Operation) {
+		check(got.Operation == want, name+".operation mismatch")
+		check(got.ExecExitCode == 0, name+".exec_exit_code must be zero")
+		check(got.HTTPStatus == 200, name+".http_status must be 200")
+		check(got.ResponseValidated, name+".response_validated must be true")
+		check(strings.TrimSpace(got.Mode) != "", name+".mode is empty")
+	}
+	checkOperation("reachability.health", observations.Health, canarycontrol.OpHealth)
+	checkOperation("reachability.initial_state", observations.InitialState, canarycontrol.OpState)
+	check(observations.Operate.Operation == canarycontrol.OpOperate, "reachability.operate.operation mismatch")
+	check(observations.Operate.ExecExitCode == 0, "reachability.operate.exec_exit_code must be zero")
+	check(observations.Operate.HTTPStatus == 200, "reachability.operate.http_status must be 200")
+	check(observations.Operate.Requested > 0, "reachability.operate.requested must be positive")
+	check(observations.Operate.Attempted == observations.Operate.Requested, "reachability.operate.attempted mismatch")
+	check(observations.Operate.Completed == observations.Operate.Attempted, "reachability.operate.completed mismatch")
+	check(observations.Operate.ResponseValidated, "reachability.operate.response_validated must be true")
+	checkOperation("reachability.final_state", observations.FinalState, canarycontrol.OpState)
+	return len(errs) == 0, errs
 }
 
 // DerivedClaims holds the implied claim values computed from the
@@ -570,8 +606,8 @@ func verifyUnderlyingObservations(ev *QualifiedExecutionEvidence) VerifyQualifie
 type DerivedClaims struct {
 	ImageExactIDMatch   bool
 	NetworkExactIDMatch bool
-	CleanupComplete    bool
-	Pass               bool
+	CleanupComplete     bool
+	Pass                bool
 }
 
 // deriveClaims is a pure function. It reads ev to compute the
@@ -595,17 +631,17 @@ func deriveClaims(ev *QualifiedExecutionEvidence, underlying VerifyQualifiedExec
 
 	// CORRECTION27: reachability must be successful for a passing execution.
 	// Note: ReachabilityMethodUnknown is allowed for smoke tests.
-	impliedReachability := ev != nil &&
-		(ev.Reachability.Method == ReachabilityMethodDirectHTTP ||
-			ev.Reachability.Method == ReachabilityMethodDockerExec ||
-			ev.Reachability.Method == ReachabilityMethodUnknown)
+	impliedReachability := false
+	if ev != nil {
+		impliedReachability, _ = deriveReachability(ev.Reachability)
+	}
 
 	impliedPass := underlying.Pass && impliedImage && impliedNet && impliedCleanup && impliedReachability
 	return DerivedClaims{
 		ImageExactIDMatch:   impliedImage,
 		NetworkExactIDMatch: impliedNet,
-		CleanupComplete:    impliedCleanup,
-		Pass:               impliedPass,
+		CleanupComplete:     impliedCleanup,
+		Pass:                impliedPass,
 	}
 }
 
@@ -687,15 +723,11 @@ var RequiredProvenanceFields = []string{
 // CORRECTION27 P0-3: The semantic verifier requires method to be a valid value
 // (direct_http or docker_exec) and success to be true.
 var RequiredReachabilityFields = []string{
-	"method",
-	"success",
-	"target_host",
-	"target_port",
-	"network_id",
-	"http_response_code",
-	"exec_exit_code",
-	"failure_reason",
+	"method", "network_id", "target_host", "target_port", "health", "initial_state", "operate", "final_state", "success",
 }
+
+var RequiredReachabilityOperationFields = []string{"operation", "exec_exit_code", "http_status", "response_validated", "mode"}
+var RequiredReachabilityOperateFields = []string{"operation", "exec_exit_code", "http_status", "requested", "attempted", "completed", "response_validated"}
 
 // VerifyQualifiedExecutionBytes parses and verifies serialized
 // evidence. The verifier rejects malformed JSON, trailing JSON,
@@ -759,6 +791,18 @@ func VerifyQualifiedExecutionBytes(data []byte) (VerifyQualifiedExecutionResult,
 	if err := verifyNestedObject(raw["reachability"], "reachability", RequiredReachabilityFields); err != nil {
 		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{err.Error()}}, nil
 	}
+	var reach map[string]json.RawMessage
+	if err := json.Unmarshal(raw["reachability"], &reach); err != nil {
+		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{err.Error()}}, nil
+	}
+	for _, name := range []string{"health", "initial_state", "final_state"} {
+		if err := verifyRequiredObject(reach[name], "reachability."+name, RequiredReachabilityOperationFields); err != nil {
+			return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{err.Error()}}, nil
+		}
+	}
+	if err := verifyRequiredObject(reach["operate"], "reachability.operate", RequiredReachabilityOperateFields); err != nil {
+		return VerifyQualifiedExecutionResult{Pass: false, Errors: []string{err.Error()}}, nil
+	}
 
 	// Decode into the typed struct, then run the in-memory verifier.
 	var ev QualifiedExecutionEvidence
@@ -771,6 +815,26 @@ func VerifyQualifiedExecutionBytes(data []byte) (VerifyQualifiedExecutionResult,
 // verifyNestedObject checks that a nested JSON object is present
 // and that every key is on the allowlist. Fields in the allowlist
 // that are not in the object are allowed (optional fields).
+func verifyRequiredObject(raw json.RawMessage, name string, allowlist []string) error {
+	if err := verifyNestedObject(raw, name, allowlist); err != nil {
+		return err
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return err
+	}
+	for _, field := range allowlist {
+		value, ok := m[field]
+		if !ok {
+			return fmt.Errorf("missing required field in %s: %q", name, field)
+		}
+		if strings.TrimSpace(string(value)) == "null" {
+			return fmt.Errorf("null required field in %s: %q", name, field)
+		}
+	}
+	return nil
+}
+
 func verifyNestedObject(raw json.RawMessage, name string, allowlist []string) error {
 	if len(raw) == 0 {
 		return fmt.Errorf("missing %s object", name)

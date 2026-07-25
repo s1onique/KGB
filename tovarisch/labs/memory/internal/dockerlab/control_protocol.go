@@ -1,4 +1,4 @@
-// control_protocol_v2.go — Docker controller protocol orchestrator (v2).
+// control_protocol.go — Canonical Docker controller protocol orchestrator.
 package dockerlab
 
 import (
@@ -23,15 +23,15 @@ var (
 )
 
 type ControlRunner struct {
-	Runtime ControlExecRuntime
+	runtime ControlExecRuntime
 }
 
 func NewControlRunner(runtime ControlExecRuntime) *ControlRunner {
-	return &ControlRunner{Runtime: runtime}
+	return &ControlRunner{runtime: runtime}
 }
 
 func (r *ControlRunner) ControlProbe(ctx context.Context, containerID string, kind canarycontrol.Operation, port, expectedRequest int, timeout time.Duration) (int, *canarycontrol.ControlEnvelope, error) {
-	if r == nil || r.Runtime == nil {
+	if r == nil || r.runtime == nil {
 		return -1, nil, ErrControlRuntimeRequired
 	}
 	if strings.TrimSpace(containerID) == "" {
@@ -58,7 +58,7 @@ func contextFailure(ctx context.Context) error {
 }
 
 func (r *ControlRunner) runExec(ctx context.Context, op canarycontrol.ControlOperation, argv []string, expectedRequest int, containerID string) (exitCode int, env *canarycontrol.ControlEnvelope, retErr error) {
-	execID, err := r.Runtime.ExecCreate(ctx, containerID, ExecCreateOptions{Command: argv, AttachStdout: true, AttachStderr: true, TTY: false})
+	execID, err := r.runtime.ExecCreate(ctx, containerID, ExecCreateOptions{Command: argv, AttachStdout: true, AttachStderr: true, TTY: false})
 	if err != nil {
 		if ctxErr := contextFailure(ctx); ctxErr != nil {
 			return -1, nil, ctxErr
@@ -69,7 +69,7 @@ func (r *ControlRunner) runExec(ctx context.Context, op canarycontrol.ControlOpe
 		return -1, nil, ErrExecIDRequired
 	}
 
-	attachment, err := r.Runtime.ExecAttach(ctx, containerID, execID)
+	attachment, err := r.runtime.ExecAttach(ctx, containerID, execID)
 	if err != nil {
 		if ctxErr := contextFailure(ctx); ctxErr != nil {
 			return -1, nil, ctxErr
@@ -113,7 +113,7 @@ func (r *ControlRunner) runExec(ctx context.Context, op canarycontrol.ControlOpe
 		return -1, nil, ErrEmptyStdout
 	}
 
-	inspect, err := r.Runtime.ExecInspect(ctx, containerID, execID)
+	inspect, err := r.runtime.ExecInspect(ctx, containerID, execID)
 	if err != nil {
 		if ctxErr := contextFailure(ctx); ctxErr != nil {
 			return -1, nil, errors.Join(ctxErr, err)

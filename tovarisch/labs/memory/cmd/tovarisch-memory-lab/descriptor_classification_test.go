@@ -85,11 +85,11 @@ func makeMemoryGrowingSamples(t *testing.T) []sampling.Sample {
 		growth := int64(i * 100)
 		fd := 8 + i*2 // grow FD as well
 		samples[i] = sampling.Sample{
-			Sequence:    i,
-			Timestamp:   time.Date(2026, 7, 21, 12, 0, i, 0, time.UTC),
-			PID:         12345,
+			Sequence:         i,
+			Timestamp:        time.Date(2026, 7, 21, 12, 0, i, 0, time.UTC),
+			PID:              12345,
 			ProcessStartTime: 600000000,
-			Phase:       phase,
+			Phase:            phase,
 			PSSAnonKiB:       8000 + growth,
 			PrivateDirtyKiB:  8000 + growth,
 			AnonymousKiB:     8000 + growth,

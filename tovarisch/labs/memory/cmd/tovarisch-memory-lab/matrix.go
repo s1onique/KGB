@@ -60,30 +60,30 @@ var matrixScenarioOrder = []string{
 // This is captured once and passed into all three scenario executions.
 type MatrixExecutionIdentity struct {
 	// Git identity
-	ImplementationCommitOID   string `json:"implementation_commit_oid"`
-	ImplementationTreeOID     string `json:"implementation_tree_oid"`
-	GitObjectFormat           string `json:"git_object_format"`
+	ImplementationCommitOID string `json:"implementation_commit_oid"`
+	ImplementationTreeOID   string `json:"implementation_tree_oid"`
+	GitObjectFormat         string `json:"git_object_format"`
 
 	// Controller identity
-	ControllerPID             int    `json:"controller_pid"`
+	ControllerPID              int    `json:"controller_pid"`
 	ControllerExecutableSHA256 string `json:"controller_executable_sha256"`
 
 	// Manifest schema version (all runs must use 1.1.0)
 	RunManifestSchemaVersion string `json:"run_manifest_schema_version"`
 
 	// Canary image identity (frozen during preflight)
-	ImageReference          string   `json:"image_reference"`
-	ImageID                string   `json:"image_id"`
-	RepoDigests            []string `json:"repo_digests"`
-	RepoDigestStatus       string   `json:"repo_digest_status"`
+	ImageReference   string   `json:"image_reference"`
+	ImageID          string   `json:"image_id"`
+	RepoDigests      []string `json:"repo_digests"`
+	RepoDigestStatus string   `json:"repo_digest_status"`
 
 	// Canary source binding
-	CanarySourceCommitOID     string `json:"canary_source_commit_oid"`
+	CanarySourceCommitOID   string `json:"canary_source_commit_oid"`
 	CanaryRepositoryTreeOID string `json:"canary_repository_tree_oid"`
-	CanarySourceSubtreeOID   string `json:"canary_source_subtree_oid"`
-	CanaryBinarySHA256       string `json:"canary_binary_sha256"`
-	CanaryBinarySHA256Label  string `json:"canary_binary_sha256_label"`
-	CanaryRevisionLabel      string `json:"canary_revision_label"`
+	CanarySourceSubtreeOID  string `json:"canary_source_subtree_oid"`
+	CanaryBinarySHA256      string `json:"canary_binary_sha256"`
+	CanaryBinarySHA256Label string `json:"canary_binary_sha256_label"`
+	CanaryRevisionLabel     string `json:"canary_revision_label"`
 	CanaryTreeLabel         string `json:"canary_tree_label"`
 	CanarySubtreeLabel      string `json:"canary_subtree_label"`
 
@@ -94,41 +94,41 @@ type MatrixExecutionIdentity struct {
 
 	// Docker identity
 	DockerEngineVersion string `json:"docker_engine_version"`
-	DockerAPIVersion   string `json:"docker_api_version"`
+	DockerAPIVersion    string `json:"docker_api_version"`
 
 	// Configuration
-	Thresholds   *analysis.Thresholds `json:"thresholds"`
-	PhaseConfig  interface{}          `json:"phase_config"`
+	Thresholds  *analysis.Thresholds `json:"thresholds"`
+	PhaseConfig interface{}          `json:"phase_config"`
 }
 
 // MatrixManifest represents the matrix-level manifest.json.
 type MatrixManifest struct {
 	SchemaVersion     string                   `json:"schema_version"`
-	MatrixID         string                   `json:"matrix_id"`
-	StartedAt        time.Time                `json:"started_at"`
-	FinishedAt       time.Time                `json:"finished_at"`
+	MatrixID          string                   `json:"matrix_id"`
+	StartedAt         time.Time                `json:"started_at"`
+	FinishedAt        time.Time                `json:"finished_at"`
 	ExecutionIdentity *MatrixExecutionIdentity `json:"execution_identity"`
-	Runs             []MatrixRunDeclaration   `json:"runs"`
+	Runs              []MatrixRunDeclaration   `json:"runs"`
 }
 
 // MatrixRunDeclaration declares a single scenario run within the matrix.
 type MatrixRunDeclaration struct {
-	Index          int    `json:"index"`
-	Scenario       string `json:"scenario"`
-	RunID          string `json:"run_id"`
-	Path           string `json:"path"`
+	Index           int    `json:"index"`
+	Scenario        string `json:"scenario"`
+	RunID           string `json:"run_id"`
+	Path            string `json:"path"`
 	ChecksumsSHA256 string `json:"checksums_sha256"`
 }
 
 // MatrixVerdict represents the matrix-level verdict.json.
 type MatrixVerdict struct {
-	MatrixID       string                     `json:"matrix_id"`
-	MatrixValid    bool                       `json:"matrix_valid"`
+	MatrixID        string                     `json:"matrix_id"`
+	MatrixValid     bool                       `json:"matrix_valid"`
 	ScenarioResults map[string]*ScenarioResult `json:"scenario_results"`
-	CrossRunChecks *CrossRunChecks            `json:"cross_run_checks"`
-	ChecksTotal    int                        `json:"checks_total"`
-	ChecksPassed   int                        `json:"checks_passed"`
-	ChecksFailed   int                        `json:"checks_failed"`
+	CrossRunChecks  *CrossRunChecks            `json:"cross_run_checks"`
+	ChecksTotal     int                        `json:"checks_total"`
+	ChecksPassed    int                        `json:"checks_passed"`
+	ChecksFailed    int                        `json:"checks_failed"`
 }
 
 // ScenarioResult holds the verified result for one scenario.
@@ -145,21 +145,21 @@ type ScenarioResult struct {
 type CrossRunChecks struct {
 	SameCommitTree         bool `json:"same_commit_tree"`
 	SameControllerPID      bool `json:"same_controller_pid"`
-	SameControllerHash    bool `json:"same_controller_hash"`
-	SameSchema            bool `json:"same_schema"`
-	SameThresholds        bool `json:"same_thresholds"`
-	SamePhaseConfig       bool `json:"same_phase_config"`
-	SameHostIdentity      bool `json:"same_host_identity"`
-	SameDockerIdentity    bool `json:"same_docker_identity"`
-	SameImageIdentity     bool `json:"same_image_identity"`
-	SameCanaryBinary      bool `json:"same_canary_binary"`
-	UniqueRunIDs          bool `json:"unique_run_ids"`
+	SameControllerHash     bool `json:"same_controller_hash"`
+	SameSchema             bool `json:"same_schema"`
+	SameThresholds         bool `json:"same_thresholds"`
+	SamePhaseConfig        bool `json:"same_phase_config"`
+	SameHostIdentity       bool `json:"same_host_identity"`
+	SameDockerIdentity     bool `json:"same_docker_identity"`
+	SameImageIdentity      bool `json:"same_image_identity"`
+	SameCanaryBinary       bool `json:"same_canary_binary"`
+	UniqueRunIDs           bool `json:"unique_run_ids"`
 	UniqueSubjectProcesses bool `json:"unique_subject_processes"`
-	UniqueContainerIDs    bool `json:"unique_container_ids"`
-	FixedOrder            bool `json:"fixed_order"`
-	NonOverlapping        bool `json:"non_overlapping"`
-	CleanupComplete       bool `json:"cleanup_complete"`
-	ChecksPassed          int  `json:"checks_passed"`
+	UniqueContainerIDs     bool `json:"unique_container_ids"`
+	FixedOrder             bool `json:"fixed_order"`
+	NonOverlapping         bool `json:"non_overlapping"`
+	CleanupComplete        bool `json:"cleanup_complete"`
+	ChecksPassed           int  `json:"checks_passed"`
 }
 
 // NewMatrixExecutionIdentity creates a new frozen execution identity.
@@ -180,30 +180,30 @@ func NewMatrixExecutionIdentity(
 ) *MatrixExecutionIdentity {
 	return &MatrixExecutionIdentity{
 		ImplementationCommitOID:    gitCommit,
-		ImplementationTreeOID:     gitTree,
-		GitObjectFormat:          gitFormat,
-		ControllerPID:            controllerPID,
+		ImplementationTreeOID:      gitTree,
+		GitObjectFormat:            gitFormat,
+		ControllerPID:              controllerPID,
 		ControllerExecutableSHA256: controllerHash,
-		RunManifestSchemaVersion: "1.1.0",
-		ImageReference:          imageRef,
-		ImageID:                imageID,
-		RepoDigests:            repoDigests,
-		RepoDigestStatus:       repoDigestStatus,
-		CanarySourceCommitOID:    canaryCommit,
-		CanaryRepositoryTreeOID:  canaryTree,
-		CanarySourceSubtreeOID:   canarySubtree,
-		CanaryBinarySHA256:       canaryBinary,
-		CanaryBinarySHA256Label:  canaryBinaryLabel,
-		CanaryRevisionLabel:      canaryRevLabel,
-		CanaryTreeLabel:         canaryTreeLabel,
-		CanarySubtreeLabel:      canarySubtreeLabel,
-		HostKernelRelease:       kernelRelease,
-		HostKernelVersion:       kernelVersion,
-		HostCgroupMode:          cgroupMode,
-		DockerEngineVersion:     dockerVersion,
-		DockerAPIVersion:        dockerAPIVersion,
-		Thresholds:              thresholds,
-		PhaseConfig:             phaseConfig,
+		RunManifestSchemaVersion:   "1.1.0",
+		ImageReference:             imageRef,
+		ImageID:                    imageID,
+		RepoDigests:                repoDigests,
+		RepoDigestStatus:           repoDigestStatus,
+		CanarySourceCommitOID:      canaryCommit,
+		CanaryRepositoryTreeOID:    canaryTree,
+		CanarySourceSubtreeOID:     canarySubtree,
+		CanaryBinarySHA256:         canaryBinary,
+		CanaryBinarySHA256Label:    canaryBinaryLabel,
+		CanaryRevisionLabel:        canaryRevLabel,
+		CanaryTreeLabel:            canaryTreeLabel,
+		CanarySubtreeLabel:         canarySubtreeLabel,
+		HostKernelRelease:          kernelRelease,
+		HostKernelVersion:          kernelVersion,
+		HostCgroupMode:             cgroupMode,
+		DockerEngineVersion:        dockerVersion,
+		DockerAPIVersion:           dockerAPIVersion,
+		Thresholds:                 thresholds,
+		PhaseConfig:                phaseConfig,
 	}
 }
 
@@ -344,9 +344,9 @@ func ValidateChildChecksums(matrixDir string, manifest *MatrixManifest) error {
 			"verdict.json":              false,
 			"samples.csv":               false,
 			"events.jsonl":              false,
-			"container-inspect.json":     false,
+			"container-inspect.json":    false,
 			"container-logs.txt":        false,
-			"initial-canary-state.json":  false,
+			"initial-canary-state.json": false,
 			"final-canary-state.json":   false,
 			"workload-result.json":      false,
 			"checksums.txt":             false,

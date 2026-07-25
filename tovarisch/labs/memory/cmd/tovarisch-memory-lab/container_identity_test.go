@@ -151,14 +151,14 @@ func TestCanonicalChildArtifactInventory_HasNineEntries(t *testing.T) {
 	// Verify expected entries
 	expected := map[string]bool{
 		"container-identity.json":   true,
-		"events.jsonl":            true,
-		"final-canary-state.json": true,
+		"events.jsonl":              true,
+		"final-canary-state.json":   true,
 		"initial-canary-state.json": true,
-		"manifest.json":           true,
-		"network-identity.json":   true,
-		"samples.csv":             true,
-		"verdict.json":            true,
-		"workload-result.json":    true,
+		"manifest.json":             true,
+		"network-identity.json":     true,
+		"samples.csv":               true,
+		"verdict.json":              true,
+		"workload-result.json":      true,
 	}
 
 	for _, name := range CanonicalChildArtifactInventory {

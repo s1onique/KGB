@@ -45,14 +45,14 @@ type columnIndex map[string]int
 
 // parser is the internal CSV parser state
 type parser struct {
-	reader       *csv.Reader
-	colIdx       columnIndex
-	rowNum       int
-	lastTS       time.Time
-	lastPID      int
-	lastPST      uint64
-	lastRank     int
-	sampleCount  int
+	reader      *csv.Reader
+	colIdx      columnIndex
+	rowNum      int
+	lastTS      time.Time
+	lastPID     int
+	lastPST     uint64
+	lastRank    int
+	sampleCount int
 }
 
 // newParser creates a new CSV parser with the sampling schema as authority
@@ -655,47 +655,47 @@ func ParseSamplesCSVStream(r io.Reader) ([]sampling.Sample, error) {
 		}
 
 		samples = append(samples, sampling.Sample{
-			Sequence:                  seq,
-			Timestamp:                 timestamp,
-			PID:                       pid,
-			ProcessStartTime:          startTime,
-			Phase:                     phase,
-			Delayed:                   delayed,
-			RSSKiB:                    rssKiB,
-			PSSKiB:                    pssKiB,
-			PSSAnonKiB:                pssAnonKiB,
-			PrivateDirtyKiB:           privateDirtyKiB,
-			AnonymousKiB:              anonymousKiB,
-			SwapKiB:                   swapKiB,
-			DockerMemoryUsageBytes:    dockerUsage,
-			DockerMemoryLimitBytes:    dockerLimit,
-			HasDockerMemory:           hasDocker,
-			VMACount:                  vmaCount,
-			FDCount:                   fdCount,
-			SocketFDCount:             socketFDCount,
-			ThreadCount:               threadCount,
-			PIDCount:                  pidCount,
-			CgroupAnonBytes:           cgroupAnonBytes,
-			CgroupCurrentBytes:        cgroupCurrentBytes,
-			CgroupMemoryStatAnon:      cgroupStatAnon,
-			HasCgroupAnon:             hasCgroupAnon,
-			HasCgroup:                 hasCgroup,
-			OOMEvents:                 oomEvents,
-			OOMKillEvents:             oomKillEvents,
-			BGPState:                  bgpState,
-			BGPFSMTicks:               bgpFSMTicks,
-			ReconnectCount:             reconnectCount,
-			HasRSS:                    hasRSS,
-			HasPSS:                    hasPSS,
-			HasPSSAnon:                hasPSSAnon,
-			HasPrivateDirty:           hasPrivateDirty,
-			HasAnonymous:              hasAnonymous,
-			HasSwap:                   hasSwap,
-			HasThreadCount:            hasThreadCount,
-			HasPIDCount:               hasPIDCount,
-			HasFDCount:                hasFDCount,
-			HasSocketFDCount:          hasSocketFDCount,
-			HasVMACount:               hasVMACount,
+			Sequence:               seq,
+			Timestamp:              timestamp,
+			PID:                    pid,
+			ProcessStartTime:       startTime,
+			Phase:                  phase,
+			Delayed:                delayed,
+			RSSKiB:                 rssKiB,
+			PSSKiB:                 pssKiB,
+			PSSAnonKiB:             pssAnonKiB,
+			PrivateDirtyKiB:        privateDirtyKiB,
+			AnonymousKiB:           anonymousKiB,
+			SwapKiB:                swapKiB,
+			DockerMemoryUsageBytes: dockerUsage,
+			DockerMemoryLimitBytes: dockerLimit,
+			HasDockerMemory:        hasDocker,
+			VMACount:               vmaCount,
+			FDCount:                fdCount,
+			SocketFDCount:          socketFDCount,
+			ThreadCount:            threadCount,
+			PIDCount:               pidCount,
+			CgroupAnonBytes:        cgroupAnonBytes,
+			CgroupCurrentBytes:     cgroupCurrentBytes,
+			CgroupMemoryStatAnon:   cgroupStatAnon,
+			HasCgroupAnon:          hasCgroupAnon,
+			HasCgroup:              hasCgroup,
+			OOMEvents:              oomEvents,
+			OOMKillEvents:          oomKillEvents,
+			BGPState:               bgpState,
+			BGPFSMTicks:            bgpFSMTicks,
+			ReconnectCount:         reconnectCount,
+			HasRSS:                 hasRSS,
+			HasPSS:                 hasPSS,
+			HasPSSAnon:             hasPSSAnon,
+			HasPrivateDirty:        hasPrivateDirty,
+			HasAnonymous:           hasAnonymous,
+			HasSwap:                hasSwap,
+			HasThreadCount:         hasThreadCount,
+			HasPIDCount:            hasPIDCount,
+			HasFDCount:             hasFDCount,
+			HasSocketFDCount:       hasSocketFDCount,
+			HasVMACount:            hasVMACount,
 		})
 	}
 

@@ -392,7 +392,7 @@ func matrixCommandWithDeps(args []string, deps MatrixCommandDeps) error {
 	}
 
 	// Write matrix verdict using shared authority
-	verdictJSON, err := json.MarshalIndent(verdict, "",  "  ")
+	verdictJSON, err := json.MarshalIndent(verdict, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal matrix verdict: %w", err)
 	}
@@ -925,6 +925,7 @@ const (
 	ProcessPIDReused                               // PID reused by different process
 	ProcessUnavailable                             // Evidence unavailable (permission denied, etc.)
 )
+
 func inspectProcessGone(pid int, expectedStart uint64) (ProcessCleanupStatus, error) {
 	if pid <= 0 {
 		return ProcessUnavailable, fmt.Errorf("invalid PID: %d", pid)
@@ -1113,9 +1114,9 @@ func buildCleanupEvidence(runsDir string, declarations []MatrixRunDeclaration) *
 
 	return &MatrixCleanupEvidence{
 		SchemaVersion:    "1.0.0",
-		MatrixID:        "", // Set by caller
-		ObservedAt:      observedAt,
+		MatrixID:         "", // Set by caller
+		ObservedAt:       observedAt,
 		NetworkOwnership: "per_run",
-		Runs:            records,
+		Runs:             records,
 	}
 }

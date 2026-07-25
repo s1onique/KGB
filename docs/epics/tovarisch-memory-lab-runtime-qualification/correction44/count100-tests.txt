@@ -1,0 +1,3 @@
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/canarycontrol	0.760s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	22.503s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/evidence	1.279s
