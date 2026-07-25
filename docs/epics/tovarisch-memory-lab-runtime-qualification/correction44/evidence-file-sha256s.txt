@@ -1,0 +1,15 @@
+S44 commit: 439e841c3fecc8051ff76e2d44d706c43fc52823
+E44 parent: 439e841c3fecc8051ff76e2d44d706c43fc52823
+E44 evidence files sha256:
+  962f99a024436ca08ed90cbcc0a423cac5afa3f1d25d953173efb0b9e0acb0a1  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/E43-A43-semantic-erratum.md
+  e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/build.txt
+  053e280b8314b95ebea43426092991b4e916e0a5a768f6b9b600040845e88e19  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/cline-checkpoint.md
+  707f5b6a5c90c1e65ab7c36d80246e2ca9c120ad9fe9570deb8612af3a92858f  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/count100-tests.txt
+  e6abe6bb2d1d717977a81d4a83886a3a2f0738cfe25ec056db218097cf601e9d  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/focused-tests.txt
+  e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/focused-vet.txt
+  e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/legacy-authority-after.txt
+  8db86af77de330e0486290b3af2245eeac1aaf1b1dbe511686cc165f4817253a  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/legacy-authority-before.txt
+  132ff7e595322d708b91d6312831161903f8ed467ba3d981860927c3bb9571a4  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/legacy-regression-tests.txt
+  01009c235b09fbb3d4caa61167dda8ac37d5462ce0db8f894aac85ca0caa3a31  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/make-gate.txt
+  ea5fc46298058962cfa6a26a0e413e3ad554480d9aafd088316938bcd3a31d83  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/race-tests.txt
+  19c1277b3c4918b122020452829e0c39c72b0cdcd79d827cc0b0fef60c1e1cb5  docs/epics/tovarisch-memory-lab-runtime-qualification/correction44/reachability-mutation-tests.txt
