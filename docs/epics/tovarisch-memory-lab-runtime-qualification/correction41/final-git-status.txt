@@ -1,0 +1,4 @@
+Pre-A41 attestation preparation status:
+- E41 working tree was clean immediately after commit 40ec4d048cae63cc5704a869231289a33f8901ea.
+- Only attestation.md, evidence-file-sha256s.txt, and final-git-status.txt are added by A41.
+- Final post-A41 `git status --short` is required to be empty and is verified externally because a commit cannot contain its own post-commit status.
