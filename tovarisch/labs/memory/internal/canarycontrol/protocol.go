@@ -66,14 +66,24 @@ func IsValidOperation(op Operation) bool {
 	return ok
 }
 
-// AllOperations returns a defensive copy of the valid-operation set.
-// Callers cannot mutate the package-level authority.
+// AllOperations returns a deterministic, sorted defensive copy of the
+// valid-operation set. Callers cannot mutate the package-level authority.
 func AllOperations() []Operation {
 	out := make([]Operation, 0, len(validOperations))
 	for op := range validOperations {
 		out = append(out, op)
 	}
+	sortOperations(out)
 	return out
+}
+
+// sortOperations sorts a slice of Operation in place.
+func sortOperations(s []Operation) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j-1] > s[j]; j-- {
+			s[j-1], s[j] = s[j], s[j-1]
+		}
+	}
 }
 
 // ErrorClass is the stable classification vocabulary for control-protocol errors.
@@ -127,14 +137,25 @@ func IsAllowedErrorClass(ec ErrorClass) bool {
 	return ok
 }
 
-// AllErrorClasses returns a defensive copy of the error-class vocabulary.
-// Callers cannot mutate the package-level authority.
+// AllErrorClasses returns a deterministic, sorted defensive copy of the
+// error-class vocabulary. Callers cannot mutate the package-level authority.
 func AllErrorClasses() []ErrorClass {
 	out := make([]ErrorClass, 0, len(allowedErrorClasses))
 	for ec := range allowedErrorClasses {
 		out = append(out, ec)
 	}
+	sortErrorClasses(out)
 	return out
+}
+
+// sortErrorClasses sorts a slice of ErrorClass in place using insertion sort.
+// ErrorClass is a string type so lexicographic order is well-defined.
+func sortErrorClasses(s []ErrorClass) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j-1] > s[j]; j-- {
+			s[j-1], s[j] = s[j], s[j-1]
+		}
+	}
 }
 
 // retryableErrorClasses is the closed vocabulary of retryable error classes.
@@ -364,6 +385,7 @@ func decodeExactJSONObject(data []byte, requiredFields []string, target any) err
 //  8. validate the discriminated success/failure variant
 //  9. for success envelopes, decode and validate the nested payload
 //     (presence, null, required-field, semantic invariants) per Operation
+//
 // 10. for failure envelopes, reject any nested payload and validate HTTP status
 //
 // Consumers MUST use this function — not encoding/json directly.
@@ -703,6 +725,19 @@ func validateSuccessEnvelope(env *ControlEnvelope, op Operation) error {
 				Message:  "health operation must not have state or workload",
 			}
 		}
+		// Health semantic: ready must be true and mode non-empty.
+		if !env.Health.Ready {
+			return &ProtocolError{
+				ErrClass: ErrHealthNotReady,
+				Message:  "success health envelope must have ready=true",
+			}
+		}
+		if env.Health.Mode == "" {
+			return &ProtocolError{
+				ErrClass: ErrMissingRequiredField,
+				Message:  "success health envelope must have non-empty mode",
+			}
+		}
 	case OpState:
 		if env.State == nil {
 			return &ProtocolError{
@@ -716,6 +751,10 @@ func validateSuccessEnvelope(env *ControlEnvelope, op Operation) error {
 				Message:  "state operation must not have health or workload",
 			}
 		}
+		// State semantic: ValidateStateSemantics rejects negative counters, ready=false, empty mode.
+		if err := ValidateStateSemantics(env.State); err != nil {
+			return err
+		}
 	case OpOperate:
 		if env.Workload == nil {
 			return &ProtocolError{
@@ -728,6 +767,14 @@ func validateSuccessEnvelope(env *ControlEnvelope, op Operation) error {
 				ErrClass: ErrInvalidArguments,
 				Message:  "operate operation must not have health or state",
 			}
+		}
+		// Workload semantic: ValidateWorkloadSemantics rejects requested<=0,
+		// attempted != requested, completed != attempted. expectedRequest=0
+		// skips the equality check so envelope-level validation accepts any
+		// positive requested/attempted/completed triple; the Docker boundary
+		// re-checks requested against the operator-supplied count.
+		if err := ValidateWorkloadSemantics(env.Workload, 0); err != nil {
+			return err
 		}
 	}
 	return nil

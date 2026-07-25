@@ -47,6 +47,11 @@ func NewControlOperation(kind Operation, port, count int, timeout time.Duration)
 
 // Validate enforces port range, timeout, count, and operation kind before
 // any Docker exec is attempted.
+//
+// Per-operation count rules:
+//   - OpHealth  : Count MUST be 0
+//   - OpState   : Count MUST be 0
+//   - OpOperate : Count MUST be > 0
 func (op ControlOperation) Validate() error {
 	if op.Kind == "" {
 		return errors.New("empty operation kind")
@@ -60,8 +65,19 @@ func (op ControlOperation) Validate() error {
 	if op.Timeout <= 0 {
 		return fmt.Errorf("invalid timeout: %v", op.Timeout)
 	}
-	if op.Kind == OpOperate && op.Count <= 0 {
-		return fmt.Errorf("invalid count for operate: %d", op.Count)
+	switch op.Kind {
+	case OpHealth:
+		if op.Count != 0 {
+			return fmt.Errorf("health operation must have count=0, got %d", op.Count)
+		}
+	case OpState:
+		if op.Count != 0 {
+			return fmt.Errorf("state operation must have count=0, got %d", op.Count)
+		}
+	case OpOperate:
+		if op.Count <= 0 {
+			return fmt.Errorf("invalid count for operate: %d", op.Count)
+		}
 	}
 	return nil
 }
