@@ -1,0 +1,4 @@
+Pre-A42 status:
+- E42 working tree was clean after commit 762a20495a15aba56c67834db455cc1f38c226b0.
+- A42 adds only attestation.md, evidence-file-sha256s.txt, and final-git-status.txt.
+- Final post-A42 clean status is verified externally because a commit cannot contain its own post-commit status.
