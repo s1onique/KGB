@@ -4,8 +4,9 @@
 // ControlOperation.BuildArgv(). This is the canonical authority for what
 // argv is passed to docker exec.
 //
-// CORRECTION34: typed operation ownership moved from cmd/canary to this
-// shared package so the controller cannot drift from canary-side vocabulary.
+// CORRECTION35: BuildArgv now fails closed. An unvalidated ControlOperation
+// cannot produce executable argv. Use NewControlOperation to construct or
+// BuildArgv to consume; either path goes through Validate.
 
 package canarycontrol
 
@@ -28,6 +29,21 @@ type ControlOperation struct {
 // must exec. It is intentionally non-configurable: argv must always start
 // with this binary path.
 const CanaryExecutable = "/app/canary"
+
+// NewControlOperation constructs a validated ControlOperation. Returns an
+// error if any argument is invalid.
+func NewControlOperation(kind Operation, port, count int, timeout time.Duration) (ControlOperation, error) {
+	op := ControlOperation{
+		Kind:    kind,
+		Port:    port,
+		Count:   count,
+		Timeout: timeout,
+	}
+	if err := op.Validate(); err != nil {
+		return ControlOperation{}, err
+	}
+	return op, nil
+}
 
 // Validate enforces port range, timeout, count, and operation kind before
 // any Docker exec is attempted.
@@ -57,9 +73,14 @@ func (op ControlOperation) Validate() error {
 //   - /app/canary control state   --port N --timeout D
 //   - /app/canary control operate --port N --count C --timeout D
 //
-// The flag order is fixed and asserted by tests. No shell, no curl, no wget,
-// no additional arguments are permitted.
-func (op ControlOperation) BuildArgv() []string {
+// BuildArgv fails closed: it calls Validate internally and returns an error
+// for any unvalidated operation. The flag order is fixed.
+//
+// No shell, no curl, no wget, no additional arguments are permitted.
+func (op ControlOperation) BuildArgv() ([]string, error) {
+	if err := op.Validate(); err != nil {
+		return nil, fmt.Errorf("BuildArgv failed validation: %w", err)
+	}
 	timeoutStr := op.Timeout.String()
 	switch op.Kind {
 	case OpHealth:
@@ -68,14 +89,14 @@ func (op ControlOperation) BuildArgv() []string {
 			"control", string(OpHealth),
 			"--port", fmt.Sprintf("%d", op.Port),
 			"--timeout", timeoutStr,
-		}
+		}, nil
 	case OpState:
 		return []string{
 			CanaryExecutable,
 			"control", string(OpState),
 			"--port", fmt.Sprintf("%d", op.Port),
 			"--timeout", timeoutStr,
-		}
+		}, nil
 	case OpOperate:
 		return []string{
 			CanaryExecutable,
@@ -83,7 +104,7 @@ func (op ControlOperation) BuildArgv() []string {
 			"--port", fmt.Sprintf("%d", op.Port),
 			"--count", fmt.Sprintf("%d", op.Count),
 			"--timeout", timeoutStr,
-		}
+		}, nil
 	}
-	return nil
+	return nil, fmt.Errorf("unreachable: validated op has unknown kind %q", op.Kind)
 }

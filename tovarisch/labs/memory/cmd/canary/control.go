@@ -77,8 +77,16 @@ var (
 	ErrInvalidOperation      = canarycontrol.ErrInvalidOperation
 )
 
-// AllowedErrorClasses is a re-export of the shared vocabulary.
-var AllowedErrorClasses = canarycontrol.AllowedErrorClasses
+// AllowedErrorClasses is a defensive-copy helper that exposes the closed
+// error-class vocabulary via the shared package. Callers SHOULD use
+// canarycontrol.IsAllowedErrorClass for membership checks.
+var AllowedErrorClasses = func() map[canarycontrol.ErrorClass]bool {
+	out := make(map[canarycontrol.ErrorClass]bool)
+	for _, ec := range canarycontrol.AllErrorClasses() {
+		out[ec] = true
+	}
+	return out
+}()
 
 // runControl executes the control subcommand.
 func runControl(args []string) int {
@@ -467,16 +475,8 @@ func ValidateControlEnvelope(env *ControlEnvelope) error {
 }
 
 // buildArgv exposes the shared typed-operation argv authority for the
-// in-package tests. The shared package already provides BuildArgv on the
-// canonical ControlOperation type; this thin wrapper preserves the lowercase
-// accessor used by existing tests.
-func buildArgv(op ControlOperation) []string {
+// in-package tests. BuildArgv fails closed (returns an error if the
+// operation is not validated).
+func buildArgv(op ControlOperation) ([]string, error) {
 	return op.BuildArgv()
-}
-
-// decodeExactJSONObject exposes the shared strict exact-object decoder for
-// the in-package tests. The shared package owns the canonical implementation;
-// this thin wrapper preserves the lowercase accessor used by existing tests.
-func decodeExactJSONObject(data []byte, requiredFields []string, target any) error {
-	return canarycontrol.DecodeExactJSONObjectForTest(data, requiredFields, target)
 }

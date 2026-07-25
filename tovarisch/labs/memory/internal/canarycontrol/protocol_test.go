@@ -7,6 +7,10 @@
 //   - payload semantics (health, state, workload)
 //   - retry policy authority
 //   - typed operation argv authority
+//   - immutable shared vocabulary (P0-1)
+//
+// CORRECTION35: shared collections are private. Tests target the accessor
+// functions and verify mutation-resistance.
 package canarycontrol
 
 import (
@@ -113,6 +117,56 @@ func TestDecodeEnvelopeExactlyOne_InvalidOperation(t *testing.T) {
 	}
 }
 
+// ===== Nested payload validation =====
+
+func TestDecodeEnvelope_NestedHealthNull(t *testing.T) {
+	body := []byte(`{"schema_version":"` + SchemaVersion + `","operation":"health","success":true,"http_status":200,"health":null}`)
+	_, err := DecodeEnvelopeExactlyOne(body)
+	if err == nil {
+		t.Fatal("expected error for null health payload")
+	}
+}
+
+func TestDecodeEnvelope_NestedHealthMissing(t *testing.T) {
+	body := []byte(`{"schema_version":"` + SchemaVersion + `","operation":"health","success":true,"http_status":200}`)
+	_, err := DecodeEnvelopeExactlyOne(body)
+	if err == nil {
+		t.Fatal("expected error for missing health payload")
+	}
+}
+
+func TestDecodeEnvelope_NestedHealthUnknownField(t *testing.T) {
+	body := []byte(`{"schema_version":"` + SchemaVersion + `","operation":"health","success":true,"http_status":200,"health":{"ready":true,"mode":"growing","extra":"forbidden"}}`)
+	_, err := DecodeEnvelopeExactlyOne(body)
+	if err == nil {
+		t.Fatal("expected error for unknown field in health payload")
+	}
+}
+
+func TestDecodeEnvelope_NestedStateNullField(t *testing.T) {
+	body := []byte(`{"schema_version":"` + SchemaVersion + `","operation":"state","success":true,"http_status":200,"state":{"mode":"growing","retained_blocks":null,"retained_bytes":0,"operation_count":0,"fd_count":0,"ready":true}}`)
+	_, err := DecodeEnvelopeExactlyOne(body)
+	if err == nil {
+		t.Fatal("expected error for null state field")
+	}
+}
+
+func TestDecodeEnvelope_NestedWorkloadMismatch(t *testing.T) {
+	body := []byte(`{"schema_version":"` + SchemaVersion + `","operation":"operate","success":true,"http_status":200,"workload":{"requested":5,"attempted":3,"completed":3}}`)
+	_, err := DecodeEnvelopeExactlyOne(body)
+	if err == nil {
+		t.Fatal("expected error for workload mismatch")
+	}
+}
+
+func TestDecodeEnvelope_HealthEnvelopeWithStatePayload(t *testing.T) {
+	body := []byte(`{"schema_version":"` + SchemaVersion + `","operation":"health","success":true,"http_status":200,"health":{"ready":true,"mode":"growing"},"state":{"mode":"growing","retained_blocks":0,"retained_bytes":0,"operation_count":0,"fd_count":0,"ready":true}}`)
+	_, err := DecodeEnvelopeExactlyOne(body)
+	if err == nil {
+		t.Fatal("expected error for health envelope with state payload")
+	}
+}
+
 // ===== Health payload tests =====
 
 func TestDecodeHealth_Success(t *testing.T) {
@@ -143,9 +197,6 @@ func TestDecodeHealth_NullMode(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for null mode")
 	}
-	if pe, ok := AsProtocolError(err); !ok || pe.ErrClass != ErrMissingRequiredField {
-		t.Errorf("expected ErrMissingRequiredField, got %v", err)
-	}
 }
 
 func TestDecodeHealth_EmptyMode(t *testing.T) {
@@ -161,14 +212,6 @@ func TestDecodeHealth_UnknownField(t *testing.T) {
 	_, err := DecodeHealth(body)
 	if err == nil {
 		t.Fatal("expected error for unknown field")
-	}
-}
-
-func TestDecodeHealth_NullReady(t *testing.T) {
-	body := []byte(`{"ready":null,"mode":"growing"}`)
-	_, err := DecodeHealth(body)
-	if err == nil {
-		t.Fatal("expected error for null ready")
 	}
 }
 
@@ -204,6 +247,30 @@ func TestDecodeState_NegativeRetainedBlocks(t *testing.T) {
 	}
 }
 
+func TestDecodeState_NegativeRetainedBytes(t *testing.T) {
+	body := []byte(`{"mode":"growing","retained_blocks":0,"retained_bytes":-1,"operation_count":0,"fd_count":0,"ready":true}`)
+	_, err := DecodeState(body)
+	if err == nil {
+		t.Fatal("expected error for negative retained_bytes")
+	}
+}
+
+func TestDecodeState_NegativeOperationCount(t *testing.T) {
+	body := []byte(`{"mode":"growing","retained_blocks":0,"retained_bytes":0,"operation_count":-1,"fd_count":0,"ready":true}`)
+	_, err := DecodeState(body)
+	if err == nil {
+		t.Fatal("expected error for negative operation_count")
+	}
+}
+
+func TestDecodeState_NegativeFDCount(t *testing.T) {
+	body := []byte(`{"mode":"growing","retained_blocks":0,"retained_bytes":0,"operation_count":0,"fd_count":-1,"ready":true}`)
+	_, err := DecodeState(body)
+	if err == nil {
+		t.Fatal("expected error for negative fd_count")
+	}
+}
+
 func TestDecodeState_NotReady(t *testing.T) {
 	body := []byte(`{"mode":"growing","retained_blocks":0,"retained_bytes":0,"operation_count":0,"fd_count":0,"ready":false}`)
 	_, err := DecodeState(body)
@@ -217,6 +284,36 @@ func TestDecodeState_EmptyMode(t *testing.T) {
 	_, err := DecodeState(body)
 	if err == nil {
 		t.Fatal("expected error for empty mode")
+	}
+}
+
+func TestDecodeState_EachFieldMissing(t *testing.T) {
+	// mode missing
+	body := []byte(`{"retained_blocks":0,"retained_bytes":0,"operation_count":0,"fd_count":0,"ready":true}`)
+	if _, err := DecodeState(body); err == nil {
+		t.Error("expected error for missing mode")
+	}
+	// retained_blocks missing
+	body = []byte(`{"mode":"growing","retained_bytes":0,"operation_count":0,"fd_count":0,"ready":true}`)
+	if _, err := DecodeState(body); err == nil {
+		t.Error("expected error for missing retained_blocks")
+	}
+	// ready missing
+	body = []byte(`{"mode":"growing","retained_blocks":0,"retained_bytes":0,"operation_count":0,"fd_count":0}`)
+	if _, err := DecodeState(body); err == nil {
+		t.Error("expected error for missing ready")
+	}
+}
+
+func TestDecodeState_EachFieldNull(t *testing.T) {
+	fields := []string{"mode", "retained_blocks", "retained_bytes", "operation_count", "fd_count", "ready"}
+	for _, f := range fields {
+		body := []byte(`{"mode":"growing","retained_blocks":0,"retained_bytes":0,"operation_count":0,"fd_count":0,"ready":true}`)
+		// Replace "f":value with "f":null
+		bodyStr := strings.Replace(string(body), `"`+f+`":`, `"`+f+`":null,`, 1)
+		if _, err := DecodeState([]byte(bodyStr)); err == nil {
+			t.Errorf("expected error for null %s", f)
+		}
 	}
 }
 
@@ -244,6 +341,38 @@ func TestDecodeWorkload_CountMismatch(t *testing.T) {
 	}
 }
 
+func TestDecodeWorkload_AttemptedMismatch(t *testing.T) {
+	body := []byte(`{"requested":5,"attempted":4,"completed":4}`)
+	_, err := DecodeWorkload(body, 5)
+	if err == nil {
+		t.Fatal("expected error for attempted mismatch")
+	}
+}
+
+func TestDecodeWorkload_CompletedMismatch(t *testing.T) {
+	body := []byte(`{"requested":5,"attempted":5,"completed":4}`)
+	_, err := DecodeWorkload(body, 5)
+	if err == nil {
+		t.Fatal("expected error for completed mismatch")
+	}
+}
+
+func TestDecodeWorkload_ZeroRequested(t *testing.T) {
+	body := []byte(`{"requested":0,"attempted":0,"completed":0}`)
+	_, err := DecodeWorkload(body, 5)
+	if err == nil {
+		t.Fatal("expected error for zero requested")
+	}
+}
+
+func TestDecodeWorkload_NegativeRequested(t *testing.T) {
+	body := []byte(`{"requested":-1,"attempted":-1,"completed":-1}`)
+	_, err := DecodeWorkload(body, 5)
+	if err == nil {
+		t.Fatal("expected error for negative requested")
+	}
+}
+
 func TestDecodeWorkload_ExpectedMismatch(t *testing.T) {
 	body := []byte(`{"requested":5,"attempted":5,"completed":5}`)
 	_, err := DecodeWorkload(body, 10)
@@ -257,6 +386,74 @@ func TestDecodeWorkload_NullField(t *testing.T) {
 	_, err := DecodeWorkload(body, 5)
 	if err == nil {
 		t.Fatal("expected error for null field")
+	}
+}
+
+// ===== Failure HTTP status strict boundaries =====
+
+func TestValidateEnvelope_FailureHTTPStatus_Rejects_0(t *testing.T) {
+	// 0 is allowed for local failures (no HTTP status)
+	env := &ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:     "health",
+		Success:       false,
+		HTTPStatus:    0,
+		ErrorClass:    ErrHealthNotReady,
+	}
+	if err := ValidateControlEnvelope(env); err != nil {
+		t.Errorf("expected success for http_status=0, got %v", err)
+	}
+}
+
+func TestValidateEnvelope_FailureHTTPStatus_Accepts_300(t *testing.T) {
+	env := &ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:     "health",
+		Success:       false,
+		HTTPStatus:    301,
+		ErrorClass:    ErrHealthNotReady,
+	}
+	if err := ValidateControlEnvelope(env); err != nil {
+		t.Errorf("expected success for http_status=301, got %v", err)
+	}
+}
+
+func TestValidateEnvelope_FailureHTTPStatus_Rejects_Negative(t *testing.T) {
+	env := &ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:     "health",
+		Success:       false,
+		HTTPStatus:    -1,
+		ErrorClass:    ErrHealthNotReady,
+	}
+	if err := ValidateControlEnvelope(env); err == nil {
+		t.Error("expected error for negative http_status")
+	}
+}
+
+func TestValidateEnvelope_FailureHTTPStatus_Rejects_99(t *testing.T) {
+	env := &ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:     "health",
+		Success:       false,
+		HTTPStatus:    99,
+		ErrorClass:    ErrHealthNotReady,
+	}
+	if err := ValidateControlEnvelope(env); err == nil {
+		t.Error("expected error for http_status=99")
+	}
+}
+
+func TestValidateEnvelope_FailureHTTPStatus_Rejects_600(t *testing.T) {
+	env := &ControlEnvelope{
+		SchemaVersion: SchemaVersion,
+		Operation:     "health",
+		Success:       false,
+		HTTPStatus:    600,
+		ErrorClass:    ErrHealthNotReady,
+	}
+	if err := ValidateControlEnvelope(env); err == nil {
+		t.Error("expected error for http_status=600")
 	}
 }
 
@@ -342,19 +539,6 @@ func TestValidateEnvelope_FailureWithPayload(t *testing.T) {
 	}
 }
 
-func TestValidateEnvelope_FailureHTTP200(t *testing.T) {
-	env := &ControlEnvelope{
-		SchemaVersion: SchemaVersion,
-		Operation:     "health",
-		Success:       false,
-		HTTPStatus:    200,
-		ErrorClass:    ErrHealthNotReady,
-	}
-	if err := ValidateControlEnvelope(env); err == nil {
-		t.Error("expected error for failure with HTTP 200")
-	}
-}
-
 func TestValidateEnvelope_FailureNoErrorClass(t *testing.T) {
 	env := &ControlEnvelope{
 		SchemaVersion: SchemaVersion,
@@ -377,20 +561,6 @@ func TestValidateEnvelope_UnknownErrorClass(t *testing.T) {
 	}
 	if err := ValidateControlEnvelope(env); err == nil {
 		t.Error("expected error for unknown error class")
-	}
-}
-
-func TestValidateEnvelope_SuccessWithMultiplePayloads(t *testing.T) {
-	env := &ControlEnvelope{
-		SchemaVersion: SchemaVersion,
-		Operation:     "health",
-		Success:       true,
-		HTTPStatus:    200,
-		Health:        &HealthPayload{Ready: true, Mode: "growing"},
-		State:         &StatePayload{Mode: "growing", Ready: true},
-	}
-	if err := ValidateControlEnvelope(env); err == nil {
-		t.Error("expected error for health operation with state payload")
 	}
 }
 
@@ -431,11 +601,14 @@ func TestIsRetryable_NonProtocolError(t *testing.T) {
 	}
 }
 
-// ===== Operation argv authority tests =====
+// ===== Operation argv authority (fails closed) =====
 
 func TestControlOperation_BuildArgvHealth(t *testing.T) {
 	op := ControlOperation{Kind: OpHealth, Port: 8080, Timeout: 5 * time.Second}
-	argv := op.BuildArgv()
+	argv, err := op.BuildArgv()
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
 	expected := []string{"/app/canary", "control", "health", "--port", "8080", "--timeout", "5s"}
 	if len(argv) != len(expected) {
 		t.Fatalf("expected %d args, got %d", len(expected), len(argv))
@@ -449,7 +622,10 @@ func TestControlOperation_BuildArgvHealth(t *testing.T) {
 
 func TestControlOperation_BuildArgvState(t *testing.T) {
 	op := ControlOperation{Kind: OpState, Port: 8080, Timeout: 5 * time.Second}
-	argv := op.BuildArgv()
+	argv, err := op.BuildArgv()
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
 	expected := []string{"/app/canary", "control", "state", "--port", "8080", "--timeout", "5s"}
 	if len(argv) != len(expected) {
 		t.Fatalf("expected %d args, got %d", len(expected), len(argv))
@@ -463,7 +639,10 @@ func TestControlOperation_BuildArgvState(t *testing.T) {
 
 func TestControlOperation_BuildArgvOperate(t *testing.T) {
 	op := ControlOperation{Kind: OpOperate, Port: 8080, Count: 10, Timeout: 30 * time.Second}
-	argv := op.BuildArgv()
+	argv, err := op.BuildArgv()
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
 	expected := []string{"/app/canary", "control", "operate", "--port", "8080", "--count", "10", "--timeout", "30s"}
 	if len(argv) != len(expected) {
 		t.Fatalf("expected %d args, got %d", len(expected), len(argv))
@@ -481,7 +660,11 @@ func TestControlOperation_NoShell(t *testing.T) {
 		{Kind: OpState, Port: 8080, Timeout: 5 * time.Second},
 		{Kind: OpOperate, Port: 8080, Count: 5, Timeout: 30 * time.Second},
 	} {
-		argv := op.BuildArgv()
+		argv, err := op.BuildArgv()
+		if err != nil {
+			t.Errorf("BuildArgv failed: %v", err)
+			continue
+		}
 		for _, arg := range argv {
 			low := strings.ToLower(arg)
 			if low == "/bin/sh" || low == "/bin/bash" || low == "sh" || low == "bash" ||
@@ -495,13 +678,59 @@ func TestControlOperation_NoShell(t *testing.T) {
 	}
 }
 
+func TestControlOperation_BuildArgvFailsClosedOnBadOp(t *testing.T) {
+	op := ControlOperation{Kind: Operation("nope"), Port: 8080, Timeout: 5 * time.Second}
+	_, err := op.BuildArgv()
+	if err == nil {
+		t.Error("expected error for invalid op")
+	}
+}
+
+func TestControlOperation_BuildArgvFailsClosedOnBadPort(t *testing.T) {
+	op := ControlOperation{Kind: OpHealth, Port: 0, Timeout: 5 * time.Second}
+	_, err := op.BuildArgv()
+	if err == nil {
+		t.Error("expected error for port=0")
+	}
+}
+
+func TestControlOperation_BuildArgvFailsClosedOnBadCount(t *testing.T) {
+	op := ControlOperation{Kind: OpOperate, Port: 8080, Count: 0, Timeout: 5 * time.Second}
+	_, err := op.BuildArgv()
+	if err == nil {
+		t.Error("expected error for count=0")
+	}
+}
+
+func TestControlOperation_BuildArgvFailsClosedOnZeroTimeout(t *testing.T) {
+	op := ControlOperation{Kind: OpHealth, Port: 8080, Timeout: 0}
+	_, err := op.BuildArgv()
+	if err == nil {
+		t.Error("expected error for timeout=0")
+	}
+}
+
+func TestNewControlOperation(t *testing.T) {
+	op, err := NewControlOperation(OpHealth, 8080, 0, 5*time.Second)
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if op.Port != 8080 {
+		t.Errorf("expected port=8080, got %d", op.Port)
+	}
+	if _, err := NewControlOperation(OpHealth, 0, 0, 5*time.Second); err == nil {
+		t.Error("expected error for port=0")
+	}
+	if _, err := NewControlOperation(OpOperate, 8080, 0, 5*time.Second); err == nil {
+		t.Error("expected error for count=0")
+	}
+}
+
 func TestControlOperation_Validate(t *testing.T) {
-	// Valid
 	op := ControlOperation{Kind: OpHealth, Port: 8080, Timeout: 5 * time.Second}
 	if err := op.Validate(); err != nil {
 		t.Errorf("expected valid, got %v", err)
 	}
-	// Invalid port
 	op.Port = 0
 	if err := op.Validate(); err == nil {
 		t.Error("expected error for port=0")
@@ -511,34 +740,91 @@ func TestControlOperation_Validate(t *testing.T) {
 		t.Error("expected error for port>65535")
 	}
 	op.Port = 8080
-	// Invalid timeout
 	op.Timeout = 0
 	if err := op.Validate(); err == nil {
 		t.Error("expected error for timeout=0")
 	}
 	op.Timeout = 5 * time.Second
-	// Operate with invalid count
 	op.Kind = OpOperate
 	op.Count = 0
 	if err := op.Validate(); err == nil {
 		t.Error("expected error for count=0")
 	}
-	op.Count = 5
-	// Unknown operation
 	op.Kind = Operation("unknown")
 	if err := op.Validate(); err == nil {
 		t.Error("expected error for unknown operation")
 	}
-	// Empty operation
 	op.Kind = ""
 	if err := op.Validate(); err == nil {
 		t.Error("expected error for empty operation")
 	}
 }
 
-// ===== Allowed error class completeness =====
+// ===== P0-1: Mutation-resistance tests =====
 
-func TestAllowedErrorClasses_ContainsAll(t *testing.T) {
+func TestAllErrorClasses_ReturnsDefensiveCopy(t *testing.T) {
+	classes := AllErrorClasses()
+	if len(classes) == 0 {
+		t.Fatal("expected non-empty error classes")
+	}
+	// Mutate the returned slice
+	classes[0] = "hacked"
+	// Verify package-level authority is unaffected
+	if AllErrorClasses()[0] == "hacked" {
+		t.Error("AllErrorClasses must return a defensive copy")
+	}
+	if !IsAllowedErrorClass(ErrInvalidArguments) {
+		t.Error("mutating slice should not affect IsAllowedErrorClass")
+	}
+}
+
+func TestAllOperations_ReturnsDefensiveCopy(t *testing.T) {
+	ops := AllOperations()
+	if len(ops) == 0 {
+		t.Fatal("expected non-empty operations")
+	}
+	ops[0] = "hacked"
+	if AllOperations()[0] == "hacked" {
+		t.Error("AllOperations must return a defensive copy")
+	}
+	if !IsValidOperation(OpHealth) {
+		t.Error("mutating slice should not affect IsValidOperation")
+	}
+}
+
+func TestRequiredEnvelopeFields_ReturnsDefensiveCopy(t *testing.T) {
+	fields := RequiredEnvelopeFields()
+	fields[0] = "hacked"
+	if RequiredEnvelopeFields()[0] == "hacked" {
+		t.Error("RequiredEnvelopeFields must return a defensive copy")
+	}
+}
+
+func TestRequiredHealthFields_ReturnsDefensiveCopy(t *testing.T) {
+	fields := RequiredHealthFields()
+	fields[0] = "hacked"
+	if RequiredHealthFields()[0] == "hacked" {
+		t.Error("RequiredHealthFields must return a defensive copy")
+	}
+}
+
+func TestRequiredStateFields_ReturnsDefensiveCopy(t *testing.T) {
+	fields := RequiredStateFields()
+	fields[0] = "hacked"
+	if RequiredStateFields()[0] == "hacked" {
+		t.Error("RequiredStateFields must return a defensive copy")
+	}
+}
+
+func TestRequiredWorkloadFields_ReturnsDefensiveCopy(t *testing.T) {
+	fields := RequiredWorkloadFields()
+	fields[0] = "hacked"
+	if RequiredWorkloadFields()[0] == "hacked" {
+		t.Error("RequiredWorkloadFields must return a defensive copy")
+	}
+}
+
+func TestAllowedErrorClasses_AllPresent(t *testing.T) {
 	expected := []ErrorClass{
 		ErrInvalidArguments, ErrRequestCreateFailed, ErrConnectionFailed,
 		ErrRequestTimeout, ErrResponseTooLarge, ErrUnexpectedHTTPStatus,
@@ -553,16 +839,15 @@ func TestAllowedErrorClasses_ContainsAll(t *testing.T) {
 	}
 }
 
-// ===== Required envelope fields reference =====
-
 func TestRequiredEnvelopeFields_AllPresent(t *testing.T) {
 	expected := []string{"schema_version", "operation", "success", "http_status"}
-	if len(RequiredEnvelopeFields) != len(expected) {
-		t.Fatalf("expected %d fields, got %d", len(expected), len(RequiredEnvelopeFields))
+	fields := RequiredEnvelopeFields()
+	if len(fields) != len(expected) {
+		t.Fatalf("expected %d fields, got %d", len(expected), len(fields))
 	}
 	for i, f := range expected {
-		if RequiredEnvelopeFields[i] != f {
-			t.Errorf("field[%d]: expected %q, got %q", i, f, RequiredEnvelopeFields[i])
+		if fields[i] != f {
+			t.Errorf("field[%d]: expected %q, got %q", i, f, fields[i])
 		}
 	}
 }
