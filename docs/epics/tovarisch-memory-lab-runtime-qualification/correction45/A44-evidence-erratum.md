@@ -4,7 +4,7 @@
 
 CORRECTION44 evidence was accepted as a bounded closure. The
 authoritative record at S44/E44/A44 remains the canonical control
-provenance. CORRECTION45 repairs five bounded residuals without
+provenance. CORRECTION45 repairs the bounded residuals without
 rewriting S44, E44, or A44, and then performs the live
 source-image-executable qualification.
 
@@ -28,8 +28,7 @@ source-image-executable qualification.
    The file is a pre-attestation snapshot taken just before A44
    was committed. The embedded `git status` records `M
    docs/.../final-git-status.txt` plus two `??` (additions) for
-   the attestation and source-hash files. The snapshot was
-   generated as part of the A44 commit workflow.
+   the attestation and source-hash files.
 5. **legacy-authority-after.txt**:
    The post-migration evidence was regenerated with command,
    working directory, patterns, files_scanned, and exit code.
