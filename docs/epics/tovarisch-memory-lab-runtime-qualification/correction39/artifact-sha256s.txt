@@ -1,0 +1,40 @@
+# CORRECTION39 Artifact SHA-256s
+
+Subject commit: 599b69028abe963c7642dfeae7aee751e103f9c1 (S39)
+Subject tree:   412b2db66d5044e29ee42925eb88bba60f69a095 (ST39)
+
+## Source files
+
+```
+03c160f6f7fea65716d31e867bf28ab5c3b93887362b71e6ba0143c34eeaf522  tovarisch/labs/memory/internal/dockerlab/control_seam.go
+5384a6b66136d10b0a267fca9f14b4727d5daf050afeea8e23dbe170fa43c252  tovarisch/labs/memory/internal/dockerlab/control_protocol_v2.go
+c8b5fbeeaa3d22d254fed90189e85187297511d8e2fa2ce81920f2dd648dacc0  tovarisch/labs/memory/internal/dockerlab/control_retry.go
+92a8d8064000a434f0df17dbe09a2dc9707827c879d4ca4ef9e794124c4516bd  tovarisch/labs/memory/internal/dockerlab/control_v2_test.go
+```
+
+## Evidence files (this correction39 directory)
+
+```
+a289457b4ab79ebf887807cd685bd4d7b562d1c77c0a1f76a61472c12e698afb  E38-erratum.md
+d36eedb28f9658aa35a46304ad2e88c2578b556fdb24dc988ddc4941fbe43361  E38-artifact-sha256s.txt
+bce1916117697b74ce311956b1a3b007edac8634394a7f1d63cd327fe0045155  identities-subject.txt
+9a1bc1c8ccc763ac8fbbec9e1dc34d21be3f73c86bcfca0ec024d8eaff541492  changed-files.txt
+e391bd781b19a8a43ad1f3d0b9c1a2df45d919db1e84fd142b6db5a12cf6b230  dockerlab-migration-inventory.txt
+ec4a59f9834bd19f37cf8d46026fe3613d0038f07fed781f75f65af69b362add  protocol-ownership-scan.txt
+198eab63031b87c83454841d0c9f3d6a8a176fd687c0650a7c28d9da677eb538  recording-exec-tests.txt
+a77c097cf9752fa8fbabbc1bcc1012d2c79085607209e69671c6582dea1a4b87  engine-argv-tests.txt
+0ae4c5f17ffa68f7a899ad6f89be548e4fece146fd96f7b1ccf048998a980ae9  output-bound-tests.txt
+e3edba2bcae5abb11f7cbc58040dd61a1d64240061d823440198bc11c6b52015  exit-envelope-consistency-tests.txt
+df57a942114cf1cc63684110d4b7e941665fbcd0d67da9141b4af70fef9e7cf5  readiness-retry-tests.txt
+2763d580f78bc7efb96a25b4e0cbbec133b2089e431490541f29a754cf119c9f  focused-vet.txt
+526799417e73546b0ad2aee56c61a9c9daa387c0dd53fdb46cd1ca24fc879328  focused-tests.txt
+df47a87175b772f93df312b512e3e77c4212d8787f4df5ca4880326a8ed8c274  race-tests.txt
+a2074a4261d7999917f13a4a66893d4d669124cdff52fba7c36bf78729606126  count100-tests.txt
+4ffb2990217659123c2d78390183ddc0383c05a829a2a31e7ffe722fbdec9e22  short-tests.txt
+7a7a674ecbcb61ff2c66f0532c7eec2a9896182e8efc0219cd6135a63ef3fb5b  make-gate.txt
+1c4f76d42565eee17c920fad405832b9edf86d76eb7efe07aa3f3766909f1a22  artifact-sha256s.txt
+2659bba363d0b797919c1da07cdd9b1cba47856104aae7abc2849a9593bb1e5b  final-git-status.txt
+bb13d1029e58a7eb60c233d1d7cc723967929af5932f26480e2d59f573953311  close-report.md
+```
+
+All SHA-256 values are real (no placeholders).

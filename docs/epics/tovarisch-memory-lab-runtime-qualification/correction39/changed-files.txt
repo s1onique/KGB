@@ -1,0 +1,44 @@
+# CORRECTION39 Changed Files
+
+## Created (source)
+- tovarisch/labs/memory/internal/dockerlab/control_seam.go
+  (ControlExecRuntime interface + FakeControlExecRuntime recording fake)
+- tovarisch/labs/memory/internal/dockerlab/control_protocol_v2.go
+  (ControlRunner orchestrator using canarycontrol types)
+- tovarisch/labs/memory/internal/dockerlab/control_retry.go
+  (ReadinessLoop with FakeSleeper injection)
+- tovarisch/labs/memory/internal/dockerlab/control_v2_test.go
+  (30+ hermetic Engine seam tests)
+
+## Created (evidence)
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/E38-erratum.md
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/E38-artifact-sha256s.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/identities-subject.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/changed-files.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/dockerlab-migration-inventory.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/protocol-ownership-scan.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/recording-exec-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/engine-argv-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/output-bound-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/exit-envelope-consistency-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/readiness-retry-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/focused-vet.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/focused-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/race-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/count100-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/short-tests.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/make-gate.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/artifact-sha256s.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/final-git-status.txt
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/close-report.md
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/attestation.md
+- docs/epics/tovarisch-memory-lab-runtime-qualification/correction39/evidence-file-sha256s.txt
+
+## Modified
+(none — existing dockerlab/client.go is unchanged; new v2 files are additive)
+
+## Untouched (out of CORRECTION39 scope)
+- cmd/canary (no source changes)
+- internal/canarycontrol (no source changes)
+- internal/evidence (untouched)
+- cmd/tovarisch-memory-lab (untouched)

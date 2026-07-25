@@ -1,0 +1,103 @@
+# CORRECTION39 Dockerlab Migration Inventory (updated)
+
+CORRECTION39 introduced the NEW v2 controller path (control_seam.go,
+control_protocol_v2.go, control_retry.go, control_v2_test.go). The
+legacy dockerlab/client.go transport remains in place for callers
+that have not yet migrated.
+
+## Symbols migrated to v2 (NEW files in CORRECTION39)
+
+```yaml
+- file: control_seam.go
+  introduced:
+    - ControlExecRuntime interface (P0-2 Engine seam)
+    - FakeControlExecRuntime (recording fake)
+    - MaxControlStdout, MaxControlStderr (P0-6 bounded output)
+    - ErrStdoutOverflow, ErrStderrOverflow, ErrEmptyStdout
+    - ArgsContainsForbidden (P0-4 forbidden argv detection)
+
+- file: control_protocol_v2.go
+  introduced:
+    - ControlRunner (uses canarycontrol.NewControlOperation + BuildArgv)
+    - ControlProbe (orchestrates Engine call)
+    - runExec (exec create/attach/inspect + envelope decode + consistency)
+    - ErrExitEnvelopeMismatch (P0-7 exit/envelope consistency)
+    - ErrControlTimeout
+    - stderrWrapped (preserves bounded stderr on decode failure)
+    - wrapWithStderr
+    - IsProtocolRetryable (P0-8 retry authority delegation)
+
+- file: control_retry.go
+  introduced:
+    - Sleeper interface (P0-8 sleeper injection)
+    - realSleeper (production)
+    - FakeSleeper (test injection)
+    - RetryPolicy
+    - DefaultRetryPolicy
+    - ReadinessLoop (wraps canarycontrol.IsRetryable)
+    - IsContextCanceled
+
+- file: control_v2_test.go
+  introduced:
+    - 30+ hermetic Engine-seam tests covering exact argv, input
+      rejection, exec/attach/inspect failures, bounded output,
+      exit/envelope consistency, requested-count mismatch, malformed
+      envelope, trailing data, typed failure preservation, retry loop
+      behavior, forbidden argv detection
+```
+
+## Symbols still pending migration (legacy client.go)
+
+```yaml
+- symbol: ProtocolError (dockerlab type)
+  current_file: tovarisch/labs/memory/internal/dockerlab/client.go:994
+  shared_replacement: canarycontrol.ProtocolError
+  action: delete (deferred)
+
+- symbol: ControlEnvelope (dockerlab type)
+  current_file: tovarisch/labs/memory/internal/dockerlab/client.go:1022
+  shared_replacement: canarycontrol.ControlEnvelope
+  action: delete (deferred)
+
+- symbol: strictParseEnvelope
+  current_file: tovarisch/labs/memory/internal/dockerlab/client.go
+  shared_replacement: canarycontrol.DecodeEnvelopeExactlyOne
+  action: delete (deferred)
+
+- symbol: validateControlEnvelope
+  current_file: tovarisch/labs/memory/internal/dockerlab/client.go
+  shared_replacement: canarycontrol.ValidateControlEnvelope
+  action: delete (deferred)
+
+- symbol: IsProtocolNonRetryable
+  current_file: tovarisch/labs/memory/internal/dockerlab/client.go:1007
+  shared_replacement: canarycontrol.IsRetryable (inverted)
+  action: delete (deferred)
+
+- symbol: CanaryHealthCheckViaExec
+  current_file: tovarisch/labs/memory/internal/dockerlab/client.go:696
+  shared_replacement: ControlRunner.ControlProbe (uses canarycontrol types)
+  action: adapt (deferred)
+
+- symbol: CanaryStateViaExec
+  current_file: tovarisch/labs/memory/internal/dockerlab/client.go:723
+  shared_replacement: ControlRunner.ControlProbe (uses canarycontrol types)
+  action: adapt (deferred)
+
+- symbol: CanaryOperateViaExec
+  current_file: tovarisch/labs/memory/internal/dockerlab/client.go:742
+  shared_replacement: ControlRunner.ControlProbe (uses canarycontrol types)
+  action: adapt (deferred)
+```
+
+## Why the full migration is staged
+
+The CORRECTION39 bounded scope focused on introducing the new v2 path
+that consumes canarycontrol types and the recording Engine seam, with
+comprehensive hermetic tests proving exact Engine argv, bounded output,
+exit/envelope consistency, and shared retry integration.
+
+The legacy client.go path remains in place because deleting it would
+break dependent consumers (the tovarisch-memory-lab CLI, the qualified
+runtime, the existing test suite). Deletion of the legacy symbols is
+staged to a follow-up ACT that migrates the dependent callers first.

@@ -1,0 +1,27 @@
+command=make gate
+working_directory=/home/kgb/Projects/KGB
+subject_commit=599b69028abe963c7642dfeae7aee751e103f9c1 (S39)
+subject_tree=412b2db66d5044e29ee42925eb88bba60f69a095 (ST39)
+started_at=2026-07-25T10:19:20+03:00
+finished_at=<deferred>
+exit_code=<deferred>
+
+Result: DEFERRED.
+
+CORRECTION39 does NOT require parent closure. The pre-existing UVB-76
+artifact-writer defects remain a parent blocker. The verifier has not
+been weakened.
+
+The ACT-specific outcome (new v2 path, recording seam, bounded output,
+exit/envelope consistency, shared retry integration) is verified by the
+focused unit, race, count=100, and short test runs in
+focused-tests.txt / race-tests.txt / count100-tests.txt / short-tests.txt.
+
+Recommended next ACT (CORRECTION40) scope:
+- operation-level canonical reachability
+- independent evidence strictness
+- canary image rebuild
+- helper live qualification
+- production CLI qualification
+- subject/image/executable binding
+- final canonical gate

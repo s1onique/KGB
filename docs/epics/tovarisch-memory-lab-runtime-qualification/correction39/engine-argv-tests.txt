@@ -1,0 +1,17 @@
+command=go test -count=1 -v -run 'TestEngineSeam_RecordsExact|TestArgsContainsForbidden' \
+  ./internal/dockerlab/...
+working_directory=/home/kgb/Projects/KGB/tovarisch/labs/memory
+subject_commit=599b69028abe963c7642dfeae7aee751e103f9c1 (S39)
+subject_tree=412b2db66d5044e29ee42925eb88bba60f69a095 (ST39)
+started_at=2026-07-25T10:18:00+03:00
+finished_at=2026-07-25T10:18:01+03:00
+exit_code=0
+
+Result: PASS. All Engine argv tests pass:
+- TestEngineSeam_RecordsExactHealthArgv: argv = [/app/canary control health --port 8080 --timeout 5s]
+- TestEngineSeam_RecordsExactStateArgv: argv = [/app/canary control state --port 8080 --timeout 5s]
+- TestEngineSeam_RecordsExactOperateArgv: argv = [/app/canary control operate --port 8080 --count 5 --timeout 30s]
+- TestArgsContainsForbidden: rejects sh, /bin/sh, bash, /bin/bash, curl, wget, nc, telnet.
+
+No argv contains any forbidden tool token (asserted in each
+TestEngineSeam_RecordsExact* test via ArgsContainsForbidden).

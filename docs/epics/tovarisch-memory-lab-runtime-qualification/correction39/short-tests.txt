@@ -1,0 +1,9 @@
+command=go test -count=1 -short ./...
+working_directory=/home/kgb/Projects/KGB/tovarisch/labs/memory
+subject_commit=599b69028abe963c7642dfeae7aee751e103f9c1 (S39)
+subject_tree=412b2db66d5044e29ee42925eb88bba60f69a095 (ST39)
+started_at=2026-07-25T10:19:05+03:00
+finished_at=2026-07-25T10:19:07+03:00
+exit_code=0
+
+Result: PASS (all packages)

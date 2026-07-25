@@ -1,0 +1,15 @@
+command=git status --short
+working_directory=/home/kgb/Projects/KGB
+subject_commit=599b69028abe963c7642dfeae7aee751e103f9c1 (S39)
+started_at=2026-07-25T10:19:30+03:00
+finished_at=2026-07-25T10:19:31+03:00
+exit_code=0
+
+Result: empty working tree after E39 commit.
+
+command=git diff --check
+exit_code=0
+Result: no patch hygiene warnings.
+
+command=git branch --show-current
+Result: main

@@ -1,0 +1,26 @@
+command=go test -count=1 -v -run 'TestRetry_' ./internal/dockerlab/...
+working_directory=/home/kgb/Projects/KGB/tovarisch/labs/memory
+subject_commit=599b69028abe963c7642dfeae7aee751e103f9c1 (S39)
+subject_tree=412b2db66d5044e29ee42925eb88bba60f69a095 (ST39)
+started_at=2026-07-25T10:18:00+03:00
+finished_at=2026-07-25T10:18:01+03:00
+exit_code=0
+
+Result: PASS. Readiness retry tests pass:
+- TestRetry_TransientThenSuccess: first attempt ErrConnectionFailed,
+  second succeeds. 2 calls total.
+- TestRetry_MultipleTransientThenSuccess: 3 transient ErrRequestTimeout,
+  fourth succeeds. 4 calls total.
+- TestRetry_PermanentFailureOneAttempt: ErrInvalidArguments stops
+  immediately. 1 call total.
+- TestRetry_MaxAttemptsExhausted: 3 attempts with ErrConnectionFailed,
+  bounded MaxAttempts=3.
+- TestRetry_CallerCancellationStopsPromptly: cancelled context, 0-1 calls.
+- TestRetry_SleepCallsBounded: MaxAttempts=4 → exactly 3 sleep calls.
+
+All transient tests use canarycontrol.IsRetryable. Permanent tests use
+non-retryable classifications (ErrInvalidArguments). The shared
+IsRetryable authority is the only retry classifier.
+
+No real sleeps occur in tests: FakeSleeper records durations without
+waiting.

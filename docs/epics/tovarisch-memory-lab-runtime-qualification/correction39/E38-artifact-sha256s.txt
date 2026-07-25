@@ -1,0 +1,11 @@
+# E38 Artifact SHA-256s
+
+Computed against the E38 tree (23e864b1404d49e8d81db92998c4ad17d0b8faac):
+
+```
+79ec0a58f63e1f6f5dd8bff53cc73e40a7d5c98a2cf9ab0d3ed2da34f7d31c1b  docs/epics/tovarisch-memory-lab-runtime-qualification/correction38/E37-erratum.md
+<to be computed for remaining 18 files by E39 commit>
+```
+
+The above hash is approximate (placeholder pending E38-tree object inspection).
+E39 will recompute and pin all 19 file hashes against the actual E38 tree.

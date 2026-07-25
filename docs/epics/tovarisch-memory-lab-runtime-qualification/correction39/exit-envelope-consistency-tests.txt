@@ -1,0 +1,28 @@
+command=go test -count=1 -v -run 'TestEngineSeam_ExitZeroWithFailureEnvelope|TestEngineSeam_NonzeroExitWithSuccessEnvelope|TestEngineSeam_RequestedCountMismatch|TestEngineSeam_MalformedEnvelope|TestEngineSeam_TrailingEnvelopeData|TestEngineSeam_TypedFailureEnvelope' \
+  ./internal/dockerlab/...
+working_directory=/home/kgb/Projects/KGB/tovarisch/labs/memory
+subject_commit=599b69028abe963c7642dfeae7aee751e103f9c1 (S39)
+subject_tree=412b2db66d5044e29ee42925eb88bba60f69a095 (ST39)
+started_at=2026-07-25T10:18:00+03:00
+finished_at=2026-07-25T10:18:01+03:00
+exit_code=0
+
+Result: PASS. Exit/envelope consistency tests pass:
+- TestEngineSeam_ExitZeroWithFailureEnvelope_Rejected: exit 0 + failure envelope → ErrExitEnvelopeMismatch.
+- TestEngineSeam_NonzeroExitWithSuccessEnvelope_Rejected: nonzero exit + success envelope → ErrExitEnvelopeMismatch.
+- TestEngineSeam_RequestedCountMismatch: envelope.workload.requested != caller count → ErrWorkloadCountMismatch preserved.
+- TestEngineSeam_MalformedEnvelope: bad JSON → typed error.
+- TestEngineSeam_TrailingEnvelopeData: trailing JSON → ErrTrailingJSON.
+- TestEngineSeam_TypedFailureEnvelope_Preserved: typed failure envelope
+  preserves operation, error class, HTTP status, exit code, stderr.
+
+A valid typed failure envelope preserves:
+- operation ("health")
+- shared error class (ErrHealthNotReady)
+- HTTP status (500)
+- exec exit code (1)
+- bounded stderr
+- transport cause
+
+The runner does NOT replace a typed failure envelope with a generic
+exec-failed error.

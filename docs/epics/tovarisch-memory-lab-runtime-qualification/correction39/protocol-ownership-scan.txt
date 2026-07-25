@@ -1,0 +1,79 @@
+# CORRECTION39 Protocol Ownership Scan (updated)
+
+P0-9: After dockerlab migration, run:
+
+```bash
+git grep -n \
+  -e 'canary-control/v1' \
+  -e 'health_not_ready' \
+  -e 'workload_count_mismatch' \
+  -- tovarisch/labs/memory
+```
+
+## Current Ownership (after CORRECTION39)
+
+```yaml
+internal/canarycontrol: true    # owns SchemaVersion, ErrHealthNotReady,
+                                # ErrWorkloadCountMismatch, etc.
+
+cmd/canary:
+  Aliases the shared types via type aliases:
+    type DecodeError      = canarycontrol.ProtocolError
+    type HealthPayload    = canarycontrol.HealthPayload
+    type StatePayload     = canarycontrol.StatePayload
+    type WorkloadPayload  = canarycontrol.WorkloadPayload
+    type ControlEnvelope  = canarycontrol.ControlEnvelope
+    type ErrorClass       = canarycontrol.ErrorClass
+    type ControlOperation = canarycontrol.ControlOperation
+    type ControlOperationKind = canarycontrol.Operation
+
+  Constants all alias the shared authority.
+  Error-class vars all alias the shared authority.
+
+internal/dockerlab: PARTIAL → IMPROVED
+  ADDITIVE CONSUMERS (new in CORRECTION39):
+    internal/dockerlab/control_seam.go:
+      - ControlExecRuntime (interface)
+      - FakeControlExecRuntime (recording fake)
+      - MaxControlStdout, MaxControlStderr
+      - ErrStdoutOverflow, ErrStderrOverflow, ErrEmptyStdout
+      - ArgsContainsForbidden (consumes no vocabulary, just checks strings)
+    internal/dockerlab/control_protocol_v2.go:
+      - ControlRunner (CONSUMES canarycontrol.NewControlOperation + BuildArgv)
+      - ControlProbe (CONSUMES canarycontrol.DecodeEnvelopeExactlyOne)
+      - runExec (CONSUMES canarycontrol.DecodeEnvelopeExactlyOne +
+        envelope validation)
+      - ErrExitEnvelopeMismatch (CONSUMES canarycontrol envelope semantics)
+      - IsProtocolRetryable (DELEGATES to canarycontrol.IsRetryable)
+    internal/dockerlab/control_retry.go:
+      - ReadinessLoop (CONSUMES canarycontrol.IsRetryable)
+      - RetryPolicy, Sleeper, FakeSleeper, realSleeper
+      - IsContextCanceled
+
+  LEGACY DUPLICATES (still in client.go, deferred):
+    - ProtocolError type
+    - ControlEnvelope type
+    - strictParseEnvelope
+    - validateControlEnvelope
+    - IsProtocolNonRetryable
+    - CanaryHealthCheckViaExec / CanaryStateViaExec / CanaryOperateViaExec
+      (still use legacy path, not the new v2 ControlRunner)
+```
+
+## Required Ownership (per CORRECTION39 P0-9)
+
+```yaml
+internal/canarycontrol:
+  definitions: true    # ACHIEVED
+
+cmd/canary:
+  aliases_or_consumers_only: true    # ACHIEVED
+
+internal/dockerlab:
+  consumers_only: partial    # ACHIEVED for new v2 path; legacy still has duplicates
+```
+
+CORRECTION39 status on P0-9: PARTIAL — new v2 files are consumer-only;
+legacy client.go still owns duplicates. Full migration deferred to a
+follow-up ACT that migrates dependent callers (tovarisch-memory-lab CLI,
+qualified_runtime) first.
