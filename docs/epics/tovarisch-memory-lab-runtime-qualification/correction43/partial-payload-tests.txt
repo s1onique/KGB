@@ -1,0 +1,8 @@
+TestFrameGuard_PartialFirstPayload                 PASS
+TestFrameGuard_ValidFrameThenPartialPayload         PASS
+TestFrameGuard_PayloadReaderReturnsBytesAndEOF     PASS
+TestFrameGuard_PayloadOneByteShort                 PASS
+TestFrameGuard_ZeroLengthPayloadAccepted           PASS (streams 1,2,3)
+TestFrameGuard_PartialPayloadForEachStream         PASS (streams 1,2,3)
+TestControlProbe_ValidEnvelopeThenPartialPayloadRejected  PASS
+TestControlProbe_PartialOnlyPayloadRejected                PASS

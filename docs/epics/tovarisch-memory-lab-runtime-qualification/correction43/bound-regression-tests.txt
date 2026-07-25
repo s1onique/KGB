@@ -1,0 +1,12 @@
+TestFrameGuard_StdoutAtLimitRegression                 PASS
+TestFrameGuard_StdoutOneOverRegression                 PASS
+TestFrameGuard_StderrAtLimitRegression                 PASS
+TestFrameGuard_StderrOneOverRegression                 PASS
+TestFrameGuard_DeclaredUint32MaxRegression             PASS
+TestFrameGuard_ManyStdoutCumulativeOverflowRegression  PASS
+TestFrameGuard_ManyStderrCumulativeOverflowRegression  PASS
+TestFrameGuard_BothCumulativeLimitsRegression          PASS
+TestFrameGuard_ValidNearLimitThenPartialFrame          PASS
+TestFrameGuard_ValidCumulativeThenMalformedHeader      PASS
+TestFrameGuard_OversizedFrameAfterValidEnvelope        PASS
+TestFrameGuard_PropertyRetainedStateBounded            PASS (allocs <= 4)

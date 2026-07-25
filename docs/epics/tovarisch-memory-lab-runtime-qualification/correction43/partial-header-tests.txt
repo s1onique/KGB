@@ -1,0 +1,12 @@
+TestFrameGuard_EmptyStreamGracefulEOF                  PASS
+TestFrameGuard_PartialHeaderNotCollapsedToEOF           PASS
+TestFrameGuard_PartialFirstHeaderEachLength            PASS (1..7)
+TestFrameGuard_ValidFrameThenPartialHeaderEachLength   PASS (1..7)
+TestFrameGuard_HeaderReaderReturnsBytesAndEOF          PASS (1..7)
+TestFrameGuard_FragmentedHeaderThenUnexpectedEOF       PASS (1..7)
+TestFrameGuard_ReaderContract_NPositiveEOF             PASS (1,2,3,5,7)
+TestFrameGuard_ReaderContract_FragmentedHeaderAndPayloadSameRead PASS
+TestControlProbe_ValidEnvelopeThenPartialHeaderRejected  PASS
+TestControlProbe_PartialOnlyHeaderRejected               PASS
+TestControlProbe_IncompleteTrailingFrameNeverAcceptsFirstEnvelope PASS
+TestFrameGuard_ValidNearLimitThenPartialFrame           PASS

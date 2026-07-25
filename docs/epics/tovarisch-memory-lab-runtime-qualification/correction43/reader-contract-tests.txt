@@ -1,0 +1,5 @@
+TestFrameGuard_ReaderContract_NPositiveEOF            PASS (1,2,3,5,7)
+TestFrameGuard_ReaderContract_CustomErrorDiscoverable  PASS
+TestFrameGuard_ReaderContract_ZeroByteNilOnce          PASS
+TestFrameGuard_ReaderContract_OneByteReads              PASS
+TestFrameGuard_ReaderContract_FragmentedHeaderAndPayloadSameRead PASS

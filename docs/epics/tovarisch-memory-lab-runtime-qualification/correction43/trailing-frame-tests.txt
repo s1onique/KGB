@@ -1,0 +1,6 @@
+TestControlProbe_ValidEnvelopeThenPartialHeaderRejected  PASS
+TestControlProbe_ValidEnvelopeThenPartialPayloadRejected PASS
+TestControlProbe_PartialOnlyHeaderRejected                PASS
+TestControlProbe_PartialOnlyPayloadRejected              PASS
+TestControlProbe_IncompleteTrailingFrameNeverAcceptsFirstEnvelope PASS
+TestControlProbe_NoncanonicalReservedBytesRejected        PASS

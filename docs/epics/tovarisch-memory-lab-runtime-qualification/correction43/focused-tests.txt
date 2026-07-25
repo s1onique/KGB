@@ -1,0 +1,720 @@
+=== RUN   TestResolveImageIdentity_NotFound
+--- PASS: TestResolveImageIdentity_NotFound (0.00s)
+=== RUN   TestResolveImageIdentity_NoPull
+--- PASS: TestResolveImageIdentity_NoPull (0.00s)
+=== RUN   TestContainerCreateWithImageID_RejectsNilConfig
+--- PASS: TestContainerCreateWithImageID_RejectsNilConfig (0.00s)
+=== RUN   TestContainerCreateWithImageID_RejectsEmptyImage
+--- PASS: TestContainerCreateWithImageID_RejectsEmptyImage (0.00s)
+=== RUN   TestContainerCreateWithImageID_RejectsTag
+--- PASS: TestContainerCreateWithImageID_RejectsTag (0.00s)
+=== RUN   TestContainerCreateWithImageID_RejectsShortID
+--- PASS: TestContainerCreateWithImageID_RejectsShortID (0.00s)
+=== RUN   TestContainerCreateWithImageID_RejectsUppercase
+--- PASS: TestContainerCreateWithImageID_RejectsUppercase (0.00s)
+=== RUN   TestContainerCreateWithImageID_RejectsMalformedID
+=== RUN   TestContainerCreateWithImageID_RejectsMalformedID/no_sha256_prefix
+=== RUN   TestContainerCreateWithImageID_RejectsMalformedID/wrong_prefix
+=== RUN   TestContainerCreateWithImageID_RejectsMalformedID/missing_prefix
+=== RUN   TestContainerCreateWithImageID_RejectsMalformedID/empty_prefix
+=== RUN   TestContainerCreateWithImageID_RejectsMalformedID/only_prefix
+--- PASS: TestContainerCreateWithImageID_RejectsMalformedID (0.00s)
+    --- PASS: TestContainerCreateWithImageID_RejectsMalformedID/no_sha256_prefix (0.00s)
+    --- PASS: TestContainerCreateWithImageID_RejectsMalformedID/wrong_prefix (0.00s)
+    --- PASS: TestContainerCreateWithImageID_RejectsMalformedID/missing_prefix (0.00s)
+    --- PASS: TestContainerCreateWithImageID_RejectsMalformedID/empty_prefix (0.00s)
+    --- PASS: TestContainerCreateWithImageID_RejectsMalformedID/only_prefix (0.00s)
+=== RUN   TestValidateExactImageID_ValidCanonicalID
+=== RUN   TestValidateExactImageID_ValidCanonicalID/sha256:0000000000000
+=== RUN   TestValidateExactImageID_ValidCanonicalID/sha256:fffffffffffff
+=== RUN   TestValidateExactImageID_ValidCanonicalID/sha256:abcd1234abcd1
+=== RUN   TestValidateExactImageID_ValidCanonicalID/sha256:0123456789abc
+--- PASS: TestValidateExactImageID_ValidCanonicalID (0.00s)
+    --- PASS: TestValidateExactImageID_ValidCanonicalID/sha256:0000000000000 (0.00s)
+    --- PASS: TestValidateExactImageID_ValidCanonicalID/sha256:fffffffffffff (0.00s)
+    --- PASS: TestValidateExactImageID_ValidCanonicalID/sha256:abcd1234abcd1 (0.00s)
+    --- PASS: TestValidateExactImageID_ValidCanonicalID/sha256:0123456789abc (0.00s)
+=== RUN   TestValidateExactImageID_InvalidCanonicalID
+=== RUN   TestValidateExactImageID_InvalidCanonicalID/empty
+=== RUN   TestValidateExactImageID_InvalidCanonicalID/tag
+=== RUN   TestValidateExactImageID_InvalidCanonicalID/short
+=== RUN   TestValidateExactImageID_InvalidCanonicalID/uppercase
+=== RUN   TestValidateExactImageID_InvalidCanonicalID/no_prefix
+=== RUN   TestValidateExactImageID_InvalidCanonicalID/wrong_algo
+--- PASS: TestValidateExactImageID_InvalidCanonicalID (0.00s)
+    --- PASS: TestValidateExactImageID_InvalidCanonicalID/empty (0.00s)
+    --- PASS: TestValidateExactImageID_InvalidCanonicalID/tag (0.00s)
+    --- PASS: TestValidateExactImageID_InvalidCanonicalID/short (0.00s)
+    --- PASS: TestValidateExactImageID_InvalidCanonicalID/uppercase (0.00s)
+    --- PASS: TestValidateExactImageID_InvalidCanonicalID/no_prefix (0.00s)
+    --- PASS: TestValidateExactImageID_InvalidCanonicalID/wrong_algo (0.00s)
+=== RUN   TestExactImageID_ZeroDockerCallsOnFailure
+=== RUN   TestExactImageID_ZeroDockerCallsOnFailure/empty_image
+=== RUN   TestExactImageID_ZeroDockerCallsOnFailure/tag
+=== RUN   TestExactImageID_ZeroDockerCallsOnFailure/short_ID
+=== RUN   TestExactImageID_ZeroDockerCallsOnFailure/uppercase
+--- PASS: TestExactImageID_ZeroDockerCallsOnFailure (0.00s)
+    --- PASS: TestExactImageID_ZeroDockerCallsOnFailure/empty_image (0.00s)
+    --- PASS: TestExactImageID_ZeroDockerCallsOnFailure/tag (0.00s)
+    --- PASS: TestExactImageID_ZeroDockerCallsOnFailure/short_ID (0.00s)
+    --- PASS: TestExactImageID_ZeroDockerCallsOnFailure/uppercase (0.00s)
+=== RUN   TestFrameGuard_StableErrorsDiscoverable
+--- PASS: TestFrameGuard_StableErrorsDiscoverable (0.00s)
+=== RUN   TestFrameGuard_PartialHeaderNotCollapsedToEOF
+--- PASS: TestFrameGuard_PartialHeaderNotCollapsedToEOF (0.00s)
+=== RUN   TestFrameGuard_EmptyStreamGracefulEOF
+--- PASS: TestFrameGuard_EmptyStreamGracefulEOF (0.00s)
+=== RUN   TestFrameGuard_PartialFirstHeaderEachLength
+--- PASS: TestFrameGuard_PartialFirstHeaderEachLength (0.00s)
+=== RUN   TestFrameGuard_ValidFrameThenPartialHeaderEachLength
+--- PASS: TestFrameGuard_ValidFrameThenPartialHeaderEachLength (0.00s)
+=== RUN   TestFrameGuard_HeaderReaderReturnsBytesAndEOF
+--- PASS: TestFrameGuard_HeaderReaderReturnsBytesAndEOF (0.00s)
+=== RUN   TestFrameGuard_FragmentedHeaderThenUnexpectedEOF
+--- PASS: TestFrameGuard_FragmentedHeaderThenUnexpectedEOF (0.00s)
+=== RUN   TestFrameGuard_PartialFirstPayload
+--- PASS: TestFrameGuard_PartialFirstPayload (0.00s)
+=== RUN   TestFrameGuard_ValidFrameThenPartialPayload
+--- PASS: TestFrameGuard_ValidFrameThenPartialPayload (0.00s)
+=== RUN   TestFrameGuard_PayloadReaderReturnsBytesAndEOF
+--- PASS: TestFrameGuard_PayloadReaderReturnsBytesAndEOF (0.00s)
+=== RUN   TestFrameGuard_PayloadOneByteShort
+--- PASS: TestFrameGuard_PayloadOneByteShort (0.00s)
+=== RUN   TestFrameGuard_ZeroLengthPayloadAccepted
+--- PASS: TestFrameGuard_ZeroLengthPayloadAccepted (0.00s)
+=== RUN   TestFrameGuard_PartialPayloadForEachStream
+--- PASS: TestFrameGuard_PartialPayloadForEachStream (0.00s)
+=== RUN   TestFrameGuard_ReservedByte1Nonzero
+--- PASS: TestFrameGuard_ReservedByte1Nonzero (0.00s)
+=== RUN   TestFrameGuard_ReservedByte2Nonzero
+--- PASS: TestFrameGuard_ReservedByte2Nonzero (0.00s)
+=== RUN   TestFrameGuard_ReservedByte3Nonzero
+--- PASS: TestFrameGuard_ReservedByte3Nonzero (0.00s)
+=== RUN   TestFrameGuard_AllReservedBytesZero
+--- PASS: TestFrameGuard_AllReservedBytesZero (0.00s)
+=== RUN   TestFrameGuard_StdoutAccepted
+--- PASS: TestFrameGuard_StdoutAccepted (0.00s)
+=== RUN   TestFrameGuard_StderrAccepted
+--- PASS: TestFrameGuard_StderrAccepted (0.00s)
+=== RUN   TestFrameGuard_SystemErrorAccepted
+--- PASS: TestFrameGuard_SystemErrorAccepted (0.00s)
+=== RUN   TestFrameGuard_StdinRejected
+--- PASS: TestFrameGuard_StdinRejected (0.00s)
+=== RUN   TestFrameGuard_UnknownStreamsRejected
+--- PASS: TestFrameGuard_UnknownStreamsRejected (0.00s)
+=== RUN   TestFrameGuard_StdoutAtLimitRegression
+--- PASS: TestFrameGuard_StdoutAtLimitRegression (0.00s)
+=== RUN   TestFrameGuard_StdoutOneOverRegression
+--- PASS: TestFrameGuard_StdoutOneOverRegression (0.00s)
+=== RUN   TestFrameGuard_StderrAtLimitRegression
+--- PASS: TestFrameGuard_StderrAtLimitRegression (0.00s)
+=== RUN   TestFrameGuard_StderrOneOverRegression
+--- PASS: TestFrameGuard_StderrOneOverRegression (0.00s)
+=== RUN   TestFrameGuard_DeclaredUint32MaxRegression
+--- PASS: TestFrameGuard_DeclaredUint32MaxRegression (0.00s)
+=== RUN   TestFrameGuard_ManyStdoutCumulativeOverflowRegression
+--- PASS: TestFrameGuard_ManyStdoutCumulativeOverflowRegression (0.00s)
+=== RUN   TestFrameGuard_ManyStderrCumulativeOverflowRegression
+--- PASS: TestFrameGuard_ManyStderrCumulativeOverflowRegression (0.00s)
+=== RUN   TestFrameGuard_BothCumulativeLimitsRegression
+--- PASS: TestFrameGuard_BothCumulativeLimitsRegression (0.00s)
+=== RUN   TestFrameGuard_ValidNearLimitThenPartialFrame
+--- PASS: TestFrameGuard_ValidNearLimitThenPartialFrame (0.00s)
+=== RUN   TestFrameGuard_ValidCumulativeThenMalformedHeader
+--- PASS: TestFrameGuard_ValidCumulativeThenMalformedHeader (0.00s)
+=== RUN   TestFrameGuard_OversizedFrameAfterValidEnvelope
+--- PASS: TestFrameGuard_OversizedFrameAfterValidEnvelope (0.00s)
+=== RUN   TestFrameGuard_ReaderContract_NPositiveEOF
+--- PASS: TestFrameGuard_ReaderContract_NPositiveEOF (0.00s)
+=== RUN   TestFrameGuard_ReaderContract_CustomErrorDiscoverable
+--- PASS: TestFrameGuard_ReaderContract_CustomErrorDiscoverable (0.00s)
+=== RUN   TestFrameGuard_ReaderContract_ZeroByteNilOnce
+--- PASS: TestFrameGuard_ReaderContract_ZeroByteNilOnce (0.00s)
+=== RUN   TestFrameGuard_ReaderContract_OneByteReads
+--- PASS: TestFrameGuard_ReaderContract_OneByteReads (0.00s)
+=== RUN   TestFrameGuard_ReaderContract_FragmentedHeaderAndPayloadSameRead
+--- PASS: TestFrameGuard_ReaderContract_FragmentedHeaderAndPayloadSameRead (0.00s)
+=== RUN   TestFrameGuard_PropertySuite
+=== RUN   TestFrameGuard_PropertySuite/valid_complete_frame_health_envelope
+=== RUN   TestFrameGuard_PropertySuite/valid_complete_stdout_then_stderr
+=== RUN   TestFrameGuard_PropertySuite/partial_header_4bytes
+=== RUN   TestFrameGuard_PropertySuite/partial_header_7bytes
+=== RUN   TestFrameGuard_PropertySuite/partial_payload_5of10
+=== RUN   TestFrameGuard_PropertySuite/declared_size_uint32_max
+=== RUN   TestFrameGuard_PropertySuite/noncanonical_reserved_byte_1
+=== RUN   TestFrameGuard_PropertySuite/noncanonical_reserved_byte_2
+=== RUN   TestFrameGuard_PropertySuite/noncanonical_reserved_byte_3
+=== RUN   TestFrameGuard_PropertySuite/stdin_stream_rejected
+=== RUN   TestFrameGuard_PropertySuite/unknown_stream_rejected
+--- PASS: TestFrameGuard_PropertySuite (0.00s)
+    --- PASS: TestFrameGuard_PropertySuite/valid_complete_frame_health_envelope (0.00s)
+    --- PASS: TestFrameGuard_PropertySuite/valid_complete_stdout_then_stderr (0.00s)
+    --- PASS: TestFrameGuard_PropertySuite/partial_header_4bytes (0.00s)
+    --- PASS: TestFrameGuard_PropertySuite/partial_header_7bytes (0.00s)
+    --- PASS: TestFrameGuard_PropertySuite/partial_payload_5of10 (0.00s)
+    --- PASS: TestFrameGuard_PropertySuite/declared_size_uint32_max (0.00s)
+    --- PASS: TestFrameGuard_PropertySuite/noncanonical_reserved_byte_1 (0.00s)
+    --- PASS: TestFrameGuard_PropertySuite/noncanonical_reserved_byte_2 (0.00s)
+    --- PASS: TestFrameGuard_PropertySuite/noncanonical_reserved_byte_3 (0.00s)
+    --- PASS: TestFrameGuard_PropertySuite/stdin_stream_rejected (0.00s)
+    --- PASS: TestFrameGuard_PropertySuite/unknown_stream_rejected (0.00s)
+=== RUN   TestFrameGuard_PropertyRetainedStateBounded
+--- PASS: TestFrameGuard_PropertyRetainedStateBounded (0.00s)
+=== RUN   TestControlProbe_ValidEnvelopeThenPartialHeaderRejected
+--- PASS: TestControlProbe_ValidEnvelopeThenPartialHeaderRejected (0.00s)
+=== RUN   TestControlProbe_ValidEnvelopeThenPartialPayloadRejected
+--- PASS: TestControlProbe_ValidEnvelopeThenPartialPayloadRejected (0.00s)
+=== RUN   TestControlProbe_PartialOnlyHeaderRejected
+--- PASS: TestControlProbe_PartialOnlyHeaderRejected (0.00s)
+=== RUN   TestControlProbe_PartialOnlyPayloadRejected
+--- PASS: TestControlProbe_PartialOnlyPayloadRejected (0.00s)
+=== RUN   TestControlProbe_IncompleteTrailingFrameNeverAcceptsFirstEnvelope
+--- PASS: TestControlProbe_IncompleteTrailingFrameNeverAcceptsFirstEnvelope (0.00s)
+=== RUN   TestControlProbe_NoncanonicalReservedBytesRejected
+--- PASS: TestControlProbe_NoncanonicalReservedBytesRejected (0.00s)
+=== RUN   TestStrictParseEnvelope_Success
+--- PASS: TestStrictParseEnvelope_Success (0.00s)
+=== RUN   TestStrictParseEnvelope_EmptyStdout
+--- PASS: TestStrictParseEnvelope_EmptyStdout (0.00s)
+=== RUN   TestStrictParseEnvelope_InvalidJSON
+--- PASS: TestStrictParseEnvelope_InvalidJSON (0.00s)
+=== RUN   TestStrictParseEnvelope_MissingSchemaVersion
+--- PASS: TestStrictParseEnvelope_MissingSchemaVersion (0.00s)
+=== RUN   TestStrictParseEnvelope_MissingOperation
+--- PASS: TestStrictParseEnvelope_MissingOperation (0.00s)
+=== RUN   TestStrictParseEnvelope_MissingSuccess
+--- PASS: TestStrictParseEnvelope_MissingSuccess (0.00s)
+=== RUN   TestStrictParseEnvelope_MissingHTTPStatus
+--- PASS: TestStrictParseEnvelope_MissingHTTPStatus (0.00s)
+=== RUN   TestStrictParseEnvelope_UnknownField
+--- PASS: TestStrictParseEnvelope_UnknownField (0.00s)
+=== RUN   TestStrictParseEnvelope_SecondJSONValue
+--- PASS: TestStrictParseEnvelope_SecondJSONValue (0.00s)
+=== RUN   TestStrictParseEnvelope_MalformedTrailingBytes
+--- PASS: TestStrictParseEnvelope_MalformedTrailingBytes (0.00s)
+=== RUN   TestStrictParseEnvelope_TrailingWhitespace
+--- PASS: TestStrictParseEnvelope_TrailingWhitespace (0.00s)
+=== RUN   TestValidateControlEnvelope_SuccessVariant
+--- PASS: TestValidateControlEnvelope_SuccessVariant (0.00s)
+=== RUN   TestValidateControlEnvelope_FailureVariant
+--- PASS: TestValidateControlEnvelope_FailureVariant (0.00s)
+=== RUN   TestValidateControlEnvelope_WrongSchemaVersion
+--- PASS: TestValidateControlEnvelope_WrongSchemaVersion (0.00s)
+=== RUN   TestValidateControlEnvelope_OperationMismatch
+--- PASS: TestValidateControlEnvelope_OperationMismatch (0.00s)
+=== RUN   TestValidateControlEnvelope_SuccessExitMismatch
+--- PASS: TestValidateControlEnvelope_SuccessExitMismatch (0.00s)
+=== RUN   TestValidateControlEnvelope_FailureExitMismatch
+--- PASS: TestValidateControlEnvelope_FailureExitMismatch (0.00s)
+=== RUN   TestValidateControlEnvelope_SuccessWithErrorClass
+--- PASS: TestValidateControlEnvelope_SuccessWithErrorClass (0.00s)
+=== RUN   TestValidateControlEnvelope_FailureWithoutErrorClass
+--- PASS: TestValidateControlEnvelope_FailureWithoutErrorClass (0.00s)
+=== RUN   TestValidateControlEnvelope_SuccessWithNon200
+--- PASS: TestValidateControlEnvelope_SuccessWithNon200 (0.00s)
+=== RUN   TestProtocolError_TypedError
+--- PASS: TestProtocolError_TypedError (0.00s)
+=== RUN   TestIsProtocolNonRetryable_Retryable
+--- PASS: TestIsProtocolNonRetryable_Retryable (0.00s)
+=== RUN   TestIsProtocolNonRetryable_NonRetryable
+--- PASS: TestIsProtocolNonRetryable_NonRetryable (0.00s)
+=== RUN   TestParseError_TypedError
+--- PASS: TestParseError_TypedError (0.00s)
+=== RUN   TestCanaryStateFromExec_ZeroCounters
+--- PASS: TestCanaryStateFromExec_ZeroCounters (0.00s)
+=== RUN   TestControlEnvelope_StatePayload
+--- PASS: TestControlEnvelope_StatePayload (0.00s)
+=== RUN   TestControlEnvelope_WorkloadPayload
+--- PASS: TestControlEnvelope_WorkloadPayload (0.00s)
+=== RUN   TestCanaryControlExecResult_Fields
+--- PASS: TestCanaryControlExecResult_Fields (0.00s)
+=== RUN   TestControlEnvelope_JSONRoundTrip
+--- PASS: TestControlEnvelope_JSONRoundTrip (0.00s)
+=== RUN   TestProtocolError_ErrorsAs
+--- PASS: TestProtocolError_ErrorsAs (0.00s)
+=== RUN   TestParseError_ErrorsAs
+--- PASS: TestParseError_ErrorsAs (0.00s)
+=== RUN   TestBoundedResponse_64KB
+--- PASS: TestBoundedResponse_64KB (0.00s)
+=== RUN   TestControlRunner_NilRuntimeRejected
+--- PASS: TestControlRunner_NilRuntimeRejected (0.00s)
+=== RUN   TestControlRunner_NilRuntimeZeroEngineCalls
+--- PASS: TestControlRunner_NilRuntimeZeroEngineCalls (0.00s)
+=== RUN   TestControlAdapter_NilHijackedConnRejected
+--- PASS: TestControlAdapter_NilHijackedConnRejected (0.00s)
+=== RUN   TestControlAdapter_NilHijackedReaderRejected
+--- PASS: TestControlAdapter_NilHijackedReaderRejected (0.00s)
+=== RUN   TestControlAdapter_InvalidResponseCloseErrorJoined
+--- PASS: TestControlAdapter_InvalidResponseCloseErrorJoined (0.00s)
+=== RUN   TestControlAdapter_ExactAttachOptions
+--- PASS: TestControlAdapter_ExactAttachOptions (0.00s)
+=== RUN   TestDockerExecAttachment_CloseIdempotent
+--- PASS: TestDockerExecAttachment_CloseIdempotent (0.00s)
+=== RUN   TestControlAdapter_CreateAndAttachTTYCannotDiverge
+--- PASS: TestControlAdapter_CreateAndAttachTTYCannotDiverge (0.00s)
+=== RUN   TestFrameGuard_ValidFragmentedHeader
+--- PASS: TestFrameGuard_ValidFragmentedHeader (0.00s)
+=== RUN   TestFrameGuard_ValidFragmentedPayload
+--- PASS: TestFrameGuard_ValidFragmentedPayload (0.00s)
+=== RUN   TestFrameGuard_MultipleFrames
+--- PASS: TestFrameGuard_MultipleFrames (0.00s)
+=== RUN   TestFrameGuard_StdoutFrameAtLimit
+--- PASS: TestFrameGuard_StdoutFrameAtLimit (0.00s)
+=== RUN   TestFrameGuard_StdoutFrameOneOver
+--- PASS: TestFrameGuard_StdoutFrameOneOver (0.00s)
+=== RUN   TestFrameGuard_StderrFrameAtLimit
+--- PASS: TestFrameGuard_StderrFrameAtLimit (0.00s)
+=== RUN   TestFrameGuard_StderrFrameOneOver
+--- PASS: TestFrameGuard_StderrFrameOneOver (0.00s)
+=== RUN   TestFrameGuard_InvalidStreamRejected
+--- PASS: TestFrameGuard_InvalidStreamRejected (0.00s)
+=== RUN   TestFrameGuard_DeclaredUint32MaxRejectedWithoutPayload
+--- PASS: TestFrameGuard_DeclaredUint32MaxRejectedWithoutPayload (0.00s)
+=== RUN   TestFrameGuard_NoLargeAllocationOnOversizedHeader
+--- PASS: TestFrameGuard_NoLargeAllocationOnOversizedHeader (0.00s)
+=== RUN   TestControlStream_ManyValidStdoutFramesCumulativeOverflow
+--- PASS: TestControlStream_ManyValidStdoutFramesCumulativeOverflow (0.00s)
+=== RUN   TestControlStream_ManyValidStderrFramesCumulativeOverflow
+--- PASS: TestControlStream_ManyValidStderrFramesCumulativeOverflow (0.00s)
+=== RUN   TestControlStream_AtBothCumulativeLimits
+--- PASS: TestControlStream_AtBothCumulativeLimits (0.00s)
+=== RUN   TestControlStream_ParentCancellationDuringRead
+--- PASS: TestControlStream_ParentCancellationDuringRead (0.00s)
+=== RUN   TestControlStream_ParentDeadlineDuringRead
+--- PASS: TestControlStream_ParentDeadlineDuringRead (0.02s)
+=== RUN   TestControlStream_AttemptTimeoutDuringRead
+--- PASS: TestControlStream_AttemptTimeoutDuringRead (0.02s)
+=== RUN   TestControlStream_CancellationClosesConnection
+--- PASS: TestControlStream_CancellationClosesConnection (0.00s)
+=== RUN   TestControlStream_CancellationNoWatcherLeak
+--- PASS: TestControlStream_CancellationNoWatcherLeak (0.00s)
+=== RUN   TestControlStream_CopyErrorPlusContext
+--- PASS: TestControlStream_CopyErrorPlusContext (0.00s)
+=== RUN   TestControlStream_CloseErrorPlusContext
+--- PASS: TestControlStream_CloseErrorPlusContext (0.00s)
+=== RUN   TestControlInspect_RunningTrueRejected
+--- PASS: TestControlInspect_RunningTrueRejected (0.00s)
+=== RUN   TestControlInspect_RunningFalseAccepted
+--- PASS: TestControlInspect_RunningFalseAccepted (0.00s)
+=== RUN   TestControlInspect_RunningTruePreservesExitAndStderr
+--- PASS: TestControlInspect_RunningTruePreservesExitAndStderr (0.00s)
+=== RUN   TestControlStream_CancelDuringRead_Count100
+--- PASS: TestControlStream_CancelDuringRead_Count100 (0.01s)
+=== RUN   TestControlStream_AttemptTimeoutDuringRead_Count100
+--- PASS: TestControlStream_AttemptTimeoutDuringRead_Count100 (0.12s)
+=== RUN   TestControlStream_NoGoroutineGrowth
+--- PASS: TestControlStream_NoGoroutineGrowth (0.01s)
+=== RUN   TestControlStream_NoConnectionLeak
+--- PASS: TestControlStream_NoConnectionLeak (0.01s)
+=== RUN   TestControlAdapter_ExactCreateOptions
+--- PASS: TestControlAdapter_ExactCreateOptions (0.00s)
+=== RUN   TestControlAdapter_ExactContainerAndExecIdentity
+--- PASS: TestControlAdapter_ExactContainerAndExecIdentity (0.00s)
+=== RUN   TestControlAdapter_ClosesAttachmentOnSuccess
+--- PASS: TestControlAdapter_ClosesAttachmentOnSuccess (0.00s)
+=== RUN   TestControlAdapter_ClosesAttachmentOnDemuxFailure
+--- PASS: TestControlAdapter_ClosesAttachmentOnDemuxFailure (0.00s)
+=== RUN   TestControlAdapter_ClosesAttachmentOnOverflow
+--- PASS: TestControlAdapter_ClosesAttachmentOnOverflow (0.00s)
+=== RUN   TestControlAdapter_CloseErrorJoined
+--- PASS: TestControlAdapter_CloseErrorJoined (0.00s)
+=== RUN   TestControlTransport_StdoutAtLimit
+--- PASS: TestControlTransport_StdoutAtLimit (0.00s)
+=== RUN   TestControlTransport_StdoutOneOver
+--- PASS: TestControlTransport_StdoutOneOver (0.00s)
+=== RUN   TestControlTransport_StderrAtLimit
+--- PASS: TestControlTransport_StderrAtLimit (0.00s)
+=== RUN   TestControlTransport_StderrOneOver
+--- PASS: TestControlTransport_StderrOneOver (0.00s)
+=== RUN   TestControlTransport_BothStreamsNearLimit
+--- PASS: TestControlTransport_BothStreamsNearLimit (0.00s)
+=== RUN   TestControlTransport_DemuxFailure
+--- PASS: TestControlTransport_DemuxFailure (0.00s)
+=== RUN   TestControlTimeout_ParentCancellation
+--- PASS: TestControlTimeout_ParentCancellation (0.00s)
+=== RUN   TestControlTimeout_ParentDeadline
+--- PASS: TestControlTimeout_ParentDeadline (0.00s)
+=== RUN   TestControlTimeout_AttemptDeadline
+--- PASS: TestControlTimeout_AttemptDeadline (0.00s)
+=== RUN   TestControlFailureError_ProtocolOnly
+--- PASS: TestControlFailureError_ProtocolOnly (0.00s)
+=== RUN   TestControlFailureError_CauseOnly
+--- PASS: TestControlFailureError_CauseOnly (0.00s)
+=== RUN   TestControlFailureError_ProtocolAndCause
+--- PASS: TestControlFailureError_ProtocolAndCause (0.00s)
+=== RUN   TestControlIdentity_EmptyContainerRejected
+--- PASS: TestControlIdentity_EmptyContainerRejected (0.00s)
+=== RUN   TestControlIdentity_WhitespaceContainerRejected
+--- PASS: TestControlIdentity_WhitespaceContainerRejected (0.00s)
+=== RUN   TestControlIdentity_EmptyExecIDRejected
+--- PASS: TestControlIdentity_EmptyExecIDRejected (0.00s)
+=== RUN   TestControlOperation_WrongEnvelopeOperation
+--- PASS: TestControlOperation_WrongEnvelopeOperation (0.00s)
+=== RUN   TestControlIdentity_RecordsEveryEngineIdentity
+--- PASS: TestControlIdentity_RecordsEveryEngineIdentity (0.00s)
+=== RUN   TestEngineSeam_RecordsExactHealthArgv
+--- PASS: TestEngineSeam_RecordsExactHealthArgv (0.00s)
+=== RUN   TestEngineSeam_RecordsExactStateArgv
+--- PASS: TestEngineSeam_RecordsExactStateArgv (0.00s)
+=== RUN   TestEngineSeam_RecordsExactOperateArgv
+--- PASS: TestEngineSeam_RecordsExactOperateArgv (0.00s)
+=== RUN   TestEngineSeam_InvalidHealthPortRejectedBeforeEngine
+--- PASS: TestEngineSeam_InvalidHealthPortRejectedBeforeEngine (0.00s)
+=== RUN   TestEngineSeam_InvalidStateTimeoutRejectedBeforeEngine
+--- PASS: TestEngineSeam_InvalidStateTimeoutRejectedBeforeEngine (0.00s)
+=== RUN   TestEngineSeam_InvalidOperateCountRejectedBeforeEngine
+--- PASS: TestEngineSeam_InvalidOperateCountRejectedBeforeEngine (0.00s)
+=== RUN   TestEngineSeam_ExecCreateFailure
+--- PASS: TestEngineSeam_ExecCreateFailure (0.00s)
+=== RUN   TestEngineSeam_ExecAttachFailure
+--- PASS: TestEngineSeam_ExecAttachFailure (0.00s)
+=== RUN   TestEngineSeam_ExecInspectFailure
+--- PASS: TestEngineSeam_ExecInspectFailure (0.00s)
+=== RUN   TestEngineSeam_StdoutOverflow
+--- PASS: TestEngineSeam_StdoutOverflow (0.00s)
+=== RUN   TestEngineSeam_StderrOverflow
+--- PASS: TestEngineSeam_StderrOverflow (0.00s)
+=== RUN   TestEngineSeam_EmptyStdout
+--- PASS: TestEngineSeam_EmptyStdout (0.00s)
+=== RUN   TestEngineSeam_ExitZeroWithFailureEnvelope_Rejected
+--- PASS: TestEngineSeam_ExitZeroWithFailureEnvelope_Rejected (0.00s)
+=== RUN   TestEngineSeam_NonzeroExitWithSuccessEnvelope_Rejected
+--- PASS: TestEngineSeam_NonzeroExitWithSuccessEnvelope_Rejected (0.00s)
+=== RUN   TestEngineSeam_RequestedCountMismatch
+--- PASS: TestEngineSeam_RequestedCountMismatch (0.00s)
+=== RUN   TestEngineSeam_MalformedEnvelope
+--- PASS: TestEngineSeam_MalformedEnvelope (0.00s)
+=== RUN   TestEngineSeam_TrailingEnvelopeData
+--- PASS: TestEngineSeam_TrailingEnvelopeData (0.00s)
+=== RUN   TestEngineSeam_TypedFailureEnvelope_Preserved
+--- PASS: TestEngineSeam_TypedFailureEnvelope_Preserved (0.00s)
+=== RUN   TestRetry_TransientThenSuccess
+--- PASS: TestRetry_TransientThenSuccess (0.00s)
+=== RUN   TestRetry_MultipleTransientThenSuccess
+--- PASS: TestRetry_MultipleTransientThenSuccess (0.00s)
+=== RUN   TestRetry_PermanentFailureOneAttempt
+--- PASS: TestRetry_PermanentFailureOneAttempt (0.00s)
+=== RUN   TestRetry_MaxAttemptsExhausted
+--- PASS: TestRetry_MaxAttemptsExhausted (0.00s)
+=== RUN   TestRetry_CallerCancellationStopsPromptly
+--- PASS: TestRetry_CallerCancellationStopsPromptly (0.00s)
+=== RUN   TestRetry_SleepCallsBounded
+--- PASS: TestRetry_SleepCallsBounded (0.00s)
+=== RUN   TestArgsContainsForbidden
+--- PASS: TestArgsContainsForbidden (0.00s)
+=== RUN   TestRunErrorPropagates
+--- PASS: TestRunErrorPropagates (0.00s)
+=== RUN   TestRunAndTerminalErrorsJoin
+--- PASS: TestRunAndTerminalErrorsJoin (0.00s)
+=== RUN   TestRunAndCleanupErrorsJoin
+--- PASS: TestRunAndCleanupErrorsJoin (0.00s)
+=== RUN   TestTerminalAndCleanupErrorsJoin
+--- PASS: TestTerminalAndCleanupErrorsJoin (0.00s)
+=== RUN   TestRunTerminalAndCleanupErrorsJoin
+--- PASS: TestRunTerminalAndCleanupErrorsJoin (0.00s)
+=== RUN   TestPullAttemptFailureObservations
+--- PASS: TestPullAttemptFailureObservations (0.00s)
+=== RUN   TestLifecycle_PhaseOrder
+--- PASS: TestLifecycle_PhaseOrder (0.00s)
+=== RUN   TestCreateAndInspectNetwork_Success
+--- PASS: TestCreateAndInspectNetwork_Success (0.00s)
+=== RUN   TestCreateAndInspectNetwork_EmptyNameFails
+--- PASS: TestCreateAndInspectNetwork_EmptyNameFails (0.00s)
+=== RUN   TestCreateAndInspectNetwork_CreateErrorPropagates
+--- PASS: TestCreateAndInspectNetwork_CreateErrorPropagates (0.00s)
+=== RUN   TestCreateAndInspectNetwork_InspectErrorTriggersCleanup
+--- PASS: TestCreateAndInspectNetwork_InspectErrorTriggersCleanup (0.00s)
+=== RUN   TestCreateAndInspectNetwork_MismatchTriggersCleanup
+--- PASS: TestCreateAndInspectNetwork_MismatchTriggersCleanup (0.00s)
+=== RUN   TestValidateCanonicalNetworkIDLenient
+=== RUN   TestValidateCanonicalNetworkIDLenient/valid
+=== RUN   TestValidateCanonicalNetworkIDLenient/empty
+=== RUN   TestValidateCanonicalNetworkIDLenient/short
+=== RUN   TestValidateCanonicalNetworkIDLenient/long
+=== RUN   TestValidateCanonicalNetworkIDLenient/uppercase
+=== RUN   TestValidateCanonicalNetworkIDLenient/non-hex
+--- PASS: TestValidateCanonicalNetworkIDLenient (0.00s)
+    --- PASS: TestValidateCanonicalNetworkIDLenient/valid (0.00s)
+    --- PASS: TestValidateCanonicalNetworkIDLenient/empty (0.00s)
+    --- PASS: TestValidateCanonicalNetworkIDLenient/short (0.00s)
+    --- PASS: TestValidateCanonicalNetworkIDLenient/long (0.00s)
+    --- PASS: TestValidateCanonicalNetworkIDLenient/uppercase (0.00s)
+    --- PASS: TestValidateCanonicalNetworkIDLenient/non-hex (0.00s)
+=== RUN   TestQualifiedRun_NilConfigFailsBeforeDocker
+--- PASS: TestQualifiedRun_NilConfigFailsBeforeDocker (0.00s)
+=== RUN   TestQualifiedRun_CreateReceivesExactNetworkingConfig
+--- PASS: TestQualifiedRun_CreateReceivesExactNetworkingConfig (0.00s)
+=== RUN   TestQualifiedRun_AcceptsExactDeclaredNetworkSet
+--- PASS: TestQualifiedRun_AcceptsExactDeclaredNetworkSet (0.00s)
+=== RUN   TestQualifiedRun_RejectsWrongObservedNetworkID
+--- PASS: TestQualifiedRun_RejectsWrongObservedNetworkID (0.00s)
+=== RUN   TestQualifiedRun_OrderedCallsWithNetwork
+--- PASS: TestQualifiedRun_OrderedCallsWithNetwork (0.00s)
+=== RUN   TestQualifiedRun_OrderedCallsRequiresNetwork
+--- PASS: TestQualifiedRun_OrderedCallsRequiresNetwork (0.00s)
+=== RUN   TestQualifiedRun_DoesNotMutateCallerImage
+--- PASS: TestQualifiedRun_DoesNotMutateCallerImage (0.00s)
+=== RUN   TestQualifiedRun_RuntimeCannotMutateCallerConfig
+--- PASS: TestQualifiedRun_RuntimeCannotMutateCallerConfig (0.00s)
+=== RUN   TestQualifiedRun_ImageMismatchTriggersCleanup
+--- PASS: TestQualifiedRun_ImageMismatchTriggersCleanup (0.00s)
+=== RUN   TestCombineErrors_BothPreservePrimary
+--- PASS: TestCombineErrors_BothPreservePrimary (0.00s)
+=== RUN   TestCombineErrors_PrimaryOnly
+--- PASS: TestCombineErrors_PrimaryOnly (0.00s)
+=== RUN   TestCombineErrors_CleanupOnly
+--- PASS: TestCombineErrors_CleanupOnly (0.00s)
+=== RUN   TestContainerCreateWithImageID_HermeticZeroCalls
+=== RUN   TestContainerCreateWithImageID_HermeticZeroCalls/nil_config
+=== RUN   TestContainerCreateWithImageID_HermeticZeroCalls/empty_image
+=== RUN   TestContainerCreateWithImageID_HermeticZeroCalls/tag_format
+=== RUN   TestContainerCreateWithImageID_HermeticZeroCalls/short_id
+--- PASS: TestContainerCreateWithImageID_HermeticZeroCalls (0.00s)
+    --- PASS: TestContainerCreateWithImageID_HermeticZeroCalls/nil_config (0.00s)
+    --- PASS: TestContainerCreateWithImageID_HermeticZeroCalls/empty_image (0.00s)
+    --- PASS: TestContainerCreateWithImageID_HermeticZeroCalls/tag_format (0.00s)
+    --- PASS: TestContainerCreateWithImageID_HermeticZeroCalls/short_id (0.00s)
+=== RUN   TestContainerCreateWithImageID_HermeticOneCall
+--- PASS: TestContainerCreateWithImageID_HermeticOneCall (0.00s)
+=== RUN   TestResolveImageIdentity_Hermetic
+--- PASS: TestResolveImageIdentity_Hermetic (0.00s)
+=== RUN   TestQualifiedRun_HermeticCallOrder
+--- PASS: TestQualifiedRun_HermeticCallOrder (0.00s)
+PASS
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	0.232s
+=== RUN   TestValidateEnvelope_Health_ReadyFalse_Rejected
+--- PASS: TestValidateEnvelope_Health_ReadyFalse_Rejected (0.00s)
+=== RUN   TestValidateEnvelope_Health_EmptyMode_Rejected
+--- PASS: TestValidateEnvelope_Health_EmptyMode_Rejected (0.00s)
+=== RUN   TestValidateEnvelope_State_EmptyMode_Rejected
+--- PASS: TestValidateEnvelope_State_EmptyMode_Rejected (0.00s)
+=== RUN   TestValidateEnvelope_State_EachNegativeCounter_Rejected
+=== RUN   TestValidateEnvelope_State_EachNegativeCounter_Rejected/retained_blocks=-1
+=== RUN   TestValidateEnvelope_State_EachNegativeCounter_Rejected/retained_bytes=-1
+=== RUN   TestValidateEnvelope_State_EachNegativeCounter_Rejected/operation_count=-1
+=== RUN   TestValidateEnvelope_State_EachNegativeCounter_Rejected/fd_count=-1
+--- PASS: TestValidateEnvelope_State_EachNegativeCounter_Rejected (0.00s)
+    --- PASS: TestValidateEnvelope_State_EachNegativeCounter_Rejected/retained_blocks=-1 (0.00s)
+    --- PASS: TestValidateEnvelope_State_EachNegativeCounter_Rejected/retained_bytes=-1 (0.00s)
+    --- PASS: TestValidateEnvelope_State_EachNegativeCounter_Rejected/operation_count=-1 (0.00s)
+    --- PASS: TestValidateEnvelope_State_EachNegativeCounter_Rejected/fd_count=-1 (0.00s)
+=== RUN   TestValidateEnvelope_State_ReadyFalse_Rejected
+--- PASS: TestValidateEnvelope_State_ReadyFalse_Rejected (0.00s)
+=== RUN   TestValidateEnvelope_Workload_NonPositiveRequested_Rejected
+--- PASS: TestValidateEnvelope_Workload_NonPositiveRequested_Rejected (0.00s)
+=== RUN   TestValidateEnvelope_Workload_AttemptedMismatch_Rejected
+--- PASS: TestValidateEnvelope_Workload_AttemptedMismatch_Rejected (0.00s)
+=== RUN   TestValidateEnvelope_Workload_CompletedMismatch_Rejected
+--- PASS: TestValidateEnvelope_Workload_CompletedMismatch_Rejected (0.00s)
+=== RUN   TestEquivalence_ValidHealthEnvelope
+--- PASS: TestEquivalence_ValidHealthEnvelope (0.00s)
+=== RUN   TestEquivalence_InvalidNestedHealthRejectedByBoth
+--- PASS: TestEquivalence_InvalidNestedHealthRejectedByBoth (0.00s)
+=== RUN   TestEquivalence_InvalidWorkloadRejectedByBoth
+--- PASS: TestEquivalence_InvalidWorkloadRejectedByBoth (0.00s)
+=== RUN   TestAllOperations_Deterministic
+--- PASS: TestAllOperations_Deterministic (0.00s)
+=== RUN   TestAllErrorClasses_Deterministic
+--- PASS: TestAllErrorClasses_Deterministic (0.00s)
+=== RUN   TestAllOperations_Sorted
+--- PASS: TestAllOperations_Sorted (0.00s)
+=== RUN   TestAllErrorClasses_Sorted
+--- PASS: TestAllErrorClasses_Sorted (0.00s)
+=== RUN   TestCount_Health_Zero_Accepted
+--- PASS: TestCount_Health_Zero_Accepted (0.00s)
+=== RUN   TestCount_Health_Positive_Rejected
+--- PASS: TestCount_Health_Positive_Rejected (0.00s)
+=== RUN   TestCount_Health_Negative_Rejected
+--- PASS: TestCount_Health_Negative_Rejected (0.00s)
+=== RUN   TestCount_State_Zero_Accepted
+--- PASS: TestCount_State_Zero_Accepted (0.00s)
+=== RUN   TestCount_State_Positive_Rejected
+--- PASS: TestCount_State_Positive_Rejected (0.00s)
+=== RUN   TestCount_State_Negative_Rejected
+--- PASS: TestCount_State_Negative_Rejected (0.00s)
+=== RUN   TestCount_Operate_Positive_Accepted
+--- PASS: TestCount_Operate_Positive_Accepted (0.00s)
+=== RUN   TestCount_Operate_Zero_Rejected
+--- PASS: TestCount_Operate_Zero_Rejected (0.00s)
+=== RUN   TestCount_Operate_Negative_Rejected
+--- PASS: TestCount_Operate_Negative_Rejected (0.00s)
+=== RUN   TestDecodeHealth_Exact65536ByteValidBody_Success
+--- PASS: TestDecodeHealth_Exact65536ByteValidBody_Success (0.00s)
+=== RUN   TestDoHealthCheck_65536ByteValidBody_Success
+--- PASS: TestDoHealthCheck_65536ByteValidBody_Success (0.00s)
+=== RUN   TestDoHealthCheck_65537ByteBody_Rejection
+--- PASS: TestDoHealthCheck_65537ByteBody_Rejection (0.00s)
+=== RUN   TestNullMatrix_Health_Ready
+--- PASS: TestNullMatrix_Health_Ready (0.00s)
+=== RUN   TestNullMatrix_Health_Mode
+--- PASS: TestNullMatrix_Health_Mode (0.00s)
+=== RUN   TestMissingMatrix_Health_Ready
+--- PASS: TestMissingMatrix_Health_Ready (0.00s)
+=== RUN   TestMissingMatrix_Health_Mode
+--- PASS: TestMissingMatrix_Health_Mode (0.00s)
+=== RUN   TestNullMatrix_State
+--- PASS: TestNullMatrix_State (0.00s)
+=== RUN   TestMissingMatrix_State
+--- PASS: TestMissingMatrix_State (0.00s)
+=== RUN   TestNullMatrix_Workload
+--- PASS: TestNullMatrix_Workload (0.00s)
+=== RUN   TestMissingMatrix_Workload
+--- PASS: TestMissingMatrix_Workload (0.00s)
+=== RUN   TestNullMatrix_Envelope
+--- PASS: TestNullMatrix_Envelope (0.00s)
+=== RUN   TestMissingMatrix_Envelope
+--- PASS: TestMissingMatrix_Envelope (0.00s)
+=== RUN   TestFixtures_AreValidJSON
+--- PASS: TestFixtures_AreValidJSON (0.00s)
+=== RUN   TestDecodeEnvelopeExactlyOne_EmptyInput
+--- PASS: TestDecodeEnvelopeExactlyOne_EmptyInput (0.00s)
+=== RUN   TestDecodeEnvelopeExactlyOne_SecondValue
+--- PASS: TestDecodeEnvelopeExactlyOne_SecondValue (0.00s)
+=== RUN   TestDecodeEnvelopeExactlyOne_MalformedTrailingBytes
+--- PASS: TestDecodeEnvelopeExactlyOne_MalformedTrailingBytes (0.00s)
+=== RUN   TestDecodeEnvelopeExactlyOne_UnknownField
+--- PASS: TestDecodeEnvelopeExactlyOne_UnknownField (0.00s)
+=== RUN   TestDecodeEnvelopeExactlyOne_NullRequiredMember
+--- PASS: TestDecodeEnvelopeExactlyOne_NullRequiredMember (0.00s)
+=== RUN   TestDecodeEnvelopeExactlyOne_MissingMember
+--- PASS: TestDecodeEnvelopeExactlyOne_MissingMember (0.00s)
+=== RUN   TestDecodeEnvelopeExactlyOne_EmptySchemaVersion
+--- PASS: TestDecodeEnvelopeExactlyOne_EmptySchemaVersion (0.00s)
+=== RUN   TestDecodeEnvelopeExactlyOne_EmptyOperation
+--- PASS: TestDecodeEnvelopeExactlyOne_EmptyOperation (0.00s)
+=== RUN   TestDecodeEnvelopeExactlyOne_SchemaVersionMismatch
+--- PASS: TestDecodeEnvelopeExactlyOne_SchemaVersionMismatch (0.00s)
+=== RUN   TestDecodeEnvelopeExactlyOne_InvalidOperation
+--- PASS: TestDecodeEnvelopeExactlyOne_InvalidOperation (0.00s)
+=== RUN   TestDecodeEnvelope_NestedHealthNull
+--- PASS: TestDecodeEnvelope_NestedHealthNull (0.00s)
+=== RUN   TestDecodeEnvelope_NestedHealthMissing
+--- PASS: TestDecodeEnvelope_NestedHealthMissing (0.00s)
+=== RUN   TestDecodeEnvelope_NestedHealthUnknownField
+--- PASS: TestDecodeEnvelope_NestedHealthUnknownField (0.00s)
+=== RUN   TestDecodeEnvelope_NestedStateNullField
+--- PASS: TestDecodeEnvelope_NestedStateNullField (0.00s)
+=== RUN   TestDecodeEnvelope_NestedWorkloadMismatch
+--- PASS: TestDecodeEnvelope_NestedWorkloadMismatch (0.00s)
+=== RUN   TestDecodeEnvelope_HealthEnvelopeWithStatePayload
+--- PASS: TestDecodeEnvelope_HealthEnvelopeWithStatePayload (0.00s)
+=== RUN   TestDecodeHealth_Success
+--- PASS: TestDecodeHealth_Success (0.00s)
+=== RUN   TestDecodeHealth_NotReady
+--- PASS: TestDecodeHealth_NotReady (0.00s)
+=== RUN   TestDecodeHealth_NullMode
+--- PASS: TestDecodeHealth_NullMode (0.00s)
+=== RUN   TestDecodeHealth_EmptyMode
+--- PASS: TestDecodeHealth_EmptyMode (0.00s)
+=== RUN   TestDecodeHealth_UnknownField
+--- PASS: TestDecodeHealth_UnknownField (0.00s)
+=== RUN   TestDecodeState_Valid
+--- PASS: TestDecodeState_Valid (0.00s)
+=== RUN   TestDecodeState_NullField
+--- PASS: TestDecodeState_NullField (0.00s)
+=== RUN   TestDecodeState_NegativeRetainedBlocks
+--- PASS: TestDecodeState_NegativeRetainedBlocks (0.00s)
+=== RUN   TestDecodeState_NegativeRetainedBytes
+--- PASS: TestDecodeState_NegativeRetainedBytes (0.00s)
+=== RUN   TestDecodeState_NegativeOperationCount
+--- PASS: TestDecodeState_NegativeOperationCount (0.00s)
+=== RUN   TestDecodeState_NegativeFDCount
+--- PASS: TestDecodeState_NegativeFDCount (0.00s)
+=== RUN   TestDecodeState_NotReady
+--- PASS: TestDecodeState_NotReady (0.00s)
+=== RUN   TestDecodeState_EmptyMode
+--- PASS: TestDecodeState_EmptyMode (0.00s)
+=== RUN   TestDecodeState_EachFieldMissing
+--- PASS: TestDecodeState_EachFieldMissing (0.00s)
+=== RUN   TestDecodeState_EachFieldNull
+--- PASS: TestDecodeState_EachFieldNull (0.00s)
+=== RUN   TestDecodeWorkload_Valid
+--- PASS: TestDecodeWorkload_Valid (0.00s)
+=== RUN   TestDecodeWorkload_CountMismatch
+--- PASS: TestDecodeWorkload_CountMismatch (0.00s)
+=== RUN   TestDecodeWorkload_AttemptedMismatch
+--- PASS: TestDecodeWorkload_AttemptedMismatch (0.00s)
+=== RUN   TestDecodeWorkload_CompletedMismatch
+--- PASS: TestDecodeWorkload_CompletedMismatch (0.00s)
+=== RUN   TestDecodeWorkload_ZeroRequested
+--- PASS: TestDecodeWorkload_ZeroRequested (0.00s)
+=== RUN   TestDecodeWorkload_NegativeRequested
+--- PASS: TestDecodeWorkload_NegativeRequested (0.00s)
+=== RUN   TestDecodeWorkload_ExpectedMismatch
+--- PASS: TestDecodeWorkload_ExpectedMismatch (0.00s)
+=== RUN   TestDecodeWorkload_NullField
+--- PASS: TestDecodeWorkload_NullField (0.00s)
+=== RUN   TestValidateEnvelope_FailureHTTPStatus_Rejects_0
+--- PASS: TestValidateEnvelope_FailureHTTPStatus_Rejects_0 (0.00s)
+=== RUN   TestValidateEnvelope_FailureHTTPStatus_Accepts_300
+--- PASS: TestValidateEnvelope_FailureHTTPStatus_Accepts_300 (0.00s)
+=== RUN   TestValidateEnvelope_FailureHTTPStatus_Rejects_Negative
+--- PASS: TestValidateEnvelope_FailureHTTPStatus_Rejects_Negative (0.00s)
+=== RUN   TestValidateEnvelope_FailureHTTPStatus_Rejects_99
+--- PASS: TestValidateEnvelope_FailureHTTPStatus_Rejects_99 (0.00s)
+=== RUN   TestValidateEnvelope_FailureHTTPStatus_Rejects_600
+--- PASS: TestValidateEnvelope_FailureHTTPStatus_Rejects_600 (0.00s)
+=== RUN   TestValidateEnvelope_SuccessHealth
+--- PASS: TestValidateEnvelope_SuccessHealth (0.00s)
+=== RUN   TestValidateEnvelope_SuccessState
+--- PASS: TestValidateEnvelope_SuccessState (0.00s)
+=== RUN   TestValidateEnvelope_SuccessOperate
+--- PASS: TestValidateEnvelope_SuccessOperate (0.00s)
+=== RUN   TestValidateEnvelope_Failure
+--- PASS: TestValidateEnvelope_Failure (0.00s)
+=== RUN   TestValidateEnvelope_SuccessWithErrorClass
+--- PASS: TestValidateEnvelope_SuccessWithErrorClass (0.00s)
+=== RUN   TestValidateEnvelope_FailureWithPayload
+--- PASS: TestValidateEnvelope_FailureWithPayload (0.00s)
+=== RUN   TestValidateEnvelope_FailureNoErrorClass
+--- PASS: TestValidateEnvelope_FailureNoErrorClass (0.00s)
+=== RUN   TestValidateEnvelope_UnknownErrorClass
+--- PASS: TestValidateEnvelope_UnknownErrorClass (0.00s)
+=== RUN   TestIsRetryable_Retryable
+--- PASS: TestIsRetryable_Retryable (0.00s)
+=== RUN   TestIsRetryable_NonRetryable
+--- PASS: TestIsRetryable_NonRetryable (0.00s)
+=== RUN   TestIsRetryable_Nil
+--- PASS: TestIsRetryable_Nil (0.00s)
+=== RUN   TestIsRetryable_NonProtocolError
+--- PASS: TestIsRetryable_NonProtocolError (0.00s)
+=== RUN   TestControlOperation_BuildArgvHealth
+--- PASS: TestControlOperation_BuildArgvHealth (0.00s)
+=== RUN   TestControlOperation_BuildArgvState
+--- PASS: TestControlOperation_BuildArgvState (0.00s)
+=== RUN   TestControlOperation_BuildArgvOperate
+--- PASS: TestControlOperation_BuildArgvOperate (0.00s)
+=== RUN   TestControlOperation_NoShell
+--- PASS: TestControlOperation_NoShell (0.00s)
+=== RUN   TestControlOperation_BuildArgvFailsClosedOnBadOp
+--- PASS: TestControlOperation_BuildArgvFailsClosedOnBadOp (0.00s)
+=== RUN   TestControlOperation_BuildArgvFailsClosedOnBadPort
+--- PASS: TestControlOperation_BuildArgvFailsClosedOnBadPort (0.00s)
+=== RUN   TestControlOperation_BuildArgvFailsClosedOnBadCount
+--- PASS: TestControlOperation_BuildArgvFailsClosedOnBadCount (0.00s)
+=== RUN   TestControlOperation_BuildArgvFailsClosedOnZeroTimeout
+--- PASS: TestControlOperation_BuildArgvFailsClosedOnZeroTimeout (0.00s)
+=== RUN   TestNewControlOperation
+--- PASS: TestNewControlOperation (0.00s)
+=== RUN   TestControlOperation_Validate
+--- PASS: TestControlOperation_Validate (0.00s)
+=== RUN   TestAllErrorClasses_ReturnsDefensiveCopy
+--- PASS: TestAllErrorClasses_ReturnsDefensiveCopy (0.00s)
+=== RUN   TestAllOperations_ReturnsDefensiveCopy
+--- PASS: TestAllOperations_ReturnsDefensiveCopy (0.00s)
+=== RUN   TestRequiredEnvelopeFields_ReturnsDefensiveCopy
+--- PASS: TestRequiredEnvelopeFields_ReturnsDefensiveCopy (0.00s)
+=== RUN   TestRequiredHealthFields_ReturnsDefensiveCopy
+--- PASS: TestRequiredHealthFields_ReturnsDefensiveCopy (0.00s)
+=== RUN   TestRequiredStateFields_ReturnsDefensiveCopy
+--- PASS: TestRequiredStateFields_ReturnsDefensiveCopy (0.00s)
+=== RUN   TestRequiredWorkloadFields_ReturnsDefensiveCopy
+--- PASS: TestRequiredWorkloadFields_ReturnsDefensiveCopy (0.00s)
+=== RUN   TestAllowedErrorClasses_AllPresent
+--- PASS: TestAllowedErrorClasses_AllPresent (0.00s)
+=== RUN   TestRequiredEnvelopeFields_AllPresent
+--- PASS: TestRequiredEnvelopeFields_AllPresent (0.00s)
+=== RUN   TestControlEnvelope_RoundTrip_Success
+--- PASS: TestControlEnvelope_RoundTrip_Success (0.00s)
+PASS
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/canarycontrol	0.015s

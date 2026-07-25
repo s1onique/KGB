@@ -1,0 +1,18 @@
+TestFrameGuard_PropertySuite
+  valid_complete_frame_health_envelope                  PASS
+  valid_complete_stdout_then_stderr                      PASS
+  partial_header_4bytes                                  PASS
+  partial_header_7bytes                                  PASS
+  partial_payload_5of10                                  PASS
+  declared_size_uint32_max                              PASS
+  noncanonical_reserved_byte_1                          PASS
+  noncanonical_reserved_byte_2                          PASS
+  noncanonical_reserved_byte_3                          PASS
+  stdin_stream_rejected                                 PASS
+  unknown_stream_rejected                               PASS
+
+Bounded seed corpus: 11 frames covering valid health envelope,
+stdout+stderr sequences, partial headers, partial payloads, uint32-max
+declared size, noncanonical reserved bytes, and stream policy. The
+suite is run as part of the normal `go test` invocation; no `-fuzz`
+execution is required in the canonical gate.

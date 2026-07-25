@@ -1,0 +1,5 @@
+files changed in S43 (2305b8eb34389090f761b51c2d087b46b2fe7872):
+
+M tovarisch/labs/memory/internal/dockerlab/control_frame_guard.go
+A tovarisch/labs/memory/internal/dockerlab/control_frame_guard_correction43_test.go
+A docs/cline-checkpoint-correction43.md

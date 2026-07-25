@@ -1,0 +1,5 @@
+TestFrameGuard_StdoutAccepted        PASS
+TestFrameGuard_StderrAccepted        PASS
+TestFrameGuard_SystemErrorAccepted   PASS
+TestFrameGuard_StdinRejected         PASS
+TestFrameGuard_UnknownStreamsRejected PASS (4,5,9,100,255)
