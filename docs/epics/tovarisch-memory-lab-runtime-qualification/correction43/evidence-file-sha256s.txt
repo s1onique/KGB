@@ -1,0 +1,43 @@
+evidence-file-sha256s.txt (CORRECTION43)
+
+Scope: E43's source/blob SHAs (non-circular). These are the actual
+blobs that the S43 and E43 commits recorded, computed from the git
+object database. The attestation files in A43 are NOT in this scope;
+they are derived from these SHAs and would otherwise introduce a
+circular self-reference.
+
+E43 commit: 9681e12eddfcd78712e7766d90ef5d4665e5e122
+ET43:      51b57188d9a9985b307e3e28e05906d67f55229f
+
+--- S43 source blobs ---
+208c9dcbf22d5251def49d6b6276d4d3b5e1d12d12fd345e9a119ebb64f7a2b2  tovarisch/labs/memory/internal/dockerlab/control_frame_guard.go @ 2305b8eb
+8477ac8088b628f1a2f3d81c6e20a836d439490edf1392f3abe4b2569aa2cb4c  tovarisch/labs/memory/internal/dockerlab/control_frame_guard_correction43_test.go @ 2305b8eb
+18d7084a10f5f9b84f4a1f943c8ccada44725c3db2ad7de60dec8886a3612c33  docs/cline-checkpoint-correction43.md @ 2305b8eb
+
+--- E43 evidence blobs (final E43 content) ---
+10b7cd579980b4b8df3c37c07fc1f7861c86328867d6d6e6b21255fd2995c5bd  close-report.md
+1e9f2beca0b23406c1b05c196c8d5be1d2b1411ca6e706511c772dd3a7484eb8  subject-identities.txt
+b12f84fec62df7668afbde60584c678e199ea9d2c2025661c03c7fa706c50adb  changed-files.txt
+47d0b6cc1e28ad44a2ef8244973151d82e11dcf9c4b570bff4308125745d8fb8  cline-checkpoint.md
+8489616ee01b53d74f48a7c7f80192e78f6d26484fce1c3a5c47582122edd970  partial-header-tests.txt
+30a087f5ac98bbcbb131a173754468496d96f39013552724bf228c801ce76154  partial-payload-tests.txt
+23f769d7402c8159895147c3c14062339514aaeb47a32fb51c8ad10cc4e0fa4c  trailing-frame-tests.txt
+2c71b5b99f737ab1af873d4f78ed38fcca284b656d5bde9d79bffc31944d212e  reserved-header-tests.txt
+bc8e824d6f195848387b530fac246c83a3327c391cf31170d56434747290a73b  stream-policy-tests.txt
+358085331837bec5dd27476593c9a2f1503432014195490b3969d5ec867d5aa2  reader-contract-tests.txt
+c5d66795cfa70ab5402bbdf47eefc4e3cf61db23a95e625b71f75c8bab933d97  bound-regression-tests.txt
+e2592f0f86773ffb6e53bce8c9c7f156dda8e6b5fe3a82411eaf7ea0e2fc1e20  fuzz-seed-tests.txt
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  focused-vet.txt
+0e3d17cf35828fe2c5f472d3d4aa46272e3208d65f05eba62e3b565e73488284  focused-tests.txt
+43bb7e09c7b18764e5c47643c5c0a8165ba70dfce58e6e6738a3708462443dfe  race-tests.txt
+90fa91bacae29e7dde3646538a62d2a9c05a40aec5d14d6fd467dcf07a3806be  count100-tests.txt
+e12ca1663fdc08a46e782677e78a9705fe0cd57bbf27bb0a78778c730473e938  short-tests.txt
+bdc3dacbfd31f97544db95a3dbc16c6fa6ed5fd00399d31cdd884e1e01f1e2f2  make-gate.txt
+
+Note: focused-vet.txt is the SHA256 of the empty file (go vet produced
+no diagnostics on the focused packages). The e3b0c44…b855 hash is
+the canonical SHA256 of the empty input.
+
+Note: subject-identities.txt hash changed during the final E43 amend
+(placeholder → final E43 ID). The new hash is canonical for the
+committed E43 content.

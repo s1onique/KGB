@@ -1,0 +1,18 @@
+final-git-status.txt (CORRECTION43)
+
+The git status captured BEFORE A43 is committed. The untracked file
+docs/epics/.../correction43/evidence-file-sha256s.txt is the A43
+attestation candidate.
+
+$ git status --short
+?? docs/epics/tovarisch-memory-lab-runtime-qualification/correction43/evidence-file-sha256s.txt
+
+$ git show -s --format='commit=%H tree=%T parents=%P' HEAD
+commit=9681e12eddfcd78712e7766d90ef5d4665e5e122 tree=51b57188d9a9985b307e3e28e05906d67f55229f parents=2305b8eb34389090f761b51c2d087b46b2fe7872
+
+E43 (HEAD): 9681e12eddfcd78712e7766d90ef5d4665e5e122
+ET43:       51b57188d9a9985b307e3e28e05906d67f55229f
+E43_parent: 2305b8eb34389090f761b51c2d087b46b2fe7872 (= S43)
+
+$ git diff --check HEAD
+(no whitespace errors)
