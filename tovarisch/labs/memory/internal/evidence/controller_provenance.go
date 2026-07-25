@@ -1,13 +1,23 @@
 // controller_provenance.go — Canonical controller-binary provenance
-// collector (CORRECTION18).
+// collector (CORRECTION18, CORRECTION48).
 //
 // The collector reads the embedded build info via
 // `runtime/debug.ReadBuildInfo()` and resolves the source tree
 // belonging to the embedded revision via `git rev-parse`. The
 // caller may pass a pre-resolved tree identity (e.g. from a
 // build-time injector) when the repository is unavailable at
-// runtime; the collector validates the pair against the repository
-// object format and the embedded VCS revision.
+// runtime; the collector validates the pair against the
+// repository object format and the embedded VCS revision.
+//
+// CORRECTION48 P0-4: the CleanPolicy field replaces the legacy
+// binary RequireClean. Unknown policies are rejected; the
+// closure producer (tovarisch-memory-lab CLI and the compiled
+// helper test artifact) MUST use ProvenanceRequireClean. The
+// hermetic helper path (compiled helper running outside the live
+// qualification) MAY use ProvenanceIgnoreWorktree to absorb
+// worktree dirtiness, but the resulting provenance is marked
+// QualifyingObservation=false so it can never authorize
+// `pass=true`.
 
 package evidence
 
@@ -27,6 +37,15 @@ import (
 // provenance collector. The fields are bound to the running
 // controller binary; canary subject provenance is recorded
 // separately inside the canary image build metadata.
+//
+// QualifyingObservation is false when the collector ran under
+// ProvenanceIgnoreWorktree (or otherwise detected dirty state
+// that the caller chose to record). The verifier and any
+// downstream qualification must refuse to assign `pass=true`
+// when QualifyingObservation is false. QualifyingObservation is
+// independent of whether CollectControllerProvenance returned
+// a non-nil error — it is set even on success paths that
+// deliberately downgrade authorization.
 type ControllerProvenance struct {
 	// VCSRevision is the embedded git revision (full OID).
 	VCSRevision string
@@ -38,6 +57,15 @@ type ControllerProvenance struct {
 	// WorkingTreeDirty is true when `git status --porcelain` reports
 	// any modifications at the controller working tree.
 	WorkingTreeDirty bool
+	// TrackedModified is true when there are tracked-file
+	// modifications in the working tree (git diff HEAD).
+	TrackedModified bool
+	// StagedModified is true when there are staged-but-uncommitted
+	// changes (git diff --cached).
+	StagedModified bool
+	// UntrackedFiles is true when there are untracked files in
+	// the working tree (git ls-files --others --exclude-standard).
+	UntrackedFiles bool
 	// SourceCommitDirty is true when HEAD differs from the
 	// embedded revision.
 	SourceCommitDirty bool
@@ -52,10 +80,25 @@ type ControllerProvenance struct {
 	// DockerServerVersion is collected once by orchestration and carried
 	// with the running-binary provenance authority.
 	DockerServerVersion string
+	// CleanPolicy records which policy was applied to produce
+	// this collector output.
+	CleanPolicy ProvenanceCleanPolicy
+	// QualifyingObservation is true when the policy is
+	// ProvenanceRequireClean AND the checkout passed every
+	// dirty-state check. It is false when either the policy
+	// downgraded authorization or any dirty-state check failed.
+	QualifyingObservation bool
 }
 
 // ProvenanceOptions configures the collector. The caller passes a
 // pre-resolved tree when the repository is unavailable at runtime.
+//
+// CleanPolicy is the only acceptable policy selector; an empty
+// or unknown value is a hard error. The legacy RequireClean bool
+// remains as a fallback shim for callers that have not yet been
+// ported: RequireClean=true maps to ProvenanceRequireClean and
+// RequireClean=false maps to ProvenanceIgnoreWorktree. The two
+// fields are mutually exclusive and may not disagree.
 type ProvenanceOptions struct {
 	// RepoDir is the path to the repository root. The collector runs
 	// `git` from this directory.
@@ -69,17 +112,29 @@ type ProvenanceOptions struct {
 	ProducerVersion string
 	// DockerServerVersion is the observed Engine server version.
 	DockerServerVersion string
-	// RequireClean forces a failure when the working tree or source
-	// commit is dirty. Defaults to true.
+	// CleanPolicy is the CORRECTION48 typed selector. An empty or
+	// unknown value is rejected by ValidateProvenanceCleanPolicy.
+	CleanPolicy ProvenanceCleanPolicy
+	// RequireClean is a legacy fallback. When CleanPolicy is
+	// empty, RequireClean=true is treated as ProvenanceRequireClean
+	// and RequireClean=false as ProvenanceIgnoreWorktree. When
+	// CleanPolicy is set, RequireClean must agree (after the
+	// mapping above) or the collector returns
+	// ErrInconsistentCleanPolicy.
 	RequireClean bool
 }
+
+// ErrInconsistentCleanPolicy indicates that the caller supplied
+// both CleanPolicy and RequireClean, and the two fields disagree
+// after the legacy mapping.
+var ErrInconsistentCleanPolicy = errors.New("inconsistent provenance cleanliness configuration: CleanPolicy and RequireClean disagree")
 
 // ErrProvenanceUnavailable is returned when neither the embedded
 // build info nor the local repository is available.
 var ErrProvenanceUnavailable = errors.New("controller provenance unavailable: no embedded VCS info and repository not reachable")
 
-// ErrProvenanceDirty is returned when RequireClean is true and the
-// working tree or the source commit is dirty.
+// ErrProvenanceDirty is returned when ProvenanceRequireClean is
+// selected and the working tree or source commit is dirty.
 var ErrProvenanceDirty = errors.New("controller provenance dirty: working tree or source commit has uncommitted changes")
 
 // ErrProvenanceMismatch is returned when HEAD does not match the
@@ -92,12 +147,14 @@ var ErrProvenanceTreeMismatch = errors.New("controller provenance tree mismatch"
 
 // CollectControllerProvenance reads the embedded VCS info from the
 // running controller binary, resolves the source tree from the
-// repository, and returns a fully bound ControllerProvenance. When
-// RequireClean is true (default), any dirty state is a hard error.
+// repository, and returns a fully bound ControllerProvenance.
+// Under ProvenanceRequireClean, any dirty state is a hard error;
+// under ProvenanceIgnoreWorktree, dirty state is recorded but the
+// resulting QualifyingObservation is forced to false.
 func CollectControllerProvenance(opts ProvenanceOptions) (ControllerProvenance, error) {
-	if opts.RequireClean == false {
-		// Treat unset as true. Set explicitly to false to allow dirty.
-		opts.RequireClean = true
+	policy, err := resolveCleanPolicy(opts)
+	if err != nil {
+		return ControllerProvenance{}, err
 	}
 	build, ok := debug.ReadBuildInfo()
 	if !ok {
@@ -126,6 +183,9 @@ func CollectControllerProvenance(opts ProvenanceOptions) (ControllerProvenance, 
 	head := ""
 	tree := ""
 	workingDirty := false
+	trackedMod := false
+	stagedMod := false
+	untracked := false
 	headMismatch := false
 	if repoDir != "" {
 		if exists, err := dirExists(repoDir); err == nil && exists {
@@ -138,6 +198,9 @@ func CollectControllerProvenance(opts ProvenanceOptions) (ControllerProvenance, 
 				headMismatch = true
 			}
 			workingDirty, _ = gitWorkingTreeDirty(repoDir)
+			trackedMod, _ = gitTrackedModified(repoDir)
+			stagedMod, _ = gitStagedModified(repoDir)
+			untracked, _ = gitUntrackedFiles(repoDir)
 		}
 	}
 	if opts.EmbeddedTreeOverride != "" {
@@ -156,7 +219,6 @@ func CollectControllerProvenance(opts ProvenanceOptions) (ControllerProvenance, 
 			return ControllerProvenance{}, fmt.Errorf("%w: tree=%q format=sha256", ErrProvenanceTreeMismatch, tree)
 		}
 	} else if gitFormat != "" {
-		// Unknown object format: reject.
 		return ControllerProvenance{}, fmt.Errorf("unknown git object format %q", gitFormat)
 	}
 
@@ -167,25 +229,74 @@ func CollectControllerProvenance(opts ProvenanceOptions) (ControllerProvenance, 
 	}
 
 	cp := ControllerProvenance{
-		VCSRevision:         vcsRevision,
-		VCSTree:             tree,
-		VCSModified:         vcsModified,
-		WorkingTreeDirty:    workingDirty,
-		SourceCommitDirty:   headMismatch,
-		GitObjectFormat:     gitFormat,
-		ExecutableSHA256:    execSHA256,
-		ProducerVersion:     opts.ProducerVersion,
-		DockerServerVersion: opts.DockerServerVersion,
+		VCSRevision:          vcsRevision,
+		VCSTree:              tree,
+		VCSModified:          vcsModified,
+		WorkingTreeDirty:     workingDirty,
+		TrackedModified:      trackedMod,
+		StagedModified:       stagedMod,
+		UntrackedFiles:       untracked,
+		SourceCommitDirty:    headMismatch,
+		GitObjectFormat:      gitFormat,
+		ExecutableSHA256:     execSHA256,
+		ProducerVersion:      opts.ProducerVersion,
+		DockerServerVersion:  opts.DockerServerVersion,
+		CleanPolicy:          policy,
+		QualifyingObservation: false,
 	}
-	if opts.RequireClean {
-		if cp.VCSModified || cp.WorkingTreeDirty || cp.SourceCommitDirty {
+	switch policy {
+	case ProvenanceRequireClean:
+		if cp.VCSModified {
+			return cp, fmt.Errorf("%w: embedded vcs.modified=true", ErrProvenanceDirty)
+		}
+		if cp.TrackedModified {
+			return cp, fmt.Errorf("%w: tracked files modified in working tree", ErrProvenanceDirty)
+		}
+		if cp.StagedModified {
+			return cp, fmt.Errorf("%w: staged modifications present", ErrProvenanceDirty)
+		}
+		if cp.UntrackedFiles {
+			return cp, fmt.Errorf("%w: untracked files present in working tree", ErrProvenanceDirty)
+		}
+		if cp.WorkingTreeDirty || cp.SourceCommitDirty {
 			return cp, ErrProvenanceDirty
 		}
 		if head != "" && head != cp.VCSRevision {
 			return cp, ErrProvenanceMismatch
 		}
+		cp.QualifyingObservation = true
+	case ProvenanceIgnoreWorktree:
+		// Always non-qualifying; dirty facts are recorded for the
+		// verifier and the close report.
+		cp.QualifyingObservation = false
 	}
 	return cp, nil
+}
+
+// resolveCleanPolicy harmonizes CleanPolicy and the legacy
+// RequireClean field. Returns an error when the two disagree.
+func resolveCleanPolicy(opts ProvenanceOptions) (ProvenanceCleanPolicy, error) {
+	has := false
+	policy := opts.CleanPolicy
+	if policy != "" {
+		if err := ValidateProvenanceCleanPolicy(policy); err != nil {
+			return "", err
+		}
+		has = true
+	}
+	// Map legacy RequireClean when no explicit CleanPolicy.
+	if !has {
+		if opts.RequireClean {
+			return ProvenanceRequireClean, nil
+		}
+		return ProvenanceIgnoreWorktree, nil
+	}
+	// If both are present, RequireClean must agree with CleanPolicy.
+	want := policy == ProvenanceRequireClean
+	if opts.RequireClean != want && opts.CleanPolicy != "" {
+		return "", ErrInconsistentCleanPolicy
+	}
+	return policy, nil
 }
 
 // runGit runs `git <args...>` in dir and returns (stdout, success).
@@ -211,8 +322,44 @@ func dirExists(p string) (bool, error) {
 }
 
 // gitWorkingTreeDirty returns true when the working tree is dirty.
+// `git status --porcelain` reports both staged and unstaged
+// modifications; the helper-only breakdown is in gitTrackedModified,
+// gitStagedModified, and gitUntrackedFiles.
 func gitWorkingTreeDirty(dir string) (bool, bool) {
 	out, ok := runGit(dir, "status", "--porcelain")
+	if !ok {
+		return false, false
+	}
+	return strings.TrimSpace(out) != "", true
+}
+
+// gitTrackedModified returns true when tracked files have local
+// modifications that are not yet staged. Implemented via
+// `git diff --name-only HEAD`.
+func gitTrackedModified(dir string) (bool, bool) {
+	out, ok := runGit(dir, "diff", "--name-only", "HEAD")
+	if !ok {
+		return false, false
+	}
+	return strings.TrimSpace(out) != "", true
+}
+
+// gitStagedModified returns true when changes are staged for
+// commit but not yet committed. Implemented via
+// `git diff --cached --name-only`.
+func gitStagedModified(dir string) (bool, bool) {
+	out, ok := runGit(dir, "diff", "--cached", "--name-only")
+	if !ok {
+		return false, false
+	}
+	return strings.TrimSpace(out) != "", true
+}
+
+// gitUntrackedFiles returns true when there are untracked files in
+// the working tree (excluding ignored paths). Implemented via
+// `git ls-files --others --exclude-standard`.
+func gitUntrackedFiles(dir string) (bool, bool) {
+	out, ok := runGit(dir, "ls-files", "--others", "--exclude-standard")
 	if !ok {
 		return false, false
 	}

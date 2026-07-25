@@ -66,6 +66,14 @@ type Manifest struct {
 	// fact used by the close report must live inside the
 	// checksum boundary.
 	SubjectImageIdentity *SubjectImageIdentity `json:"subject_image_identity,omitempty"`
+
+	// CORRECTION48 P0-3: CanaryBuildMetadataPath records the
+	// absolute, symlink-resolved path to the canary image
+	// build metadata file used at run time. The verifier reads
+	// this field and asserts it matches the manifest's
+	// resolver output; an empty value is tolerated only when
+	// the run predates CORRECTION48.
+	CanaryBuildMetadataPath string `json:"canary_build_metadata_path,omitempty"`
 }
 
 // SubjectIdentity captures the subject's identity for binding.

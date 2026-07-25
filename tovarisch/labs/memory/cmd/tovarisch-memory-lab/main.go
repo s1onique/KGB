@@ -99,8 +99,9 @@ func main() {
 }
 
 func run(args []string) error {
-	if len(args) < 2 {
-		return fmt.Errorf("usage: %s <run|verify|derive-runtime-state|matrix|verify-matrix> [options]", args[0])
+	if len(args) < 2 || args[1] == "-h" || args[1] == "--help" {
+		fmt.Fprintf(os.Stderr, "usage: %s <run|verify|derive-runtime-state|matrix|verify-matrix> [options]\n\nSubcommands:\n  run                  execute a canary scenario\n  verify               verify an evidence bundle\n  derive-runtime-state emit the runtime-state block\n  matrix               execute all three scenarios\n  verify-matrix        verify a matrix bundle\n", args[0])
+		return nil
 	}
 
 	switch args[1] {
@@ -144,7 +145,21 @@ type workloadArtifacts struct {
 	Reachability   *ReachabilityInfo
 }
 
+var runCommandDockerFactory = dockerlab.NewClient
+
 func runCommand(args []string) error {
+	return runCommandWithDocker(args, buildmetadata.ResolveCanaryMetadataPath, runCommandDockerFactory)
+}
+
+// runCommandWithDocker is the testable seam: metadata resolution
+// and docker-client construction are parameterized so tests can
+// inject deterministic helpers and assert that Docker is not
+// touched when metadata resolution fails (CORRECTION48 P0-3).
+func runCommandWithDocker(
+	args []string,
+	resolveMetadata func(buildmetadata.MetadataPathOptions) (string, error),
+	dockerFactory func(context.Context) (*dockerlab.Client, error),
+) error {
 	fs := flag.NewFlagSet("memory-lab run", flag.ContinueOnError)
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s run [options]\n\nOptions:\n", args[0])
@@ -157,6 +172,8 @@ func runCommand(args []string) error {
 	verbose := fs.Bool("v", false, "Verbose output")
 	containerImage := fs.String("container-image", "kgb-tovarisch-canary:latest", "Container image")
 	canaryPort := fs.Int("canary-port", 8080, "Canary HTTP port")
+	canaryBuildMetadata := fs.String("canary-build-metadata", "", "Absolute or relative path to canary image build metadata JSON (overrides TOVARISCH_CANARY_METADATA_PATH and the repository compatibility fallback)")
+	repoRootFlag := fs.String("repository-root", "", "Repository root for the compatibility metadata fallback (defaults to the .git ancestor of the working directory)")
 
 	if err := fs.Parse(args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -178,14 +195,37 @@ func runCommand(args []string) error {
 		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-
 	if *duration < 10 {
 		return fmt.Errorf("duration must be >= 10 seconds")
 	}
 
-	dockerClient, err := dockerlab.NewClient(ctx)
+	// Resolve the canary image build metadata BEFORE any Docker
+	// contact. A missing or invalid metadata source must surface
+	// here and prevent any further work. dockerFactory is invoked
+	// only after this check succeeds, which is the property that
+	// the P0-3 tests assert.
+	repoRoot := *repoRootFlag
+	if repoRoot == "" {
+		repoRoot = repoDirForProvenance()
+	}
+	resolvedMetadataPath, err := resolveMetadata(buildmetadata.MetadataPathOptions{
+		ExplicitPath: *canaryBuildMetadata,
+		Environment:  os.Getenv(buildmetadata.EnvMetadataPath),
+		Repository:   repoRoot,
+	})
+	if err != nil {
+		return fmt.Errorf("canary build metadata: %w", err)
+	}
+	if resolveMetadata == nil {
+		// Defensive guard: a future refactor must never silently
+		// drop the resolver from the contract.
+		return fmt.Errorf("canary build metadata resolver is nil")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	dockerClient, err := dockerFactory(ctx)
 	if err != nil {
 		return fmt.Errorf("create docker client: %w", err)
 	}
@@ -236,6 +276,11 @@ func runCommand(args []string) error {
 			EngineVersion: dockerInfo.Version,
 			APIVersion:    dockerClient.ClientVersion(),
 		},
+		// CORRECTION48 P0-3: persist the resolved canonical
+		// metadata path in the run manifest so the verifier can
+		// reconstruct exactly which build metadata file the
+		// producer used.
+		CanaryBuildMetadataPath: resolvedMetadataPath,
 	}
 	if err := evidenceWriter.WriteManifest(manifest); err != nil {
 		return fmt.Errorf("write manifest: %w", err)
@@ -397,6 +442,12 @@ func runCommand(args []string) error {
 		RepoDir:             repoDirForProvenance(),
 		ProducerVersion:     "tovarisch-memory-lab/1.0.0",
 		DockerServerVersion: dockerInfo.Version,
+		// CORRECTION48 P0-5: closure producer policy. The
+		// production CLI MUST run from a clean checkout; the
+		// helper test path may opt into ProvenanceIgnoreWorktree
+		// for targeted hermetic runs, but ProvenanceIgnoreWorktree
+		// still records QualifyingObservation=false.
+		CleanPolicy: evidence.ProvenanceRequireClean,
 	})
 	if err != nil {
 		return fmt.Errorf("collect running-binary provenance: %w", err)
@@ -422,7 +473,7 @@ func runCommand(args []string) error {
 	// disagreement fails the production CLI. The result is stored inside the
 	// canonical manifest.json (the canary-image-provenance.json
 	// sidecar is no longer used).
-	canaryImageIdentity, err := captureAndVerifyCanaryImageIdentity(ctx, dockerClient, outcome.ImageID)
+	canaryImageIdentity, err := captureAndVerifyCanaryImageIdentity(ctx, dockerClient, outcome.ImageID, resolvedMetadataPath)
 	if err != nil {
 		return fmt.Errorf("canary image identity: %w", err)
 	}
@@ -666,11 +717,18 @@ func captureAndVerifyCanaryImageIdentity(
 	ctx context.Context,
 	dockerClient *dockerlab.Client,
 	expectedImageID string,
+	resolvedMetadataPath string,
 ) (*evidence.SubjectImageIdentity, error) {
-	buildPath := filepath.Join(repoDirForProvenance(), "tovarisch", "labs", "memory", "canary-image-build.json")
-	build, err := buildmetadata.Read(buildPath)
+	if resolvedMetadataPath == "" {
+		return nil, fmt.Errorf("canary build metadata path is empty; runCommandWithDocker must resolve it before calling captureAndVerifyCanaryImageIdentity")
+	}
+	// CORRECTION48 P0-3: capture the caller-supplied canonical
+	// metadata path verbatim. No production function is allowed
+	// to reopen the fixed path; runCommandWithDocker owns the
+	// one resolved value.
+	build, err := buildmetadata.Read(resolvedMetadataPath)
 	if err != nil {
-		return nil, fmt.Errorf("read canonical canary build metadata: %w (run scripts/build_tovarisch_canary_image.sh first)", err)
+		return nil, fmt.Errorf("read canonical canary build metadata from %s: %w (run scripts/build_tovarisch_canary_image.sh first)", resolvedMetadataPath, err)
 	}
 
 	// Create a read-only container from the canary image so
