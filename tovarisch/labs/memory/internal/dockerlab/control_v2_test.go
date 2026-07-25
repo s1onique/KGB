@@ -22,7 +22,7 @@ func TestEngineSeam_RecordsExactHealthArgv(t *testing.T) {
 	fake.NextInspectResult = ExecInspectResult{ExitCode: 0}
 
 	r := NewControlRunner(fake)
-	_, env, err := r.ControlProbe(context.Background(), canarycontrol.OpHealth, 8080, 0, 5*time.Second)
+	_, env, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -55,7 +55,7 @@ func TestEngineSeam_RecordsExactStateArgv(t *testing.T) {
 	fake.NextInspectResult = ExecInspectResult{ExitCode: 0}
 
 	r := NewControlRunner(fake)
-	_, env, err := r.ControlProbe(context.Background(), canarycontrol.OpState, 8080, 0, 5*time.Second)
+	_, env, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpState, 8080, 0, 5*time.Second)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -76,7 +76,7 @@ func TestEngineSeam_RecordsExactOperateArgv(t *testing.T) {
 	fake.NextInspectResult = ExecInspectResult{ExitCode: 0}
 
 	r := NewControlRunner(fake)
-	_, env, err := r.ControlProbe(context.Background(), canarycontrol.OpOperate, 8080, 5, 30*time.Second)
+	_, env, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpOperate, 8080, 5, 30*time.Second)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -96,7 +96,7 @@ func TestEngineSeam_RecordsExactOperateArgv(t *testing.T) {
 func TestEngineSeam_InvalidHealthPortRejectedBeforeEngine(t *testing.T) {
 	fake := &FakeControlExecRuntime{}
 	r := NewControlRunner(fake)
-	_, _, err := r.ControlProbe(context.Background(), canarycontrol.OpHealth, 0, 0, 5*time.Second)
+	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 0, 0, 5*time.Second)
 	if err == nil {
 		t.Fatal("expected error for port=0")
 	}
@@ -108,7 +108,7 @@ func TestEngineSeam_InvalidHealthPortRejectedBeforeEngine(t *testing.T) {
 func TestEngineSeam_InvalidStateTimeoutRejectedBeforeEngine(t *testing.T) {
 	fake := &FakeControlExecRuntime{}
 	r := NewControlRunner(fake)
-	_, _, err := r.ControlProbe(context.Background(), canarycontrol.OpState, 8080, 0, 0)
+	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpState, 8080, 0, 0)
 	if err == nil {
 		t.Fatal("expected error for timeout=0")
 	}
@@ -120,7 +120,7 @@ func TestEngineSeam_InvalidStateTimeoutRejectedBeforeEngine(t *testing.T) {
 func TestEngineSeam_InvalidOperateCountRejectedBeforeEngine(t *testing.T) {
 	fake := &FakeControlExecRuntime{}
 	r := NewControlRunner(fake)
-	_, _, err := r.ControlProbe(context.Background(), canarycontrol.OpOperate, 8080, 0, 5*time.Second)
+	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpOperate, 8080, 0, 5*time.Second)
 	if err == nil {
 		t.Fatal("expected error for count=0")
 	}
@@ -135,7 +135,7 @@ func TestEngineSeam_ExecCreateFailure(t *testing.T) {
 	fake := &FakeControlExecRuntime{}
 	fake.NextCreateErr = errors.New("create failed")
 	r := NewControlRunner(fake)
-	_, _, err := r.ControlProbe(context.Background(), canarycontrol.OpHealth, 8080, 0, 5*time.Second)
+	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -148,7 +148,7 @@ func TestEngineSeam_ExecAttachFailure(t *testing.T) {
 	fake := &FakeControlExecRuntime{}
 	fake.NextAttachErr = errors.New("attach failed")
 	r := NewControlRunner(fake)
-	_, _, err := r.ControlProbe(context.Background(), canarycontrol.OpHealth, 8080, 0, 5*time.Second)
+	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -159,7 +159,7 @@ func TestEngineSeam_ExecInspectFailure(t *testing.T) {
 	fake.NextAttachStdout = []byte(`{"schema_version":"canary-control/v1","operation":"health","success":true,"http_status":200,"health":{"ready":true,"mode":"growing"}}`)
 	fake.NextInspectErr = errors.New("inspect failed")
 	r := NewControlRunner(fake)
-	_, _, err := r.ControlProbe(context.Background(), canarycontrol.OpHealth, 8080, 0, 5*time.Second)
+	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -171,7 +171,7 @@ func TestEngineSeam_StdoutOverflow(t *testing.T) {
 	fake := &FakeControlExecRuntime{}
 	fake.AttachExceedsMaxStdout = true
 	r := NewControlRunner(fake)
-	_, _, err := r.ControlProbe(context.Background(), canarycontrol.OpHealth, 8080, 0, 5*time.Second)
+	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)
 	if !errors.Is(err, ErrStdoutOverflow) {
 		t.Errorf("expected ErrStdoutOverflow, got %v", err)
 	}
@@ -183,7 +183,7 @@ func TestEngineSeam_StderrOverflow(t *testing.T) {
 	fake.AttachExceedsMaxStderr = true
 	fake.NextInspectResult = ExecInspectResult{ExitCode: 0}
 	r := NewControlRunner(fake)
-	_, _, err := r.ControlProbe(context.Background(), canarycontrol.OpHealth, 8080, 0, 5*time.Second)
+	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)
 	if !errors.Is(err, ErrStderrOverflow) {
 		t.Errorf("expected ErrStderrOverflow, got %v", err)
 	}
@@ -193,7 +193,7 @@ func TestEngineSeam_EmptyStdout(t *testing.T) {
 	fake := &FakeControlExecRuntime{}
 	fake.AttachEmptyStdout = true
 	r := NewControlRunner(fake)
-	_, _, err := r.ControlProbe(context.Background(), canarycontrol.OpHealth, 8080, 0, 5*time.Second)
+	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)
 	if !errors.Is(err, ErrEmptyStdout) {
 		t.Errorf("expected ErrEmptyStdout, got %v", err)
 	}
@@ -206,7 +206,7 @@ func TestEngineSeam_ExitZeroWithFailureEnvelope_Rejected(t *testing.T) {
 	fake.NextAttachStdout = []byte(`{"schema_version":"canary-control/v1","operation":"health","success":false,"http_status":500,"error_class":"health_not_ready"}`)
 	fake.NextInspectResult = ExecInspectResult{ExitCode: 0}
 	r := NewControlRunner(fake)
-	_, _, err := r.ControlProbe(context.Background(), canarycontrol.OpHealth, 8080, 0, 5*time.Second)
+	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)
 	if !errors.Is(err, ErrExitEnvelopeMismatch) {
 		t.Errorf("expected ErrExitEnvelopeMismatch, got %v", err)
 	}
@@ -217,7 +217,7 @@ func TestEngineSeam_NonzeroExitWithSuccessEnvelope_Rejected(t *testing.T) {
 	fake.NextAttachStdout = []byte(`{"schema_version":"canary-control/v1","operation":"health","success":true,"http_status":200,"health":{"ready":true,"mode":"growing"}}`)
 	fake.NextInspectResult = ExecInspectResult{ExitCode: 1}
 	r := NewControlRunner(fake)
-	_, _, err := r.ControlProbe(context.Background(), canarycontrol.OpHealth, 8080, 0, 5*time.Second)
+	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)
 	if !errors.Is(err, ErrExitEnvelopeMismatch) {
 		t.Errorf("expected ErrExitEnvelopeMismatch, got %v", err)
 	}
@@ -228,7 +228,7 @@ func TestEngineSeam_RequestedCountMismatch(t *testing.T) {
 	fake.NextAttachStdout = []byte(`{"schema_version":"canary-control/v1","operation":"operate","success":true,"http_status":200,"workload":{"requested":3,"attempted":3,"completed":3}}`)
 	fake.NextInspectResult = ExecInspectResult{ExitCode: 0}
 	r := NewControlRunner(fake)
-	_, _, err := r.ControlProbe(context.Background(), canarycontrol.OpOperate, 8080, 5, 30*time.Second)
+	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpOperate, 8080, 5, 30*time.Second)
 	if err == nil {
 		t.Fatal("expected error for requested mismatch")
 	}
@@ -239,7 +239,7 @@ func TestEngineSeam_MalformedEnvelope(t *testing.T) {
 	fake.NextAttachStdout = []byte(`{"schema_version":"canary-control/v1","operation":"health","success":true`)
 	fake.NextInspectResult = ExecInspectResult{ExitCode: 0}
 	r := NewControlRunner(fake)
-	_, _, err := r.ControlProbe(context.Background(), canarycontrol.OpHealth, 8080, 0, 5*time.Second)
+	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)
 	if err == nil {
 		t.Fatal("expected error for malformed envelope")
 	}
@@ -250,22 +250,25 @@ func TestEngineSeam_TrailingEnvelopeData(t *testing.T) {
 	fake.NextAttachStdout = []byte(`{"schema_version":"canary-control/v1","operation":"health","success":true,"http_status":200,"health":{"ready":true,"mode":"growing"}}{"extra":1}`)
 	fake.NextInspectResult = ExecInspectResult{ExitCode: 0}
 	r := NewControlRunner(fake)
-	_, _, err := r.ControlProbe(context.Background(), canarycontrol.OpHealth, 8080, 0, 5*time.Second)
+	_, _, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)
 	if err == nil {
 		t.Fatal("expected error for trailing envelope")
 	}
 }
 
-// ===== Typed failure envelope preservation =====
+// ===== Typed failure envelope preservation (CORRECTION40 P0-7) =====
 
 func TestEngineSeam_TypedFailureEnvelope_Preserved(t *testing.T) {
 	fake := &FakeControlExecRuntime{}
 	fake.NextAttachStdout = []byte(`{"schema_version":"canary-control/v1","operation":"health","success":false,"http_status":500,"error_class":"health_not_ready"}`)
 	fake.NextInspectResult = ExecInspectResult{ExitCode: 1}
 	r := NewControlRunner(fake)
-	_, env, err := r.ControlProbe(context.Background(), canarycontrol.OpHealth, 8080, 0, 5*time.Second)
-	if err != nil {
-		t.Fatalf("expected typed failure preserved, got %v", err)
+	exitCode, env, err := r.ControlProbe(context.Background(), "container-1", canarycontrol.OpHealth, 8080, 0, 5*time.Second)
+	if err == nil {
+		t.Fatal("expected failure error for failure envelope")
+	}
+	if exitCode != 1 {
+		t.Errorf("expected exit_code=1, got %d", exitCode)
 	}
 	if env == nil {
 		t.Fatal("expected envelope")
@@ -275,6 +278,17 @@ func TestEngineSeam_TypedFailureEnvelope_Preserved(t *testing.T) {
 	}
 	if env.ErrorClass != canarycontrol.ErrHealthNotReady {
 		t.Errorf("expected ErrHealthNotReady, got %s", env.ErrorClass)
+	}
+	// ControlFailureError must preserve the shared error class.
+	var cfe *ControlFailureError
+	if !errors.As(err, &cfe) {
+		t.Fatalf("expected *ControlFailureError, got %T", err)
+	}
+	if cfe.Protocol == nil {
+		t.Fatal("expected Protocol set on ControlFailureError")
+	}
+	if cfe.Protocol.ErrClass != canarycontrol.ErrHealthNotReady {
+		t.Errorf("expected shared ErrHealthNotReady preserved, got %s", cfe.Protocol.ErrClass)
 	}
 }
 
