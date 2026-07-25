@@ -1,0 +1,9 @@
+{
+  "image_reference": "kgb-tovarisch-canary:latest",
+  "image_id": "sha256:318f3aa49873231d3b7fefed088202340dcdf7c3f3febfe628f51f6169d69aad",
+  "repo_digests": ["kgb-tovarisch-canary@sha256:318f3aa49873231d3b7fefed088202340dcdf7c3f3febfe628f51f6169d69aad"],
+  "source_commit_oid": "2791912723a6d9dad1e34dc4f7a1bb061901e792",
+  "repository_tree_oid": "19a40b10d08a5bee5f95622e952b1a827bd3f790",
+  "canary_source_subtree_oid": "056016e82fba903ed25d0bab98197e2a424b2a67",
+  "prebuild_binary_sha256": "9b3726a7d00fde1fa410faf6c34c68ba25dc00ee18d1b9e3616892bcbe3cf683"
+}

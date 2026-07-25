@@ -1,0 +1,1 @@
+build_command: cd tovarisch/labs/memory && go build -buildvcs=true -o ./tovarisch-memory-lab-cli ./cmd/tovarisch-memory-lab

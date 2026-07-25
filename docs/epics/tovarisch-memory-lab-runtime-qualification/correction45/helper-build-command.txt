@@ -1,0 +1,1 @@
+build_command: cd tovarisch/labs/memory/cmd/tovarisch-memory-lab && go test -buildvcs=true -c -o ../../tovarisch-memory-lab-qualified-smoke.test .

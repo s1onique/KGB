@@ -1,0 +1,49 @@
+TESTED_COMMIT=efa752f0c9a133bac4969bb69cba6680c2b04662
+TESTED_TREE=0e456806eb0a6fb2b78707f3192519b10e19ff79
+CANARY_SUBTREE=5f86416ccca73148f979296cc322bf91f5816c38
+PREBUILD_BINARY_SHA256=078d58d466a1dd6af580857fbdc11fc2e21a5a996c7896fbd1fc5175c5758ec2
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 647B done
+#1 WARN: FromPlatformFlagConstDisallowed: FROM --platform flag should not use constant value "linux/amd64" (line 8)
+#1 DONE 0.0s
+
+#2 [internal] load metadata for gcr.io/distroless/static:nonroot
+#2 DONE 2.6s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [1/2] FROM gcr.io/distroless/static:nonroot@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6
+#4 resolve gcr.io/distroless/static:nonroot@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6 0.0s done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 6.47MB 0.1s done
+#5 DONE 0.1s
+
+#4 [1/2] FROM gcr.io/distroless/static:nonroot@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6
+#4 CACHED
+
+#6 [2/2] COPY canary /app/canary
+#6 DONE 0.1s
+
+#7 exporting to image
+#7 exporting layers
+#7 exporting layers 0.8s done
+#7 exporting manifest sha256:4c15a2bb6fe44419f0f3a7a34846e609556d22a83095472991b391ac8f023bff done
+#7 exporting config sha256:31a0622971adeb5adb7665878692337d3e066975f4dd37306326d3195ce7956b done
+#7 exporting attestation manifest sha256:04f1fa15dd599b4ebf5cbc1fe49ea080a8f77904c34c87abf45a3941507fec79 0.0s done
+#7 exporting manifest list sha256:285af8f6aade9bfcd6c9bfcba0eab25e388dc21b14aa4b03ee4a72731164d11f done
+#7 naming to docker.io/library/kgb-tovarisch-canary:latest done
+#7 unpacking to docker.io/library/kgb-tovarisch-canary:latest 0.1s done
+#7 DONE 1.0s
+
+ [33m1 warning found (use docker --debug to expand):
+[0m - FromPlatformFlagConstDisallowed: FROM --platform flag should not use constant value "linux/amd64" (line 8)
+=== canary image built: kgb-tovarisch-canary:latest ===
+image_id: sha256:285af8f6aade9bfcd6c9bfcba0eab25e388dc21b14aa4b03ee4a72731164d11f
+prebuild_binary_sha256: 078d58d466a1dd6af580857fbdc11fc2e21a5a996c7896fbd1fc5175c5758ec2
+build metadata: tovarisch/labs/memory/canary-image-build.json

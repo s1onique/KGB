@@ -1,0 +1,110 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-07-25T17:59:57.117094017Z",
+  "image": {
+    "requested_reference": "kgb-tovarisch-canary:correction45-S45",
+    "inspected_id_before_create": "sha256:50d4b2d78e554bd1cb69bc1db1bdfed1657efbda10b9c61710a8262c68747531",
+    "repo_digests": [
+      "kgb-tovarisch-canary@sha256:50d4b2d78e554bd1cb69bc1db1bdfed1657efbda10b9c61710a8262c68747531"
+    ],
+    "create_request_image": "sha256:50d4b2d78e554bd1cb69bc1db1bdfed1657efbda10b9c61710a8262c68747531",
+    "container_inspect_image_id": "sha256:50d4b2d78e554bd1cb69bc1db1bdfed1657efbda10b9c61710a8262c68747531",
+    "container_inspect_config_image": "sha256:50d4b2d78e554bd1cb69bc1db1bdfed1657efbda10b9c61710a8262c68747531"
+  },
+  "network": {
+    "requested_name": "kgb-lab-lab-canary-bounded-1785002397",
+    "create_response_id": "8c235bce233cdde0c1508150f6f49416f203f3b1fe501c89b0c97c2858832c27",
+    "inspected_network_id": "8c235bce233cdde0c1508150f6f49416f203f3b1fe501c89b0c97c2858832c27",
+    "container_endpoint_network_id": "8c235bce233cdde0c1508150f6f49416f203f3b1fe501c89b0c97c2858832c27",
+    "removed": true
+  },
+  "pull": {
+    "observation_available": true,
+    "attempted": false,
+    "attempt_count": 0
+  },
+  "container": {
+    "id": "5fb3f1a53c193115292d00bb6147c5e2d2fbb4b3358feb2b721fac65e33c56a7",
+    "created": true,
+    "inspected": true,
+    "started": true,
+    "terminal_state_observed": false,
+    "removed": true
+  },
+  "provenance": {
+    "source_commit": "",
+    "source_tree": "",
+    "git_object_format": "",
+    "working_tree_dirty": false,
+    "source_commit_dirty": false,
+    "vcs_modified": false,
+    "docker_server_version": "29.6.2",
+    "producer_version": "",
+    "executable_sha256": "11844fd0d53912dfbc84b8ad870c38110299b2707d8293a5b2ded009e70a35d8"
+  },
+  "reachability": {
+    "method": "",
+    "network_id": "",
+    "target_host": "",
+    "target_port": 0,
+    "health": {
+      "operation": "",
+      "exec_exit_code": 0,
+      "http_status": 0,
+      "response_validated": false
+    },
+    "initial_state": {
+      "operation": "",
+      "exec_exit_code": 0,
+      "http_status": 0,
+      "response_validated": false
+    },
+    "operate": {
+      "operation": "",
+      "exec_exit_code": 0,
+      "http_status": 0,
+      "requested": 0,
+      "attempted": 0,
+      "completed": 0,
+      "response_validated": false
+    },
+    "final_state": {
+      "operation": "",
+      "exec_exit_code": 0,
+      "http_status": 0,
+      "response_validated": false
+    },
+    "success": false
+  },
+  "image_exact_id_match": true,
+  "network_exact_id_match": true,
+  "cleanup_complete": true,
+  "pass": false,
+  "verifier_errors": [
+    "container.terminal_state_observed=false",
+    "provenance.source_commit is empty",
+    "provenance.source_tree is empty",
+    "provenance.git_object_format is empty",
+    "provenance.producer_version is empty",
+    "reachability.method must be docker_exec",
+    "reachability.network_id must be canonical 64 lowercase hex",
+    "reachability.target_host must be 127.0.0.1",
+    "reachability.target_port out of range",
+    "reachability.health.operation mismatch",
+    "reachability.health.http_status must be 200",
+    "reachability.health.response_validated must be true",
+    "reachability.health.mode is empty",
+    "reachability.initial_state.operation mismatch",
+    "reachability.initial_state.http_status must be 200",
+    "reachability.initial_state.response_validated must be true",
+    "reachability.initial_state.mode is empty",
+    "reachability.operate.operation mismatch",
+    "reachability.operate.http_status must be 200",
+    "reachability.operate.requested must be positive",
+    "reachability.operate.response_validated must be true",
+    "reachability.final_state.operation mismatch",
+    "reachability.final_state.http_status must be 200",
+    "reachability.final_state.response_validated must be true",
+    "reachability.final_state.mode is empty"
+  ]
+}

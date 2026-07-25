@@ -1,0 +1,1 @@
+build_command: bash scripts/build_tovarisch_canary_image.sh

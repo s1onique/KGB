@@ -1,0 +1,1 @@
+11844fd0d53912dfbc84b8ad870c38110299b2707d8293a5b2ded009e70a35d8  /home/kgb/Projects/KGB/tovarisch/labs/memory/tovarisch-memory-lab-cli

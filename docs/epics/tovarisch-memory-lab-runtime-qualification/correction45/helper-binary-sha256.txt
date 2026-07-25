@@ -1,0 +1,1 @@
+06d4b10a40078b5113fde0f22eeaba02d0665fa296fbe33c78287b73f301db36  /home/kgb/Projects/KGB/tovarisch/labs/memory/tovarisch-memory-lab-qualified-smoke.test

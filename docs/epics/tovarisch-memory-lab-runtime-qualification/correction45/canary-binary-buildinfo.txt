@@ -1,0 +1,14 @@
+/tmp/canary_in_image_v6: go1.25.12
+	path	github.com/s1onique/KGB/tovarisch/labs/memory/cmd/canary
+	mod	github.com/s1onique/KGB/tovarisch/labs/memory	v0.0.0-20260725175634-efa752f0c9a1	
+	build	-buildmode=exe
+	build	-compiler=gc
+	build	-ldflags="-s -w"
+	build	CGO_ENABLED=0
+	build	GOARCH=amd64
+	build	GOOS=linux
+	build	GOAMD64=v1
+	build	vcs=git
+	build	vcs.revision=efa752f0c9a133bac4969bb69cba6680c2b04662
+	build	vcs.time=2026-07-25T17:56:34Z
+	build	vcs.modified=false
