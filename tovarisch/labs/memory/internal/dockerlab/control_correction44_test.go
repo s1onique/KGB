@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/canarycontrol"
 	"github.com/docker/docker/api/types"
 )
 
@@ -114,12 +113,4 @@ func TestExecuteQualifiedLifecycle_DependencyRecordHonorsControl(t *testing.T) {
 	if called != 1 {
 		t.Fatalf("expected workload to be called once, got %d", called)
 	}
-}
-
-// TestExecuteQualifiedLifecycle_ContainerIDReachesExec is a
-// placeholder marker: full exec path requires a real canary
-// container. The constructor-level test above proves the
-// canonical runner is bound to the production transport.
-func TestExecuteQualifiedLifecycle_ContainerIDReachesExec(t *testing.T) {
-	_ = canarycontrol.OpOperate
 }

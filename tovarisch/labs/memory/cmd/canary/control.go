@@ -223,11 +223,23 @@ func emitFailureEnvelope(operation string, errClass ErrorClass, httpStatus int) 
 	emitEnvelope(&env)
 }
 
-// emitEnvelope emits exactly one JSON envelope to stdout.
+// emitEnvelope emits exactly one JSON envelope. When the
+// optional writer is nil, the envelope is written to stdout
+// (the control subcommand path); otherwise it is written to
+// the supplied writer (the HTTP handler path).
 func emitEnvelope(env *ControlEnvelope) {
-	enc := json.NewEncoder(os.Stdout)
+	emitEnvelopeTo(nil, env)
+}
+
+// emitEnvelopeTo is the explicit form. When w is nil, the
+// envelope is written to stdout.
+func emitEnvelopeTo(w io.Writer, env *ControlEnvelope) {
+	if w == nil {
+		w = os.Stdout
+	}
+	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
-	enc.Encode(env)
+	_ = enc.Encode(env)
 }
 
 // HealthCheckResult represents the result of a health check.

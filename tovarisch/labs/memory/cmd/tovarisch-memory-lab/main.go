@@ -267,29 +267,45 @@ func runCommand(args []string) error {
 			fmt.Printf("Container %s started with PID %d\n", containerID, containerPID)
 		}
 
-		// CORRECTION28: Use Docker exec-based health check with image-owned canary-control.
-		// This eliminates shell/curl dependency and uses the image's own binary.
-		// Docker exec always works because it uses the container's own network namespace.
-		healthExit, healthEnv, err := control.ControlProbe(workloadCtx, containerID, canarycontrol.OpHealth, *canaryPort, 0, 30*time.Second)
-		if err != nil {
-			return fmt.Errorf("canary health check failed (docker exec): %w", err)
-		}
-		obs.Reachability.Health = dockerlab.ReachabilityOperationObservation{Operation: canarycontrol.OpHealth, ExecExitCode: healthExit, HTTPStatus: healthEnv.HTTPStatus, ResponseValidated: true, Mode: healthEnv.Health.Mode}
-		if *verbose {
-			fmt.Printf("Canary healthy (via canary-control exec)\n")
+		// CORRECTION45: The four-operation reachability flow is the
+		// single canonical orchestrator. The production CLI and
+		// the live qualification tests both call this function.
+		// There is no parallel test-only implementation.
+		runSequence := func(probeCtx context.Context, port int, count int, timeout time.Duration) (*CanaryState, *WorkloadResult, *CanaryState, *dockerlab.QualifiedExecutionObservations, error) {
+			sequenceObs := &dockerlab.QualifiedExecutionObservations{
+				SchemaVersion: dockerlab.QualifiedExecutionObservationsSchemaVersion,
+				GeneratedAt:   time.Now().UTC(),
+				Image:         obs.Image,
+				Network:       obs.Network,
+				Pull:          obs.Pull,
+				Container:     obs.Container,
+				Reachability: dockerlab.ReachabilityObservations{
+					Method:     dockerlab.ReachabilityMethodDockerExec,
+					NetworkID:  obs.Network.InspectResponseID,
+					TargetHost: "127.0.0.1",
+					TargetPort: port,
+				},
+			}
+			initialState, workloadResult, finalState, sequenceErr := RunCanonicalControlSequence(
+				probeCtx, control, sequenceObs,
+				CanonicalControlSequenceOptions{
+					ContainerID: containerID,
+					Port:        port,
+					Operations:  count,
+					Timeout:     timeout,
+				},
+			)
+			return initialState, workloadResult, finalState, sequenceObs, sequenceErr
 		}
 
-		// CORRECTION28: All canary operations use exec with canary-control binary.
-		// No bridge IP, no direct HTTP, no shell/curl dependency.
-		// Initial state via exec
-		initialExit, initialEnv, err := control.ControlProbe(workloadCtx, containerID, canarycontrol.OpState, *canaryPort, 0, 30*time.Second)
+		// 1. Health + initial state (count=0 so operate is skipped).
+		initialState, _, _, probeObs, err := runSequence(workloadCtx, *canaryPort, 0, 30*time.Second)
 		if err != nil {
-			return fmt.Errorf("fetch initial canary state: %w", err)
+			return fmt.Errorf("canonical control sequence: health+initial: %w", err)
 		}
-		initialState := canaryStateFromEnvelope(initialEnv)
-		obs.Reachability.InitialState = dockerlab.ReachabilityOperationObservation{Operation: canarycontrol.OpState, ExecExitCode: initialExit, HTTPStatus: initialEnv.HTTPStatus, ResponseValidated: true, Mode: initialEnv.State.Mode}
-		if err != nil {
-			return fmt.Errorf("fetch initial canary state: %w", err)
+		obs.Reachability = probeObs.Reachability
+		if *verbose {
+			fmt.Printf("Canary healthy (via canary-control exec)\n")
 		}
 		expectedMode := scenarioToMode(*scenario)
 		if initialState.Mode != expectedMode {
@@ -340,19 +356,15 @@ func runCommand(args []string) error {
 		if *verbose {
 			fmt.Printf("Stimulus phase started, triggering workload\n")
 		}
-		// CORRECTION28: Use canary-control exec for operate, not direct HTTP
+		// CORRECTION45: operate + final state via the canonical
+		// sequence. The CLI does not call ControlProbe directly.
 		expectedRequest := getScenarioOperationCount(*scenario)
-		operateExit, operateEnv, err := control.ControlProbe(workloadCtx, containerID, canarycontrol.OpOperate, *canaryPort, expectedRequest, 60*time.Second)
+		_, workloadResult, finalState, probeObs2, err := runSequence(workloadCtx, *canaryPort, expectedRequest, 60*time.Second)
 		if err != nil {
 			sampler.Stop()
-			return fmt.Errorf("operate canary: %w", err)
+			return fmt.Errorf("canonical control sequence: operate+final: %w", err)
 		}
-		workloadResult := &WorkloadResult{Requested: operateEnv.Workload.Requested, Attempted: operateEnv.Workload.Attempted, Completed: operateEnv.Workload.Completed, Failed: operateEnv.Workload.Requested - operateEnv.Workload.Completed, Returned: operateEnv.Workload.Completed}
-		obs.Reachability.Operate = dockerlab.ReachabilityOperateObservation{Operation: canarycontrol.OpOperate, ExecExitCode: operateExit, HTTPStatus: operateEnv.HTTPStatus, Requested: operateEnv.Workload.Requested, Attempted: operateEnv.Workload.Attempted, Completed: operateEnv.Workload.Completed, ResponseValidated: true}
-		if err != nil {
-			sampler.Stop()
-			return fmt.Errorf("operate canary: %w", err)
-		}
+		obs.Reachability = probeObs2.Reachability
 		if *verbose {
 			fmt.Printf("Workload completed: requested=%d attempted=%d completed=%d\n",
 				workloadResult.Requested, workloadResult.Attempted, workloadResult.Completed)
@@ -379,20 +391,6 @@ func runCommand(args []string) error {
 			return fmt.Errorf("bounded stop: %w", stopErr)
 		}
 
-		// CORRECTION28: All canary operations use exec with canary-control binary.
-		// No bridge IP, no direct HTTP, no shell/curl dependency.
-		// Final state via exec
-		finalExit, finalEnv, err := control.ControlProbe(workloadCtx, containerID, canarycontrol.OpState, *canaryPort, 0, 30*time.Second)
-		if err != nil {
-			sampler.Stop()
-			return fmt.Errorf("fetch final canary state: %w", err)
-		}
-		finalState := canaryStateFromEnvelope(finalEnv)
-		obs.Reachability.FinalState = dockerlab.ReachabilityOperationObservation{Operation: canarycontrol.OpState, ExecExitCode: finalExit, HTTPStatus: finalEnv.HTTPStatus, ResponseValidated: true, Mode: finalEnv.State.Mode}
-		if err != nil {
-			sampler.Stop()
-			return fmt.Errorf("fetch final canary state: %w", err)
-		}
 		if *verbose {
 			fmt.Printf("Final canary state: mode=%s, operations=%d, retained_blocks=%d\n",
 				finalState.Mode, finalState.OperationCount, finalState.RetainedBlocks)
@@ -2713,22 +2711,12 @@ func validateStateInvariant(scenario string, initial, final *CanaryState, worklo
 // production CLI now goes through dockerlab.ExecuteQualifiedDockerLifecycle
 // and evidence.PersistQualifiedExecutionEvidence directly.
 
-// fetchCanaryStateViaExec fetches canary state using docker exec.
-// CORRECTION27 P0-1: More reliable than direct HTTP when Docker bridge
-// networking has issues.
-func canaryControlOpOperate() canarycontrol.Operation { return canarycontrol.OpOperate }
-
+// canaryStateFromEnvelope translates a /state envelope into the
+// package-local CanaryState. CORRECTION45: this is the only
+// remaining helper that bridges the /state envelope to the
+// runWorkload consumer. The legacy fetchCanaryStateViaExec and
+// operateCanaryViaExec helpers have been deleted; all four
+// operations go through RunCanonicalControlSequence.
 func canaryStateFromEnvelope(env *canarycontrol.ControlEnvelope) *CanaryState {
 	return &CanaryState{Mode: env.State.Mode, RetainedBlocks: env.State.RetainedBlocks, RetainedBytes: env.State.RetainedBytes, OperationCount: int(env.State.OperationCount), FDCount: env.State.FDCount, Ready: env.State.Ready}
-}
-
-func fetchCanaryStateViaExec(ctx context.Context, dockerClient *dockerlab.Client, containerID string, port int) (*CanaryState, error) {
-	return nil, fmt.Errorf("legacy state helper removed; use ControlRunner.ControlProbe")
-}
-
-// operateCanaryViaExec triggers N operations on the canary via exec.
-// CORRECTION28: Eliminates shell/curl dependency by using the
-// image-owned canary-control binary.
-func operateCanaryViaExec(ctx context.Context, dockerClient *dockerlab.Client, containerID string, port int, count int) (*WorkloadResult, error) {
-	return nil, fmt.Errorf("legacy operate helper removed; use ControlRunner.ControlProbe")
 }

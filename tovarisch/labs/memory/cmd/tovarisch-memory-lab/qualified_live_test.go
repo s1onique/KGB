@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -91,12 +92,45 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 		TerminalTimeout: 15 * time.Second,
 		CleanupTimeout:  10 * time.Second,
 		Run: func(runCtx context.Context, containerID string, observations *dockerlab.QualifiedExecutionObservations) error {
-			// CORRECTION27: Smoke test validates LIFECYCLE, not canary HTTP.
-			// The canary container may not have wget/curl. We record
-			// reachability_unknown since the smoke is testing Docker
-			// lifecycle (create, start, stop, cleanup), not the canary.
-			networkID := observations.Network.CreateResponseID
-			observations.SetReachabilityUnknown(networkID)
+			// CORRECTION45: The live smoke executes the canonical
+			// four-operation reachability sequence via the production
+			// seam. The canary binary is image-owned and runs inside
+			// the container's network namespace, so docker exec
+			// always works. The smoke validates the canonical
+			// operation order and the resulting observation.
+			port := 8080
+			if cp, ok := os.LookupEnv("TOVARISCH_CANARY_PORT"); ok {
+				if v, err := strconv.Atoi(cp); err == nil && v > 0 && v <= 65535 {
+					port = v
+				}
+			}
+			expectedRequest := 100
+			if cr, ok := os.LookupEnv("TOVARISCH_CANARY_REQUEST"); ok {
+				if v, err := strconv.Atoi(cr); err == nil && v > 0 {
+					expectedRequest = v
+				}
+			}
+			control, err := dockerlab.NewDockerControl(docker.Client)
+			if err != nil {
+				return fmt.Errorf("construct canonical control: %w", err)
+			}
+			// Stamp the top-level reachability fields before invoking
+			// the canonical sequence so the producer-verifier comparison
+			// does not detect a disagreement.
+			observations.Reachability.Method = dockerlab.ReachabilityMethodDockerExec
+			observations.Reachability.NetworkID = observations.Network.InspectResponseID
+			observations.Reachability.TargetHost = "127.0.0.1"
+			observations.Reachability.TargetPort = port
+			_, _, _, err = RunCanonicalControlSequence(runCtx, control, observations, CanonicalControlSequenceOptions{
+				ContainerID: containerID,
+				Port:        port,
+				Operations:  expectedRequest,
+				Timeout:     30 * time.Second,
+			})
+			if err != nil {
+				return fmt.Errorf("canonical control sequence: %w", err)
+			}
+			observations.Reachability.Success = true
 
 			if err := docker.ContainerStop(runCtx, containerID, 5*time.Second); err != nil {
 				return fmt.Errorf("bounded stop: %w", err)

@@ -256,18 +256,38 @@ func (c *Canary) DescriptorOperation() {
 
 func (c *Canary) handleState(w http.ResponseWriter, r *http.Request) {
 	state := c.State()
+	// CORRECTION45: emit a StatePayload directly (the
+	// control subcommand calls canarycontrol.DecodeState on
+	// the response body).
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(state)
+	_ = json.NewEncoder(w).Encode(StatePayload{
+		Mode:           string(state.Mode),
+		RetainedBlocks: state.RetainedBlocks,
+		RetainedBytes:  state.RetainedBytes,
+		OperationCount: state.OperationCount,
+		FDCount:        state.FDCount,
+		Ready:          state.Ready,
+	})
 }
 
 func (c *Canary) handleHealth(w http.ResponseWriter, r *http.Request) {
 	state := c.State()
+	// CORRECTION45: emit a HealthPayload directly (the
+	// control subcommand calls canarycontrol.DecodeHealth on
+	// the response body).
 	if state.Ready {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "OK\nMode: %s\nOperations: %d\n", c.mode, state.OperationCount)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(HealthPayload{
+			Ready: true,
+			Mode:  string(c.mode),
+		})
 	} else {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(w, "NOT READY\n")
+		_ = json.NewEncoder(w).Encode(HealthPayload{
+			Ready: false,
+			Mode:  string(c.mode),
+		})
 	}
 }
 
@@ -343,15 +363,16 @@ func (c *Canary) handleOperate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Get current operation count while still holding lock
-	opCount := c.state.OperationCount
 	c.mu.Unlock()
 
-	// Return result
+	// CORRECTION45: emit a WorkloadPayload directly (the
+	// control subcommand calls canarycontrol.DecodeWorkload on
+	// the response body).
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"attempted":       count,
-		"completed":       completed,
-		"operation_count": opCount,
+	_ = json.NewEncoder(w).Encode(WorkloadPayload{
+		Requested: count,
+		Attempted: count,
+		Completed: completed,
 	})
 }
 

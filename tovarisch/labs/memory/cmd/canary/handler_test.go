@@ -25,13 +25,13 @@ func TestHandleOperatePOSTCount1(t *testing.T) {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
 
-	var resp map[string]interface{}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+	var wl WorkloadPayload
+	if err := json.NewDecoder(w.Body).Decode(&wl); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	if resp["completed"] != float64(1) {
-		t.Errorf("completed: got %v, want 1", resp["completed"])
+	if wl.Completed != 1 {
+		t.Errorf("completed: got %v, want 1", wl.Completed)
 	}
 }
 
@@ -48,13 +48,13 @@ func TestHandleOperateCount0(t *testing.T) {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
 
-	var resp map[string]interface{}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+	var wl WorkloadPayload
+	if err := json.NewDecoder(w.Body).Decode(&wl); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	if resp["completed"] != float64(0) {
-		t.Errorf("completed: got %v, want 0", resp["completed"])
+	if wl.Completed != 0 {
+		t.Errorf("completed: got %v, want 0", wl.Completed)
 	}
 }
 
@@ -212,13 +212,13 @@ func TestStoppedCanaryCompletesZeroOperations(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 
-	var resp map[string]interface{}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+	var wl WorkloadPayload
+	if err := json.NewDecoder(w.Body).Decode(&wl); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	if resp["completed"] != float64(0) {
-		t.Errorf("completed: got %v, want 0", resp["completed"])
+	if wl.Completed != 0 {
+		t.Errorf("completed: got %v, want 0", wl.Completed)
 	}
 }
 
@@ -263,16 +263,16 @@ func TestHandleState(t *testing.T) {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
 
-	var state State
-	if err := json.NewDecoder(w.Body).Decode(&state); err != nil {
+	var st StatePayload
+	if err := json.NewDecoder(w.Body).Decode(&st); err != nil {
 		t.Fatalf("decode state: %v", err)
 	}
 
-	if state.Mode != ModeGrowing {
-		t.Errorf("Mode: got %s, want growing", state.Mode)
+	if st.Mode != string(ModeGrowing) {
+		t.Errorf("Mode: got %s, want growing", st.Mode)
 	}
 
-	if !state.Ready {
+	if !st.Ready {
 		t.Error("Ready should be true")
 	}
 }
@@ -303,13 +303,13 @@ func TestDefaultCountIs1(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 
-	var resp map[string]interface{}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+	var wl WorkloadPayload
+	if err := json.NewDecoder(w.Body).Decode(&wl); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	if resp["completed"] != float64(1) {
-		t.Errorf("completed: got %v, want 1", resp["completed"])
+	if wl.Completed != 1 {
+		t.Errorf("completed: got %v, want 1", wl.Completed)
 	}
 }
 
