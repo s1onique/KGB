@@ -1,0 +1,28 @@
+# CORRECTION38 Engine argv Tests
+
+DEFERRED — the dockerlab migration that exercises exact Engine argv
+via the recording seam has been deferred to CORRECTION39. The
+canarycontrol.BuildArgv() tests in c36_regression_test.go already prove
+the argv authority at the Go level:
+
+```
+go test -count=1 -v -run 'TestControlOperation_BuildArgv' \
+  ./internal/canarycontrol/...
+```
+
+Result:
+- TestControlOperation_BuildArgvHealth:
+  argv = [/app/canary control health --port 8080 --timeout 5s]
+- TestControlOperation_BuildArgvState:
+  argv = [/app/canary control state --port 8080 --timeout 5s]
+- TestControlOperation_BuildArgvOperate:
+  argv = [/app/canary control operate --port 8080 --count 10 --timeout 30s]
+- TestControlOperation_BuildArgvFailsClosedOn* (4 tests): each rejects
+  before any Engine call would occur.
+
+These prove the argv at the authority level. Engine-level argv recording
+(deferred to C39) requires the recording seam that is part of the
+dockerlab migration.
+
+No Engine command contains: sh, bash, curl, wget, nc, telnet (asserted
+by TestControlOperation_NoShell which iterates every operation kind).

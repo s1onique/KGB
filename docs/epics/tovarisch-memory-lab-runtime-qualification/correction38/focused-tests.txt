@@ -1,0 +1,12 @@
+command=go test -count=1 ./internal/canarycontrol/... ./cmd/canary/... ./internal/dockerlab/...
+working_directory=/home/kgb/Projects/KGB/tovarisch/labs/memory
+subject_commit=cd6c96211d27bac1006252b0a8177b1395363062 (E37)
+subject_tree=07a986280f0cdd059784f0f1bf03dd13dc6749ff (ET37)
+started_at=2026-07-25T09:59:10+03:00
+finished_at=2026-07-25T09:59:11+03:00
+exit_code=0
+
+Result:
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/canarycontrol	0.015s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/cmd/canary	0.683s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	0.016s

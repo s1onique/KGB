@@ -1,0 +1,20 @@
+# CORRECTION38 Readiness Retry Tests
+
+DEFERRED — readiness retry integration requires the dockerlab migration
+and is part of CORRECTION39.
+
+The shared retry policy authority is implemented and tested in
+canarycontrol:
+
+```
+go test -count=1 -v -run 'TestIsRetryable' ./internal/canarycontrol/...
+```
+
+Result:
+- TestIsRetryable_Retryable: ErrConnectionFailed, ErrRequestTimeout,
+  ErrHealthNotReady return true.
+- TestIsRetryable_NonRetryable: all other classes return false.
+- TestIsRetryable_Nil: nil returns false.
+- TestIsRetryable_NonProtocolError: plain errors return false.
+
+Ready for consumers; CanaryHealthCheckViaExec wiring is deferred to C39.

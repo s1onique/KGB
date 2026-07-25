@@ -1,0 +1,78 @@
+# CORRECTION38 Protocol Ownership Scan
+
+P0-9: After dockerlab migration, run:
+
+```bash
+git grep -n \
+  -e 'canary-control/v1' \
+  -e 'health_not_ready' \
+  -e 'workload_count_mismatch' \
+  -- tovarisch/labs/memory
+```
+
+Expected ownership:
+
+```yaml
+internal/canarycontrol:
+  definitions: true
+
+cmd/canary:
+  consumers_or_aliases_only: true
+
+internal/dockerlab:
+  consumers_only: true
+```
+
+## Current Ownership (before CORRECTION38 migration)
+
+```yaml
+internal/canarycontrol: true    # owns SchemaVersion, ErrHealthNotReady,
+                                # ErrWorkloadCountMismatch, etc.
+cmd/canary:                    # consumers/aliases only
+  Aliases the shared types via type aliases:
+    type DecodeError      = canarycontrol.ProtocolError
+    type HealthPayload    = canarycontrol.HealthPayload
+    type StatePayload     = canarycontrol.StatePayload
+    type WorkloadPayload  = canarycontrol.WorkloadPayload
+    type ControlEnvelope  = canarycontrol.ControlEnvelope
+    type ErrorClass       = canarycontrol.ErrorClass
+    type ControlOperation = canarycontrol.ControlOperation
+    type ControlOperationKind = canarycontrol.Operation
+
+  Constants:
+    SchemaVersion       = canarycontrol.SchemaVersion
+    MaxResponseBody     = canarycontrol.MaxResponseBody
+    ControlDialTimeout  = canarycontrol.ControlDialTimeout
+
+  Error-class vars (all alias the shared authority):
+    ErrInvalidArguments, ErrRequestCreateFailed, ErrConnectionFailed,
+    ErrRequestTimeout, ErrResponseTooLarge, ErrUnexpectedHTTPStatus,
+    ErrMalformedJSON, ErrUnknownJSONField, ErrMissingRequiredField,
+    ErrTrailingJSON, ErrHealthNotReady, ErrStateInvalid,
+    ErrWorkloadCountMismatch, ErrSchemaVersionMismatch, ErrInvalidOperation
+
+internal/dockerlab: PARTIAL
+  Owns (DUPLICATES that must be deleted):
+    ProtocolError type (client.go:994)
+    ErrorClass type
+    ControlEnvelope type (client.go:1022)
+    strictParseEnvelope (private parser)
+    validateControlEnvelope (private validator)
+    IsProtocolNonRetryable (private retry classifier)
+    Operation string constants
+    ErrorClass string constants
+```
+
+## Compatibility Cleanup (P0-9)
+
+`cmd/canary.AllowedErrorClasses` is currently a defensive-copy helper map
+built from `canarycontrol.AllErrorClasses()`. It exists for legacy test
+compatibility. CORRECTION38 keeps it because existing tests reference it,
+but it is not a parallel vocabulary authority — it is a derived accessor.
+
+No active production caller depends on `cmd/canary.AllowedErrorClasses`
+outside of `cmd/canary/control_test.go`.
+
+## Action
+
+None required in CORRECTION38 (dockerlab migration deferred).

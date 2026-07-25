@@ -1,0 +1,105 @@
+# CORRECTION38 Dockerlab Migration Inventory
+
+Symbols in `tovarisch/labs/memory/internal/dockerlab` that duplicate
+`internal/canarycontrol` authorities. Migration scope.
+
+```yaml
+- symbol: ProtocolError (dockerlab type)
+  file: tovarisch/labs/memory/internal/dockerlab/client.go:994
+  role: typed-protocol error (duplicate of canarycontrol.ProtocolError)
+  shared_replacement: canarycontrol.ProtocolError
+  action: delete
+
+- symbol: ErrorClass (dockerlab string type)
+  file: tovarisch/labs/memory/internal/dockerlab/client.go (string aliases)
+  role: error classification (duplicate of canarycontrol.ErrorClass)
+  shared_replacement: canarycontrol.ErrorClass
+  action: delete
+
+- symbol: ControlEnvelope (dockerlab type)
+  file: tovarisch/labs/memory/internal/dockerlab/client.go:1022
+  role: envelope struct (duplicate of canarycontrol.ControlEnvelope)
+  shared_replacement: canarycontrol.ControlEnvelope
+  action: delete
+
+- symbol: strictParseEnvelope
+  file: tovarisch/labs/memory/internal/dockerlab/client.go (multiple)
+  role: strict envelope parser (duplicate of canarycontrol.DecodeEnvelopeExactlyOne)
+  shared_replacement: canarycontrol.DecodeEnvelopeExactlyOne
+  action: delete
+
+- symbol: validateControlEnvelope
+  file: tovarisch/labs/memory/internal/dockerlab/client.go
+  role: envelope validator (duplicate of canarycontrol.ValidateControlEnvelope)
+  shared_replacement: canarycontrol.ValidateControlEnvelope
+  action: delete
+
+- symbol: IsProtocolNonRetryable
+  file: tovarisch/labs/memory/internal/dockerlab/client.go:1007
+  role: retry classifier (inverted logic of canarycontrol.IsRetryable)
+  shared_replacement: canarycontrol.IsRetryable (inverted)
+  action: delete
+
+- symbol: CanaryControlExecResult
+  file: tovarisch/labs/memory/internal/dockerlab/client.go:681
+  role: Docker-exec transport result wrapper (keep; transport-owned)
+  shared_replacement: N/A — transport detail
+  action: transport_adapter
+
+- symbol: CanaryHealthCheckViaExec
+  file: tovarisch/labs/memory/internal/dockerlab/client.go:696
+  role: Docker-exec health probe (must consume canarycontrol.NewControlOperation+BuildArgv)
+  shared_replacement: canarycontrol.NewControlOperation + canarycontrol.ControlOperation.BuildArgv
+  action: transport_adapter
+
+- symbol: CanaryStateViaExec
+  file: tovarisch/labs/memory/internal/dockerlab/client.go:723
+  role: Docker-exec state probe (must consume canarycontrol.NewControlOperation+BuildArgv)
+  shared_replacement: canarycontrol.NewControlOperation + canarycontrol.ControlOperation.BuildArgv
+  action: transport_adapter
+
+- symbol: CanaryOperateViaExec
+  file: tovarisch/labs/memory/internal/dockerlab/client.go:742
+  role: Docker-exec operate probe (must consume canarycontrol.NewControlOperation+BuildArgv)
+  shared_replacement: canarycontrol.NewControlOperation + canarycontrol.ControlOperation.BuildArgv
+  action: transport_adapter
+
+- symbol: CanaryStateFromExec
+  file: tovarisch/labs/memory/internal/dockerlab/canary.go
+  role: dockerlab-internal result wrapper
+  shared_replacement: N/A — transport detail
+  action: transport_adapter
+
+- symbol: CanaryWorkloadResult
+  file: tovarisch/labs/memory/internal/dockerlab/canary.go
+  role: dockerlab-internal result wrapper
+  shared_replacement: N/A — transport detail
+  action: transport_adapter
+```
+
+## Permitted Dockerlab-owned concerns (retain)
+
+- Docker Engine API calls (exec create/attach/start/inspect)
+- exec attachment and stream handling
+- exec inspection
+- transport context handling (timeouts, cancellation, deadlines)
+- bounded stdout/stderr capture (with explicit limits)
+- bounded diagnostic rendering
+
+## Forbidden Dockerlab-owned concerns (must delete or replace)
+
+- protocol schema (duplicate of canarycontrol.ControlEnvelope)
+- operation vocabulary (duplicate of canarycontrol.Operation)
+- error-class vocabulary (duplicate of canarycontrol.ErrorClass)
+- payload structs (duplicate of canarycontrol.HealthPayload/StatePayload/WorkloadPayload)
+- JSON decoding semantics (duplicate of canarycontrol decoder)
+- retry classification (duplicate of canarycontrol.IsRetryable)
+- argv construction (duplicate of canarycontrol.BuildArgv)
+- manual envelope validation (duplicate of canarycontrol.ValidateControlEnvelope)
+
+## Migration Status (CORRECTION38)
+
+NOT migrated in this bounded ACT. The dockerlab migration requires
+updating hundreds of dependent tests across dockerlab and the
+tovarisch-memory-lab CLI. Deferred to a future ACT that focuses
+exclusively on the migration and re-runs the full dependent test suite.

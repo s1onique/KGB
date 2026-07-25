@@ -1,0 +1,26 @@
+command=make gate
+working_directory=/home/kgb/Projects/KGB
+subject_commit=cd6c96211d27bac1006252b0a8177b1395363062 (E37)
+subject_tree=07a986280f0cdd059784f0f1bf03dd13dc6749ff (ET37)
+started_at=2026-07-25T09:59:40+03:00
+finished_at=<deferred>
+exit_code=<deferred>
+
+Result: DEFERRED.
+
+`make gate` was not executed in this bounded hermetic ACT. CORRECTION38
+explicitly does not require the parent correction closed. The gate
+must not be claimed PASS for the parent.
+
+CORRECTION38 does NOT introduce gate weakening. The previously-recorded
+UVB-76 artifact-writer defects remain a parent blocker that must be
+addressed in a future ACT before the parent can be claimed closed.
+
+Recommended next ACT (CORRECTION39) scope:
+- canonical operation-level reachability observations
+- qualified-evidence strictness and mutation tests
+- canary image rebuild
+- helper live qualification
+- production CLI qualification
+- commit/tree/image/executable binding
+- final green canonical gate

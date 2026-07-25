@@ -1,0 +1,11 @@
+# CORRECTION38 Output-Bound Tests
+
+DEFERRED — dockerlab stdout/stderr bounds and overflow handling are
+part of the dockerlab migration and will be implemented in CORRECTION39.
+
+The canary-side bounded body tests in cmd/canary/control_test.go and
+canarycontrol/c36_regression_test.go prove that bounded body handling
+works for the canary HTTP reader (MaxResponseBody = 64 KiB).
+
+No partial-output parsing on overflow is implemented in the canary side
+either; the bounded reader fails closed before any partial parse.

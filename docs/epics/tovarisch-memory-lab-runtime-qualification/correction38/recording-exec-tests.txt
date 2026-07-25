@@ -1,0 +1,29 @@
+# CORRECTION38 Recording Exec Tests
+
+DEFERRED — the dockerlab migration that introduces the recording Engine
+seam has been deferred to CORRECTION39 (per CORRECTION38's "bounded non-live"
+scope). Without the recording seam there are no Dockerlab-owned tests
+to capture here.
+
+The placeholder is reserved; CORRECTION39 will populate this file with
+the full set of:
+
+```
+- exec-create failure
+- exec-attach failure
+- exec-inspect failure
+- stdout overflow
+- stderr overflow
+- empty stdout
+- successful health envelope
+- successful state envelope
+- successful operate envelope
+- typed failure envelope
+- exit/envelope mismatch
+- malformed envelope
+- trailing envelope data
+- requested-count mismatch
+- retry transient-to-success
+- retry permanent-one-attempt
+- retry deadline
+- retry cancellation

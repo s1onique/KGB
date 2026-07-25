@@ -1,0 +1,21 @@
+command=go test -count=1 -short ./...
+working_directory=/home/kgb/Projects/KGB/tovarisch/labs/memory
+subject_commit=cd6c96211d27bac1006252b0a8177b1395363062 (E37)
+subject_tree=07a986280f0cdd059784f0f1bf03dd13dc6749ff (ET37)
+started_at=2026-07-25T09:59:33+03:00
+finished_at=2026-07-25T09:59:35+03:00
+exit_code=0
+
+Result:
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory	0.007s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/cmd/canary	0.676s
+?   	github.com/s1onique/KGB/tovarisch/labs/memory/cmd/extract-image-metadata	[no test files]
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/cmd/tovarisch-memory-lab	33.071s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/analysis	0.010s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/canarycontrol	0.020s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/dockerlab	0.017s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/evidence	0.021s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/procfs	0.016s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/roots	0.016s
+ok  	github.com/s1onique/KGB/tovarisch/labs/memory/internal/sampling	0.213s
+?   	github.com/s1onique/KGB/tovarisch/labs/memory/internal/workload	[no test files]

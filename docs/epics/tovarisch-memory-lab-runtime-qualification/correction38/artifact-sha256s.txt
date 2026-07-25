@@ -1,0 +1,18 @@
+# CORRECTION38 Artifact SHA-256s
+
+Subject commit: cd6c96211d27bac1006252b0a8177b1395363062 (E37)
+Subject tree:   07a986280f0cdd059784f0f1bf03dd13dc6749ff (ET37)
+
+## Source files (unchanged in CORRECTION38)
+
+```
+a4e6867e6a112cc9bf2745437d8d8c166528b4ea7877a626a28a0316b058d20b  tovarisch/labs/memory/internal/canarycontrol/c36_regression_test.go
+1fa302795533ab02a68fa12c1f63c48263cd4185153d80cbea7ef2bdcde80f6c  tovarisch/labs/memory/internal/canarycontrol/protocol.go
+fe9d3837319372e6a4c7a9a53f0c2c278549b34fa6fb4fcac9906d8fdbe7ff21  tovarisch/labs/memory/internal/canarycontrol/operation.go
+b87d63221cf1d7ff04e411e5f4667b984c30e93f3fdff052896f135fcec150ec  tovarisch/labs/memory/cmd/canary/control.go
+66153b8bc52b5b4acb3e4b1f4c058075ffb630decb8016ea213722ae1db43cf6  tovarisch/labs/memory/cmd/canary/control_test.go
+```
+
+## Evidence files (this correction38 directory)
+
+(to be computed at E38 commit)

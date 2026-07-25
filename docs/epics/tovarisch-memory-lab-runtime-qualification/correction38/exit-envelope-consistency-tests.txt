@@ -1,0 +1,19 @@
+# CORRECTION38 Exit/Envelope Consistency Tests
+
+DEFERRED — exit/envelope consistency enforcement requires the
+dockerlab migration and is part of CORRECTION39.
+
+The canarycontrol.ValidateControlEnvelope already enforces:
+- success envelope requires HTTP 200 (validated in
+  TestValidateEnvelope_SuccessHealth/State/Operate)
+- failure envelope requires valid HTTP status (rejects negative,
+  1..99, 600+, 2xx via validateFailureHTTPStatus)
+- failure envelope requires ErrorClass in AllowedErrorClasses
+- failure envelope must not have payloads
+- success envelope has exactly one payload matching the operation
+
+These rules are tested in canarycontrol/protocol_test.go (30+ tests)
+and c36_regression_test.go (validation regression tests).
+
+Exit/envelope consistency at the Docker transport boundary requires the
+recording Engine seam (P0-4 in C38; deferred to C39).

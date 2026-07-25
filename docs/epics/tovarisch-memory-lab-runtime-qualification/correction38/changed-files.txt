@@ -1,0 +1,32 @@
+# CORRECTION38 Changed Files
+
+## Created (under docs/epics/.../correction38/)
+- E37-erratum.md
+- dockerlab-migration-inventory.txt
+- protocol-ownership-scan.txt
+- identities.txt
+- changed-files.txt
+- recording-exec-tests.txt
+- engine-argv-tests.txt
+- output-bound-tests.txt
+- exit-envelope-consistency-tests.txt
+- readiness-retry-tests.txt
+- focused-vet.txt
+- focused-tests.txt
+- race-tests.txt
+- count100-tests.txt
+- short-tests.txt
+- make-gate.txt
+- artifact-sha256s.txt
+- final-git-status.txt
+- close-report.md
+
+## Modified
+(none — CORRECTION38 is documentation-only)
+
+## Untouched
+- internal/canarycontrol (no source changes in C38)
+- cmd/canary (no source changes in C38)
+- internal/dockerlab (migration deferred to C39)
+- internal/evidence (untouched)
+- cmd/tovarisch-memory-lab (untouched)
