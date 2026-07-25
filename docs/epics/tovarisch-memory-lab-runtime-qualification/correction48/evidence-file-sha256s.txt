@@ -1,0 +1,32 @@
+# E48 evidence-file SHA-256 inventory
+# Each line: <sha256>  <path>
+#
+9ef6cc811daf8674f3272a9906494c4ccebd91bf4dbcc974fbee97a969546816  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/artifact-path-tests.txt
+4d2accc9fd5f2951af4eabd9a749d4180bd4bbbb11ea0763868657dd83c62b96  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/artifact-role-mutation-tests.txt
+87aefef8d0adaa57833e9133f42dd0bd6ba8bda2b829d1f2ba2ae16b130988cf  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/artifact-role-record.json
+4d2accc9fd5f2951af4eabd9a749d4180bd4bbbb11ea0763868657dd83c62b96  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/artifact-role-tests.txt
+43c0c139ca1e9a10ff119fe70d9ca154f6dab1790542641da06687fbc4d331ed  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/artifact-role-verifier.txt
+d75d1839cb506173516d88bdbd033d67a125ba14e99bdb775c151959b0526c78  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/changed-files.txt
+57028e15fd60cf60afa8523eb4a5f971bb20380665354ddda860cacc6b1f1113  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/close-report.md
+bc5cc61cd35ca8e481f0c0badaba2f8b38e55e4072e51153891379d4d662f348  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/count100-tests.txt
+deae7b606bbba02a6f78d94e1207071433fbba83c38f42df7c4f256a3101afb4  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/detached-worktree-clean-after.txt
+deae7b606bbba02a6f78d94e1207071433fbba83c38f42df7c4f256a3101afb4  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/detached-worktree-clean-before.txt
+f21f43741c6dcb880bdac5b616322824f0db8ad79cc189354fff5e51cb9a6f7f  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/detached-worktree-identity.txt
+920ca990772fa48ff8b47fdaab917ef9001fee030c0ab0b555af07d724489c70  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/full-tests.txt
+2813b658d09c31a32aee7a5ce6964dd403e8ca98fee278a8a904a7e31e6987a7  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/helper-buildinfo.txt
+1eb99226b5fbc8640822823bb97966ee372dcca248b4e5c1b9df410845a1d349  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/helper-sha256.txt
+12b66146c03f0de369a5544ad4415b562e849e6b03af74a758a2c9444e7761c5  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/helper-stat.txt
+f3082baad46a86499624440198e9f42d2a8e82fb4710885914ab394bc9ece786  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/helper-test-list.txt
+d6032367d27589bae186fa55d72ea26eb33609586d7883a743cf7d54d0b7e465  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/make-gate.txt
+1b55c2514545c39b847f15114b2faee3dcefa875831071e9a52e0b5dff59dd68  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/metadata-path-tests.txt
+f10feddd7db2023f125f443af9a2b43a1862425189459537b9d35ceddbbebbdc  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/pending-patch-inventory.txt
+0e79cd4824c96f6a6c5666bfd6be344f10780a954770e2dcad70fc4afe79ef8c  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/production-buildinfo.txt
+ac392c2fe072a4a320dcfbae88bcb254e709c6e0c8e0440606a69073256dc2de  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/production-help.txt
+f7e2e8dc75566e82812affc867476738d91387c44dc2a9ae4aecc425b06e86d3  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/production-sha256.txt
+d24fad502fc4fa540f7e26db435c54df29296b3ea98f54c05068b4750e2ed521  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/production-stat.txt
+d7c72f56558227d4f926ec6b62ec451100221e14bcf766ac0ba646139b1d8786  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/provenance-policy-tests.txt
+534099486d8adb54179f7d30a643c7e6c19728d767c2eec166a48ec4f509748e  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/qualification-build-tests.txt
+b30e6da84d7b234cc591fb26bb4a87f975b831050dfd2b454f1cadf1d36cb05e  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/race-tests.txt
+4ac8b1ef9de5b57b18b2ed31c5bcfbdc1300c2bf80a29406e2c3e4571b63c244  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/S47-classification-erratum.md
+08ded637a1b7998de6f1b1dc7cd65b2a560cb0440f976fdcd346ef486d4cebb9  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/short-tests.txt
+a664dcbc97725b5bee23c1163a31bde2fc0088be7848f08a5bbaee9a4579186c  /home/kgb/Projects/KGB/docs/epics/tovarisch-memory-lab-runtime-qualification/correction48/subject-identities.txt
