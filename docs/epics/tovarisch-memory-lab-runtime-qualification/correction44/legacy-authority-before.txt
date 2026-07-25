@@ -1,0 +1,35 @@
+CORRECTION44 legacy/canonical authority inventory before migration
+
+shared_protocol_authority:
+- internal/canarycontrol/protocol.go: ProtocolError, ErrorClass, ControlEnvelope, DecodeEnvelopeExactlyOne, ValidateControlEnvelope, IsRetryable and all operation/payload vocabulary.
+
+production_transport:
+- internal/dockerlab/control_seam.go: DockerExecAPI, ProductionControlExecRuntime and bounded Docker exec attachment transport.
+- internal/dockerlab/control_frame_guard.go: strict complete Docker multiplex frame guard.
+- internal/dockerlab/control_protocol_v2.go: ControlRunner transport orchestration (canonical behavior under temporary v2 filename).
+
+production_orchestration:
+- internal/dockerlab/control_retry.go: ReadinessLoop; delegates retry classification to canarycontrol.IsRetryable.
+- internal/dockerlab/qualified_runtime.go: qualified prepare/start/workload/terminal/cleanup lifecycle, not yet carrying ControlRunner as a dependency.
+
+production_caller:
+- cmd/tovarisch-memory-lab/main.go: runCommand and its workload callback call CanaryHealthCheckViaExec, fetchCanaryStateViaExec, operateCanaryViaExec, then fetchCanaryStateViaExec again.
+- internal/dockerlab/client.go: CanaryHealthCheckViaExec, CanaryStateViaExec, CanaryOperateViaExec call the legacy canaryControlExec implementation.
+
+compatibility_alias:
+- cmd/canary/control.go: package-main aliases to canarycontrol vocabulary used by the in-container emitter/tests; these are consumer conveniences, not an independent parser. They remain subject to consumer-only ownership verification.
+
+test_only:
+- internal/dockerlab/control_v2_test.go and control/frame transport regression tests exercise the canonical ControlRunner.
+- internal/dockerlab/control_protocol_test.go exercises the duplicate legacy implementation and must be deleted with that implementation.
+- cmd/tovarisch-memory-lab/parser.go ParseError is unrelated CSV parser vocabulary and is not a Docker control-protocol authority.
+
+legacy_duplicate:
+- internal/dockerlab/client.go: ProtocolError, ParseError, ControlEnvelope, payload copies, strictParseEnvelope, validateControlEnvelope, IsProtocolNonRetryable, legacy operation/error constants, legacy argv construction, canaryControlExec and the three Canary*ViaExec methods.
+- internal/dockerlab/control_protocol_test.go: tests for the duplicate legacy authority.
+
+permanent_v2_naming:
+- internal/dockerlab/control_protocol_v2.go
+- internal/dockerlab/control_v2_test.go
+
+Every production legacy caller is identified above; deletion may proceed only with runCommand/lifecycle migrated to ControlRunner.
