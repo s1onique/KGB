@@ -165,6 +165,7 @@ func TestLiveDockerSmoke_QualifiedExecutionPath(t *testing.T) {
 	cp, err := evidence.CollectControllerProvenance(evidence.ProvenanceOptions{
 		RepoDir: projRoots.Repository, ProducerVersion: "qualified-live-smoke/1.0.0",
 		DockerServerVersion: dockerVersion.Version,
+		CleanPolicy:         evidence.ProvenanceRequireClean,
 	})
 	if err != nil {
 		t.Fatalf("collect running-binary provenance: %v", err)

@@ -254,11 +254,11 @@ func successHealthEnvelope() []byte {
 
 func successStateEnvelope(mode string, ops int) []byte {
 	env, _ := json.Marshal(map[string]any{
-		"schema_version":   canarycontrol.SchemaVersion,
-		"operation":        string(canarycontrol.OpState),
-		"success":          true,
-		"http_status":      200,
-		"state":            map[string]any{"mode": mode, "retained_blocks": 0, "retained_bytes": 0, "operation_count": ops, "fd_count": 5, "ready": true},
+		"schema_version": canarycontrol.SchemaVersion,
+		"operation":      string(canarycontrol.OpState),
+		"success":        true,
+		"http_status":    200,
+		"state":          map[string]any{"mode": mode, "retained_blocks": 0, "retained_bytes": 0, "operation_count": ops, "fd_count": 5, "ready": true},
 	})
 	return env
 }
@@ -870,16 +870,16 @@ func TestProductionControlSequence_LegacyAuthorityScan(t *testing.T) {
 	// NOTE: the test file names below are the only files where
 	// the patterns are allowed to appear.
 	allowedFiles := map[string]bool{
-		"control_correction45_test.go":   true, // contains the pattern list itself
-		"qualified_execution.go":         true, // mirrors dockerlab fields
+		"control_correction45_test.go":             true, // contains the pattern list itself
+		"qualified_execution.go":                   true, // mirrors dockerlab fields
 		"qualified_execution_correction44_test.go": true,
-		"qualified_execution_test.go":    true,
-		"qualified_runtime_test.go":      true,
-		"control_protocol.go":            true,
-		"control_test_support_test.go":   true,
-		"main.go":                        true, // contains the // legacy helpers comment
-		"control_transport_test.go":      true,
-		"control_protocol_test.go":       true,
+		"qualified_execution_test.go":              true,
+		"qualified_runtime_test.go":                true,
+		"control_protocol.go":                      true,
+		"control_test_support_test.go":             true,
+		"main.go":                                  true, // contains the // legacy helpers comment
+		"control_transport_test.go":                true,
+		"control_protocol_test.go":                 true,
 	}
 	_ = blocked
 

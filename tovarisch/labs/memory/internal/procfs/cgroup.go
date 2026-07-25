@@ -95,9 +95,9 @@ func parseMemoryEvents(m *CgroupMemory, data []byte) {
 // NamespaceInfo captures namespace identities for mismatch detection.
 // Includes per-field errors so callers can distinguish partial failures.
 type NamespaceInfo struct {
-	MountNamespace   string
-	MountNamespaceErr error
-	CgroupNamespace  string
+	MountNamespace     string
+	MountNamespaceErr  error
+	CgroupNamespace    string
 	CgroupNamespaceErr error
 }
 
@@ -191,10 +191,11 @@ func ResolveCgroupV2Path(pid int) (string, error) {
 
 // findCgroup2MountRoot reads /proc/self/mountinfo to find the cgroup2 mount root.
 // Mountinfo format:
-//   mount_id parent_id major:minor mount_point root_of_mount options [optional fields] - fs_type source super_options
-//   field 5 = mount_point (index 4)
-//   field after "-" separator = fs_type
-//   field 4 = root_of_mount (index 3)
+//
+//	mount_id parent_id major:minor mount_point root_of_mount options [optional fields] - fs_type source super_options
+//	field 5 = mount_point (index 4)
+//	field after "-" separator = fs_type
+//	field 4 = root_of_mount (index 3)
 func findCgroup2MountRoot() (string, error) {
 	data, err := os.ReadFile("/proc/self/mountinfo")
 	if err != nil {
@@ -261,10 +262,11 @@ func parseMountinfoLine(line string) (string, bool) {
 
 // decodeMountinfoPath decodes octal-escaped mountinfo paths.
 // Mountinfo uses octal escapes for special characters:
-//   \040 = space
-//   \011 = tab
-//   \012 = newline
-//   \134 = backslash
+//
+//	\040 = space
+//	\011 = tab
+//	\012 = newline
+//	\134 = backslash
 func decodeMountinfoPath(path string) string {
 	// Handle empty or root path
 	if path == "" || path == "/" {

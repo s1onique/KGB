@@ -25,7 +25,7 @@ import (
 // ProjectRoots holds the resolved repository and module paths.
 type ProjectRoots struct {
 	Repository string // absolute path to repository root (.git parent)
-	Module    string // absolute path to memory module root (go.mod parent)
+	Module     string // absolute path to memory module root (go.mod parent)
 }
 
 // ResolveProjectRoots resolves both roots from explicit environment

@@ -58,21 +58,21 @@ func (c CgroupCapability) String() string {
 // This enables independent verification of classification decisions.
 type NamespaceProof struct {
 	// Target process namespace identities
-	TargetMountNamespace   string `json:"target_mount_namespace,omitempty"`
+	TargetMountNamespace  string `json:"target_mount_namespace,omitempty"`
 	TargetCgroupNamespace string `json:"target_cgroup_namespace,omitempty"`
 
 	// Controller process namespace identities
-	ControllerMountNamespace   string `json:"controller_mount_namespace,omitempty"`
+	ControllerMountNamespace  string `json:"controller_mount_namespace,omitempty"`
 	ControllerCgroupNamespace string `json:"controller_cgroup_namespace,omitempty"`
 
 	// Top-level read errors (when reader returns nil, error)
-	TargetReadError       string `json:"target_read_error,omitempty"`
-	ControllerReadError   string `json:"controller_read_error,omitempty"`
+	TargetReadError     string `json:"target_read_error,omitempty"`
+	ControllerReadError string `json:"controller_read_error,omitempty"`
 
 	// Per-field read errors (for independent verification)
-	TargetMountNamespaceErr   string `json:"target_mount_namespace_err,omitempty"`
-	TargetCgroupNamespaceErr string `json:"target_cgroup_namespace_err,omitempty"`
-	ControllerMountNamespaceErr   string `json:"controller_mount_namespace_err,omitempty"`
+	TargetMountNamespaceErr      string `json:"target_mount_namespace_err,omitempty"`
+	TargetCgroupNamespaceErr     string `json:"target_cgroup_namespace_err,omitempty"`
+	ControllerMountNamespaceErr  string `json:"controller_mount_namespace_err,omitempty"`
 	ControllerCgroupNamespaceErr string `json:"controller_cgroup_namespace_err,omitempty"`
 
 	// Namespace read error (combined)
@@ -84,10 +84,10 @@ type NamespaceProof struct {
 
 // CgroupCapabilityEvent records a cgroup capability classification with proof.
 type CgroupCapabilityEvent struct {
-	PID             int              `json:"pid"`
-	Capability      CgroupCapability `json:"capability"`
-	CgroupPath      string          `json:"cgroup_path,omitempty"`
-	Error           string          `json:"error,omitempty"`
-	ControllerPID   int             `json:"controller_pid"`
-	Proof           *NamespaceProof  `json:"proof,omitempty"`
+	PID           int              `json:"pid"`
+	Capability    CgroupCapability `json:"capability"`
+	CgroupPath    string           `json:"cgroup_path,omitempty"`
+	Error         string           `json:"error,omitempty"`
+	ControllerPID int              `json:"controller_pid"`
+	Proof         *NamespaceProof  `json:"proof,omitempty"`
 }

@@ -183,10 +183,13 @@ func buildHelperStubNamed(t *testing.T, suffix string) string {
 	}
 	return exe
 }
+
 // realSHA256 returns the SHA-256 of a file path as a hex string.
 func realSHA256(p string) (string, error) {
-    data, err := os.ReadFile(p)
-    if err != nil { return "", err }
-    s := sha256.Sum256(data)
-    return hex.EncodeToString(s[:]), nil
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return "", err
+	}
+	s := sha256.Sum256(data)
+	return hex.EncodeToString(s[:]), nil
 }

@@ -91,6 +91,9 @@ func validateFinalControllerProvenance(p ControllerProvenance) error {
 	if p.VCSModified || p.WorkingTreeDirty || p.SourceCommitDirty {
 		return invalid("controller source is dirty")
 	}
+	if p.CleanPolicy != ProvenanceRequireClean || !p.QualifyingObservation {
+		return invalid("controller provenance is not authorized by require_clean")
+	}
 	if strings.TrimSpace(p.ProducerVersion) == "" {
 		return invalid("producer version is empty")
 	}

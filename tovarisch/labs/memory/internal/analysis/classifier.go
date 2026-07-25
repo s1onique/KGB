@@ -182,11 +182,11 @@ func Analyze(samples []sampling.Sample, thresholds Thresholds) *Verdict {
 // verifier can derive the same overall value independently.
 //
 // Priority order (CORRECTION01):
-//   1. invalid semantic → invalid
-//   2. memory growing → growth (memory growth has priority over
-//      descriptor resource growth)
-//   3. else resource growing → resource_growth
-//   4. else follow memory: inconclusive / process_replaced / stable
+//  1. invalid semantic → invalid
+//  2. memory growing → growth (memory growth has priority over
+//     descriptor resource growth)
+//  3. else resource growing → resource_growth
+//  4. else follow memory: inconclusive / process_replaced / stable
 func computeOverall(memory, resource, semantic Classification) Classification {
 	if semantic == ClassificationInvalid {
 		return ClassificationInvalid
@@ -1013,11 +1013,11 @@ func SamplesHaveFDAvailable(samples []sampling.Sample) bool {
 // this exact function.
 //
 // CORRECTION02 priority order:
-//   1. invalid semantic OR invalid scenario invariant → invalid
-//   2. memory growing → growth (memory growth has priority over
-//      descriptor resource growth)
-//   3. else resource growing → resource_growth
-//   4. else follow memory: inconclusive / process_replaced / stable
+//  1. invalid semantic OR invalid scenario invariant → invalid
+//  2. memory growing → growth (memory growth has priority over
+//     descriptor resource growth)
+//  3. else resource growing → resource_growth
+//  4. else follow memory: inconclusive / process_replaced / stable
 func ComputeOverallWithInvariant(memory, resource, semantic Classification, invariantValid bool) Classification {
 	if semantic == ClassificationInvalid {
 		return ClassificationInvalid

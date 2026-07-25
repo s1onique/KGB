@@ -17,7 +17,7 @@ const expectedModule = "github.com/s1onique/KGB/tovarisch/labs/memory"
 type tempFixture struct {
 	repoRoot   string
 	moduleRoot string
-	cleanupFn func()
+	cleanupFn  func()
 }
 
 func newTempFixture(t *testing.T) *tempFixture {
@@ -29,7 +29,7 @@ func newTempFixture(t *testing.T) *tempFixture {
 	f := &tempFixture{
 		repoRoot:   filepath.Join(tmpDir, "repo"),
 		moduleRoot: filepath.Join(tmpDir, "repo", "tovarisch", "labs", "memory"),
-		cleanupFn: func() { os.RemoveAll(tmpDir) },
+		cleanupFn:  func() { os.RemoveAll(tmpDir) },
 	}
 	// Create directory structure
 	if err := os.MkdirAll(f.moduleRoot, 0755); err != nil {
@@ -91,15 +91,15 @@ func TestResolveProjectRoots_Hermetic(t *testing.T) {
 			wantErr:            false,
 		},
 		{
-			name:       "mismatching explicit roots",
-			explicitRepoRoot: "/tmp/nonexistent",
+			name:               "mismatching explicit roots",
+			explicitRepoRoot:   "/tmp/nonexistent",
 			explicitModuleRoot: fixture.moduleRoot,
-			wantErr:    true,
+			wantErr:            true,
 		},
 		{
-			name:               "repo root missing .git",
-			explicitRepoRoot:   "/tmp",
-			wantErr:            true,
+			name:             "repo root missing .git",
+			explicitRepoRoot: "/tmp",
+			wantErr:          true,
 		},
 		{
 			name:               "module root missing go.mod",

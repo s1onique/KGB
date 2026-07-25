@@ -3,7 +3,6 @@ package buildmetadata
 
 import (
 	"crypto/sha256"
-	"debug/buildinfo"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -12,6 +11,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/s1onique/KGB/tovarisch/labs/memory/internal/qualification"
 )
 
 const SchemaVersion = "canary-image-build/v2"
@@ -67,30 +68,19 @@ func (m CanaryImageBuild) Validate() error {
 }
 
 // BinaryAuthority hashes a built canary and reads its embedded VCS authority.
+// The authority reader is strict: missing or malformed VCS settings are never
+// converted into a source-commit claim or an implicit false value.
 func BinaryAuthority(path string) (hash, revision string, modified bool, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", "", false, err
 	}
 	sum := sha256.Sum256(data)
-	hash = hex.EncodeToString(sum[:])
-	info, err := buildinfo.ReadFile(path)
+	authority, err := qualification.ReadEmbeddedBinaryAuthority(path)
 	if err != nil {
-		return "", "", false, fmt.Errorf("read Go build info: %w", err)
+		return "", "", false, err
 	}
-	var modifiedRaw string
-	for _, setting := range info.Settings {
-		switch setting.Key {
-		case "vcs.revision":
-			revision = setting.Value
-		case "vcs.modified":
-			modifiedRaw = setting.Value
-		}
-	}
-	if revision == "" {
-		return "", "", false, errors.New("canary binary has no embedded vcs.revision")
-	}
-	return hash, revision, modifiedRaw == "true", nil
+	return hex.EncodeToString(sum[:]), authority.VCSRevision, authority.VCSModified, nil
 }
 
 // BuildKitDigests extracts available digest classes from buildx metadata.

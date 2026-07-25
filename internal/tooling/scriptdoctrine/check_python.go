@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -348,7 +349,14 @@ func (v *Verifier) walkCIWorkflows(root string, diags *[]Diagnostic) {
 }
 
 func (v *Verifier) walkGitHooks(root string, diags *[]Diagnostic) {
-	hooksDir := filepath.Join(root, ".git", "hooks")
+	hooksDir, err := gitHooksPath(root)
+	if err != nil {
+		if isGitRepositoryAbsent(err) {
+			return
+		}
+		*diags = append(*diags, Diagnostic{Check: "internal-error", Path: ".git/hooks", Msg: fmt.Sprintf("resolving git hooks path: %v", err)})
+		return
+	}
 	entries, err := os.ReadDir(hooksDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -398,6 +406,26 @@ func (v *Verifier) walkGitHooks(root string, diags *[]Diagnostic) {
 			})
 		}
 	}
+}
+
+// gitHooksPath asks Git for its authoritative hooks path. A linked worktree
+// may represent its administrative directory with a file, so constructing
+// root/.git/hooks is not valid.
+func gitHooksPath(root string) (string, error) {
+	cmd := exec.Command("git", "-C", root, "rev-parse", "--git-path", "hooks")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse --git-path hooks: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	path := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
+	}
+	return filepath.Clean(path), nil
+}
+
+func isGitRepositoryAbsent(err error) bool {
+	return strings.Contains(err.Error(), "not a git repository") || strings.Contains(err.Error(), "cannot change to")
 }
 
 // diagnosticFromScanErr converts the typed error returned by

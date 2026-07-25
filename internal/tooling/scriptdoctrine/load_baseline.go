@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -181,16 +180,5 @@ func FindRepoRoot() (string, error) {
 		return strings.TrimSpace(string(out)), nil
 	}
 
-	for {
-		if _, err := os.Stat(filepath.Join(cwd, ".git")); err == nil {
-			return cwd, nil
-		}
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			break
-		}
-		cwd = parent
-	}
-
-	return "", errors.New("repository root not found")
+	return "", errors.New("repository root not found via git rev-parse")
 }

@@ -146,9 +146,9 @@ type Sampler struct {
 	stopped     bool // Once true, samples are immutable
 
 	// Centralized phase notification state
-	stimulusCh       chan struct{} // Closed exactly once when stimulus begins
-	stimulusNotified bool          // Guards against double-close
-	waiters          []*waiter     // All registered waiters
+	stimulusCh       chan struct{}  // Closed exactly once when stimulus begins
+	stimulusNotified bool           // Guards against double-close
+	waiters          []*waiter      // All registered waiters
 	terminal         *terminalState // nil = not terminated, set = terminated (nil err = complete)
 }
 
@@ -179,7 +179,6 @@ func NewSamplerWithDocker(containerID string, hostPIDFunc func() int, docker *do
 		stimulusCh:  make(chan struct{}),
 	}
 }
-
 
 // RecordCgroupCapability records the result of cgroup v2 resolution as a structured event.
 // This creates durable evidence of the capability classification.

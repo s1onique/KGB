@@ -34,6 +34,7 @@ func validFinalProvenance() ControllerProvenance {
 		VCSRevision: strings.Repeat("a", 40), VCSTree: strings.Repeat("b", 40), GitObjectFormat: "sha1",
 		ProducerVersion: "correction46-test/1.0.0", DockerServerVersion: "27.0.0",
 		ExecutableSHA256: strings.Repeat("c", 64),
+		CleanPolicy:      ProvenanceRequireClean, QualifyingObservation: true,
 	}
 }
 

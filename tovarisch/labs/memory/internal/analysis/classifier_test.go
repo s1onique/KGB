@@ -259,13 +259,13 @@ func TestClassificationBoundedDockerOnlySmallGrowth(t *testing.T) {
 		// Docker memory grows from 1708 KiB to ~2756 KiB (delta ~1048 KiB)
 		dockerKiB := int64(1708 + i*55)
 		samples[i] = sampling.Sample{
-			Sequence:              i,
-			Timestamp:             now.Add(time.Duration(i) * time.Second),
-			PID:                   12345,
-			ProcessStartTime:      1000,
-			Phase:                 phase,
+			Sequence:               i,
+			Timestamp:              now.Add(time.Duration(i) * time.Second),
+			PID:                    12345,
+			ProcessStartTime:       1000,
+			Phase:                  phase,
 			DockerMemoryUsageBytes: dockerKiB * 1024,
-			HasDockerMemory:       true,
+			HasDockerMemory:        true,
 			// All other signals unavailable (default zero values)
 		}
 	}

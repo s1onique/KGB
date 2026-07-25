@@ -135,9 +135,9 @@ func (e *ProcError) IsZombie() bool {
 
 // Sentinel errors for cgroup operations
 var (
-	ErrNoUnifiedCgroup   = fmt.Errorf("no unified cgroup v2 record found")
-	ErrNoCgroup2Mount    = fmt.Errorf("cgroup2 mount not found in mountinfo")
-	ErrPathTraversal     = fmt.Errorf("path traversal detected")
-	ErrPermissionDenied  = fmt.Errorf("permission denied")
-	ErrParseFailure      = fmt.Errorf("parse failure")
+	ErrNoUnifiedCgroup  = fmt.Errorf("no unified cgroup v2 record found")
+	ErrNoCgroup2Mount   = fmt.Errorf("cgroup2 mount not found in mountinfo")
+	ErrPathTraversal    = fmt.Errorf("path traversal detected")
+	ErrPermissionDenied = fmt.Errorf("permission denied")
+	ErrParseFailure     = fmt.Errorf("parse failure")
 )
