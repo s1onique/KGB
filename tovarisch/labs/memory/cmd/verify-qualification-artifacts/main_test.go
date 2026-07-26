@@ -409,4 +409,3 @@ func goRun(t *testing.T, dir string, args ...string) {
 		t.Fatalf("go %v: %v (%s)", args, err, out)
 	}
 }
-
