@@ -409,3 +409,108 @@ func goRun(t *testing.T, dir string, args ...string) {
 		t.Fatalf("go %v: %v (%s)", args, err, out)
 	}
 }
+
+// TestQualificationHarness_NoLegacyRootBuildCommand verifies that no legacy
+// root-level build command exists.
+func TestQualificationHarness_NoLegacyRootBuildCommand(t *testing.T) {
+	// Use absolute path to the actual KGB repository root
+	repoRoot := os.Getenv("TEST_KGB_REPO_ROOT")
+	if repoRoot == "" {
+		// Navigate from tovarisch/labs/memory to repo root (4 levels up)
+		wd, err := os.Getwd()
+		if err == nil {
+			repoRoot = filepath.Join(wd, "..", "..", "..", "..")
+		}
+	}
+	// Always use absolute path since this is a KGB-specific test
+	cmd := exec.Command("git", "-C", "/home/kgb/Projects/KGB", "ls-files", "--", "cmd/build-qualification-artifacts")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git ls-files: %v (%s)", err, out)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	// Filter empty lines
+	var nonEmpty []string
+	for _, l := range lines {
+		if l != "" {
+			nonEmpty = append(nonEmpty, l)
+		}
+	}
+	if len(nonEmpty) > 0 {
+		t.Errorf("legacy root build command files found:\n%s", strings.Join(nonEmpty, "\n"))
+	}
+}
+
+// TestQualificationHarness_NoLegacyRootVerifyCommand verifies that no legacy
+// root-level verify command exists.
+func TestQualificationHarness_NoLegacyRootVerifyCommand(t *testing.T) {
+	// Always use absolute path since this is a KGB-specific test
+	cmd := exec.Command("git", "-C", "/home/kgb/Projects/KGB", "ls-files", "--", "cmd/verify-qualification-artifacts")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git ls-files: %v (%s)", err, out)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	// Filter empty lines
+	var nonEmpty []string
+	for _, l := range lines {
+		if l != "" {
+			nonEmpty = append(nonEmpty, l)
+		}
+	}
+	if len(nonEmpty) > 0 {
+		t.Errorf("legacy root verify command files found:\n%s", strings.Join(nonEmpty, "\n"))
+	}
+}
+
+// TestQualificationHarness_ExactlyOneBuildCommandAuthority verifies that exactly
+// one build command main.go exists under tovarisch/labs/memory/cmd/.
+func TestQualificationHarness_ExactlyOneBuildCommandAuthority(t *testing.T) {
+	// Always use absolute path since this is a KGB-specific test
+	cmd := exec.Command("git", "-C", "/home/kgb/Projects/KGB", "ls-files", "--", "tovarisch/labs/memory/cmd/build-qualification-artifacts/main.go")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git ls-files: %v (%s)", err, out)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	// Filter empty lines
+	var nonEmpty []string
+	for _, l := range lines {
+		if l != "" {
+			nonEmpty = append(nonEmpty, l)
+		}
+	}
+	if len(nonEmpty) != 1 {
+		t.Errorf("expected exactly 1 build command authority, got %d:\n%s", len(nonEmpty), strings.Join(nonEmpty, "\n"))
+	}
+	expected := "tovarisch/labs/memory/cmd/build-qualification-artifacts/main.go"
+	if len(nonEmpty) == 1 && nonEmpty[0] != expected {
+		t.Errorf("unexpected build command path: got %q, want %q", nonEmpty[0], expected)
+	}
+}
+
+// TestQualificationHarness_ExactlyOneVerifyCommandAuthority verifies that exactly
+// one verify command main.go exists under tovarisch/labs/memory/cmd/.
+func TestQualificationHarness_ExactlyOneVerifyCommandAuthority(t *testing.T) {
+	// Always use absolute path since this is a KGB-specific test
+	cmd := exec.Command("git", "-C", "/home/kgb/Projects/KGB", "ls-files", "--", "tovarisch/labs/memory/cmd/verify-qualification-artifacts/main.go")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git ls-files: %v (%s)", err, out)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	// Filter empty lines
+	var nonEmpty []string
+	for _, l := range lines {
+		if l != "" {
+			nonEmpty = append(nonEmpty, l)
+		}
+	}
+	if len(nonEmpty) != 1 {
+		t.Errorf("expected exactly 1 verify command authority, got %d:\n%s", len(nonEmpty), strings.Join(nonEmpty, "\n"))
+	}
+	expected := "tovarisch/labs/memory/cmd/verify-qualification-artifacts/main.go"
+	if len(nonEmpty) == 1 && nonEmpty[0] != expected {
+		t.Errorf("unexpected verify command path: got %q, want %q", nonEmpty[0], expected)
+	}
+}
