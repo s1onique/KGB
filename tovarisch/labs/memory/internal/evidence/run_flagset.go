@@ -28,7 +28,7 @@ type RunFlagValues struct {
 // the FlagSet and a pointer to the parsed values. The caller must call
 // fs.Parse(args) before accessing the values.
 //
-// Nil output is handled gracefully: flags that fail will write to os.Stderr
+// Nil output is handled gracefully: flags that fail will write to io.Discard
 // instead if output is nil.
 //
 // Forbidden flags (evidence bypass):
@@ -46,7 +46,7 @@ func NewRunFlagSet(output io.Writer) (*flag.FlagSet, *RunFlagValues) {
 		output = io.Discard
 	}
 
-	fs := flag.NewFlagSet("memory-lab run", flag.ContinueOnError)
+	fs := flag.NewFlagSet("memory-lab", flag.ContinueOnError)
 	fs.SetOutput(output)
 	fs.Usage = func() {
 		fmt.Fprintf(output, "Usage: %s run [options]\n\nOptions:\n", fs.Name())

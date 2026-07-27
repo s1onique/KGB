@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"flag"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -261,9 +262,18 @@ func TestRunFlagSet_UsageOutput(t *testing.T) {
 
 	output := buf.String()
 	if output == "" {
-		t.Error("usage output is empty")
+		t.Fatal("usage output is empty")
 	}
-	if !bytes.Contains(buf.Bytes(), []byte("Usage:")) {
-		t.Error("usage output missing 'Usage:'")
+
+	// Exact first-line assertion: "Usage: memory-lab run [options]"
+	firstLine := strings.SplitN(output, "\n", 2)[0]
+	expected := "Usage: memory-lab run [options]"
+	if firstLine != expected {
+		t.Errorf("usage first line: got %q, want %q", firstLine, expected)
+	}
+
+	// Verify "Options:" header is present
+	if !bytes.Contains(buf.Bytes(), []byte("Options:")) {
+		t.Error("usage output missing 'Options:'")
 	}
 }
