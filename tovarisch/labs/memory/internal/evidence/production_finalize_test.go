@@ -768,7 +768,7 @@ func TestProductionFinalize_EvidenceChecksumMatchesBytes(t *testing.T) {
 		t.Fatalf("FinalizeProductionQualifiedRun: %v", err)
 	}
 
-	// Verify checksum matches actual bytes
+	// P0-7: Verify checksum matches actual bytes using exact parsing
 	evidenceBytes, err := os.ReadFile(evidencePath)
 	if err != nil {
 		t.Fatalf("read evidence: %v", err)
@@ -783,8 +783,26 @@ func TestProductionFinalize_EvidenceChecksumMatchesBytes(t *testing.T) {
 		t.Fatalf("read checksums: %v", err)
 	}
 
-	if !strings.Contains(string(checksumData), expectedHex) {
-		t.Errorf("checksums do not contain correct digest: %s", expectedHex)
+	// Parse checksums with exact format: <64 hex chars><two spaces><path>
+	found := false
+	scanner := bufio.NewScanner(bytes.NewReader(checksumData))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "  ", 2)
+		if len(parts) == 2 {
+			digestHex := strings.TrimSpace(parts[0])
+			path := strings.TrimSpace(parts[1])
+			if path == "qualified-execution-evidence.json" && digestHex == expectedHex {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Errorf("checksums do not contain correct digest %s for evidence path", expectedHex)
 	}
 }
 

@@ -589,19 +589,26 @@ func verifyPhysicalChecksums(checksumsPath, evidencePath string, inventory []str
 
 	for scanner.Scan() {
 		lineNum++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue // skip empty lines
+		// P0-7: Reject blank lines - canonical format requires exactly one entry per line
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			return fmt.Errorf("%w: line %d: blank lines not allowed", ErrMalformedChecksums, lineNum)
 		}
 
-		// Parse format: <64 hex chars><two spaces><path>
+		// P0-7: Parse format: <64 hex chars><two spaces><path>
+		// Require exactly two ASCII spaces as separator, not one, not three
 		parts := strings.SplitN(line, "  ", 2)
 		if len(parts) != 2 {
-			return fmt.Errorf("%w: line %d: expected 'digest  path' format", ErrMalformedChecksums, lineNum)
+			return fmt.Errorf("%w: line %d: expected 'digest  path' format (exactly two spaces)", ErrMalformedChecksums, lineNum)
 		}
 
-		digestHex := strings.TrimSpace(parts[0])
-		path := strings.TrimSpace(parts[1])
+		// No leading/trailing whitespace allowed on digest or path
+		digestHex := parts[0]
+		path := parts[1]
+
+		if digestHex != strings.TrimSpace(digestHex) || path != strings.TrimSpace(path) {
+			return fmt.Errorf("%w: line %d: no leading/trailing whitespace allowed", ErrMalformedChecksums, lineNum)
+		}
 
 		// Validate digest is exactly 64 lowercase hex characters
 		if len(digestHex) != 64 {
@@ -615,20 +622,27 @@ func verifyPhysicalChecksums(checksumsPath, evidencePath string, inventory []str
 			}
 		}
 
-		// Validate path is non-empty
+		// P0-6: Validate path is non-empty
 		if path == "" {
 			return fmt.Errorf("%w: line %d: empty path", ErrMalformedChecksums, lineNum)
 		}
 
-		// Validate path is safe relative (no absolute, no traversal, no backslashes)
+		// P0-6: Validate path is safe relative using component validation
+		// Do not use strings.Contains(path, "..") as it rejects harmless names like "report..json"
 		if filepath.IsAbs(path) {
 			return fmt.Errorf("%w: line %d: absolute path %q not allowed", ErrMalformedChecksums, lineNum, path)
 		}
-		if strings.Contains(path, "..") {
-			return fmt.Errorf("%w: line %d: traversal %q not allowed", ErrMalformedChecksums, lineNum, path)
-		}
 		if strings.ContainsRune(path, '\\') {
 			return fmt.Errorf("%w: line %d: backslash in path %q not allowed", ErrMalformedChecksums, lineNum, path)
+		}
+		// Check each path component for ".." or "."
+		for _, part := range strings.Split(path, "/") {
+			if part == ".." {
+				return fmt.Errorf("%w: line %d: traversal component '..' not allowed", ErrMalformedChecksums, lineNum)
+			}
+			if part == "." {
+				return fmt.Errorf("%w: line %d: dot component '.' not allowed", ErrMalformedChecksums, lineNum)
+			}
 		}
 
 		// Check for duplicate paths
