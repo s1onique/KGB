@@ -160,20 +160,9 @@ func runCommandWithDocker(
 	resolveMetadata func(buildmetadata.MetadataPathOptions) (string, error),
 	dockerFactory func(context.Context) (*dockerlab.Client, error),
 ) error {
-	fs := flag.NewFlagSet("memory-lab run", flag.ContinueOnError)
-	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s run [options]\n\nOptions:\n", args[0])
-		fs.PrintDefaults()
-	}
-
-	scenario := fs.String("scenario", "", "Scenario (required): canary-growing, canary-bounded, canary-descriptor")
-	duration := fs.Int("duration", 60, "Duration in seconds")
-	artifactsDir := fs.String("artifacts-dir", "", "Artifacts directory (required)")
-	verbose := fs.Bool("v", false, "Verbose output")
-	containerImage := fs.String("container-image", "kgb-tovarisch-canary:latest", "Container image")
-	canaryPort := fs.Int("canary-port", 8080, "Canary HTTP port")
-	canaryBuildMetadata := fs.String("canary-build-metadata", "", "Absolute or relative path to canary image build metadata JSON (overrides TOVARISCH_CANARY_METADATA_PATH and the repository compatibility fallback)")
-	repoRootFlag := fs.String("repository-root", "", "Repository root for the compatibility metadata fallback (defaults to the .git ancestor of the working directory)")
+	// P0-7: Use the canonical FlagSet constructor so tests and production
+	// consume the exact same FlagSet definition.
+	fs, v := evidence.NewRunFlagSet(os.Stderr)
 
 	if err := fs.Parse(args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -182,21 +171,13 @@ func runCommandWithDocker(
 		return fmt.Errorf("parse flags: %w", err)
 	}
 
-	if *scenario == "" {
-		return fmt.Errorf("--scenario is required")
-	}
-	if _, ok := allowedScenarios[*scenario]; !ok {
-		return fmt.Errorf("invalid scenario %q: allowed: canary-growing, canary-bounded, canary-descriptor", *scenario)
-	}
-	if *artifactsDir == "" {
-		return fmt.Errorf("--artifacts-dir is required")
-	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	// P0-7: Use canonical validation from the evidence package
+	if err := evidence.ValidateRunFlags(v); err != nil {
+		return fmt.Errorf("validate flags: %w", err)
 	}
 
-	if *duration < 10 {
-		return fmt.Errorf("duration must be >= 10 seconds")
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
 	}
 
 	// Resolve the canary image build metadata BEFORE any Docker
@@ -204,12 +185,12 @@ func runCommandWithDocker(
 	// here and prevent any further work. dockerFactory is invoked
 	// only after this check succeeds, which is the property that
 	// the P0-3 tests assert.
-	repoRoot := *repoRootFlag
+	repoRoot := v.RepositoryRoot
 	if repoRoot == "" {
 		repoRoot = repoDirForProvenance()
 	}
 	resolvedMetadataPath, err := resolveMetadata(buildmetadata.MetadataPathOptions{
-		ExplicitPath: *canaryBuildMetadata,
+		ExplicitPath: v.CanaryBuildMetadata,
 		Environment:  os.Getenv(buildmetadata.EnvMetadataPath),
 		Repository:   repoRoot,
 	})
@@ -235,14 +216,14 @@ func runCommandWithDocker(
 		return fmt.Errorf("get docker version: %w", err)
 	}
 
-	if *verbose {
+	if v.Verbose {
 		fmt.Printf("Docker %s (API %s)\n", dockerInfo.Version, dockerClient.ClientVersion())
 	}
 
 	// P0-10 CORRECTION02: Resolve descriptive reference to exact
 	// image ID exactly once. Use ResolveImageIdentity - NEVER
 	// ImagePull in qualified paths.
-	imageID, err := dockerClient.ResolveImageIdentity(ctx, *containerImage)
+	imageID, err := dockerClient.ResolveImageIdentity(ctx, v.ContainerImage)
 	if err != nil {
 		return fmt.Errorf("resolve image identity: %w", err)
 	}
@@ -253,24 +234,24 @@ func runCommandWithDocker(
 	}
 
 	frozenImageID := imageID
-	imageReference := *containerImage
-	if *verbose {
+	imageReference := v.ContainerImage
+	if v.Verbose {
 		fmt.Printf("Resolved %s -> %s\n", imageReference, frozenImageID[:12])
 	}
 
-	runID := fmt.Sprintf("lab-%s-%d", *scenario, time.Now().Unix())
+	runID := fmt.Sprintf("lab-%s-%d", v.Scenario, time.Now().Unix())
 
-	artifactsPath := filepath.Join(*artifactsDir, runID)
+	artifactsPath := filepath.Join(v.ArtifactsDir, runID)
 	if err := os.MkdirAll(artifactsPath, 0755); err != nil {
 		return fmt.Errorf("create artifacts dir: %w", err)
 	}
 
-	evidenceWriter := evidence.NewWriter(runID, *scenario, artifactsPath)
+	evidenceWriter := evidence.NewWriter(runID, v.Scenario, artifactsPath)
 
 	manifest := &evidence.Manifest{
 		SchemaVersion: "1.0.0",
 		RunID:         runID,
-		Scenario:      *scenario,
+		Scenario:      v.Scenario,
 		StartedAt:     time.Now(),
 		DockerID: &evidence.DockerIdentity{
 			EngineVersion: dockerInfo.Version,
@@ -287,9 +268,9 @@ func runCommandWithDocker(
 	}
 
 	phaseCfg := sampling.SmokePhaseConfig()
-	phaseCfg.Stimulus = time.Duration(*duration) * time.Second
+	phaseCfg.Stimulus = time.Duration(v.Duration) * time.Second
 
-	cmd := getScenarioCommand(*scenario)
+	cmd := getScenarioCommand(v.Scenario)
 	containerName := fmt.Sprintf("tovarisch-subject-%s", runID)
 	netName := fmt.Sprintf("kgb-lab-%s", runID)
 
@@ -310,7 +291,7 @@ func runCommandWithDocker(
 		if err != nil {
 			return nil, fmt.Errorf("get container PID: %w", err)
 		}
-		if *verbose {
+		if v.Verbose {
 			fmt.Printf("Container %s started with PID %d\n", containerID, containerPID)
 		}
 
@@ -330,17 +311,17 @@ func runCommandWithDocker(
 			GeneratedAt:   time.Now().UTC(),
 			Reachability: dockerlab.ReachabilityObservations{
 				Method: dockerlab.ReachabilityMethodDockerExec, NetworkID: input.NetworkID,
-				TargetHost: "127.0.0.1", TargetPort: *canaryPort,
+				TargetHost: "127.0.0.1", TargetPort: v.CanaryPort,
 			},
 		}
-		expectedRequest := getScenarioOperationCount(*scenario)
+		expectedRequest := getScenarioOperationCount(v.Scenario)
 		initialState, workloadResult, finalState, err := RunCanonicalControlSequence(
 			workloadCtx, control, sequenceObs,
 			CanonicalControlSequenceOptions{
-				ContainerID: containerID, Port: *canaryPort, Operations: expectedRequest, Timeout: 60 * time.Second,
+				ContainerID: containerID, Port: v.CanaryPort, Operations: expectedRequest, Timeout: 60 * time.Second,
 				BeforeOperate: func(initial *CanaryState) error {
-					if initial.Mode != scenarioToMode(*scenario) {
-						return fmt.Errorf("canary mode mismatch: expected %s, got %s", scenarioToMode(*scenario), initial.Mode)
+					if initial.Mode != scenarioToMode(v.Scenario) {
+						return fmt.Errorf("canary mode mismatch: expected %s, got %s", scenarioToMode(v.Scenario), initial.Mode)
 					}
 					if err := evidenceWriter.WriteCanaryState("initial", initial); err != nil {
 						return fmt.Errorf("write initial canary state: %w", err)
@@ -416,7 +397,7 @@ func runCommandWithDocker(
 	}
 
 	opts := dockerlab.LifecycleOptions{
-		ImageReference:  *containerImage,
+		ImageReference:  v.ContainerImage,
 		NetworkName:     netName,
 		ContainerName:   containerName,
 		ContainerCmd:    cmd,
@@ -479,7 +460,7 @@ func runCommandWithDocker(
 	}
 
 	thresholds := analysis.DefaultThresholds()
-	invariantResult := validateStateInvariant(*scenario, initialState, finalState, workloadResult)
+	invariantResult := validateStateInvariant(v.Scenario, initialState, finalState, workloadResult)
 	verdict := analysis.AnalyzeWithInvariant(samples, thresholds, invariantResult)
 
 	// CORRECTION02: descriptor fallback with full state-invariant
@@ -488,7 +469,7 @@ func runCommandWithDocker(
 	// prevents the descriptor_state_invariant signal from being
 	// emitted.
 	descriptorStateInvariantValid := invariantResult.Valid
-	if *scenario == "canary-descriptor" {
+	if v.Scenario == "canary-descriptor" {
 		descInvariant := analysis.ComputeDescriptorStateInvariant(
 			initialState.FDCount, finalState.FDCount,
 			initialState.OperationCount, finalState.OperationCount,
@@ -501,7 +482,7 @@ func runCommandWithDocker(
 			},
 		)
 		fallback := analysis.DescriptorFallbackInput{
-			Scenario:            *scenario,
+			Scenario:            v.Scenario,
 			StateInvariantValid: descriptorStateInvariantValid,
 			Invariant:           descInvariant,
 			Initial: analysis.DescriptorInitialState{
@@ -548,7 +529,7 @@ func runCommandWithDocker(
 		)
 	}
 
-	expectedVerdict := getExpectedVerdict(*scenario)
+	expectedVerdict := getExpectedVerdict(v.Scenario)
 
 	scenarioValid := phaseValid &&
 		workloadValid &&
@@ -571,7 +552,7 @@ func runCommandWithDocker(
 
 	verdictOutput := &evidence.Verdict{
 		OverallClassification:  verdict.Overall,
-		Scenario:               *scenario,
+		Scenario:               v.Scenario,
 		ScenarioValid:          scenarioValid,
 		CanariesValid:          canariesValid,
 		MemoryClassification:   verdict.Memory,
@@ -596,7 +577,7 @@ func runCommandWithDocker(
 	finalizedManifest := &evidence.Manifest{
 		SchemaVersion:   "1.1.0",
 		RunID:           runID,
-		Scenario:        *scenario,
+		Scenario:        v.Scenario,
 		StartedAt:       manifest.StartedAt,
 		FinishedAt:      time.Now(),
 		SubjectIdentity: subject,
@@ -620,6 +601,7 @@ func runCommandWithDocker(
 			"initial-canary-state.json",
 			"final-canary-state.json",
 			"workload-result.json",
+			"qualified-execution-evidence.json",
 			"checksums.txt",
 		},
 	}
@@ -646,7 +628,7 @@ func runCommandWithDocker(
 	runFailed := !scenarioValid || !canariesValid || !invariantResult.Valid || verdict.Overall != expectedVerdict
 
 	fmt.Printf("\n=== Analysis Result ===\n")
-	fmt.Printf("Scenario: %s\n", *scenario)
+	fmt.Printf("Scenario: %s\n", v.Scenario)
 	fmt.Printf("Expected Verdict: %s\n", expectedVerdict)
 	fmt.Printf("Actual Verdict: %s\n", verdict.Overall)
 	fmt.Printf("ScenarioValid: %v\n", scenarioValid)

@@ -135,7 +135,7 @@ A regression test must verify:
 
 1. **TestProductionRun_S50Regression_NoQualifiedEvidence**
    - Reproduces: CLI returns 0, workload artifacts present, qualified evidence absent
-   
+
 2. **TestProductionRun_QualifiedEvidenceMandated**
    - Verifies: CLI returns 0, qualified evidence present with pass=true
 
