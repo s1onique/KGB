@@ -4,6 +4,8 @@
 package evidence
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -45,7 +47,7 @@ func TestProductionFinalize_NilExecuteLifecycleRejected(t *testing.T) {
 func TestProductionFinalize_NilCollectProvenanceRejected(t *testing.T) {
 	deps := ProductionQualifiedRunDependencies{
 		ExecuteLifecycle:     recordNoopExecuteLifecycle,
-		CollectProvenance:   nil, // exactly one nil
+		CollectProvenance:    nil, // exactly one nil
 		PersistFinalEvidence: recordNoopPersistFinalEvidence,
 		VerifyEvidenceBytes:  recordNoopVerifyEvidenceBytes,
 		WriteManifest:        recordNoopWriteManifest,
@@ -129,11 +131,11 @@ func TestProductionFinalize_NilWriteManifestRejected(t *testing.T) {
 func TestProductionFinalize_NilWriteChecksumsRejected(t *testing.T) {
 	deps := ProductionQualifiedRunDependencies{
 		ExecuteLifecycle:     recordNoopExecuteLifecycle,
-		CollectProvenance:     recordNoopCollectProvenance,
-		PersistFinalEvidence:  recordNoopPersistFinalEvidence,
-		VerifyEvidenceBytes:   recordNoopVerifyEvidenceBytes,
-		WriteManifest:         recordNoopWriteManifest,
-		WriteChecksums:        nil, // exactly one nil
+		CollectProvenance:    recordNoopCollectProvenance,
+		PersistFinalEvidence: recordNoopPersistFinalEvidence,
+		VerifyEvidenceBytes:  recordNoopVerifyEvidenceBytes,
+		WriteManifest:        recordNoopWriteManifest,
+		WriteChecksums:       nil, // exactly one nil
 	}
 	opts := validOptions(t)
 
@@ -717,15 +719,29 @@ func TestProductionFinalize_PhysicalChecksumsContainEvidence(t *testing.T) {
 		t.Fatalf("FinalizeProductionQualifiedRun: %v", err)
 	}
 
-	// Verify checksums contain evidence
+	// Verify checksums contain evidence using exact parsing
 	checksumsPath := filepath.Join(artifactRoot, runID, "checksums.txt")
 	checksumData, err := os.ReadFile(checksumsPath)
 	if err != nil {
 		t.Fatalf("read checksums: %v", err)
 	}
 
-	if !strings.Contains(string(checksumData), "qualified-execution-evidence.json") {
-		t.Error("checksums do not contain evidence path")
+	// Parse checksums with exact format: <64 hex chars><two spaces><path>
+	found := false
+	scanner := bufio.NewScanner(bytes.NewReader(checksumData))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "  ", 2)
+		if len(parts) == 2 && strings.TrimSpace(parts[1]) == "qualified-execution-evidence.json" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("checksums do not contain evidence path as exact entry")
 	}
 }
 
@@ -830,26 +846,26 @@ func TestProductionFinalize_MalformedChecksumsRejected(t *testing.T) {
 
 func validOptions(t *testing.T) ProductionQualifiedRunOptions {
 	return ProductionQualifiedRunOptions{
-		RepositoryRoot:  "/fake/repo",
-		ArtifactRoot:    t.TempDir(),
-		RunID:           "test-run",
-		Scenario:        "test-scenario",
-		ProducerVersion: "1.0.0",
-		DockerVersion:   "25.0.3",
-		LifecycleOptions: dockerlab.LifecycleOptions{},
+		RepositoryRoot:    "/fake/repo",
+		ArtifactRoot:      t.TempDir(),
+		RunID:             "test-run",
+		Scenario:          "test-scenario",
+		ProducerVersion:   "1.0.0",
+		DockerVersion:     "25.0.3",
+		LifecycleOptions:  dockerlab.LifecycleOptions{},
 		ExpectedInventory: []string{"qualified-execution-evidence.json"},
 	}
 }
 
 func validOptionsWithArtifactRoot(t *testing.T, artifactRoot, runID string) ProductionQualifiedRunOptions {
 	return ProductionQualifiedRunOptions{
-		RepositoryRoot:  "/fake/repo",
-		ArtifactRoot:    artifactRoot,
-		RunID:           runID,
-		Scenario:        "test-scenario",
-		ProducerVersion: "1.0.0",
-		DockerVersion:   "25.0.3",
-		LifecycleOptions: dockerlab.LifecycleOptions{},
+		RepositoryRoot:    "/fake/repo",
+		ArtifactRoot:      artifactRoot,
+		RunID:             runID,
+		Scenario:          "test-scenario",
+		ProducerVersion:   "1.0.0",
+		DockerVersion:     "25.0.3",
+		LifecycleOptions:  dockerlab.LifecycleOptions{},
 		ExpectedInventory: []string{"qualified-execution-evidence.json"},
 	}
 }
@@ -880,11 +896,11 @@ func recordNoopWriteChecksums(path, artifactRoot string, inventory []string) err
 
 func minimalEvidence(pass bool) *QualifiedExecutionEvidence {
 	return &QualifiedExecutionEvidence{
-		SchemaVersion:      QualifiedExecutionSchemaVersion,
-		ImageExactIDMatch:  true,
+		SchemaVersion:       QualifiedExecutionSchemaVersion,
+		ImageExactIDMatch:   true,
 		NetworkExactIDMatch: true,
-		CleanupComplete:    true,
-		Pass:               pass,
+		CleanupComplete:     true,
+		Pass:                pass,
 		Provenance: ProvenanceBinding{
 			SourceCommit:        "abc123def456abc123def456abc123def456abc1",
 			SourceTree:          "clean",
@@ -894,7 +910,7 @@ func minimalEvidence(pass bool) *QualifiedExecutionEvidence {
 			VCSModified:         false,
 			DockerServerVersion: "25.0.3",
 			ProducerVersion:     "1.0.0",
-			ExecutableSHA256:     "0000000000000000000000000000000000000000000000000000000000000000",
+			ExecutableSHA256:    "0000000000000000000000000000000000000000000000000000000000000000",
 		},
 		Reachability: ReachabilityObservations{
 			Success: true,

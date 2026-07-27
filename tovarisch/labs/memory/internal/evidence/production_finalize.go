@@ -145,15 +145,15 @@ type ProductionQualifiedRunOptions struct {
 
 // ProductionFinalizationResult contains the result of production finalization.
 type ProductionFinalizationResult struct {
-	Evidence           *QualifiedExecutionEvidence
-	EvidencePath       string
-	EvidenceBytes      []byte
-	ManifestPath       string
-	ChecksumsPath      string
-	Inventory          []string
-	ProducerCalled     bool
-	ManifestWritten    bool
-	ChecksumsWritten   bool
+	Evidence         *QualifiedExecutionEvidence
+	EvidencePath     string
+	EvidenceBytes    []byte
+	ManifestPath     string
+	ChecksumsPath    string
+	Inventory        []string
+	ProducerCalled   bool
+	ManifestWritten  bool
+	ChecksumsWritten bool
 }
 
 // FinalizeProductionQualifiedRun is the canonical production finalization seam.
@@ -300,7 +300,7 @@ func FinalizeProductionQualifiedRun(
 
 	// Phase 11: Write final manifest (includes evidence in inventory)
 	manifest := &Manifest{
-		SchemaVersion:      "1.1.0",
+		SchemaVersion:     "1.1.0",
 		RunID:             options.RunID,
 		Scenario:          options.Scenario,
 		ArtifactInventory: finalInventory,
@@ -329,15 +329,15 @@ func FinalizeProductionQualifiedRun(
 	}
 
 	return &ProductionFinalizationResult{
-		Evidence:           evidence,
-		EvidencePath:       evidencePath,
-		EvidenceBytes:      evidenceBytes,
-		ManifestPath:       manifestPath,
-		ChecksumsPath:      checksumsPath,
-		Inventory:          finalInventory,
-		ProducerCalled:     true,
-		ManifestWritten:    true,
-		ChecksumsWritten:   true,
+		Evidence:         evidence,
+		EvidencePath:     evidencePath,
+		EvidenceBytes:    evidenceBytes,
+		ManifestPath:     manifestPath,
+		ChecksumsPath:    checksumsPath,
+		Inventory:        finalInventory,
+		ProducerCalled:   true,
+		ManifestWritten:  true,
+		ChecksumsWritten: true,
 	}, nil
 }
 
@@ -484,6 +484,9 @@ func DecodeManifestExactlyOne(data []byte) (*Manifest, error) {
 }
 
 // verifyPhysicalManifest strictly verifies the physical manifest file.
+// It performs exact ordered equality for the inventory, rejecting substitutions,
+// reordering, duplicates, missing/extra entries, unknown JSON members, and
+// second JSON values.
 func verifyPhysicalManifest(manifestPath, expectedRunID, expectedScenario string, expectedInventory []string) error {
 	manifestBytes, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -512,11 +515,15 @@ func verifyPhysicalManifest(manifestPath, expectedRunID, expectedScenario string
 		return fmt.Errorf("scenario mismatch: got %q, want %q", manifest.Scenario, expectedScenario)
 	}
 
+	// P0-3: EXACT ORDERED EQUALITY for inventory.
+	// Reject: substitutions, reordering, duplicates, missing entries, extra entries.
+
 	// Check for duplicate inventory entries
 	seen := make(map[string]bool)
-	for _, item := range manifest.ArtifactInventory {
+	for i, item := range manifest.ArtifactInventory {
 		if seen[item] {
-			return fmt.Errorf("%w: %q appears more than once", ErrDuplicateInventoryEntry, item)
+			return fmt.Errorf("%w: %q appears more than once at positions %d and earlier",
+				ErrDuplicateInventoryEntry, item, i)
 		}
 		seen[item] = true
 	}
@@ -533,34 +540,50 @@ func verifyPhysicalManifest(manifestPath, expectedRunID, expectedScenario string
 		return fmt.Errorf("evidence appears %d times in manifest, want exactly 1", evidenceCount)
 	}
 
-	// Verify expected inventory matches
+	// EXACT ORDERED EQUALITY: length must match
 	if len(manifest.ArtifactInventory) != len(expectedInventory) {
 		return fmt.Errorf("inventory length mismatch: got %d, want %d",
 			len(manifest.ArtifactInventory), len(expectedInventory))
 	}
 
+	// EXACT ORDERED EQUALITY: each position must match
+	for i := range manifest.ArtifactInventory {
+		if manifest.ArtifactInventory[i] != expectedInventory[i] {
+			return fmt.Errorf("inventory position %d mismatch: got %q, want %q",
+				i, manifest.ArtifactInventory[i], expectedInventory[i])
+		}
+	}
+
 	return nil
 }
 
-// verifyPhysicalChecksums verifies the physical checksum file using strict parsing.
+// verifyPhysicalChecksums is the authoritative checksum verifier for the production finalizer.
+// For every inventory entry, it:
+//   - requires a non-empty safe relative slash path;
+//   - rejects absolute paths, "..", backslashes and traversal;
+//   - resolves relative to the exact run root (runRoot);
+//   - rejects symlinks and non-regular files;
+//   - proves resolved containment within the run root;
+//   - reads physical bytes;
+//   - recomputes SHA-256;
+//   - requires the exact lowercase digest.
+//
+// Rejects: blank lines, malformed lines, uppercase digest, duplicates,
+// missing entries, extra entries.
 func verifyPhysicalChecksums(checksumsPath, evidencePath string, inventory []string) error {
 	checksumBytes, err := os.ReadFile(checksumsPath)
 	if err != nil {
 		return fmt.Errorf("read checksums: %w", err)
 	}
 
-	// Read evidence bytes for verification
-	evidenceBytes, err := os.ReadFile(evidencePath)
-	if err != nil {
-		return fmt.Errorf("read evidence: %w", err)
-	}
-
-	// Compute expected digest
-	expectedDigest := sha256.Sum256(evidenceBytes)
-	expectedHex := hex.EncodeToString(expectedDigest[:])
-
 	// Parse checksums strictly
-	seen := make(map[string]bool)
+	type checksumEntry struct {
+		digest  string
+		path    string
+		lineNum int
+	}
+	var entries []checksumEntry
+	seen := make(map[string]int) // path -> first line number for duplicate detection
 	scanner := bufio.NewScanner(bytes.NewReader(checksumBytes))
 	lineNum := 0
 
@@ -585,26 +608,36 @@ func verifyPhysicalChecksums(checksumsPath, evidencePath string, inventory []str
 			return fmt.Errorf("%w: line %d: digest length %d, want 64", ErrMalformedChecksums, lineNum, len(digestHex))
 		}
 
-		// Validate digest is exactly 64 lowercase hex characters
+		// Validate digest is lowercase hex
 		for _, c := range digestHex {
 			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
 				return fmt.Errorf("%w: line %d: digest must be lowercase hex", ErrMalformedChecksums, lineNum)
 			}
 		}
 
-		// Check for duplicate paths
-		if seen[path] {
-			return fmt.Errorf("%w: %q appears more than once", ErrMalformedChecksums, path)
+		// Validate path is non-empty
+		if path == "" {
+			return fmt.Errorf("%w: line %d: empty path", ErrMalformedChecksums, lineNum)
 		}
-		seen[path] = true
 
-		// Verify evidence checksum
-		if path == "qualified-execution-evidence.json" {
-			if digestHex != expectedHex {
-				return fmt.Errorf("%w: evidence digest mismatch: got %s, want %s",
-					ErrChecksumMismatch, digestHex, expectedHex)
-			}
+		// Validate path is safe relative (no absolute, no traversal, no backslashes)
+		if filepath.IsAbs(path) {
+			return fmt.Errorf("%w: line %d: absolute path %q not allowed", ErrMalformedChecksums, lineNum, path)
 		}
+		if strings.Contains(path, "..") {
+			return fmt.Errorf("%w: line %d: traversal %q not allowed", ErrMalformedChecksums, lineNum, path)
+		}
+		if strings.ContainsRune(path, '\\') {
+			return fmt.Errorf("%w: line %d: backslash in path %q not allowed", ErrMalformedChecksums, lineNum, path)
+		}
+
+		// Check for duplicate paths
+		if firstLine, exists := seen[path]; exists {
+			return fmt.Errorf("%w: %q appears at lines %d and %d", ErrMalformedChecksums, path, firstLine, lineNum)
+		}
+		seen[path] = lineNum
+
+		entries = append(entries, checksumEntry{digest: digestHex, path: path, lineNum: lineNum})
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -624,10 +657,59 @@ func verifyPhysicalChecksums(checksumsPath, evidencePath string, inventory []str
 	}
 
 	// Verify checksums are inventory-authoritative: every path in checksums must be in inventory
-	// (skip empty lines which we already skip above)
 	for path := range seen {
 		if !isInInventory(path, inventory) {
 			return fmt.Errorf("%w: %q in checksums but not in inventory", ErrMalformedChecksums, path)
+		}
+	}
+
+	// AUTHORITATIVE: For each checksum entry, physically verify the file.
+	// Derive the run root from the evidence path.
+	runRoot := filepath.Dir(evidencePath)
+
+	for _, entry := range entries {
+		// Resolve the path relative to run root
+		resolvedPath := filepath.Join(runRoot, entry.path)
+
+		// Prove containment: resolved path must start with run root
+		absResolved, err := filepath.Abs(resolvedPath)
+		if err != nil {
+			return fmt.Errorf("%w: cannot resolve %q: %v", ErrChecksumMismatch, entry.path, err)
+		}
+		absRunRoot, err := filepath.Abs(runRoot)
+		if err != nil {
+			return fmt.Errorf("%w: cannot resolve run root: %v", ErrChecksumMismatch, err)
+		}
+		if !strings.HasPrefix(absResolved, absRunRoot+string(filepath.Separator)) && absResolved != absRunRoot {
+			return fmt.Errorf("%w: %q resolves outside run root", ErrChecksumMismatch, entry.path)
+		}
+
+		// Reject symlinks
+		info, err := os.Lstat(resolvedPath)
+		if err != nil {
+			return fmt.Errorf("%w: cannot stat %q: %v", ErrChecksumMismatch, entry.path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%w: %q is a symlink", ErrChecksumMismatch, entry.path)
+		}
+
+		// Reject non-regular files
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("%w: %q is not a regular file", ErrChecksumMismatch, entry.path)
+		}
+
+		// Read physical bytes and recompute SHA-256
+		fileBytes, err := os.ReadFile(resolvedPath)
+		if err != nil {
+			return fmt.Errorf("%w: cannot read %q: %v", ErrChecksumMismatch, entry.path, err)
+		}
+
+		actualDigest := sha256.Sum256(fileBytes)
+		actualHex := hex.EncodeToString(actualDigest[:])
+
+		if actualHex != entry.digest {
+			return fmt.Errorf("%w: %q: declared=%s actual=%s",
+				ErrChecksumMismatch, entry.path, entry.digest, actualHex)
 		}
 	}
 
@@ -653,15 +735,15 @@ func RecordOutcome(terminal, containerRemoved, networkRemoved bool) *dockerlab.Q
 		SchemaVersion: dockerlab.QualifiedExecutionObservationsSchemaVersion,
 		GeneratedAt:   time.Now().UTC(),
 		Image: dockerlab.ImageObservations{
-			RequestedReference:     "kgb-tovarisch-canary:latest",
+			RequestedReference:    "kgb-tovarisch-canary:latest",
 			InspectedBeforeCreate: "sha256:" + strings.Repeat("a", 64),
-			CreateRequestImage:     "sha256:" + strings.Repeat("a", 64),
-			ContainerInspectImage:  "sha256:" + strings.Repeat("a", 64),
-			ContainerConfigImage:   "sha256:" + strings.Repeat("a", 64),
+			CreateRequestImage:    "sha256:" + strings.Repeat("a", 64),
+			ContainerInspectImage: "sha256:" + strings.Repeat("a", 64),
+			ContainerConfigImage:  "sha256:" + strings.Repeat("a", 64),
 		},
 		Network: dockerlab.NetworkObservations{
-			RequestedName:        "test-net",
-			CreateResponseID:     strings.Repeat("b", 64),
+			RequestedName:       "test-net",
+			CreateResponseID:    strings.Repeat("b", 64),
 			InspectResponseID:   strings.Repeat("b", 64),
 			ContainerEndpointID: strings.Repeat("b", 64),
 			Removed:             networkRemoved,
@@ -740,7 +822,7 @@ func RecordOutcome(terminal, containerRemoved, networkRemoved bool) *dockerlab.Q
 	phases = append(phases, dockerlab.PhaseLifecycleReturned)
 
 	return &dockerlab.QualifiedLifecycleOutcome{
-		ContainerID:       obs.Container.ID,
+		ContainerID:      obs.Container.ID,
 		ImageID:          obs.Image.InspectedBeforeCreate,
 		NetworkID:        obs.Network.InspectResponseID,
 		Started:          true,
