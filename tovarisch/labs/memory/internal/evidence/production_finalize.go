@@ -645,19 +645,24 @@ func isInInventory(path string, inventory []string) bool {
 // ErrInvalidArtifactPath is returned when an artifact path fails validation.
 var ErrInvalidArtifactPath = errors.New("invalid artifact path")
 
-// ValidateArtifactPath validates a canonical artifact path using lexical rules
-// and physical component walking. It rejects:
+// ValidateArtifactRelativePath validates a lexical artifact path.
+// It is the shared lexical authority consumed by both ParseChecksumsCanonical
+// and ResolveRegularArtifactPath.
+//
+// It rejects:
 // - empty paths
 // - "." path
 // - absolute paths
 // - backslash paths
-// - empty, "." or ".." components
-// - noncanonical cleaned representations
-// - intermediate and final symlinks
-// - non-regular files
+// - NUL/control bytes
+// - empty components
+// - "." and ".." components
+// - trailing slash
+// - duplicate separators
+// - noncanonical cleaned forms
 //
-// It proves containment using filepath.Rel.
-func ValidateArtifactPath(path string, runRoot string) error {
+// It accepts harmless names such as report..json.
+func ValidateArtifactRelativePath(path string) error {
 	// Reject empty
 	if path == "" {
 		return fmt.Errorf("%w: empty path", ErrInvalidArtifactPath)
@@ -678,6 +683,13 @@ func ValidateArtifactPath(path string, runRoot string) error {
 		return fmt.Errorf("%w: backslash not allowed", ErrInvalidArtifactPath)
 	}
 
+	// Reject NUL and control characters
+	for i := 0; i < len(path); i++ {
+		if path[i] == 0 || (path[i] >= 1 && path[i] <= 31) {
+			return fmt.Errorf("%w: control character not allowed", ErrInvalidArtifactPath)
+		}
+	}
+
 	// Reject noncanonical cleaned representations
 	cleaned := filepath.ToSlash(filepath.Clean(path))
 	if cleaned != path {
@@ -688,7 +700,8 @@ func ValidateArtifactPath(path string, runRoot string) error {
 	components := strings.Split(path, "/")
 	for _, part := range components {
 		if part == "" {
-			return fmt.Errorf("%w: empty component in %q", ErrInvalidArtifactPath, path)
+			// Reject empty components (duplicate separators)
+			return fmt.Errorf("%w: empty component in %q (duplicate separator)", ErrInvalidArtifactPath, path)
 		}
 		if part == "." {
 			return fmt.Errorf("%w: dot component in %q", ErrInvalidArtifactPath, path)
@@ -697,6 +710,34 @@ func ValidateArtifactPath(path string, runRoot string) error {
 			return fmt.Errorf("%w: traversal component in %q", ErrInvalidArtifactPath, path)
 		}
 	}
+
+	// Reject trailing slash
+	if strings.HasSuffix(path, "/") {
+		return fmt.Errorf("%w: trailing slash not allowed", ErrInvalidArtifactPath)
+	}
+
+	return nil
+}
+
+// ValidateArtifactPath validates a canonical artifact path using lexical rules
+// and physical component walking. It rejects:
+// - empty paths
+// - "." path
+// - absolute paths
+// - backslash paths
+// - empty, "." or ".." components
+// - noncanonical cleaned representations
+// - intermediate and final symlinks
+// - non-regular files
+//
+// It proves containment using filepath.Rel.
+func ValidateArtifactPath(path string, runRoot string) error {
+	// Use the shared lexical validator first
+	if err := ValidateArtifactRelativePath(path); err != nil {
+		return err
+	}
+
+	components := strings.Split(path, "/")
 
 	// Walk every physical component and reject any symlink
 	resolvedPath := filepath.Join(runRoot, path)
@@ -760,7 +801,7 @@ var ErrMalformedChecksumLine = errors.New("malformed checksum line")
 // - malformed paths
 func ParseChecksumsCanonical(data []byte) ([]ChecksumEntry, error) {
 	if len(data) == 0 {
-		return nil, errors.New("empty input")
+		return nil, fmt.Errorf("%w: empty input", ErrMalformedChecksumLine)
 	}
 
 	// Check for CRLF - reject if present
@@ -823,26 +864,9 @@ func ParseChecksumsCanonical(data []byte) ([]ChecksumEntry, error) {
 			}
 		}
 
-		// Validate path is non-empty
-		if path == "" {
-			return nil, fmt.Errorf("%w: line %d: empty path", ErrMalformedChecksumLine, lineNum+1)
-		}
-
-		// Validate path is safe relative
-		if filepath.IsAbs(path) {
-			return nil, fmt.Errorf("%w: line %d: absolute path %q not allowed", ErrMalformedChecksumLine, lineNum+1, path)
-		}
-		if strings.ContainsRune(path, '\\') {
-			return nil, fmt.Errorf("%w: line %d: backslash in path %q not allowed", ErrMalformedChecksumLine, lineNum+1, path)
-		}
-		// Check each path component
-		for _, part := range strings.Split(path, "/") {
-			if part == ".." {
-				return nil, fmt.Errorf("%w: line %d: traversal component '..' not allowed", ErrMalformedChecksumLine, lineNum+1)
-			}
-			if part == "." {
-				return nil, fmt.Errorf("%w: line %d: dot component '.' not allowed", ErrMalformedChecksumLine, lineNum+1)
-			}
+		// Validate path using shared lexical authority
+		if err := ValidateArtifactRelativePath(path); err != nil {
+			return nil, fmt.Errorf("%w: line %d: %v", ErrMalformedChecksumLine, lineNum+1, err)
 		}
 
 		// Check for duplicate paths
@@ -876,6 +900,18 @@ func ResolveRegularArtifactPath(runRoot string, artifactPath string) (string, er
 	absRunRoot, err := filepath.Abs(runRoot)
 	if err != nil {
 		return "", fmt.Errorf("%w: cannot resolve runRoot: %v", ErrInvalidArtifactPath, err)
+	}
+
+	// P0-2: Lstat runRoot itself - reject symlinked root
+	rootInfo, err := os.Lstat(absRunRoot)
+	if err != nil {
+		return "", fmt.Errorf("%w: cannot stat runRoot %q: %v", ErrInvalidArtifactPath, runRoot, err)
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("%w: runRoot %q is a symlink", ErrInvalidArtifactPath, runRoot)
+	}
+	if !rootInfo.Mode().IsDir() {
+		return "", fmt.Errorf("%w: runRoot %q is not a directory", ErrInvalidArtifactPath, runRoot)
 	}
 
 	// Resolve the full path
