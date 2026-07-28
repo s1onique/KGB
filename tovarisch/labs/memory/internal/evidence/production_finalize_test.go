@@ -2269,10 +2269,65 @@ func TestErrorIdentity_ErrInvalidArtifactPath(t *testing.T) {
 }
 
 func TestErrorIdentity_ResolveRegularArtifactPath_ErrInvalidArtifactPath(t *testing.T) {
-	// Empty root returns ErrInvalidArtifactPath
+	// Empty root returns ErrInvalidArtifactPath wrapped with ErrInvalidArtifactRoot
 	_, err := ResolveRegularArtifactPath("", "file.json")
 	if err == nil {
 		t.Fatal("expected error for empty root")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+	if !errors.Is(err, ErrInvalidArtifactRoot) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactRoot): got %v", err)
+	}
+}
+
+func TestErrorIdentity_ErrInvalidArtifactRoot(t *testing.T) {
+	// ErrInvalidArtifactRoot is a distinct sentinel
+	if ErrInvalidArtifactRoot == nil {
+		t.Fatal("ErrInvalidArtifactRoot is nil")
+	}
+	if ErrInvalidArtifactRoot.Error() == "" {
+		t.Error("ErrInvalidArtifactRoot has empty message")
+	}
+}
+
+func TestErrorIdentity_ResolveRegularArtifactPath_RootSymlinkRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	realDir := filepath.Join(tmpDir, "real")
+	if err := os.MkdirAll(realDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	symlinkDir := filepath.Join(tmpDir, "link")
+	if err := os.Symlink(realDir, symlinkDir); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	_, err := ResolveRegularArtifactPath(symlinkDir, "file.json")
+	if err == nil {
+		t.Fatal("expected error for symlink root")
+	}
+	// Must contain both ErrInvalidArtifactRoot and ErrInvalidArtifactPath
+	if !errors.Is(err, ErrInvalidArtifactRoot) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactRoot): got %v", err)
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestErrorIdentity_ResolveRegularArtifactPath_RootFileRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	rootFile := filepath.Join(tmpDir, "root-is-file")
+	if err := os.WriteFile(rootFile, []byte("content"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	_, err := ResolveRegularArtifactPath(rootFile, "file.json")
+	if err == nil {
+		t.Fatal("expected error for root file")
+	}
+	// Must contain both ErrInvalidArtifactRoot and ErrInvalidArtifactPath
+	if !errors.Is(err, ErrInvalidArtifactRoot) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactRoot): got %v", err)
 	}
 	if !errors.Is(err, ErrInvalidArtifactPath) {
 		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
@@ -2333,6 +2388,7 @@ func TestErrorIdentity_ErrorSentinelsAreDistinct(t *testing.T) {
 	// All sentinel errors must be distinct
 	sentinels := []error{
 		ErrInvalidArtifactPath,
+		ErrInvalidArtifactRoot,
 		ErrMalformedChecksums,
 		ErrChecksumMismatch,
 		ErrProductionEvidenceMismatch,
