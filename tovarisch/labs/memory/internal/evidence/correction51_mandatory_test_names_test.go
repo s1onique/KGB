@@ -1,12 +1,10 @@
-// correction51_mandatory_test_names.go
+// correction51_mandatory_test_names_test.go
 //
 // correction51Correction09MandatoryTestNames contains the authoritative list of
 // mandatory test names for the production finalizer test suite.
 //
-// NOTE: This file contains only the name declarations. The actual verification
+// NOTE: This is a test-only file. The mandatory test inventory verification
 // is performed by TestCorrection51Correction09_MandatoryTestInventory.
-//
-// This is NOT a test file - it is a data file that can be imported by tests.
 package evidence
 
 // correction51Correction09MandatoryTestNames holds mandatory test names by category.
@@ -147,8 +145,8 @@ var correction51Correction09MandatoryTestNames = map[string][]string{
 	},
 }
 
-// GetAllMandatoryTestNames returns a flat slice of all mandatory test names.
-func GetAllMandatoryTestNames() []string {
+// getAllMandatoryTestNames returns a flat slice of all mandatory test names.
+func getAllMandatoryTestNames() []string {
 	var all []string
 	for _, names := range correction51Correction09MandatoryTestNames {
 		all = append(all, names...)

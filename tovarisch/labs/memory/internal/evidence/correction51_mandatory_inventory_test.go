@@ -35,23 +35,24 @@ func TestCorrection51Correction09_MandatoryTestInventory(t *testing.T) {
 		t.Fatalf("go list failed: %v", err)
 	}
 	dir := strings.TrimSpace(string(output))
-	
+
 	// Discover all test files in the package
 	testFiles, err := filepath.Glob(filepath.Join(dir, "*_test.go"))
 	if err != nil {
 		t.Fatalf("glob test files: %v", err)
 	}
-	
+
 	// Debug: log what we found
 	t.Logf("Looking for test files in: %s", dir)
 	t.Logf("Found %d test files", len(testFiles))
 
 	// Parse all test files and build a map of actual test declarations
 	actualTests := make(map[string]*testDeclaration)
+	invalidSigTests := make(map[string]*testDeclaration)
 	fset := token.NewFileSet()
 
 	for _, file := range testFiles {
-		tests, err := parseTestFile(fset, file)
+		tests, invalidSigs, err := parseTestFile(fset, file)
 		if err != nil {
 			t.Errorf("parse test file %s: %v", file, err)
 			continue
@@ -59,23 +60,35 @@ func TestCorrection51Correction09_MandatoryTestInventory(t *testing.T) {
 		for name, decl := range tests {
 			actualTests[name] = decl
 		}
+		for name, decl := range invalidSigs {
+			invalidSigTests[name] = decl
+		}
 	}
+
+	// Get mandatory test names
+	allMandatory := getAllMandatoryTestNames()
 
 	// Verify mandatory tests exist and have correct properties
 	var failures []string
 
-	allMandatory := GetAllMandatoryTestNames()
+	// Check for mandatory tests with missing or invalid signatures
+	for _, name := range allMandatory {
+		if _, exists := actualTests[name]; exists {
+			continue
+		}
+		// Check if it exists with invalid signature
+		if _, hasInvalidSig := invalidSigTests[name]; hasInvalidSig {
+			failures = append(failures, "INVALID_SIG: "+name)
+			continue
+		}
+		failures = append(failures, "MISSING: "+name)
+	}
 
+	// Check valid signature tests for forbidden patterns
 	for _, name := range allMandatory {
 		decl, exists := actualTests[name]
 		if !exists {
-			failures = append(failures, "MISSING: "+name)
-			continue
-		}
-
-		// Check signature: must be func(*testing.T)
-		if !decl.hasValidSignature {
-			failures = append(failures, "INVALID_SIG: "+name)
+			continue // Already reported as MISSING or INVALID_SIG above
 		}
 
 		// Check body is not empty
@@ -140,14 +153,16 @@ type testDeclaration struct {
 	referencesGateEvidenceProvider bool
 }
 
-// parseTestFile parses a test file and returns a map of test declarations.
-func parseTestFile(fset *token.FileSet, filename string) (map[string]*testDeclaration, error) {
+// parseTestFile parses a test file and returns a map of actual test declarations
+// and a map of declarations with invalid signatures.
+func parseTestFile(fset *token.FileSet, filename string) (map[string]*testDeclaration, map[string]*testDeclaration, error) {
 	file, err := parser.ParseFile(fset, filename, nil, parser.ParseComments)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	tests := make(map[string]*testDeclaration)
+	invalidSigs := make(map[string]*testDeclaration)
 
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -160,7 +175,7 @@ func parseTestFile(fset *token.FileSet, filename string) (map[string]*testDeclar
 			continue
 		}
 
-		// Must have exactly one parameter of type *testing.T
+		// Must have exactly one parameter
 		if len(fn.Type.Params.List) != 1 {
 			continue
 		}
@@ -168,30 +183,40 @@ func parseTestFile(fset *token.FileSet, filename string) (map[string]*testDeclar
 		if len(param.Names) != 1 {
 			continue
 		}
-		if !isTestingTBinary(param.Type) {
-			continue
+
+		testDecl := &testDeclaration{
+			file: filename,
+			pos:  fn.Pos(),
 		}
 
-		decl := &testDeclaration{
-			file:              filename,
-			pos:               fn.Pos(),
-			hasValidSignature: true,
-			hasBody:           fn.Body != nil && len(fn.Body.List) > 0,
-		}
+		// Check if signature is exactly *testing.T
+		if isTestingT(param.Type) {
+			testDecl.hasValidSignature = true
+			testDecl.hasBody = fn.Body != nil && len(fn.Body.List) > 0
 
-		// Inspect the function body for forbidden patterns
-		if fn.Body != nil {
-			inspectForForbiddenPatterns(fn.Body, decl)
-		}
+			// Inspect the function body for forbidden patterns
+			if fn.Body != nil {
+				inspectForForbiddenPatterns(fn.Body, testDecl)
+				// Check for log-only body
+				if isLogOnly(fn) {
+					testDecl.logOnly = true
+				}
+			}
 
-		tests[fn.Name.Name] = decl
+			tests[fn.Name.Name] = testDecl
+		} else {
+			// Invalid signature - store for reporting as INVALID_SIG
+			testDecl.hasValidSignature = false
+			testDecl.hasBody = fn.Body != nil && len(fn.Body.List) > 0
+			invalidSigs[fn.Name.Name] = testDecl
+		}
 	}
 
-	return tests, nil
+	return tests, invalidSigs, nil
 }
 
-// isTestingTBinary returns true if the type is *testing.T or *testing.B or *testing.M or *testing.TB.
-func isTestingTBinary(expr ast.Expr) bool {
+// isTestingT returns true if the type is exactly *testing.T (not B, M, or TB).
+func isTestingT(expr ast.Expr) bool {
 	// *testing.T is a StarExpr containing a SelectorExpr (testing.T)
 	star, ok := expr.(*ast.StarExpr)
 	if !ok {
@@ -205,7 +230,8 @@ func isTestingTBinary(expr ast.Expr) bool {
 	if !ok {
 		return false
 	}
-	return ident.Name == "testing" && (sel.Sel.Name == "T" || sel.Sel.Name == "B" || sel.Sel.Name == "M" || sel.Sel.Name == "TB")
+	// Only accept *testing.T, not *testing.B, *testing.M, or *testing.TB
+	return ident.Name == "testing" && sel.Sel.Name == "T"
 }
 
 // inspectForForbiddenPatterns walks the AST and checks for forbidden constructs.
