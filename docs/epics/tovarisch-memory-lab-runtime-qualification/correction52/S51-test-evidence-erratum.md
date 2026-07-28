@@ -90,16 +90,28 @@ docs/epics/tovarisch-memory-lab-runtime-qualification/correction51/call-graph-cl
 
 ## Actual S50 Defect Classification
 
-Based on historical artifact tree analysis of CORRECTION50 artifacts:
+```yaml
+classification: HISTORICAL_ARTIFACT_ABSENCE_UNRESOLVED
+```
+
+Mechanically known facts from CORRECTION50 artifact tree analysis:
 
 ```yaml
-historical_production_evidence:
-  physically_present: false
-  discovered_path: null
-  included_in_checksum_inventory: false
-  included_in_manifest: false
+production_workload_completed: true
+qualified_execution_artifact_found: false
+qualified_execution_artifact_in_manifest: false
+qualified_execution_artifact_in_checksums: false
+```
 
-classification: artifact_written_but_not_inventoried
+Not mechanically known:
+
+```yaml
+producer_called: unknown
+producer_failed: unknown
+wrong_directory: unknown
+artifact_deleted: unknown
+stale_binary: unknown
+inventory_only_defect: unknown
 ```
 
 The production path in S50:
