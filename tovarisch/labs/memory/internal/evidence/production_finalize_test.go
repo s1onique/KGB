@@ -1744,6 +1744,331 @@ func TestProductionFinalize_ReturnedPersistedSourceTreeMismatchRejected(t *testi
 	}
 }
 
+// =============================================================================
+// P0-5: Canonical artifact path resolver tests
+// =============================================================================
+
+func TestValidateArtifactPath_ValidNestedPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	if err := os.MkdirAll(filepath.Join(runRoot, "nested", "deep"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Create a regular file at nested/deep/artifact.json
+	artifactPath := filepath.Join(runRoot, "nested", "deep", "artifact.json")
+	if err := os.WriteFile(artifactPath, []byte("content"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	err := ValidateArtifactPath("nested/deep/artifact.json", runRoot)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateArtifactPath_DotDotComponentRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	_ = os.MkdirAll(runRoot, 0755)
+
+	err := ValidateArtifactPath("dir/../secret.json", runRoot)
+	if err == nil {
+		t.Error("expected error for .. component")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestValidateArtifactPath_DoubleDotInFilenameAccepted(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Create a file with ".." in the name - should be valid
+	artifactPath := filepath.Join(runRoot, "report..json")
+	if err := os.WriteFile(artifactPath, []byte("content"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	err := ValidateArtifactPath("report..json", runRoot)
+	if err != nil {
+		t.Errorf("unexpected error for harmless double dot: %v", err)
+	}
+}
+
+func TestValidateArtifactPath_DotComponentRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	_ = os.MkdirAll(runRoot, 0755)
+
+	err := ValidateArtifactPath("dir/./file.json", runRoot)
+	if err == nil {
+		t.Error("expected error for . component")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestValidateArtifactPath_AbsoluteRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+
+	err := ValidateArtifactPath("/absolute/path.json", runRoot)
+	if err == nil {
+		t.Error("expected error for absolute path")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestValidateArtifactPath_BackslashRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+
+	err := ValidateArtifactPath("dir\\file.json", runRoot)
+	if err == nil {
+		t.Error("expected error for backslash")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestValidateArtifactPath_IntermediateSymlinkRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	outsideDir := filepath.Join(tmpDir, "outside")
+	if err := os.MkdirAll(outsideDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Create symlink in runRoot that points outside
+	linkPath := filepath.Join(runRoot, "link")
+	if err := os.Symlink(outsideDir, linkPath); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	err := ValidateArtifactPath("link/secret.json", runRoot)
+	if err == nil {
+		t.Error("expected error for intermediate symlink")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestValidateArtifactPath_FinalSymlinkRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Create regular file
+	realPath := filepath.Join(runRoot, "real.json")
+	if err := os.WriteFile(realPath, []byte("content"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	// Create symlink to it
+	linkPath := filepath.Join(runRoot, "link.json")
+	if err := os.Symlink(realPath, linkPath); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	err := ValidateArtifactPath("link.json", runRoot)
+	if err == nil {
+		t.Error("expected error for final symlink")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestValidateArtifactPath_EscapeRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Create a file at the same level as runRoot
+	outsidePath := filepath.Join(tmpDir, "outside.json")
+	if err := os.WriteFile(outsidePath, []byte("content"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	// Try to escape via ../
+	err := ValidateArtifactPath("../outside.json", runRoot)
+	if err == nil {
+		t.Error("expected error for escape attempt")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestValidateArtifactPath_DirectoryRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	if err := os.MkdirAll(filepath.Join(runRoot, "dir"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	err := ValidateArtifactPath("dir", runRoot)
+	if err == nil {
+		t.Error("expected error for directory")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestValidateArtifactPath_MissingRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	err := ValidateArtifactPath("missing.json", runRoot)
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+// =============================================================================
+// P0-6: Canonical checksum parser tests
+// =============================================================================
+
+func TestParseChecksumsCanonical_ValidEntry(t *testing.T) {
+	data := []byte("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  artifact.json\n")
+	entries, err := ParseChecksumsCanonical(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if entries[0].Path != "artifact.json" {
+		t.Errorf("path: got %q, want %q", entries[0].Path, "artifact.json")
+	}
+	if entries[0].Digest != "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789" {
+		t.Errorf("digest mismatch")
+	}
+}
+
+func TestParseChecksumsCanonical_OneSeparatorSpaceRejected(t *testing.T) {
+	data := []byte("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789 artifact.json\n")
+	_, err := ParseChecksumsCanonical(data)
+	if err == nil {
+		t.Error("expected error for one separator space")
+	}
+}
+
+func TestParseChecksumsCanonical_ThreeSeparatorSpacesRejected(t *testing.T) {
+	data := []byte("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789   artifact.json\n")
+	_, err := ParseChecksumsCanonical(data)
+	if err == nil {
+		t.Error("expected error for three separator spaces")
+	}
+}
+
+func TestParseChecksumsCanonical_TabSeparatorRejected(t *testing.T) {
+	data := []byte("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\tartifact.json\n")
+	_, err := ParseChecksumsCanonical(data)
+	if err == nil {
+		t.Error("expected error for tab separator")
+	}
+}
+
+func TestParseChecksumsCanonical_CRLFRejected(t *testing.T) {
+	data := []byte("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  artifact.json\r\n")
+	_, err := ParseChecksumsCanonical(data)
+	if err == nil {
+		t.Error("expected error for CRLF")
+	}
+}
+
+func TestParseChecksumsCanonical_MissingFinalLFRejected(t *testing.T) {
+	data := []byte("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  artifact.json")
+	_, err := ParseChecksumsCanonical(data)
+	if err == nil {
+		t.Error("expected error for missing final LF")
+	}
+}
+
+func TestParseChecksumsCanonical_BlankLineRejected(t *testing.T) {
+	data := []byte("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  artifact.json\n\n")
+	_, err := ParseChecksumsCanonical(data)
+	if err == nil {
+		t.Error("expected error for blank line")
+	}
+}
+
+func TestParseChecksumsCanonical_CommentRejected(t *testing.T) {
+	data := []byte("# comment\nabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  artifact.json\n")
+	_, err := ParseChecksumsCanonical(data)
+	if err == nil {
+		t.Error("expected error for comment")
+	}
+}
+
+func TestParseChecksumsCanonical_LeadingWhitespaceRejected(t *testing.T) {
+	data := []byte(" abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  artifact.json\n")
+	_, err := ParseChecksumsCanonical(data)
+	if err == nil {
+		t.Error("expected error for leading whitespace")
+	}
+}
+
+func TestParseChecksumsCanonical_TrailingWhitespaceRejected(t *testing.T) {
+	data := []byte("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  artifact.json \n")
+	_, err := ParseChecksumsCanonical(data)
+	if err == nil {
+		t.Error("expected error for trailing whitespace")
+	}
+}
+
+func TestParseChecksumsCanonical_EmptyPathRejected(t *testing.T) {
+	data := []byte("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  \n")
+	_, err := ParseChecksumsCanonical(data)
+	if err == nil {
+		t.Error("expected error for empty path")
+	}
+}
+
+func TestParseChecksumsCanonical_DuplicatePathRejected(t *testing.T) {
+	data := []byte(`abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  artifact.json
+bcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0  artifact.json
+`)
+	_, err := ParseChecksumsCanonical(data)
+	if err == nil {
+		t.Error("expected error for duplicate path")
+	}
+}
+
+func TestParseChecksumsCanonical_UppercaseDigestRejected(t *testing.T) {
+	data := []byte("ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789  artifact.json\n")
+	_, err := ParseChecksumsCanonical(data)
+	if err == nil {
+		t.Error("expected error for uppercase digest")
+	}
+}
+
+func TestParseChecksumsCanonical_EmptyInputRejected(t *testing.T) {
+	_, err := ParseChecksumsCanonical([]byte{})
+	if err == nil {
+		t.Error("expected error for empty input")
+	}
+}
+
 func writeTestChecksums(path, artifactRoot string, inventory []string, evidencePath string) error {
 	var lines []string
 	for _, item := range inventory {

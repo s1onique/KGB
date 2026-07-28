@@ -740,6 +740,225 @@ func isInInventory(path string, inventory []string) bool {
 	return false
 }
 
+// ErrInvalidArtifactPath is returned when an artifact path fails validation.
+var ErrInvalidArtifactPath = errors.New("invalid artifact path")
+
+// ValidateArtifactPath validates a canonical artifact path using lexical rules
+// and physical component walking. It rejects:
+// - empty paths
+// - "." path
+// - absolute paths
+// - backslash paths
+// - empty, "." or ".." components
+// - noncanonical cleaned representations
+// - intermediate and final symlinks
+// - non-regular files
+//
+// It proves containment using filepath.Rel.
+func ValidateArtifactPath(path string, runRoot string) error {
+	// Reject empty
+	if path == "" {
+		return fmt.Errorf("%w: empty path", ErrInvalidArtifactPath)
+	}
+
+	// Reject "."
+	if path == "." {
+		return fmt.Errorf("%w: path is .", ErrInvalidArtifactPath)
+	}
+
+	// Reject absolute
+	if filepath.IsAbs(path) {
+		return fmt.Errorf("%w: absolute path not allowed", ErrInvalidArtifactPath)
+	}
+
+	// Reject backslash
+	if strings.ContainsRune(path, '\\') {
+		return fmt.Errorf("%w: backslash not allowed", ErrInvalidArtifactPath)
+	}
+
+	// Reject noncanonical cleaned representations
+	cleaned := filepath.ToSlash(filepath.Clean(path))
+	if cleaned != path {
+		return fmt.Errorf("%w: noncanonical path %q (cleaned: %q)", ErrInvalidArtifactPath, path, cleaned)
+	}
+
+	// Check each component
+	components := strings.Split(path, "/")
+	for _, part := range components {
+		if part == "" {
+			return fmt.Errorf("%w: empty component in %q", ErrInvalidArtifactPath, path)
+		}
+		if part == "." {
+			return fmt.Errorf("%w: dot component in %q", ErrInvalidArtifactPath, path)
+		}
+		if part == ".." {
+			return fmt.Errorf("%w: traversal component in %q", ErrInvalidArtifactPath, path)
+		}
+	}
+
+	// Walk every physical component and reject any symlink
+	resolvedPath := filepath.Join(runRoot, path)
+	dir := runRoot
+	for _, part := range components {
+		next := filepath.Join(dir, part)
+		info, err := os.Lstat(next)
+		if err != nil {
+			return fmt.Errorf("%w: cannot stat %q: %v", ErrInvalidArtifactPath, path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%w: symlink in path %q (component: %q)", ErrInvalidArtifactPath, path, part)
+		}
+		dir = next
+	}
+
+	// Prove containment using filepath.Rel
+	rel, err := filepath.Rel(runRoot, resolvedPath)
+	if err != nil {
+		return fmt.Errorf("%w: cannot derive relative path: %v", ErrInvalidArtifactPath, err)
+	}
+	// Must be the same as the original path (no escape)
+	if rel != path {
+		return fmt.Errorf("%w: path %q escapes run root", ErrInvalidArtifactPath, path)
+	}
+
+	// Require regular file
+	info, err := os.Stat(resolvedPath)
+	if err != nil {
+		return fmt.Errorf("%w: cannot stat %q: %v", ErrInvalidArtifactPath, path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%w: %q is not a regular file", ErrInvalidArtifactPath, path)
+	}
+
+	return nil
+}
+
+// ChecksumEntry represents a parsed checksum line.
+type ChecksumEntry struct {
+	Path    string
+	Digest  string
+	LineNum int
+}
+
+// ErrMalformedChecksumLine is returned for invalid checksum line format.
+var ErrMalformedChecksumLine = errors.New("malformed checksum line")
+
+// ParseChecksumsCanonical parses checksums in canonical format:
+// <64 lowercase hex><two ASCII spaces><canonical path><LF>
+//
+// It rejects:
+// - one or three spaces
+// - tabs
+// - CRLF (requires LF only)
+// - missing final LF
+// - blank lines
+// - comments
+// - surrounding whitespace
+// - duplicate paths
+// - malformed paths
+func ParseChecksumsCanonical(data []byte) ([]ChecksumEntry, error) {
+	if len(data) == 0 {
+		return nil, errors.New("empty input")
+	}
+
+	// Check for CRLF - reject if present
+	for i := 0; i < len(data); i++ {
+		if data[i] == '\r' {
+			return nil, fmt.Errorf("%w: CRLF not allowed (line ending must be LF only)", ErrMalformedChecksumLine)
+		}
+	}
+
+	// Require final LF
+	if data[len(data)-1] != '\n' {
+		return nil, fmt.Errorf("%w: missing final LF", ErrMalformedChecksumLine)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	// Remove the empty string after the final LF
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	var entries []ChecksumEntry
+	seen := make(map[string]int) // path -> first line number for duplicate detection
+
+	for lineNum, line := range lines {
+		// Reject blank lines
+		if strings.TrimSpace(line) == "" {
+			return nil, fmt.Errorf("%w: line %d: blank line", ErrMalformedChecksumLine, lineNum+1)
+		}
+
+		// Reject comment lines (starting with #)
+		if strings.HasPrefix(line, "#") {
+			return nil, fmt.Errorf("%w: line %d: comment not allowed", ErrMalformedChecksumLine, lineNum+1)
+		}
+
+		// Require exactly two ASCII spaces as separator
+		parts := strings.SplitN(line, "  ", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("%w: line %d: expected 'digest  path' format (exactly two spaces)", ErrMalformedChecksumLine, lineNum+1)
+		}
+
+		// No leading/trailing whitespace allowed
+		digestHex := parts[0]
+		path := parts[1]
+		if digestHex != strings.TrimSpace(digestHex) {
+			return nil, fmt.Errorf("%w: line %d: no leading/trailing whitespace on digest", ErrMalformedChecksumLine, lineNum+1)
+		}
+		if path != strings.TrimSpace(path) {
+			return nil, fmt.Errorf("%w: line %d: no leading/trailing whitespace on path", ErrMalformedChecksumLine, lineNum+1)
+		}
+
+		// Validate digest is exactly 64 lowercase hex characters
+		if len(digestHex) != 64 {
+			return nil, fmt.Errorf("%w: line %d: digest length %d, want 64", ErrMalformedChecksumLine, lineNum+1, len(digestHex))
+		}
+
+		// Validate digest is lowercase hex
+		for _, c := range digestHex {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+				return nil, fmt.Errorf("%w: line %d: digest must be lowercase hex", ErrMalformedChecksumLine, lineNum+1)
+			}
+		}
+
+		// Validate path is non-empty
+		if path == "" {
+			return nil, fmt.Errorf("%w: line %d: empty path", ErrMalformedChecksumLine, lineNum+1)
+		}
+
+		// Validate path is safe relative
+		if filepath.IsAbs(path) {
+			return nil, fmt.Errorf("%w: line %d: absolute path %q not allowed", ErrMalformedChecksumLine, lineNum+1, path)
+		}
+		if strings.ContainsRune(path, '\\') {
+			return nil, fmt.Errorf("%w: line %d: backslash in path %q not allowed", ErrMalformedChecksumLine, lineNum+1, path)
+		}
+		// Check each path component
+		for _, part := range strings.Split(path, "/") {
+			if part == ".." {
+				return nil, fmt.Errorf("%w: line %d: traversal component '..' not allowed", ErrMalformedChecksumLine, lineNum+1)
+			}
+			if part == "." {
+				return nil, fmt.Errorf("%w: line %d: dot component '.' not allowed", ErrMalformedChecksumLine, lineNum+1)
+			}
+		}
+
+		// Check for duplicate paths
+		if firstLine, exists := seen[path]; exists {
+			return nil, fmt.Errorf("%w: %q appears at lines %d and %d", ErrMalformedChecksumLine, path, firstLine, lineNum+1)
+		}
+		seen[path] = lineNum + 1
+
+		entries = append(entries, ChecksumEntry{
+			Path:    path,
+			Digest:  digestHex,
+			LineNum: lineNum + 1,
+		})
+	}
+
+	return entries, nil
+}
+
 // RecordOutcome creates a deterministic fixture outcome for testing.
 // All operation types use the canonical canarycontrol.Operation constants.
 // Phases are conditional: terminal_observed only if terminal=true,
