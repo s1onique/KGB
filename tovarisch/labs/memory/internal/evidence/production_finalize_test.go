@@ -2503,36 +2503,10 @@ func TestResolveRegularArtifactPath_ParentNotExist(t *testing.T) {
 // =============================================================================
 
 // TestVerifyPhysicalChecksums_ParseFailurePreservesMalformedChecksums tests that
-// checksum parse failures preserve ErrMalformedChecksums in the error chain.
+// checksum parse failures preserve both ErrMalformedChecksums and ErrMalformedChecksumLine
+// in the error chain. The invalid second line fails at parse-time and is wrapped in
+// ErrMalformedChecksums while preserving the canonical parser classification.
 func TestVerifyPhysicalChecksums_ParseFailurePreservesMalformedChecksums(t *testing.T) {
-	tmpDir := t.TempDir()
-	runRoot := filepath.Join(tmpDir, "run")
-	if err := os.MkdirAll(runRoot, 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	checksumsPath := filepath.Join(runRoot, "checksums.txt")
-	evidencePath := filepath.Join(runRoot, "qualified-execution-evidence.json")
-
-	// Write malformed checksums (missing final LF)
-	malformedChecksums := []byte("abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd  artifact.json")
-	if err := os.WriteFile(checksumsPath, malformedChecksums, 0644); err != nil {
-		t.Fatalf("write checksums: %v", err)
-	}
-
-	err := verifyPhysicalChecksums(checksumsPath, evidencePath, []string{"artifact.json"})
-	if err == nil {
-		t.Fatal("expected error for malformed checksums")
-	}
-	// Must preserve ErrMalformedChecksums
-	if !errors.Is(err, ErrMalformedChecksums) {
-		t.Errorf("errors.Is(err, ErrMalformedChecksums): got %v", err)
-	}
-}
-
-// TestVerifyPhysicalChecksums_ParseFailurePreservesMalformedChecksumLine tests that
-// checksum parse failures preserve ErrMalformedChecksumLine in the error chain.
-func TestVerifyPhysicalChecksums_ParseFailurePreservesMalformedChecksumLine(t *testing.T) {
 	tmpDir := t.TempDir()
 	runRoot := filepath.Join(tmpDir, "run")
 	if err := os.MkdirAll(runRoot, 0755); err != nil {
@@ -2553,7 +2527,8 @@ func TestVerifyPhysicalChecksums_ParseFailurePreservesMalformedChecksumLine(t *t
 	evDigestHex := hex.EncodeToString(evDigest[:])
 
 	// Write checksums with CORRECT evidence entry and invalid line format for second entry
-	invalidLine := "bcdef123456789abcdef0123456789abcdef0123456789abcdef0123456789abc  artifact.json\n"
+	// Invalid: only one space separator instead of two
+	invalidLine := "bcdef123456789abcdef0123456789abcdef0123456789abcdef0123456789abc artifact.json\n"
 	checksumsContent := evDigestHex + "  qualified-execution-evidence.json\n" + invalidLine
 	if err := os.WriteFile(checksumsPath, []byte(checksumsContent), 0644); err != nil {
 		t.Fatalf("write checksums: %v", err)
@@ -2564,15 +2539,21 @@ func TestVerifyPhysicalChecksums_ParseFailurePreservesMalformedChecksumLine(t *t
 	if err == nil {
 		t.Fatal("expected error for invalid checksum line")
 	}
-	// Must preserve ErrMalformedChecksumLine
+	// P0-1: Must preserve ErrMalformedChecksums (outer container error)
+	if !errors.Is(err, ErrMalformedChecksums) {
+		t.Errorf("errors.Is(err, ErrMalformedChecksums): got %v", err)
+	}
+	// P0-1: Must preserve ErrMalformedChecksumLine (canonical parser classification)
 	if !errors.Is(err, ErrMalformedChecksumLine) {
 		t.Errorf("errors.Is(err, ErrMalformedChecksumLine): got %v", err)
 	}
 }
 
-// TestVerifyPhysicalChecksums_InvalidPathPreservesChecksumMismatch tests that
-// invalid artifact paths in checksums preserve ErrChecksumMismatch.
-func TestVerifyPhysicalChecksums_InvalidPathPreservesChecksumMismatch(t *testing.T) {
+// TestVerifyPhysicalChecksums_InvalidLexicalPathPreservesFullParseChain tests that
+// invalid lexical artifact paths in checksums preserve the complete parse-time error chain.
+// Input "../escape.json" is rejected inside ParseChecksumsCanonical before physical resolution,
+// so ResolveRegularArtifactPath is never reached.
+func TestVerifyPhysicalChecksums_InvalidLexicalPathPreservesFullParseChain(t *testing.T) {
 	tmpDir := t.TempDir()
 	runRoot := filepath.Join(tmpDir, "run")
 	if err := os.MkdirAll(runRoot, 0755); err != nil {
@@ -2592,22 +2573,140 @@ func TestVerifyPhysicalChecksums_InvalidPathPreservesChecksumMismatch(t *testing
 	evDigest := sha256.Sum256(evidenceBytes)
 	evDigestHex := hex.EncodeToString(evDigest[:])
 
-	// Write checksums with valid evidence entry and an extra valid entry
-	// The inventory will include an invalid path that isn't in checksums
-	validChecksums := evDigestHex + "  qualified-execution-evidence.json\n"
-	validChecksums += evDigestHex + "  artifact.json\n"
-	if err := os.WriteFile(checksumsPath, []byte(validChecksums), 0644); err != nil {
+	// Write checksums with valid evidence entry AND an invalid lexical path (escape attempt)
+	// This is rejected inside ParseChecksumsCanonical, NOT in ResolveRegularArtifactPath.
+	checksumsContent := evDigestHex + "  qualified-execution-evidence.json\n"
+	checksumsContent += evDigestHex + "  ../escape.json\n" // invalid: rejected during parsing
+	if err := os.WriteFile(checksumsPath, []byte(checksumsContent), 0644); err != nil {
 		t.Fatalf("write checksums: %v", err)
 	}
 
-	// Inventory includes evidence (in checksums) but NOT artifact.json - this triggers extra-path error
-	err := verifyPhysicalChecksums(checksumsPath, evidencePath, []string{"qualified-execution-evidence.json"})
+	// Inventory includes both entries
+	err := verifyPhysicalChecksums(checksumsPath, evidencePath, []string{"qualified-execution-evidence.json", "../escape.json"})
 	if err == nil {
-		t.Fatal("expected error for extra path in checksums")
+		t.Fatal("expected error for invalid lexical path")
 	}
-	// Must preserve ErrMalformedChecksums (extra path in checksums not in inventory)
+	// Must preserve ErrMalformedChecksums (outer container error)
 	if !errors.Is(err, ErrMalformedChecksums) {
 		t.Errorf("errors.Is(err, ErrMalformedChecksums): got %v", err)
+	}
+	// Must preserve ErrMalformedChecksumLine (canonical parser classification)
+	if !errors.Is(err, ErrMalformedChecksumLine) {
+		t.Errorf("errors.Is(err, ErrMalformedChecksumLine): got %v", err)
+	}
+	// Must preserve ErrInvalidArtifactPath (path validation failure)
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+	// Must NOT preserve ErrChecksumMismatch (this is a parse failure, not verification failure)
+	if errors.Is(err, ErrChecksumMismatch) {
+		t.Error("errors.Is(err, ErrChecksumMismatch) should be false for parse failure")
+	}
+}
+
+// TestVerifyPhysicalChecksums_ChildSymlinkPreservesChecksumMismatch tests that
+// symlinks in the artifact path preserve ErrChecksumMismatch.
+// This test reaches ResolveRegularArtifactPath (symlink detection during physical walk).
+func TestVerifyPhysicalChecksums_ChildSymlinkPreservesChecksumMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	outsideDir := filepath.Join(tmpDir, "outside")
+	if err := os.MkdirAll(outsideDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Create symlink in runRoot that points outside
+	linkPath := filepath.Join(runRoot, "linkdir")
+	if err := os.Symlink(outsideDir, linkPath); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	checksumsPath := filepath.Join(runRoot, "checksums.txt")
+	evidencePath := filepath.Join(runRoot, "qualified-execution-evidence.json")
+
+	// Create the evidence file first
+	if err := os.WriteFile(evidencePath, []byte(""), 0644); err != nil {
+		t.Fatalf("write evidence: %v", err)
+	}
+
+	// Compute correct digest for evidence
+	evidenceBytes, _ := os.ReadFile(evidencePath)
+	evDigest := sha256.Sum256(evidenceBytes)
+	evDigestHex := hex.EncodeToString(evDigest[:])
+
+	// Write checksums with valid evidence entry AND path through symlink
+	checksumsContent := evDigestHex + "  qualified-execution-evidence.json\n"
+	checksumsContent += evDigestHex + "  linkdir/secret.json\n" // invalid: symlink in path
+	if err := os.WriteFile(checksumsPath, []byte(checksumsContent), 0644); err != nil {
+		t.Fatalf("write checksums: %v", err)
+	}
+
+	// Inventory includes both entries
+	err := verifyPhysicalChecksums(checksumsPath, evidencePath, []string{"qualified-execution-evidence.json", "linkdir/secret.json"})
+	if err == nil {
+		t.Fatal("expected error for symlink in path")
+	}
+	// Must preserve ErrChecksumMismatch (symlink detection during physical walk)
+	if !errors.Is(err, ErrChecksumMismatch) {
+		t.Errorf("errors.Is(err, ErrChecksumMismatch): got %v", err)
+	}
+}
+
+// TestVerifyPhysicalChecksums_ChildSymlinkPreservesInvalidArtifactPath tests that
+// symlinks in the artifact path preserve ErrInvalidArtifactPath.
+// This test reaches ResolveRegularArtifactPath (symlink detection during physical walk).
+func TestVerifyPhysicalChecksums_ChildSymlinkPreservesInvalidArtifactPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	outsideDir := filepath.Join(tmpDir, "outside")
+	if err := os.MkdirAll(outsideDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Create symlink in runRoot that points outside
+	linkPath := filepath.Join(runRoot, "linkdir")
+	if err := os.Symlink(outsideDir, linkPath); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	checksumsPath := filepath.Join(runRoot, "checksums.txt")
+	evidencePath := filepath.Join(runRoot, "qualified-execution-evidence.json")
+
+	// Create the evidence file first
+	if err := os.WriteFile(evidencePath, []byte(""), 0644); err != nil {
+		t.Fatalf("write evidence: %v", err)
+	}
+
+	// Compute correct digest for evidence
+	evidenceBytes, _ := os.ReadFile(evidencePath)
+	evDigest := sha256.Sum256(evidenceBytes)
+	evDigestHex := hex.EncodeToString(evDigest[:])
+
+	// Write checksums with valid evidence entry AND path through symlink
+	checksumsContent := evDigestHex + "  qualified-execution-evidence.json\n"
+	checksumsContent += evDigestHex + "  linkdir/secret.json\n" // invalid: symlink in path
+	if err := os.WriteFile(checksumsPath, []byte(checksumsContent), 0644); err != nil {
+		t.Fatalf("write checksums: %v", err)
+	}
+
+	// Inventory includes both entries
+	err := verifyPhysicalChecksums(checksumsPath, evidencePath, []string{"qualified-execution-evidence.json", "linkdir/secret.json"})
+	if err == nil {
+		t.Fatal("expected error for symlink in path")
+	}
+	// Must preserve ErrInvalidArtifactPath (symlink detection during physical walk)
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+	// Must NOT preserve ErrInvalidArtifactRoot (child error, not root error)
+	if errors.Is(err, ErrInvalidArtifactRoot) {
+		t.Error("child symlink error should not preserve ErrInvalidArtifactRoot")
 	}
 }
 
@@ -2734,7 +2833,7 @@ func TestVerifyPhysicalChecksums_InvalidRootPreservesInvalidArtifactPath(t *test
 }
 
 // TestVerifyPhysicalChecksums_MissingArtifactPreservesNotExist tests that
-// missing physical artifact preserves fs.ErrNotExist in the error chain.
+// missing physical artifact preserves fs.ErrNotExist, ErrChecksumMismatch, and ErrInvalidArtifactPath.
 func TestVerifyPhysicalChecksums_MissingArtifactPreservesNotExist(t *testing.T) {
 	tmpDir := t.TempDir()
 	runRoot := filepath.Join(tmpDir, "run")
@@ -2767,13 +2866,17 @@ func TestVerifyPhysicalChecksums_MissingArtifactPreservesNotExist(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected error for missing artifact")
 	}
-	// Must preserve fs.ErrNotExist (file doesn't exist)
+	// P0-1: Must preserve fs.ErrNotExist (file doesn't exist)
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("errors.Is(err, fs.ErrNotExist): got %v", err)
 	}
-	// Must preserve ErrInvalidArtifactPath (path validation fails)
+	// P0-1: Must preserve ErrInvalidArtifactPath (path validation fails)
 	if !errors.Is(err, ErrInvalidArtifactPath) {
 		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+	// P0-1: Must preserve ErrChecksumMismatch (cannot verify missing artifact)
+	if !errors.Is(err, ErrChecksumMismatch) {
+		t.Errorf("errors.Is(err, ErrChecksumMismatch): got %v", err)
 	}
 }
 
