@@ -2084,3 +2084,266 @@ func writeTestChecksums(path, artifactRoot string, inventory []string, evidenceP
 	}
 	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644)
 }
+
+// =============================================================================
+// P0-1: ResolveRegularArtifactPath root validation tests
+// =============================================================================
+
+func TestArtifactResolver_EmptyRootRejected(t *testing.T) {
+	_, err := ResolveRegularArtifactPath("", "file.json")
+	if err == nil {
+		t.Fatal("expected error for empty root")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestArtifactResolver_MissingRootRejected(t *testing.T) {
+	nonExistent := filepath.Join(t.TempDir(), "does-not-exist")
+	_, err := ResolveRegularArtifactPath(nonExistent, "file.json")
+	if err == nil {
+		t.Fatal("expected error for missing root")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestArtifactResolver_RootFileRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	rootFile := filepath.Join(tmpDir, "root-is-file")
+	if err := os.WriteFile(rootFile, []byte("content"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	_, err := ResolveRegularArtifactPath(rootFile, "file.json")
+	if err == nil {
+		t.Fatal("expected error for root file")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestArtifactResolver_SymlinkRootRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	realDir := filepath.Join(tmpDir, "real")
+	if err := os.MkdirAll(realDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	symlinkDir := filepath.Join(tmpDir, "link")
+	if err := os.Symlink(realDir, symlinkDir); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	_, err := ResolveRegularArtifactPath(symlinkDir, "file.json")
+	if err == nil {
+		t.Fatal("expected error for symlink root")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestArtifactResolver_IntermediateSymlinkRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	outsideDir := filepath.Join(tmpDir, "outside")
+	if err := os.MkdirAll(outsideDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Create symlink in runRoot that points outside
+	linkPath := filepath.Join(runRoot, "link")
+	if err := os.Symlink(outsideDir, linkPath); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	_, err := ResolveRegularArtifactPath(runRoot, "link/secret.json")
+	if err == nil {
+		t.Fatal("expected error for intermediate symlink")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestArtifactResolver_FinalSymlinkRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Create regular file
+	realPath := filepath.Join(runRoot, "real.json")
+	if err := os.WriteFile(realPath, []byte("content"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	// Create symlink to it
+	linkPath := filepath.Join(runRoot, "link.json")
+	if err := os.Symlink(realPath, linkPath); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	_, err := ResolveRegularArtifactPath(runRoot, "link.json")
+	if err == nil {
+		t.Fatal("expected error for final symlink")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestArtifactResolver_ValidNestedFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	if err := os.MkdirAll(filepath.Join(runRoot, "sub/dir"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	filePath := filepath.Join(runRoot, "sub/dir/file.json")
+	if err := os.WriteFile(filePath, []byte(`{"test":true}`), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	resolved, err := ResolveRegularArtifactPath(runRoot, "sub/dir/file.json")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resolved != filePath {
+		t.Errorf("resolved path: got %q, want %q", resolved, filePath)
+	}
+}
+
+func TestArtifactResolver_MissingFileRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	_, err := ResolveRegularArtifactPath(runRoot, "missing.json")
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+// =============================================================================
+// P0-2: Error identity preservation tests
+// =============================================================================
+
+func TestErrorIdentity_ErrMalformedChecksumLine(t *testing.T) {
+	// Empty input returns ErrMalformedChecksumLine
+	_, err := ParseChecksumsCanonical([]byte{})
+	if err == nil {
+		t.Fatal("expected error for empty input")
+	}
+	if !errors.Is(err, ErrMalformedChecksumLine) {
+		t.Errorf("errors.Is(err, ErrMalformedChecksumLine): got %v", err)
+	}
+}
+
+func TestErrorIdentity_ErrMalformedChecksumLine_InvalidPath(t *testing.T) {
+	// Invalid path returns ErrMalformedChecksumLine wrapped with ErrInvalidArtifactPath
+	data := []byte("abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd  ../escape.json\n")
+	_, err := ParseChecksumsCanonical(data)
+	if err == nil {
+		t.Fatal("expected error for invalid path")
+	}
+	if !errors.Is(err, ErrMalformedChecksumLine) {
+		t.Errorf("errors.Is(err, ErrMalformedChecksumLine): got %v", err)
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestErrorIdentity_ErrInvalidArtifactPath(t *testing.T) {
+	// Empty path returns ErrInvalidArtifactPath
+	err := ValidateArtifactRelativePath("")
+	if err == nil {
+		t.Fatal("expected error for empty path")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestErrorIdentity_ResolveRegularArtifactPath_ErrInvalidArtifactPath(t *testing.T) {
+	// Empty root returns ErrInvalidArtifactPath
+	_, err := ResolveRegularArtifactPath("", "file.json")
+	if err == nil {
+		t.Fatal("expected error for empty root")
+	}
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+func TestErrorIdentity_ErrMalformedChecksums(t *testing.T) {
+	// Test that ErrMalformedChecksums is a distinct sentinel error
+	if ErrMalformedChecksums == nil {
+		t.Fatal("ErrMalformedChecksums is nil")
+	}
+	if ErrMalformedChecksums.Error() == "" {
+		t.Error("ErrMalformedChecksums has empty message")
+	}
+}
+
+func TestErrorIdentity_ErrChecksumMismatch(t *testing.T) {
+	// Test that ErrChecksumMismatch is a distinct sentinel error
+	if ErrChecksumMismatch == nil {
+		t.Fatal("ErrChecksumMismatch is nil")
+	}
+	if ErrChecksumMismatch.Error() == "" {
+		t.Error("ErrChecksumMismatch has empty message")
+	}
+}
+
+func TestErrorIdentity_ErrProductionEvidenceMismatch(t *testing.T) {
+	// Test that ErrProductionEvidenceMismatch is a distinct sentinel error
+	if ErrProductionEvidenceMismatch == nil {
+		t.Fatal("ErrProductionEvidenceMismatch is nil")
+	}
+	if ErrProductionEvidenceMismatch.Error() == "" {
+		t.Error("ErrProductionEvidenceMismatch has empty message")
+	}
+}
+
+func TestErrorIdentity_ErrDuplicateInventoryEntry(t *testing.T) {
+	// Test that ErrDuplicateInventoryEntry is a distinct sentinel error
+	if ErrDuplicateInventoryEntry == nil {
+		t.Fatal("ErrDuplicateInventoryEntry is nil")
+	}
+	if ErrDuplicateInventoryEntry.Error() == "" {
+		t.Error("ErrDuplicateInventoryEntry has empty message")
+	}
+}
+
+func TestErrorIdentity_ErrNilDependency(t *testing.T) {
+	// Test that ErrNilDependency is a distinct sentinel error
+	if ErrNilDependency == nil {
+		t.Fatal("ErrNilDependency is nil")
+	}
+	if ErrNilDependency.Error() == "" {
+		t.Error("ErrNilDependency has empty message")
+	}
+}
+
+func TestErrorIdentity_ErrorSentinelsAreDistinct(t *testing.T) {
+	// All sentinel errors must be distinct
+	sentinels := []error{
+		ErrInvalidArtifactPath,
+		ErrMalformedChecksums,
+		ErrChecksumMismatch,
+		ErrProductionEvidenceMismatch,
+		ErrDuplicateInventoryEntry,
+		ErrNilDependency,
+	}
+	for i := 0; i < len(sentinels); i++ {
+		for j := i + 1; j < len(sentinels); j++ {
+			if errors.Is(sentinels[i], sentinels[j]) {
+				t.Errorf("sentinel %v is not distinct from %v", sentinels[i], sentinels[j])
+			}
+		}
+	}
+}

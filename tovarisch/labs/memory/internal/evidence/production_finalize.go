@@ -575,7 +575,7 @@ func verifyPhysicalChecksums(checksumsPath, evidencePath string, inventory []str
 	// Use the canonical checksum parser
 	entries, err := ParseChecksumsCanonical(checksumBytes)
 	if err != nil {
-		return fmt.Errorf("%w: parse error: %v", ErrMalformedChecksums, err)
+		return fmt.Errorf("%w: %w", ErrMalformedChecksums, err)
 	}
 
 	// Build a set of parsed paths for validation
@@ -611,7 +611,7 @@ func verifyPhysicalChecksums(checksumsPath, evidencePath string, inventory []str
 		// Use the canonical physical resolver
 		resolvedPath, err := ResolveRegularArtifactPath(runRoot, entry.Path)
 		if err != nil {
-			return fmt.Errorf("%w: resolve %q: %v", ErrChecksumMismatch, entry.Path, err)
+			return fmt.Errorf("%w: resolve %q: %w", ErrChecksumMismatch, entry.Path, err)
 		}
 
 		// Read physical bytes and recompute SHA-256
@@ -866,7 +866,7 @@ func ParseChecksumsCanonical(data []byte) ([]ChecksumEntry, error) {
 
 		// Validate path using shared lexical authority
 		if err := ValidateArtifactRelativePath(path); err != nil {
-			return nil, fmt.Errorf("%w: line %d: %v", ErrMalformedChecksumLine, lineNum+1, err)
+			return nil, fmt.Errorf("%w: line %d: %w", ErrMalformedChecksumLine, lineNum+1, err)
 		}
 
 		// Check for duplicate paths
@@ -888,25 +888,26 @@ func ParseChecksumsCanonical(data []byte) ([]ChecksumEntry, error) {
 // ResolveRegularArtifactPath resolves an artifact path to its physical location.
 // It validates the path and ensures it resolves to a regular file within runRoot.
 func ResolveRegularArtifactPath(runRoot string, artifactPath string) (string, error) {
-	// Validate the artifact path first
-	if err := ValidateArtifactPath(artifactPath, runRoot); err != nil {
-		return "", err
-	}
+	// P0-1: Order is critical: validate root first before any child access
 
-	// Resolve and validate runRoot
+	// 1. Reject empty runRoot before any filesystem operation
 	if runRoot == "" {
 		return "", fmt.Errorf("%w: runRoot is empty", ErrInvalidArtifactPath)
 	}
+
+	// 2. Convert to absolute path
 	absRunRoot, err := filepath.Abs(runRoot)
 	if err != nil {
 		return "", fmt.Errorf("%w: cannot resolve runRoot: %v", ErrInvalidArtifactPath, err)
 	}
 
-	// P0-2: Lstat runRoot itself - reject symlinked root
+	// 3. Lstat the root itself - must be done before any child access
 	rootInfo, err := os.Lstat(absRunRoot)
 	if err != nil {
 		return "", fmt.Errorf("%w: cannot stat runRoot %q: %v", ErrInvalidArtifactPath, runRoot, err)
 	}
+
+	// 4. Require non-symlink directory
 	if rootInfo.Mode()&os.ModeSymlink != 0 {
 		return "", fmt.Errorf("%w: runRoot %q is a symlink", ErrInvalidArtifactPath, runRoot)
 	}
@@ -914,20 +915,37 @@ func ResolveRegularArtifactPath(runRoot string, artifactPath string) (string, er
 		return "", fmt.Errorf("%w: runRoot %q is not a directory", ErrInvalidArtifactPath, runRoot)
 	}
 
-	// Resolve the full path
-	resolvedPath := filepath.Join(absRunRoot, artifactPath)
+	// 5. Validate artifact path lexically
+	if err := ValidateArtifactRelativePath(artifactPath); err != nil {
+		return "", fmt.Errorf("%w: artifact path validation failed: %w", ErrInvalidArtifactPath, err)
+	}
 
-	// Prove containment using filepath.Rel
+	// 6. Walk each component exactly once beneath validated root
+	components := strings.Split(artifactPath, "/")
+	dir := absRunRoot
+	for _, part := range components {
+		next := filepath.Join(dir, part)
+		info, err := os.Lstat(next)
+		if err != nil {
+			return "", fmt.Errorf("%w: cannot stat %q: %v", ErrInvalidArtifactPath, artifactPath, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("%w: symlink in path %q (component: %q)", ErrInvalidArtifactPath, artifactPath, part)
+		}
+		dir = next
+	}
+
+	// 7. Prove containment with filepath.Rel
+	resolvedPath := filepath.Join(absRunRoot, artifactPath)
 	rel, err := filepath.Rel(absRunRoot, resolvedPath)
 	if err != nil {
 		return "", fmt.Errorf("%w: cannot derive relative path: %v", ErrInvalidArtifactPath, err)
 	}
-	// Must be the same as the original path (no escape)
 	if rel != artifactPath {
 		return "", fmt.Errorf("%w: path escapes run root", ErrInvalidArtifactPath)
 	}
 
-	// Require regular file
+	// 8. Require regular final file
 	info, err := os.Stat(resolvedPath)
 	if err != nil {
 		return "", fmt.Errorf("%w: cannot stat %q: %v", ErrInvalidArtifactPath, artifactPath, err)
