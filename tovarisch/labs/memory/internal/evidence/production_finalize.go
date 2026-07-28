@@ -651,6 +651,16 @@ var ErrInvalidArtifactPath = errors.New("invalid artifact path")
 // Child/path failures preserve ErrInvalidArtifactPath but not ErrInvalidArtifactRoot.
 var ErrInvalidArtifactRoot = errors.New("invalid artifact root")
 
+// invalidArtifactRootError creates an error for root validation failures.
+// It always preserves ErrInvalidArtifactRoot and ErrInvalidArtifactPath.
+// If cause is non-nil, it also preserves the underlying filesystem error (e.g., fs.ErrNotExist).
+func invalidArtifactRootError(message string, cause error) error {
+	if cause != nil {
+		return fmt.Errorf("%s: %w", message, errors.Join(ErrInvalidArtifactRoot, ErrInvalidArtifactPath, cause))
+	}
+	return fmt.Errorf("%s: %w", message, errors.Join(ErrInvalidArtifactRoot, ErrInvalidArtifactPath))
+}
+
 // ValidateArtifactRelativePath validates a lexical artifact path.
 // It is the shared lexical authority consumed by both ParseChecksumsCanonical
 // and ResolveRegularArtifactPath.
@@ -896,37 +906,39 @@ func ParseChecksumsCanonical(data []byte) ([]ChecksumEntry, error) {
 //
 // Root validation errors (empty, non-existent, symlink, non-directory) are wrapped
 // with ErrInvalidArtifactRoot to distinguish them from child-path errors.
+// All root errors preserve ErrInvalidArtifactRoot, ErrInvalidArtifactPath, and
+// the underlying filesystem error (e.g., fs.ErrNotExist).
 func ResolveRegularArtifactPath(runRoot string, artifactPath string) (string, error) {
 	// P0-1: Order is critical: validate root first before any child access
 
 	// 1. Reject empty runRoot before any filesystem operation
 	if runRoot == "" {
-		return "", fmt.Errorf("%w: runRoot is empty: %w", ErrInvalidArtifactRoot, ErrInvalidArtifactPath)
+		return "", fmt.Errorf("runRoot is empty: %w", errors.Join(ErrInvalidArtifactRoot, ErrInvalidArtifactPath))
 	}
 
 	// 2. Convert to absolute path
 	absRunRoot, err := filepath.Abs(runRoot)
 	if err != nil {
-		return "", fmt.Errorf("%w: cannot resolve runRoot: %v: %w", ErrInvalidArtifactRoot, ErrInvalidArtifactPath, err)
+		return "", invalidArtifactRootError(fmt.Sprintf("cannot resolve runRoot %q", runRoot), err)
 	}
 
 	// 3. Lstat the root itself - must be done before any child access
 	rootInfo, err := os.Lstat(absRunRoot)
 	if err != nil {
-		return "", fmt.Errorf("%w: cannot stat runRoot %q: %v: %w", ErrInvalidArtifactRoot, runRoot, err, ErrInvalidArtifactPath)
+		return "", invalidArtifactRootError(fmt.Sprintf("cannot stat runRoot %q", runRoot), err)
 	}
 
 	// 4. Require non-symlink directory
 	if rootInfo.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("%w: runRoot %q is a symlink: %w", ErrInvalidArtifactRoot, runRoot, ErrInvalidArtifactPath)
+		return "", invalidArtifactRootError(fmt.Sprintf("runRoot %q is a symlink", runRoot), nil)
 	}
 	if !rootInfo.Mode().IsDir() {
-		return "", fmt.Errorf("%w: runRoot %q is not a directory: %w", ErrInvalidArtifactRoot, runRoot, ErrInvalidArtifactPath)
+		return "", invalidArtifactRootError(fmt.Sprintf("runRoot %q is not a directory", runRoot), nil)
 	}
 
 	// 5. Validate artifact path lexically
 	if err := ValidateArtifactRelativePath(artifactPath); err != nil {
-		return "", fmt.Errorf("%w: artifact path validation failed: %w", ErrInvalidArtifactPath, err)
+		return "", fmt.Errorf("artifact path validation failed: %w", err)
 	}
 
 	// 6. Walk each component exactly once beneath validated root

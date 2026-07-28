@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2105,8 +2106,15 @@ func TestArtifactResolver_MissingRootRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing root")
 	}
+	// Root errors must preserve both custom sentinels AND fs.ErrNotExist
+	if !errors.Is(err, ErrInvalidArtifactRoot) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactRoot): got %v", err)
+	}
 	if !errors.Is(err, ErrInvalidArtifactPath) {
 		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("errors.Is(err, fs.ErrNotExist): got %v", err)
 	}
 }
 
