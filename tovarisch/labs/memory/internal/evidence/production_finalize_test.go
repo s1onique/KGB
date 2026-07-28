@@ -2496,3 +2496,327 @@ func TestResolveRegularArtifactPath_ParentNotExist(t *testing.T) {
 		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
 	}
 }
+
+// =============================================================================
+// P0-1: Production checksum error chain tests
+// These tests verify the complete wrapping chain through verifyPhysicalChecksums.
+// =============================================================================
+
+// TestVerifyPhysicalChecksums_ParseFailurePreservesMalformedChecksums tests that
+// checksum parse failures preserve ErrMalformedChecksums in the error chain.
+func TestVerifyPhysicalChecksums_ParseFailurePreservesMalformedChecksums(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	checksumsPath := filepath.Join(runRoot, "checksums.txt")
+	evidencePath := filepath.Join(runRoot, "qualified-execution-evidence.json")
+
+	// Write malformed checksums (missing final LF)
+	malformedChecksums := []byte("abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd  artifact.json")
+	if err := os.WriteFile(checksumsPath, malformedChecksums, 0644); err != nil {
+		t.Fatalf("write checksums: %v", err)
+	}
+
+	err := verifyPhysicalChecksums(checksumsPath, evidencePath, []string{"artifact.json"})
+	if err == nil {
+		t.Fatal("expected error for malformed checksums")
+	}
+	// Must preserve ErrMalformedChecksums
+	if !errors.Is(err, ErrMalformedChecksums) {
+		t.Errorf("errors.Is(err, ErrMalformedChecksums): got %v", err)
+	}
+}
+
+// TestVerifyPhysicalChecksums_ParseFailurePreservesMalformedChecksumLine tests that
+// checksum parse failures preserve ErrMalformedChecksumLine in the error chain.
+func TestVerifyPhysicalChecksums_ParseFailurePreservesMalformedChecksumLine(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	checksumsPath := filepath.Join(runRoot, "checksums.txt")
+	evidencePath := filepath.Join(runRoot, "qualified-execution-evidence.json")
+
+	// Create the evidence file first with empty content
+	if err := os.WriteFile(evidencePath, []byte(""), 0644); err != nil {
+		t.Fatalf("write evidence: %v", err)
+	}
+
+	// Compute correct digest for evidence
+	evidenceBytes, _ := os.ReadFile(evidencePath)
+	evDigest := sha256.Sum256(evidenceBytes)
+	evDigestHex := hex.EncodeToString(evDigest[:])
+
+	// Write checksums with CORRECT evidence entry and invalid line format for second entry
+	invalidLine := "bcdef123456789abcdef0123456789abcdef0123456789abcdef0123456789abc  artifact.json\n"
+	checksumsContent := evDigestHex + "  qualified-execution-evidence.json\n" + invalidLine
+	if err := os.WriteFile(checksumsPath, []byte(checksumsContent), 0644); err != nil {
+		t.Fatalf("write checksums: %v", err)
+	}
+
+	// Inventory includes evidence (which is in checksums) and artifact.json
+	err := verifyPhysicalChecksums(checksumsPath, evidencePath, []string{"qualified-execution-evidence.json", "artifact.json"})
+	if err == nil {
+		t.Fatal("expected error for invalid checksum line")
+	}
+	// Must preserve ErrMalformedChecksumLine
+	if !errors.Is(err, ErrMalformedChecksumLine) {
+		t.Errorf("errors.Is(err, ErrMalformedChecksumLine): got %v", err)
+	}
+}
+
+// TestVerifyPhysicalChecksums_InvalidPathPreservesChecksumMismatch tests that
+// invalid artifact paths in checksums preserve ErrChecksumMismatch.
+func TestVerifyPhysicalChecksums_InvalidPathPreservesChecksumMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	checksumsPath := filepath.Join(runRoot, "checksums.txt")
+	evidencePath := filepath.Join(runRoot, "qualified-execution-evidence.json")
+
+	// Create the evidence file first
+	if err := os.WriteFile(evidencePath, []byte(""), 0644); err != nil {
+		t.Fatalf("write evidence: %v", err)
+	}
+
+	// Compute correct digest for evidence
+	evidenceBytes, _ := os.ReadFile(evidencePath)
+	evDigest := sha256.Sum256(evidenceBytes)
+	evDigestHex := hex.EncodeToString(evDigest[:])
+
+	// Write checksums with valid evidence entry and an extra valid entry
+	// The inventory will include an invalid path that isn't in checksums
+	validChecksums := evDigestHex + "  qualified-execution-evidence.json\n"
+	validChecksums += evDigestHex + "  artifact.json\n"
+	if err := os.WriteFile(checksumsPath, []byte(validChecksums), 0644); err != nil {
+		t.Fatalf("write checksums: %v", err)
+	}
+
+	// Inventory includes evidence (in checksums) but NOT artifact.json - this triggers extra-path error
+	err := verifyPhysicalChecksums(checksumsPath, evidencePath, []string{"qualified-execution-evidence.json"})
+	if err == nil {
+		t.Fatal("expected error for extra path in checksums")
+	}
+	// Must preserve ErrMalformedChecksums (extra path in checksums not in inventory)
+	if !errors.Is(err, ErrMalformedChecksums) {
+		t.Errorf("errors.Is(err, ErrMalformedChecksums): got %v", err)
+	}
+}
+
+// TestVerifyPhysicalChecksums_ValidChecksumsAndInventorySucceeds tests that when
+// checksums and inventory match exactly, no error is returned.
+func TestVerifyPhysicalChecksums_ValidChecksumsAndInventorySucceeds(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	checksumsPath := filepath.Join(runRoot, "checksums.txt")
+	evidencePath := filepath.Join(runRoot, "qualified-execution-evidence.json")
+
+	// Create the evidence file first
+	if err := os.WriteFile(evidencePath, []byte(""), 0644); err != nil {
+		t.Fatalf("write evidence: %v", err)
+	}
+
+	// Compute correct digest for evidence
+	evidenceBytes, _ := os.ReadFile(evidencePath)
+	evDigest := sha256.Sum256(evidenceBytes)
+	evDigestHex := hex.EncodeToString(evDigest[:])
+
+	// Write checksums with valid evidence entry
+	validChecksums := evDigestHex + "  qualified-execution-evidence.json\n"
+	if err := os.WriteFile(checksumsPath, []byte(validChecksums), 0644); err != nil {
+		t.Fatalf("write checksums: %v", err)
+	}
+
+	// Inventory matches checksums exactly - should succeed
+	err := verifyPhysicalChecksums(checksumsPath, evidencePath, []string{"qualified-execution-evidence.json"})
+	if err != nil {
+		t.Errorf("unexpected error for matching checksums and inventory: %v", err)
+	}
+}
+
+// TestVerifyPhysicalChecksums_InvalidRootPreservesChecksumMismatch tests that
+// invalid run root preserves ErrChecksumMismatch in the error chain.
+func TestVerifyPhysicalChecksums_InvalidRootPreservesChecksumMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Use a file as root (invalid)
+	invalidRoot := filepath.Join(tmpDir, "is-a-file")
+	if err := os.WriteFile(invalidRoot, []byte("content"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	checksumsPath := filepath.Join(tmpDir, "checksums.txt")
+	evidencePath := filepath.Join(invalidRoot, "qualified-execution-evidence.json")
+
+	// Write valid-looking checksums (will fail at path resolution due to invalid root)
+	validChecksums := []byte(`abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd  qualified-execution-evidence.json
+`)
+	if err := os.WriteFile(checksumsPath, validChecksums, 0644); err != nil {
+		t.Fatalf("write checksums: %v", err)
+	}
+
+	err := verifyPhysicalChecksums(checksumsPath, evidencePath, []string{"qualified-execution-evidence.json"})
+	if err == nil {
+		t.Fatal("expected error for invalid root")
+	}
+	// Must preserve ErrChecksumMismatch (root validation fails)
+	if !errors.Is(err, ErrChecksumMismatch) {
+		t.Errorf("errors.Is(err, ErrChecksumMismatch): got %v", err)
+	}
+}
+
+// TestVerifyPhysicalChecksums_InvalidRootPreservesInvalidArtifactRoot tests that
+// invalid run root preserves ErrInvalidArtifactRoot in the error chain.
+func TestVerifyPhysicalChecksums_InvalidRootPreservesInvalidArtifactRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Use a file as root (invalid)
+	invalidRoot := filepath.Join(tmpDir, "is-a-file")
+	if err := os.WriteFile(invalidRoot, []byte("content"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	checksumsPath := filepath.Join(tmpDir, "checksums.txt")
+	evidencePath := filepath.Join(invalidRoot, "qualified-execution-evidence.json")
+
+	validChecksums := []byte(`abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd  qualified-execution-evidence.json
+`)
+	if err := os.WriteFile(checksumsPath, validChecksums, 0644); err != nil {
+		t.Fatalf("write checksums: %v", err)
+	}
+
+	err := verifyPhysicalChecksums(checksumsPath, evidencePath, []string{"qualified-execution-evidence.json"})
+	if err == nil {
+		t.Fatal("expected error for invalid root")
+	}
+	// Must preserve ErrInvalidArtifactRoot
+	if !errors.Is(err, ErrInvalidArtifactRoot) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactRoot): got %v", err)
+	}
+}
+
+// TestVerifyPhysicalChecksums_InvalidRootPreservesInvalidArtifactPath tests that
+// invalid run root preserves ErrInvalidArtifactPath in the error chain.
+func TestVerifyPhysicalChecksums_InvalidRootPreservesInvalidArtifactPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	invalidRoot := filepath.Join(tmpDir, "is-a-file")
+	if err := os.WriteFile(invalidRoot, []byte("content"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	checksumsPath := filepath.Join(tmpDir, "checksums.txt")
+	evidencePath := filepath.Join(invalidRoot, "qualified-execution-evidence.json")
+
+	validChecksums := []byte(`abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd  qualified-execution-evidence.json
+`)
+	if err := os.WriteFile(checksumsPath, validChecksums, 0644); err != nil {
+		t.Fatalf("write checksums: %v", err)
+	}
+
+	err := verifyPhysicalChecksums(checksumsPath, evidencePath, []string{"qualified-execution-evidence.json"})
+	if err == nil {
+		t.Fatal("expected error for invalid root")
+	}
+	// Must preserve ErrInvalidArtifactPath
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+// TestVerifyPhysicalChecksums_MissingArtifactPreservesNotExist tests that
+// missing physical artifact preserves fs.ErrNotExist in the error chain.
+func TestVerifyPhysicalChecksums_MissingArtifactPreservesNotExist(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	checksumsPath := filepath.Join(runRoot, "checksums.txt")
+	evidencePath := filepath.Join(runRoot, "qualified-execution-evidence.json")
+
+	// Create the evidence file first with empty content
+	if err := os.WriteFile(evidencePath, []byte(""), 0644); err != nil {
+		t.Fatalf("write evidence: %v", err)
+	}
+
+	// Compute correct digest for evidence
+	evidenceBytes, _ := os.ReadFile(evidencePath)
+	evDigest := sha256.Sum256(evidenceBytes)
+	evDigestHex := hex.EncodeToString(evDigest[:])
+
+	// Write checksums with correct evidence entry AND entry for missing file
+	checksumsContent := evDigestHex + "  qualified-execution-evidence.json\n"
+	checksumsContent += evDigestHex + "  missing.json\n" // file doesn't exist
+	if err := os.WriteFile(checksumsPath, []byte(checksumsContent), 0644); err != nil {
+		t.Fatalf("write checksums: %v", err)
+	}
+
+	// Inventory includes both evidence (with correct digest) and missing.json
+	err := verifyPhysicalChecksums(checksumsPath, evidencePath, []string{"qualified-execution-evidence.json", "missing.json"})
+	if err == nil {
+		t.Fatal("expected error for missing artifact")
+	}
+	// Must preserve fs.ErrNotExist (file doesn't exist)
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("errors.Is(err, fs.ErrNotExist): got %v", err)
+	}
+	// Must preserve ErrInvalidArtifactPath (path validation fails)
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+}
+
+// TestVerifyPhysicalChecksums_DigestMismatchPreservesChecksumMismatch tests that
+// digest mismatch preserves ErrChecksumMismatch in the error chain.
+func TestVerifyPhysicalChecksums_DigestMismatchPreservesChecksumMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	artifactPath := filepath.Join(runRoot, "artifact.json")
+	if err := os.WriteFile(artifactPath, []byte("actual content"), 0644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	evidencePath := filepath.Join(runRoot, "qualified-execution-evidence.json")
+	// Create the evidence file with empty content
+	if err := os.WriteFile(evidencePath, []byte(""), 0644); err != nil {
+		t.Fatalf("write evidence: %v", err)
+	}
+
+	// Compute correct digest for evidence
+	evidenceBytes, _ := os.ReadFile(evidencePath)
+	evDigest := sha256.Sum256(evidenceBytes)
+	evDigestHex := hex.EncodeToString(evDigest[:])
+
+	checksumsPath := filepath.Join(runRoot, "checksums.txt")
+
+	// Write checksums with CORRECT evidence digest but WRONG artifact digest
+	checksumsContent := evDigestHex + "  qualified-execution-evidence.json\n"
+	checksumsContent += "0000000000000000000000000000000000000000000000000000000000000000  artifact.json\n" // wrong digest
+	if err := os.WriteFile(checksumsPath, []byte(checksumsContent), 0644); err != nil {
+		t.Fatalf("write checksums: %v", err)
+	}
+
+	err := verifyPhysicalChecksums(checksumsPath, evidencePath, []string{"qualified-execution-evidence.json", "artifact.json"})
+	if err == nil {
+		t.Fatal("expected error for digest mismatch")
+	}
+	// Must preserve ErrChecksumMismatch
+	if !errors.Is(err, ErrChecksumMismatch) {
+		t.Errorf("errors.Is(err, ErrChecksumMismatch): got %v", err)
+	}
+}
