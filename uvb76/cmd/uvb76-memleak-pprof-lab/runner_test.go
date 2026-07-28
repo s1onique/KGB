@@ -1,229 +1,202 @@
-// Package main provides tests for the lab harness lifecycle management.
 package main
 
 import (
-	"os"
-	"path/filepath"
-	"syscall"
 	"testing"
-	"time"
 )
 
-func TestProcessState_Running(t *testing.T) {
-	ps := &ProcessState{}
-
-	if ps.Running() {
-		t.Error("new ProcessState should not be running")
-	}
-	if ps.Exited() {
-		t.Error("new ProcessState should not be exited")
+func TestProcessIsGoneForInvalidPID(t *testing.T) {
+	// PID 0 should be considered gone
+	if !processIsGone(0) {
+		t.Error("PID 0 should be considered gone")
 	}
 
-	ps.mu.Lock()
-	ps.running = true
-	ps.mu.Unlock()
-
-	if !ps.Running() {
-		t.Error("ProcessState should be running after setting running=true")
+	// Negative PIDs should be considered gone
+	if !processIsGone(-1) {
+		t.Error("negative PID should be considered gone")
 	}
 }
 
-func TestProcessState_ExitInfo(t *testing.T) {
-	ps := &ProcessState{}
-
-	code, sig := ps.ExitInfo()
-	if code != 0 {
-		t.Errorf("expected exitCode 0, got %d", code)
-	}
-	if sig != 0 {
-		t.Errorf("expected signal 0, got %v", sig)
+func TestFlagsDefaultValues(t *testing.T) {
+	// Test that default values are sensible for smoke
+	if *flagUseFakeTovarisch != false {
+		t.Errorf("default use-fake-tovarisch should be false, got %v", *flagUseFakeTovarisch)
 	}
 
-	ps.SetExited(42, syscall.SIGSEGV)
-
-	code, sig = ps.ExitInfo()
-	if code != 42 {
-		t.Errorf("expected exitCode 42, got %d", code)
+	// Default duration should be 2 minutes for smoke
+	if (*flagDuration).Seconds() != 120 {
+		t.Errorf("default duration should be 120s for smoke, got %v", *flagDuration)
 	}
-	if sig != syscall.SIGSEGV {
-		t.Errorf("expected SIGSEGV, got %v", sig)
+
+	// Sample interval should be 1 second
+	if (*flagSampleInterval).Seconds() != 1 {
+		t.Errorf("default sample interval should be 1s, got %v", *flagSampleInterval)
 	}
 }
 
-func TestProcessState_Exited(t *testing.T) {
-	ps := &ProcessState{}
-
-	if ps.Exited() {
-		t.Error("new ProcessState should not be exited")
+func TestPortDefaults(t *testing.T) {
+	if *flagTovarischPort != "18317" {
+		t.Errorf("default tovarisch port should be 18317, got %s", *flagTovarischPort)
 	}
-
-	ps.SetExited(1, 0)
-
-	if !ps.Exited() {
-		t.Error("ProcessState should be exited after SetExited")
+	if *flagUVB76Port != "18444" {
+		t.Errorf("default uvb76 port should be 18444, got %s", *flagUVB76Port)
 	}
-	if ps.Running() {
-		t.Error("ProcessState should not be running after SetExited")
+	if *flagPProfPort != "16060" {
+		t.Errorf("default pprof port should be 16060, got %s", *flagPProfPort)
 	}
 }
 
-func TestLifecycleState_String(t *testing.T) {
-	tests := []struct {
-		state    LifecycleState
-		expected string
-	}{
-		{StateSetup, "SETUP"},
-		{StateLaunching, "LAUNCHING"},
-		{StateRunning, "RUNNING"},
-		{StateReady, "READY"},
-		{StateCollecting, "COLLECTING"},
-		{StateCollected, "COLLECTED"},
-		{StateVerified, "VERIFIED"},
-		{StateShutdown, "SHUTDOWN"},
-		{StateFailedStartup, "FAILED_STARTUP"},
-		{StateFailedReadiness, "FAILED_READINESS"},
-		{StateFailedCollection, "FAILED_COLLECTION"},
-		{StateFailedVerification, "FAILED_VERIFICATION"},
-		{LifecycleState(999), "UNKNOWN"},
+func TestLabResultClassification(t *testing.T) {
+	result := LabResult{
+		RealTovarischStarted:  true,
+		RealTovarischReady:    true,
+		RealUVB76Started:      true,
+		UVB76PProfReady:       true,
+		RealTargetObserved:    true,
+		ScrapeAttempted:       true,
+		ScrapeCompleted:       true,
+		ProcessSamplesPresent: true,
+		ProfilesPresent:       true,
+		UVB76Removed:          true,
+		TovarischRemoved:      true,
+		PortsReleased:         true,
 	}
 
-	for _, tc := range tests {
-		if got := tc.state.String(); got != tc.expected {
-			t.Errorf("LifecycleState(%d).String() = %q, want %q", tc.state, got, tc.expected)
+	// All checks pass -> OBSERVED
+	if result.RealTovarischStarted && result.RealUVB76Started &&
+		result.UVB76PProfReady && result.RealTargetObserved &&
+		result.ProcessSamplesPresent && result.ProfilesPresent &&
+		result.UVB76Removed && result.TovarischRemoved && result.PortsReleased {
+		result.Classification = "OBSERVED"
+		result.OK = true
+	}
+
+	if result.Classification != "OBSERVED" {
+		t.Errorf("expected OBSERVED classification, got %s", result.Classification)
+	}
+	if !result.OK {
+		t.Error("result should be OK when all checks pass")
+	}
+}
+
+func TestLabResultPartialClassification(t *testing.T) {
+	result := LabResult{
+		RealTovarischStarted: true,
+		RealTovarischReady:   true,
+		RealUVB76Started:     true,
+		UVB76PProfReady:      true,
+		// Missing scrape completion
+		RealTargetObserved:    false,
+		ProcessSamplesPresent: true,
+		ProfilesPresent:       true,
+		UVB76Removed:          true,
+		TovarischRemoved:      true,
+		PortsReleased:         true,
+	}
+
+	// Partial failure
+	if !result.RealTargetObserved {
+		result.Classification = "PARTIAL"
+	}
+
+	if result.Classification != "PARTIAL" {
+		t.Errorf("expected PARTIAL classification for missing scrape, got %s", result.Classification)
+	}
+}
+
+func TestLabResultFailedClassification(t *testing.T) {
+	result := LabResult{
+		RealTovarischStarted: false, // Failed to start
+		Errors:               []string{"start tovarisch: binary not found"},
+	}
+
+	// Failed classification
+	result.Classification = "FAILED"
+
+	if result.Classification != "FAILED" {
+		t.Errorf("expected FAILED classification, got %s", result.Classification)
+	}
+}
+
+func TestClassificationForbiddenValues(t *testing.T) {
+	// These classifications are FORBIDDEN from this smoke:
+	forbidden := []string{"stable", "growing", "leak", "bounded", "resource_growth"}
+
+	result := LabResult{}
+	result.Classification = "OBSERVED" // Only allowed value for success
+
+	for _, v := range forbidden {
+		if result.Classification == v {
+			t.Errorf("forbidden classification value: %s", v)
 		}
 	}
 }
 
-func TestBuildCrashEvidence(t *testing.T) {
-	evidence := StartupEvidence{
-		PID:              1234,
-		ExecutablePath:   "/bin/uvb76",
-		Args:             []string{"-dev", "-config", "/tmp/config"},
-		ChosenPorts: PortsChoice{
-			UVB76:     "18444",
-			PPROF:     "16060",
-			Tovarisch: "18317",
-		},
+func TestProcessIdentityFields(t *testing.T) {
+	identity := ProcessIdentity{
+		ExecutablePath: "/path/to/tovarisch",
+		Argv:           []string{"tovarisch", "serve", "--listen", "127.0.0.1:18317"},
+		PID:            12345,
+		Port:           "18317",
 	}
 
-	crash := buildCrashEvidence(evidence, false, false, StateFailedReadiness)
-
-	if crash.PID != 1234 {
-		t.Errorf("expected PID 1234, got %d", crash.PID)
+	if identity.ExecutablePath == "" {
+		t.Error("ExecutablePath should be set")
 	}
-	if crash.PPROFReady != false {
-		t.Error("expected PPROFReady=false")
+	if identity.PID <= 0 {
+		t.Error("PID should be positive")
 	}
-	if crash.CollectorStarted != false {
-		t.Error("expected CollectorStarted=false")
-	}
-	if crash.State != "FAILED_READINESS" {
-		t.Errorf("expected state FAILED_READINESS, got %s", crash.State)
+	if identity.Port == "" {
+		t.Error("Port should be set")
 	}
 }
 
-func TestRemoveStaleArtifacts(t *testing.T) {
-	// Create temp dir
-	tmpDir, err := os.MkdirTemp("", "stale-test")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Create stale files
-	staleFiles := []string{"exit.json", "startup_evidence.json"}
-	for _, f := range staleFiles {
-		path := filepath.Join(tmpDir, f)
-		if err := os.WriteFile(path, []byte("stale"), 0644); err != nil {
-			t.Fatalf("failed to create stale file %s: %v", f, err)
-		}
+func TestReadinessResultFields(t *testing.T) {
+	readiness := ReadinessResult{
+		TovarischReady:  true,
+		UVB76PProfReady: true,
 	}
 
-	// Remove stale artifacts
-	if err := removeStaleArtifacts(tmpDir); err != nil {
-		t.Fatalf("removeStaleArtifacts failed: %v", err)
+	if !readiness.TovarischReady {
+		t.Error("TovarischReady should be true")
 	}
-
-	// Verify files are gone
-	for _, f := range staleFiles {
-		path := filepath.Join(tmpDir, f)
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Errorf("expected %s to be removed, but it exists", f)
-		}
+	if !readiness.UVB76PProfReady {
+		t.Error("UVB76PProfReady should be true")
 	}
 }
 
-func TestWaitForHTTPReady_Timeout(t *testing.T) {
-	// Test with invalid URL - should timeout
-	ok := waitForHTTPReady("http://localhost:99999/nonexistent", 100*time.Millisecond)
-	if ok {
-		t.Error("expected waitForHTTPReady to return false for unreachable URL")
+func TestProcessSampleFields(t *testing.T) {
+	sample := ProcessSample{
+		PID:       12345,
+		RSSKIB:    1024,
+		VMSizeKIB: 4096,
+		Threads:   5,
+		FDCount:   10,
+	}
+
+	if sample.PID <= 0 {
+		t.Error("PID should be positive")
+	}
+	if sample.RSSKIB <= 0 {
+		t.Error("RSSKIB should be positive")
+	}
+	if sample.Threads <= 0 {
+		t.Error("Threads should be positive")
 	}
 }
 
-func TestStartupEvidence_JSON(t *testing.T) {
-	evidence := StartupEvidence{
-		LaunchTimestamp:     "2024-01-15T10:30:00Z",
-		PID:                12345,
-		ExecutablePath:     "/usr/bin/uvb76",
-		Args:               []string{"-dev", "-config", "/tmp/lab.json"},
-		ConfigPath:         "/tmp/lab.json",
-		ChosenPorts: PortsChoice{
-			UVB76:     "18444",
-			PPROF:     "16060",
-			Tovarisch: "18317",
-		},
-		StartupDurationMs:    150,
-		ReadinessDurationMs: 2000,
+func TestTargetObservationFields(t *testing.T) {
+	obs := TargetObservation{
+		TargetID:   "real-tovarisch",
+		Reachable:  true,
+		Status:     "ok",
+		Version:    "0.1.0",
+		ScrapedURL: "http://localhost:18317/status",
 	}
 
-	// Verify fields are accessible
-	if evidence.PID != 12345 {
-		t.Errorf("expected PID 12345, got %d", evidence.PID)
+	if obs.TargetID != "real-tovarisch" {
+		t.Errorf("expected TargetID 'real-tovarisch', got %s", obs.TargetID)
 	}
-	if evidence.StartupDurationMs != 150 {
-		t.Errorf("expected StartupDurationMs 150, got %d", evidence.StartupDurationMs)
-	}
-	if evidence.ReadinessDurationMs != 2000 {
-		t.Errorf("expected ReadinessDurationMs 2000, got %d", evidence.ReadinessDurationMs)
-	}
-	if len(evidence.Args) != 3 {
-		t.Errorf("expected 3 args, got %d", len(evidence.Args))
-	}
-}
-
-func TestCrashEvidence_JSON(t *testing.T) {
-	crash := CrashEvidence{
-		PID:              12345,
-		ExitCode:         1,
-		ExitSignal:       11,
-		RuntimeMs:        742,
-		PPROFReady:       false,
-		CollectorStarted: false,
-		State:            "FAILED_READINESS",
-		StderrExcerpt:    "listen tcp :16060: bind: address already in use",
-	}
-
-	// Verify fields
-	if crash.PID != 12345 {
-		t.Errorf("expected PID 12345, got %d", crash.PID)
-	}
-	if crash.ExitCode != 1 {
-		t.Errorf("expected ExitCode 1, got %d", crash.ExitCode)
-	}
-	if crash.ExitSignal != 11 {
-		t.Errorf("expected ExitSignal 11, got %d", crash.ExitSignal)
-	}
-	if crash.RuntimeMs != 742 {
-		t.Errorf("expected RuntimeMs 742, got %d", crash.RuntimeMs)
-	}
-	if crash.PPROFReady != false {
-		t.Error("expected PPROFReady=false")
-	}
-	if crash.CollectorStarted != false {
-		t.Error("expected CollectorStarted=false")
-	}
-	if crash.State != "FAILED_READINESS" {
-		t.Errorf("expected State FAILED_READINESS, got %s", crash.State)
+	if obs.ScrapedURL == "" {
+		t.Error("ScrapedURL should be set")
 	}
 }

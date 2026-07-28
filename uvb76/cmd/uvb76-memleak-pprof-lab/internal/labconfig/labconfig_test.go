@@ -1,120 +1,202 @@
-// Package labconfig provides tests for lab config generation.
 package labconfig
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/s1onique/KGB/uvb76/config"
 )
 
-func TestGenerate_PProfEnabled(t *testing.T) {
-	cfg := Generate("18444", "16060", "18317")
+func TestGenerateRealMode(t *testing.T) {
+	cfg := Generate("18444", "16060", "18317", false)
 
-	// Verify diagnostics is enabled
-	if !cfg.Diagnostics.Enabled {
-		t.Error("Expected Diagnostics.Enabled to be true")
+	// Verify target ID is real-tovarisch
+	if len(cfg.Targets) != 1 {
+		t.Fatalf("expected 1 target, got %d", len(cfg.Targets))
+	}
+	if cfg.Targets[0].ID != "real-tovarisch" {
+		t.Errorf("expected target ID 'real-tovarisch', got %q", cfg.Targets[0].ID)
+	}
+	if cfg.Targets[0].Name != "Real Tovarisch Status Endpoint" {
+		t.Errorf("expected target name 'Real Tovarisch Status Endpoint', got %q", cfg.Targets[0].Name)
 	}
 
-	// Verify pprof is enabled in lab config
-	if !cfg.Diagnostics.PProf.Enabled {
-		t.Error("Expected Diagnostics.PProf.Enabled to be true in lab config")
+	// Verify diagnostics peer uses real-tovarisch
+	if len(cfg.Diagnostics.Peers) != 1 {
+		t.Fatalf("expected 1 peer, got %d", len(cfg.Diagnostics.Peers))
+	}
+	if cfg.Diagnostics.Peers[0].Name != "real-tovarisch-peer" {
+		t.Errorf("expected peer name 'real-tovarisch-peer', got %q", cfg.Diagnostics.Peers[0].Name)
+	}
+	if len(cfg.Diagnostics.Peers[0].Targets) != 1 || cfg.Diagnostics.Peers[0].Targets[0] != "real-tovarisch" {
+		t.Errorf("expected peer targets ['real-tovarisch'], got %v", cfg.Diagnostics.Peers[0].Targets)
 	}
 
-	// Verify pprof listen address
-	if cfg.Diagnostics.PProf.Listen != "localhost:16060" {
-		t.Errorf("Expected PProf.Listen=localhost:16060, got %s", cfg.Diagnostics.PProf.Listen)
-	}
-
-	// Verify mem profile rate
-	if cfg.Diagnostics.PProf.MemProfileRate != 65536 {
-		t.Errorf("Expected MemProfileRate=65536, got %d", cfg.Diagnostics.PProf.MemProfileRate)
+	// Verify scrape interval is short for smoke
+	if cfg.Scrape.IntervalSeconds != 1 {
+		t.Errorf("expected scrape interval 1, got %d", cfg.Scrape.IntervalSeconds)
 	}
 }
 
-func TestGenerate_TargetConfigured(t *testing.T) {
-	cfg := Generate("18444", "16060", "18317")
+func TestGenerateFakeMode(t *testing.T) {
+	cfg := Generate("18444", "16060", "18317", true)
 
-	if len(cfg.Targets) != 1 {
-		t.Fatalf("Expected 1 target, got %d", len(cfg.Targets))
+	// Verify target ID is fake-tovarisch
+	if cfg.Targets[0].ID != "fake-tovarisch" {
+		t.Errorf("expected target ID 'fake-tovarisch', got %q", cfg.Targets[0].ID)
 	}
+	if cfg.Targets[0].Name != "Fake Tovarisch Status Endpoint" {
+		t.Errorf("expected target name 'Fake Tovarisch Status Endpoint', got %q", cfg.Targets[0].Name)
+	}
+
+	// Verify diagnostics peer uses fake-tovarisch
+	if cfg.Diagnostics.Peers[0].Name != "fake-tovarisch-peer" {
+		t.Errorf("expected peer name 'fake-tovarisch-peer', got %q", cfg.Diagnostics.Peers[0].Name)
+	}
+}
+
+func TestGeneratedConfigValidates(t *testing.T) {
+	cfg := Generate("18444", "16060", "18317", false)
+
+	// Convert to config.Config for validation
+	prodCfg := &config.Config{
+		Listen:      cfg.Listen,
+		Auth:        cfg.Auth,
+		Scrape:      cfg.Scrape,
+		Latency:     cfg.Latency,
+		Diagnostics: cfg.Diagnostics,
+		Targets:     cfg.Targets,
+	}
+
+	// Validate with dev mode (allow missing TLS)
+	err := prodCfg.Validate(config.ValidationOptions{AllowMissingTLS: true})
+	if err != nil {
+		t.Errorf("generated config should be valid: %v", err)
+	}
+}
+
+func TestPProfEnabled(t *testing.T) {
+	cfg := Generate("18444", "16060", "18317", false)
+
+	if !cfg.Diagnostics.Enabled {
+		t.Error("diagnostics should be enabled")
+	}
+	if !cfg.Diagnostics.PProf.Enabled {
+		t.Error("pprof should be enabled")
+	}
+	if cfg.Diagnostics.PProf.Listen != "localhost:16060" {
+		t.Errorf("expected pprof listen 'localhost:16060', got %q", cfg.Diagnostics.PProf.Listen)
+	}
+}
+
+func TestDiagPeerHasValidBaseURL(t *testing.T) {
+	cfg := Generate("18444", "16060", "18317", false)
+
+	peer := cfg.Diagnostics.Peers[0]
+	if peer.BaseURL != "http://localhost:18317" {
+		t.Errorf("expected peer base_url 'http://localhost:18317', got %q", peer.BaseURL)
+	}
+}
+
+func TestTargetURLIsRealTovarisch(t *testing.T) {
+	cfg := Generate("18444", "16060", "18317", false)
 
 	target := cfg.Targets[0]
-	if target.ID != "fake-tovarisch" {
-		t.Errorf("Expected target ID=fake-tovarisch, got %s", target.ID)
-	}
-	if target.BaseURL != "http://localhost:18317/status" {
-		t.Errorf("Expected BaseURL=http://localhost:18317/status, got %s", target.BaseURL)
-	}
-	if !target.Enabled {
-		t.Error("Expected target to be enabled")
+	if target.BaseURL != "http://localhost:18317" {
+		t.Errorf("expected target base_url 'http://localhost:18317', got %q", target.BaseURL)
 	}
 }
 
-func TestGenerate_ScrapeInterval(t *testing.T) {
-	cfg := Generate("18444", "16060", "18317")
+func TestScrapeIntervalForSmoke(t *testing.T) {
+	cfg := Generate("18444", "16060", "18317", false)
 
-	if cfg.Scrape.IntervalSeconds != 30 {
-		t.Errorf("Expected Scrape.IntervalSeconds=30, got %d", cfg.Scrape.IntervalSeconds)
+	// 1 second interval for active smoke test
+	if cfg.Scrape.IntervalSeconds != 1 {
+		t.Errorf("expected scrape interval 1 for smoke, got %d", cfg.Scrape.IntervalSeconds)
 	}
 }
 
-func TestGenerate_ListenAddress(t *testing.T) {
-	cfg := Generate("18444", "16060", "18317")
+func TestLatencyDisabled(t *testing.T) {
+	cfg := Generate("18444", "16060", "18317", false)
 
-	if cfg.Listen.Addr != "localhost:18444" {
-		t.Errorf("Expected Listen.Addr=localhost:18444, got %s", cfg.Listen.Addr)
+	// HTTP latency should be disabled
+	if cfg.Latency.HTTP.Enabled != nil && *cfg.Latency.HTTP.Enabled != false {
+		t.Error("HTTP latency should be disabled in lab")
+	}
+
+	// ICMP latency should be disabled
+	if cfg.Latency.ICMP.Enabled != nil && *cfg.Latency.ICMP.Enabled != false {
+		t.Error("ICMP latency should be disabled in lab")
 	}
 }
 
-func TestGenerate_NoTLSCert(t *testing.T) {
-	cfg := Generate("18444", "16060", "18317")
+func TestFakeToarischAbsentInRealMode(t *testing.T) {
+	cfg := Generate("18444", "16060", "18317", false)
 
-	if cfg.Listen.TLSCertFile != "" {
-		t.Errorf("Expected TLSCertFile to be empty, got %s", cfg.Listen.TLSCertFile)
+	// Verify no fake target ID exists
+	for _, target := range cfg.Targets {
+		if target.ID == "fake-tovarisch" {
+			t.Error("fake-tovarisch should not exist in real mode")
+		}
+	}
+
+	// Verify no fake peer name exists
+	for _, peer := range cfg.Diagnostics.Peers {
+		if peer.Name == "fake-tovarisch-peer" {
+			t.Error("fake-tovarisch-peer should not exist in real mode")
+		}
 	}
 }
 
-func TestGenerate_ValidJSON(t *testing.T) {
-	cfg := Generate("18444", "16060", "18317")
+func TestConfigJSONSerialize(t *testing.T) {
+	cfg := Generate("18444", "16060", "18317", false)
+
+	// Marshal to JSON and back
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("should serialize to JSON: %v", err)
+	}
+
+	var cfg2 Config
+	if err := json.Unmarshal(data, &cfg2); err != nil {
+		t.Fatalf("should deserialize from JSON: %v", err)
+	}
+
+	// Verify key fields preserved
+	if cfg2.Targets[0].ID != cfg.Targets[0].ID {
+		t.Error("target ID should be preserved")
+	}
+	if cfg2.Diagnostics.PProf.Listen != cfg.Diagnostics.PProf.Listen {
+		t.Error("pprof listen should be preserved")
+	}
+}
+
+func TestRealConfigFileForUVB76(t *testing.T) {
+	// Create a temp file to write the config
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "test-config.json")
+
+	cfg := Generate("18444", "16060", "18317", false)
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		t.Fatalf("Failed to marshal config: %v", err)
+		t.Fatalf("should marshal: %v", err)
 	}
 
-	// Verify it can be unmarshaled
-	var decoded Config
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("Failed to unmarshal config: %v", err)
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		t.Fatalf("should write file: %v", err)
 	}
 
-	// Verify key fields
-	if decoded.Diagnostics.PProf.Listen != "localhost:16060" {
-		t.Errorf("Round-trip failed: PProf.Listen=%s", decoded.Diagnostics.PProf.Listen)
+	// Load using production config loader
+	prodCfg, err := config.LoadWithOptions(configPath, config.ValidationOptions{AllowMissingTLS: true})
+	if err != nil {
+		t.Fatalf("production config should load generated config: %v", err)
 	}
-}
 
-func TestGenerate_DiagnosticsConfigType(t *testing.T) {
-	cfg := Generate("18444", "16060", "18317")
-
-	// Verify the type is compatible with config.DiagnosticsConfig
-	var diags config.DiagnosticsConfig = cfg.Diagnostics
-	if !diags.Enabled {
-		t.Error("DiagnosticsConfig should be enabled")
-	}
-	if !diags.PProf.Enabled {
-		t.Error("DiagnosticsConfig.PProf should be enabled")
-	}
-}
-
-func TestGenerate_AuthConfigured(t *testing.T) {
-	cfg := Generate("18444", "16060", "18317")
-
-	if cfg.Auth.Username == "" {
-		t.Error("Expected Auth.Username to be set")
-	}
-	if cfg.Auth.PasswordSHA256 == "" {
-		t.Error("Expected Auth.PasswordSHA256 to be set")
+	// Verify loaded config has correct values
+	if prodCfg.Targets[0].ID != "real-tovarisch" {
+		t.Errorf("loaded config should have real-tovarisch target, got %q", prodCfg.Targets[0].ID)
 	}
 }

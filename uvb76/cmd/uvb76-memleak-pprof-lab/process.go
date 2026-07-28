@@ -4,17 +4,129 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
+
+	"github.com/s1onique/KGB/uvb76/cmd/uvb76-memleak-pprof-lab/internal/fake"
 )
 
+// startFakeTovarisch creates and starts the fake tovarisch status server.
+func startFakeTovarisch() error {
+	// Create log file
+	logOut, err := os.OpenFile(tovarischLogFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("open tovarisch log: %w", err)
+	}
+
+	// Create fake server instance
+	fakeServer = &fake.StatusServer{
+		Port:    *flagTovarischPort,
+		LogFile: tovarischLogFile,
+	}
+
+	// Start the server
+	if err := fakeServer.Start(); err != nil {
+		logOut.Close()
+		return fmt.Errorf("start fake server: %w", err)
+	}
+
+	// Write PID file with fake PID
+	fakePID := 99999
+	tovarischPID = fakePID
+	pidFile := filepath.Join(artifactDir, "tovarisch.pid")
+	os.WriteFile(pidFile, []byte(strconv.Itoa(fakePID)), 0644)
+
+	log.Printf("[LAUNCH] Fake Tovarisch started on port %s, log=%s", *flagTovarischPort, tovarischLogFile)
+
+	return nil
+}
+
+// startTovarisch starts the real Tovarisch binary with serve command.
+func startTovarisch(bin string, args string, port string) (*exec.Cmd, *ProcessState, error) {
+	// Parse args string into slice (e.g., "serve --listen-private" -> ["serve", "--listen-private"])
+	serveArgs := strings.Fields(args)
+	if len(serveArgs) == 0 {
+		serveArgs = []string{"--listen-private"}
+	}
+
+	// Build command: tovarisch <args>
+	// The args already include the subcommand (e.g., "serve --listen-private")
+	cmdArgs := serveArgs
+	// Override port if specified
+	cmdArgs = append(cmdArgs, "--listen", "127.0.0.1:"+port)
+
+	cmd := exec.Command(bin, cmdArgs...)
+	cmd.Args[0] = bin // Set binary name for ps output
+
+	// Create log file
+	logOut, err := os.OpenFile(tovarischLogFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open tovarisch log: %w", err)
+	}
+
+	cmd.Stdout = logOut
+	cmd.Stderr = logOut
+
+	if err := cmd.Start(); err != nil {
+		logOut.Close()
+		return nil, nil, fmt.Errorf("start tovarisch: %w", err)
+	}
+	tovarischPID = cmd.Process.Pid
+
+	// Write PID file
+	pidFile := filepath.Join(artifactDir, "tovarisch.pid")
+	os.WriteFile(pidFile, []byte(strconv.Itoa(tovarischPID)), 0644)
+
+	// Create process state
+	ps := &ProcessState{}
+	ps.done = make(chan struct{})
+
+	ps.mu.Lock()
+	ps.running = true
+	ps.exited = false
+	ps.mu.Unlock()
+
+	// Monitor process
+	go func() {
+		_ = cmd.Wait()
+		_ = logOut.Close()
+
+		ps.mu.Lock()
+		defer ps.mu.Unlock()
+
+		ps.running = false
+		ps.exited = true
+
+		if cmd.ProcessState != nil {
+			if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok {
+				if ws.Signaled() {
+					ps.exitCode = -1
+					ps.signal = ws.Signal()
+				} else {
+					ps.exitCode = ws.ExitStatus()
+				}
+			} else {
+				ps.exitCode = cmd.ProcessState.ExitCode()
+			}
+		}
+
+		close(ps.done)
+	}()
+
+	log.Printf("[LAUNCH] Tovarisch started: PID=%d, port=%s, log=%s", tovarischPID, port, tovarischLogFile)
+
+	return cmd, ps, nil
+}
+
 // startUVB76 starts UVB-76 as a child process with proper output capture.
-func startUVB76(bin string, processState *ProcessState) (*exec.Cmd, error) {
+func startUVB76(bin string) (*exec.Cmd, *ProcessState, error) {
 	args := []string{
 		"-dev",
 		"-config", configFile,
@@ -25,16 +137,15 @@ func startUVB76(bin string, processState *ProcessState) (*exec.Cmd, error) {
 	// Create log file for stdout/stderr capture
 	logOut, err := os.OpenFile(uvb76LogFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
-		return nil, fmt.Errorf("open log file: %w", err)
+		return nil, nil, fmt.Errorf("open log file: %w", err)
 	}
 
-	// Capture output to file only (not teeing to console)
 	cmd.Stdout = logOut
 	cmd.Stderr = logOut
 
 	if err := cmd.Start(); err != nil {
 		logOut.Close()
-		return nil, fmt.Errorf("start: %w", err)
+		return nil, nil, fmt.Errorf("start: %w", err)
 	}
 	uvb76PID = cmd.Process.Pid
 
@@ -42,55 +153,48 @@ func startUVB76(bin string, processState *ProcessState) (*exec.Cmd, error) {
 	pidFile := filepath.Join(artifactDir, "uvb76.pid")
 	os.WriteFile(pidFile, []byte(strconv.Itoa(uvb76PID)), 0644)
 
-	// Initialize done channel
-	processState.done = make(chan struct{})
+	// Create process state
+	ps := &ProcessState{}
+	ps.done = make(chan struct{})
 
-	// Mark as running
-	processState.mu.Lock()
-	processState.running = true
-	processState.exited = false
-	processState.mu.Unlock()
+	ps.mu.Lock()
+	ps.running = true
+	ps.exited = false
+	ps.mu.Unlock()
 
-	// Monitor process using the original exec.Cmd, not FindProcess
-	// IMPORTANT: Only this goroutine calls cmd.Wait() - multiple calls are not allowed
+	// Monitor process using the original exec.Cmd
 	go func() {
 		_ = cmd.Wait()
-
-		// Close log file to flush and release FD
 		_ = logOut.Close()
 
-		processState.mu.Lock()
-		defer processState.mu.Unlock()
+		ps.mu.Lock()
+		defer ps.mu.Unlock()
 
-		processState.running = false
-		processState.exited = true // Always mark as exited after Wait()
+		ps.running = false
+		ps.exited = true
 
-		// Get exit info from cmd.ProcessState after Wait()
 		if cmd.ProcessState != nil {
 			if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok {
 				if ws.Signaled() {
-					processState.exitCode = -1
-					processState.signal = ws.Signal()
+					ps.exitCode = -1
+					ps.signal = ws.Signal()
 				} else {
-					processState.exitCode = ws.ExitStatus()
+					ps.exitCode = ws.ExitStatus()
 				}
 			} else {
-				// Fallback for non-syscall platforms
-				processState.exitCode = cmd.ProcessState.ExitCode()
+				ps.exitCode = cmd.ProcessState.ExitCode()
 			}
 		}
 
-		// Signal completion to any waiters
-		close(processState.done)
+		close(ps.done)
 	}()
 
-	log.Printf("[LAUNCH] Process started: PID=%d, log=%s", uvb76PID, uvb76LogFile)
+	log.Printf("[LAUNCH] UVB-76 started: PID=%d, log=%s", uvb76PID, uvb76LogFile)
 
-	return cmd, nil
+	return cmd, ps, nil
 }
 
-// gracefulShutdown sends SIGTERM and waits for exit via ProcessState.done channel.
-// Does NOT call cmd.Wait() - that is owned by the monitor goroutine.
+// gracefulShutdown sends SIGTERM and waits for exit.
 func gracefulShutdown(cmd *exec.Cmd, ps *ProcessState, timeout time.Duration) error {
 	if cmd == nil || cmd.Process == nil {
 		return fmt.Errorf("no process to shut down")
@@ -100,7 +204,6 @@ func gracefulShutdown(cmd *exec.Cmd, ps *ProcessState, timeout time.Duration) er
 		return err
 	}
 
-	// Wait using the done channel (not cmd.Wait())
 	select {
 	case <-ps.done:
 		return nil
@@ -115,71 +218,44 @@ func forceKill(cmd *exec.Cmd, ps *ProcessState) {
 		return
 	}
 	cmd.Process.Kill()
-	// Wait for the monitor goroutine to complete
 	<-ps.done
 }
 
-// findUVB76Binary locates the UVB-76 binary.
-func findUVB76Binary() string {
-	// Check UVB76_BINARY env var first
-	if bin := os.Getenv("UVB76_BINARY"); bin != "" {
-		if _, err := os.Stat(bin); err == nil {
-			return bin
-		}
-	}
-
-	// Check common paths
-	paths := []string{
-		"./uvb76",
-		"../../uvb76",
-		"/usr/local/bin/uvb76",
-	}
-	for _, p := range paths {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-
-	return "uvb76"
-}
-
-// waitForHTTPReady waits for an HTTP endpoint to be ready.
-func waitForHTTPReady(url string, timeout time.Duration) bool {
+// waitForTovarischReady waits for Tovarisch /status endpoint to be ready.
+func waitForTovarischReady(port string, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
+	url := fmt.Sprintf("http://localhost:%s/status", port)
 	client := &http.Client{Timeout: 2 * time.Second}
 
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(url)
 		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode < 500 {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
 				return true
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(250 * time.Millisecond)
 	}
 	return false
 }
 
-// waitForPPROFReady loops until pprof is reachable or timeout/proc exit.
-func waitForPPROFReady(port string, timeout time.Duration, processState *ProcessState) (bool, error) {
+// waitForPPROFReady loops until pprof is reachable.
+func waitForPPROFReady(port string, timeout time.Duration, ps *ProcessState) (bool, error) {
 	deadline := time.Now().Add(timeout)
 	url := fmt.Sprintf("http://localhost:%s/debug/pprof/heap", port)
 	client := &http.Client{Timeout: 2 * time.Second}
 
 	for {
-		// Check if process exited
-		if processState.Exited() {
-			exitCode, _ := processState.ExitInfo()
+		if ps.Exited() {
+			exitCode, _ := ps.ExitInfo()
 			return false, fmt.Errorf("process exited with code %d", exitCode)
 		}
 
-		// Check deadline
 		if time.Now().After(deadline) {
 			return false, fmt.Errorf("timeout after %v", timeout)
 		}
 
-		// Try pprof
 		resp, err := client.Get(url)
 		if err == nil {
 			resp.Body.Close()
@@ -192,16 +268,16 @@ func waitForPPROFReady(port string, timeout time.Duration, processState *Process
 	}
 }
 
-// verifyEndpoints checks all required pprof endpoints are responding.
-func verifyEndpoints(pprofPort string) bool {
+// verifyPPROFEndpoints checks all required pprof endpoints.
+func verifyPPROFEndpoints(port string) bool {
 	client := &http.Client{Timeout: 2 * time.Second}
 	checks := []struct {
 		name string
 		url  string
 	}{
-		{"pprof index", fmt.Sprintf("http://localhost:%s/debug/pprof/", pprofPort)},
-		{"pprof heap", fmt.Sprintf("http://localhost:%s/debug/pprof/heap", pprofPort)},
-		{"pprof cmdline", fmt.Sprintf("http://localhost:%s/debug/pprof/cmdline", pprofPort)},
+		{"pprof index", fmt.Sprintf("http://localhost:%s/debug/pprof/", port)},
+		{"pprof heap", fmt.Sprintf("http://localhost:%s/debug/pprof/heap", port)},
+		{"pprof goroutine", fmt.Sprintf("http://localhost:%s/debug/pprof/goroutine?debug=1", port)},
 	}
 
 	for _, check := range checks {
@@ -221,24 +297,88 @@ func verifyEndpoints(pprofPort string) bool {
 	return true
 }
 
-// cleanup stops child processes and fake server.
-func cleanup(cmd *exec.Cmd, ps *ProcessState) {
-	// Shutdown fake server gracefully first
+// cleanup stops all child processes and fake server.
+func cleanup(tovarischCmd, uvb76Cmd *exec.Cmd, tovarischPS, uvb76PS *ProcessState) []string {
+	var errors []string
+
+	// Shutdown fake server first if running
 	if fakeServer != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		fakeServer.Shutdown(ctx)
+		if err := fakeServer.Shutdown(ctx); err != nil {
+			errors = append(errors, fmt.Sprintf("fake server shutdown: %v", err))
+		}
 		fakeServer = nil
 	}
 
-	// Then kill uvb76 process
-	if cmd != nil && cmd.Process != nil {
-		cmd.Process.Signal(syscall.SIGTERM)
-		time.Sleep(2 * time.Second)
-		cmd.Process.Kill()
-		// Wait for monitor goroutine
-		if ps != nil {
-			<-ps.done
+	// Stop UVB-76 gracefully
+	if uvb76Cmd != nil && uvb76Cmd.Process != nil && uvb76PS != nil {
+		if err := gracefulShutdown(uvb76Cmd, uvb76PS, 10*time.Second); err != nil {
+			log.Printf("[CLEANUP] UVB-76 graceful shutdown failed, forcing: %v", err)
+			forceKill(uvb76Cmd, uvb76PS)
+			errors = append(errors, fmt.Sprintf("uvb76 forced kill: %v", err))
+		}
+		// Verify UVB-76 is gone
+		if uvb76PS.Exited() {
+			uvb76PID = 0 // Mark as cleaned
 		}
 	}
+
+	// Stop Tovarisch gracefully
+	if tovarischCmd != nil && tovarischCmd.Process != nil && tovarischPS != nil {
+		if err := gracefulShutdown(tovarischCmd, tovarischPS, 10*time.Second); err != nil {
+			log.Printf("[CLEANUP] Tovarisch graceful shutdown failed, forcing: %v", err)
+			forceKill(tovarischCmd, tovarischPS)
+			errors = append(errors, fmt.Sprintf("tovarisch forced kill: %v", err))
+		}
+		// Verify Tovarisch is gone
+		if tovarischPS.Exited() {
+			tovarischPID = 0 // Mark as cleaned
+		}
+	}
+
+	// Verify ports are released
+	if err := verifyPortsReleased(); err != nil {
+		errors = append(errors, fmt.Sprintf("ports not released: %v", err))
+	}
+
+	// Clean up PID files
+	pidFiles := []string{
+		filepath.Join(artifactDir, "tovarisch.pid"),
+		filepath.Join(artifactDir, "uvb76.pid"),
+	}
+	for _, f := range pidFiles {
+		os.Remove(f)
+	}
+
+	return errors
+}
+
+// verifyPortsReleased checks that the selected ports are no longer in use.
+func verifyPortsReleased() error {
+	ports := []string{*flagTovarischPort, *flagUVB76Port, *flagPProfPort}
+	for _, port := range ports {
+		addr := fmt.Sprintf("localhost:%s", port)
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("port %s still in use", port)
+		}
+		ln.Close()
+	}
+	return nil
+}
+
+// processIsGone verifies a specific PID is no longer running.
+func processIsGone(pid int) bool {
+	if pid <= 0 {
+		return true
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return true
+	}
+	// On Unix, FindProcess succeeds even for dead processes
+	// Send signal 0 to check if process exists
+	err = process.Signal(syscall.Signal(0))
+	return err != nil
 }

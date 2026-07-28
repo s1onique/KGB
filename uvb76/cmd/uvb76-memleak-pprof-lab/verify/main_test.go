@@ -209,8 +209,8 @@ func TestVerify_EmptyDiffReportFails(t *testing.T) {
 
 	// Create minimal valid manifest
 	manifest := map[string]interface{}{
-		"schema_version":  1,
-		"classification":  "no_material_growth",
+		"schema_version":   1,
+		"classification":   "no_material_growth",
 		"duration_seconds": 600,
 	}
 	data, _ := json.Marshal(manifest)
@@ -252,7 +252,7 @@ func TestVerify_MissingTovarischLogFails(t *testing.T) {
 
 	// Create minimal valid manifest
 	manifest := map[string]interface{}{
-		"schema_version":  1,
+		"schema_version":   1,
 		"classification":   "no_material_growth",
 		"duration_seconds": 600,
 	}
@@ -291,7 +291,7 @@ func TestVerify_EmptyTovarischLogFails(t *testing.T) {
 
 	// Create minimal valid manifest
 	manifest := map[string]interface{}{
-		"schema_version":  1,
+		"schema_version":   1,
 		"classification":   "no_material_growth",
 		"duration_seconds": 600,
 	}

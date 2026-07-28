@@ -20,7 +20,7 @@ func runCollector() error {
 
 	// Build collector args explicitly
 	pidStr := strconv.Itoa(uvb76PID)
-	pprofURL := fmt.Sprintf("http://localhost:%s", pprofPort)
+	pprofURL := fmt.Sprintf("http://localhost:%s", *flagPProfPort)
 
 	args := []string{
 		collectorBin,

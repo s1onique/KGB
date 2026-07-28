@@ -17,7 +17,7 @@ func TestVerify_ResultJSON_OkFalseFails(t *testing.T) {
 
 	// Create minimal valid manifest
 	manifest := map[string]interface{}{
-		"schema_version":  1,
+		"schema_version":   1,
 		"classification":   "no_material_growth",
 		"duration_seconds": 600,
 	}
@@ -31,11 +31,11 @@ func TestVerify_ResultJSON_OkFalseFails(t *testing.T) {
 	// Create result.json with ok=false
 	result := map[string]interface{}{
 		"ok":                   false,
-		"uvb76_started":         true,
-		"pprof_reachable":       true,
-		"tovarisch_reachable":   true,
-		"collector_succeeded":   true,
-		"pprof_diff_succeeded":  true,
+		"uvb76_started":        true,
+		"pprof_reachable":      true,
+		"tovarisch_reachable":  true,
+		"collector_succeeded":  true,
+		"pprof_diff_succeeded": true,
 		"manifest_valid":       true,
 		"verdict_valid":        true,
 	}
@@ -63,7 +63,7 @@ func TestVerify_ResultJSON_MissingCriticalFieldFails(t *testing.T) {
 
 	// Create minimal valid manifest
 	manifest := map[string]interface{}{
-		"schema_version":  1,
+		"schema_version":   1,
 		"classification":   "no_material_growth",
 		"duration_seconds": 600,
 	}
@@ -77,11 +77,11 @@ func TestVerify_ResultJSON_MissingCriticalFieldFails(t *testing.T) {
 	// Create result.json with tovarisch_reachable=false
 	result := map[string]interface{}{
 		"ok":                   true,
-		"uvb76_started":         true,
-		"pprof_reachable":       true,
-		"tovarisch_reachable":   false, // This should fail
-		"collector_succeeded":   true,
-		"pprof_diff_succeeded":  true,
+		"uvb76_started":        true,
+		"pprof_reachable":      true,
+		"tovarisch_reachable":  false, // This should fail
+		"collector_succeeded":  true,
+		"pprof_diff_succeeded": true,
 		"manifest_valid":       true,
 		"verdict_valid":        true,
 	}
@@ -109,7 +109,7 @@ func TestVerify_MissingGoroutineDumpFails(t *testing.T) {
 
 	// Create minimal valid manifest
 	manifest := map[string]interface{}{
-		"schema_version":  1,
+		"schema_version":   1,
 		"classification":   "no_material_growth",
 		"duration_seconds": 600,
 	}
@@ -123,11 +123,11 @@ func TestVerify_MissingGoroutineDumpFails(t *testing.T) {
 	// Create result.json
 	result := map[string]interface{}{
 		"ok":                   true,
-		"uvb76_started":         true,
-		"pprof_reachable":       true,
-		"tovarisch_reachable":   true,
-		"collector_succeeded":   true,
-		"pprof_diff_succeeded":  true,
+		"uvb76_started":        true,
+		"pprof_reachable":      true,
+		"tovarisch_reachable":  true,
+		"collector_succeeded":  true,
+		"pprof_diff_succeeded": true,
 		"manifest_valid":       true,
 		"verdict_valid":        true,
 	}
@@ -163,7 +163,7 @@ func TestVerify_ResultJSON_PProfNotReachableFails(t *testing.T) {
 
 	// Create minimal valid manifest
 	manifest := map[string]interface{}{
-		"schema_version":  1,
+		"schema_version":   1,
 		"classification":   "no_material_growth",
 		"duration_seconds": 600,
 	}
@@ -177,11 +177,11 @@ func TestVerify_ResultJSON_PProfNotReachableFails(t *testing.T) {
 	// Create result.json with pprof_reachable=false
 	result := map[string]interface{}{
 		"ok":                   true,
-		"uvb76_started":         true,
-		"pprof_reachable":       false, // This should fail
-		"tovarisch_reachable":   true,
-		"collector_succeeded":   true,
-		"pprof_diff_succeeded":  true,
+		"uvb76_started":        true,
+		"pprof_reachable":      false, // This should fail
+		"tovarisch_reachable":  true,
+		"collector_succeeded":  true,
+		"pprof_diff_succeeded": true,
 		"manifest_valid":       true,
 		"verdict_valid":        true,
 	}
@@ -209,7 +209,7 @@ func TestVerify_ResultJSON_PProfDiffFailedFails(t *testing.T) {
 
 	// Create minimal valid manifest
 	manifest := map[string]interface{}{
-		"schema_version":  1,
+		"schema_version":   1,
 		"classification":   "no_material_growth",
 		"duration_seconds": 600,
 	}
@@ -223,11 +223,11 @@ func TestVerify_ResultJSON_PProfDiffFailedFails(t *testing.T) {
 	// Create result.json with pprof_diff_succeeded=false
 	result := map[string]interface{}{
 		"ok":                   true,
-		"uvb76_started":         true,
-		"pprof_reachable":       true,
-		"tovarisch_reachable":   true,
-		"collector_succeeded":   true,
-		"pprof_diff_succeeded":  false, // This should fail
+		"uvb76_started":        true,
+		"pprof_reachable":      true,
+		"tovarisch_reachable":  true,
+		"collector_succeeded":  true,
+		"pprof_diff_succeeded": false, // This should fail
 		"manifest_valid":       true,
 		"verdict_valid":        true,
 	}

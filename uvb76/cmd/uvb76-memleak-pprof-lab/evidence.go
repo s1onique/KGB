@@ -9,13 +9,13 @@ import (
 
 // StartupEvidence captures launch-time metadata for reproducibility.
 type StartupEvidence struct {
-	LaunchTimestamp     string       `json:"launch_timestamp"`
-	PID                int          `json:"pid"`
-	ExecutablePath     string       `json:"executable_path"`
-	Args               []string     `json:"args"`
-	ConfigPath         string       `json:"config_path"`
-	ChosenPorts        PortsChoice  `json:"chosen_ports"`
-	StartupDurationMs  int64        `json:"startup_duration_ms"`
+	LaunchTimestamp     string      `json:"launch_timestamp"`
+	PID                 int         `json:"pid"`
+	ExecutablePath      string      `json:"executable_path"`
+	Args                []string    `json:"args"`
+	ConfigPath          string      `json:"config_path"`
+	ChosenPorts         PortsChoice `json:"chosen_ports"`
+	StartupDurationMs   int64       `json:"startup_duration_ms"`
 	ReadinessDurationMs int64       `json:"readiness_duration_ms"`
 }
 

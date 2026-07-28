@@ -1,7 +1,4 @@
 // Package labconfig generates hermetic UVB-76 configurations for the pprof lab.
-//
-// This config enables pprof diagnostics only for the lab environment,
-// keeping pprof disabled by default in normal config paths.
 package labconfig
 
 import (
@@ -22,8 +19,21 @@ type Config struct {
 }
 
 // Generate creates a hermetic configuration for the pprof memory lab.
-func Generate(uvb76Port, pprofPort, tovarischPort string) *Config {
+// When useFakeTovarisch is true, targets the fake server.
+// When false, targets the real Tovarisch /status endpoint.
+func Generate(uvb76Port, pprofPort, tovarischPort string, useFakeTovarisch bool) *Config {
 	passHash := hashPassword("lab-password")
+
+	targetID := "real-tovarisch"
+	targetName := "Real Tovarisch Status Endpoint"
+	peerName := "real-tovarisch-peer"
+	peerBaseURL := "http://localhost:" + tovarischPort
+
+	if useFakeTovarisch {
+		targetID = "fake-tovarisch"
+		targetName = "Fake Tovarisch Status Endpoint"
+		peerName = "fake-tovarisch-peer"
+	}
 
 	return &Config{
 		Listen: config.ListenConfig{
@@ -36,7 +46,7 @@ func Generate(uvb76Port, pprofPort, tovarischPort string) *Config {
 			PasswordSHA256: passHash,
 		},
 		Scrape: config.ScrapeConfig{
-			IntervalSeconds:     30,
+			IntervalSeconds:     1, // Short interval for smoke test
 			TimeoutMilliseconds: 5000,
 		},
 		Latency: config.LatencyConfig{
@@ -59,15 +69,14 @@ func Generate(uvb76Port, pprofPort, tovarischPort string) *Config {
 				RecentSamplesMax:     3600,
 			},
 		},
-		// pprof is ONLY enabled here in lab config; disabled by default
-		// Include a minimal valid peer config to satisfy diagnostics validation.
+		// pprof is enabled; diagnostics peer config is required
 		Diagnostics: config.DiagnosticsConfig{
 			Enabled: true,
 			Peers: []config.DiagPeerConfig{
 				{
-					Name:    "fake-tovarisch-peer",
-					BaseURL: "http://localhost:" + tovarischPort,
-					Targets: []string{"fake-tovarisch"},
+					Name:    peerName,
+					BaseURL: peerBaseURL,
+					Targets: []string{targetID},
 				},
 			},
 			PProf: config.PProfConfig{
@@ -78,9 +87,9 @@ func Generate(uvb76Port, pprofPort, tovarischPort string) *Config {
 		},
 		Targets: []config.TargetConfig{
 			{
-				ID:      "fake-tovarisch",
-				Name:    "Fake Tovarisch Status Endpoint",
-				BaseURL: "http://localhost:" + tovarischPort + "/status",
+				ID:      targetID,
+				Name:    targetName,
+				BaseURL: "http://localhost:" + tovarischPort,
 				Enabled: true,
 			},
 		},
