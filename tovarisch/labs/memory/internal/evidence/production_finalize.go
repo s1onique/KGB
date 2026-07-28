@@ -735,61 +735,13 @@ func ValidateArtifactRelativePath(path string) error {
 	return nil
 }
 
-// ValidateArtifactPath validates a canonical artifact path using lexical rules
-// and physical component walking. It rejects:
-// - empty paths
-// - "." path
-// - absolute paths
-// - backslash paths
-// - empty, "." or ".." components
-// - noncanonical cleaned representations
-// - intermediate and final symlinks
-// - non-regular files
+// ValidateArtifactPath is a thin wrapper over ResolveRegularArtifactPath.
+// It provides the same physical path validation without returning the resolved path.
 //
-// It proves containment using filepath.Rel.
+// P0-2: Single physical artifact authority - delegates to ResolveRegularArtifactPath.
 func ValidateArtifactPath(path string, runRoot string) error {
-	// Use the shared lexical validator first
-	if err := ValidateArtifactRelativePath(path); err != nil {
-		return err
-	}
-
-	components := strings.Split(path, "/")
-
-	// Walk every physical component and reject any symlink
-	resolvedPath := filepath.Join(runRoot, path)
-	dir := runRoot
-	for _, part := range components {
-		next := filepath.Join(dir, part)
-		info, err := os.Lstat(next)
-		if err != nil {
-			return fmt.Errorf("%w: cannot stat %q: %v", ErrInvalidArtifactPath, path, err)
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%w: symlink in path %q (component: %q)", ErrInvalidArtifactPath, path, part)
-		}
-		dir = next
-	}
-
-	// Prove containment using filepath.Rel
-	rel, err := filepath.Rel(runRoot, resolvedPath)
-	if err != nil {
-		return fmt.Errorf("%w: cannot derive relative path: %v", ErrInvalidArtifactPath, err)
-	}
-	// Must be the same as the original path (no escape)
-	if rel != path {
-		return fmt.Errorf("%w: path %q escapes run root", ErrInvalidArtifactPath, path)
-	}
-
-	// Require regular file
-	info, err := os.Stat(resolvedPath)
-	if err != nil {
-		return fmt.Errorf("%w: cannot stat %q: %v", ErrInvalidArtifactPath, path, err)
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("%w: %q is not a regular file", ErrInvalidArtifactPath, path)
-	}
-
-	return nil
+	_, err := ResolveRegularArtifactPath(runRoot, path)
+	return err
 }
 
 // ChecksumEntry represents a parsed checksum line.
@@ -942,13 +894,14 @@ func ResolveRegularArtifactPath(runRoot string, artifactPath string) (string, er
 	}
 
 	// 6. Walk each component exactly once beneath validated root
+	// P0-1: Preserve filesystem errors using errors.Join
 	components := strings.Split(artifactPath, "/")
 	dir := absRunRoot
 	for _, part := range components {
 		next := filepath.Join(dir, part)
 		info, err := os.Lstat(next)
 		if err != nil {
-			return "", fmt.Errorf("%w: cannot stat %q: %v", ErrInvalidArtifactPath, artifactPath, err)
+			return "", fmt.Errorf("%w: cannot stat %q: %w", ErrInvalidArtifactPath, artifactPath, err)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			return "", fmt.Errorf("%w: symlink in path %q (component: %q)", ErrInvalidArtifactPath, artifactPath, part)
@@ -957,19 +910,21 @@ func ResolveRegularArtifactPath(runRoot string, artifactPath string) (string, er
 	}
 
 	// 7. Prove containment with filepath.Rel
+	// P0-1: Preserve filesystem errors using errors.Join
 	resolvedPath := filepath.Join(absRunRoot, artifactPath)
 	rel, err := filepath.Rel(absRunRoot, resolvedPath)
 	if err != nil {
-		return "", fmt.Errorf("%w: cannot derive relative path: %v", ErrInvalidArtifactPath, err)
+		return "", fmt.Errorf("%w: cannot derive relative path: %w", ErrInvalidArtifactPath, err)
 	}
 	if rel != artifactPath {
 		return "", fmt.Errorf("%w: path escapes run root", ErrInvalidArtifactPath)
 	}
 
 	// 8. Require regular final file
+	// P0-1: Preserve filesystem errors using errors.Join
 	info, err := os.Stat(resolvedPath)
 	if err != nil {
-		return "", fmt.Errorf("%w: cannot stat %q: %v", ErrInvalidArtifactPath, artifactPath, err)
+		return "", fmt.Errorf("%w: cannot stat %q: %w", ErrInvalidArtifactPath, artifactPath, err)
 	}
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("%w: %q is not a regular file", ErrInvalidArtifactPath, artifactPath)

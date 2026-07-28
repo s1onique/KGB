@@ -2397,6 +2397,7 @@ func TestErrorIdentity_ErrorSentinelsAreDistinct(t *testing.T) {
 	sentinels := []error{
 		ErrInvalidArtifactPath,
 		ErrInvalidArtifactRoot,
+		ErrMalformedChecksumLine,
 		ErrMalformedChecksums,
 		ErrChecksumMismatch,
 		ErrProductionEvidenceMismatch,
@@ -2409,5 +2410,89 @@ func TestErrorIdentity_ErrorSentinelsAreDistinct(t *testing.T) {
 				t.Errorf("sentinel %v is not distinct from %v", sentinels[i], sentinels[j])
 			}
 		}
+	}
+}
+
+// TestResolveRegularArtifactPath_ChildNotExist tests P0-3:
+// Child path "not exist" errors preserve fs.ErrNotExist in error chain.
+func TestResolveRegularArtifactPath_ChildNotExist(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	_, err := ResolveRegularArtifactPath(runRoot, "missing/file.json")
+	if err == nil {
+		t.Fatal("expected error for missing child path")
+	}
+	// P0-3: Must preserve fs.ErrNotExist for callers to distinguish from other errors
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("errors.Is(err, fs.ErrNotExist): got %v", err)
+	}
+	// Must preserve ErrInvalidArtifactPath
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+	// Must NOT preserve ErrInvalidArtifactRoot (child error, not root error)
+	if errors.Is(err, ErrInvalidArtifactRoot) {
+		t.Error("child path error should not preserve ErrInvalidArtifactRoot")
+	}
+}
+
+// TestResolveRegularArtifactPath_ChildSymlink tests P0-3:
+// Child symlink errors preserve ErrInvalidArtifactPath but not ErrInvalidArtifactRoot.
+func TestResolveRegularArtifactPath_ChildSymlink(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+	realDir := filepath.Join(tmpDir, "real")
+	linkDir := filepath.Join(runRoot, "linkdir")
+
+	if err := os.MkdirAll(realDir, 0755); err != nil {
+		t.Fatalf("mkdir real: %v", err)
+	}
+	if err := os.MkdirAll(runRoot, 0755); err != nil {
+		t.Fatalf("mkdir runRoot: %v", err)
+	}
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	_, err := ResolveRegularArtifactPath(runRoot, "linkdir/file.json")
+	if err == nil {
+		t.Fatal("expected error for symlink in path")
+	}
+	// Must preserve ErrInvalidArtifactPath
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
+	}
+	// Must NOT preserve ErrInvalidArtifactRoot (child error, not root error)
+	if errors.Is(err, ErrInvalidArtifactRoot) {
+		t.Error("child symlink error should not preserve ErrInvalidArtifactRoot")
+	}
+}
+
+// TestResolveRegularArtifactPath_ParentNotExist tests P0-3:
+// Parent directory missing preserves fs.ErrNotExist and ErrInvalidArtifactRoot.
+func TestResolveRegularArtifactPath_ParentNotExist(t *testing.T) {
+	tmpDir := t.TempDir()
+	runRoot := filepath.Join(tmpDir, "run")
+
+	// runRoot does not exist at all
+	_, err := ResolveRegularArtifactPath(runRoot, "file.json")
+	if err == nil {
+		t.Fatal("expected error for nonexistent root")
+	}
+	// P0-1: Root errors preserve fs.ErrNotExist
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("errors.Is(err, fs.ErrNotExist): got %v", err)
+	}
+	// P0-1: Root errors preserve ErrInvalidArtifactRoot
+	if !errors.Is(err, ErrInvalidArtifactRoot) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactRoot): got %v", err)
+	}
+	// Root errors also preserve ErrInvalidArtifactPath
+	if !errors.Is(err, ErrInvalidArtifactPath) {
+		t.Errorf("errors.Is(err, ErrInvalidArtifactPath): got %v", err)
 	}
 }
