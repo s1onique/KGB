@@ -8,7 +8,6 @@
 package evidence
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -558,114 +557,41 @@ func verifyPhysicalManifest(manifestPath, expectedRunID, expectedScenario string
 }
 
 // verifyPhysicalChecksums is the authoritative checksum verifier for the production finalizer.
-// For every inventory entry, it:
-//   - requires a non-empty safe relative slash path;
-//   - rejects absolute paths, "..", backslashes and traversal;
-//   - resolves relative to the exact run root (runRoot);
-//   - rejects symlinks and non-regular files;
-//   - proves resolved containment within the run root;
+// It consumes the canonical ParseChecksumsCanonical and ResolveRegularArtifactPath helpers
+// to ensure a single authoritative implementation.
+//
+// For every ChecksummedInventory entry, it:
+//   - parses checksums using the canonical parser;
+//   - validates each path using the canonical resolver;
 //   - reads physical bytes;
 //   - recomputes SHA-256;
 //   - requires the exact lowercase digest.
-//
-// Rejects: blank lines, malformed lines, uppercase digest, duplicates,
-// missing entries, extra entries.
 func verifyPhysicalChecksums(checksumsPath, evidencePath string, inventory []string) error {
 	checksumBytes, err := os.ReadFile(checksumsPath)
 	if err != nil {
 		return fmt.Errorf("read checksums: %w", err)
 	}
 
-	// Parse checksums strictly
-	type checksumEntry struct {
-		digest  string
-		path    string
-		lineNum int
-	}
-	var entries []checksumEntry
-	seen := make(map[string]int) // path -> first line number for duplicate detection
-	scanner := bufio.NewScanner(bytes.NewReader(checksumBytes))
-	lineNum := 0
-
-	for scanner.Scan() {
-		lineNum++
-		// P0-7: Reject blank lines - canonical format requires exactly one entry per line
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "" {
-			return fmt.Errorf("%w: line %d: blank lines not allowed", ErrMalformedChecksums, lineNum)
-		}
-
-		// P0-7: Parse format: <64 hex chars><two spaces><path>
-		// Require exactly two ASCII spaces as separator, not one, not three
-		parts := strings.SplitN(line, "  ", 2)
-		if len(parts) != 2 {
-			return fmt.Errorf("%w: line %d: expected 'digest  path' format (exactly two spaces)", ErrMalformedChecksums, lineNum)
-		}
-
-		// No leading/trailing whitespace allowed on digest or path
-		digestHex := parts[0]
-		path := parts[1]
-
-		if digestHex != strings.TrimSpace(digestHex) || path != strings.TrimSpace(path) {
-			return fmt.Errorf("%w: line %d: no leading/trailing whitespace allowed", ErrMalformedChecksums, lineNum)
-		}
-
-		// Validate digest is exactly 64 lowercase hex characters
-		if len(digestHex) != 64 {
-			return fmt.Errorf("%w: line %d: digest length %d, want 64", ErrMalformedChecksums, lineNum, len(digestHex))
-		}
-
-		// Validate digest is lowercase hex
-		for _, c := range digestHex {
-			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
-				return fmt.Errorf("%w: line %d: digest must be lowercase hex", ErrMalformedChecksums, lineNum)
-			}
-		}
-
-		// P0-6: Validate path is non-empty
-		if path == "" {
-			return fmt.Errorf("%w: line %d: empty path", ErrMalformedChecksums, lineNum)
-		}
-
-		// P0-6: Validate path is safe relative using component validation
-		// Do not use strings.Contains(path, "..") as it rejects harmless names like "report..json"
-		if filepath.IsAbs(path) {
-			return fmt.Errorf("%w: line %d: absolute path %q not allowed", ErrMalformedChecksums, lineNum, path)
-		}
-		if strings.ContainsRune(path, '\\') {
-			return fmt.Errorf("%w: line %d: backslash in path %q not allowed", ErrMalformedChecksums, lineNum, path)
-		}
-		// Check each path component for ".." or "."
-		for _, part := range strings.Split(path, "/") {
-			if part == ".." {
-				return fmt.Errorf("%w: line %d: traversal component '..' not allowed", ErrMalformedChecksums, lineNum)
-			}
-			if part == "." {
-				return fmt.Errorf("%w: line %d: dot component '.' not allowed", ErrMalformedChecksums, lineNum)
-			}
-		}
-
-		// Check for duplicate paths
-		if firstLine, exists := seen[path]; exists {
-			return fmt.Errorf("%w: %q appears at lines %d and %d", ErrMalformedChecksums, path, firstLine, lineNum)
-		}
-		seen[path] = lineNum
-
-		entries = append(entries, checksumEntry{digest: digestHex, path: path, lineNum: lineNum})
+	// Use the canonical checksum parser
+	entries, err := ParseChecksumsCanonical(checksumBytes)
+	if err != nil {
+		return fmt.Errorf("%w: parse error: %v", ErrMalformedChecksums, err)
 	}
 
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("%w: scanner error: %v", ErrMalformedChecksums, err)
+	// Build a set of parsed paths for validation
+	seen := make(map[string]bool)
+	for _, entry := range entries {
+		seen[entry.Path] = true
 	}
 
 	// Verify evidence is in checksums
-	if _, ok := seen["qualified-execution-evidence.json"]; !ok {
+	if !seen["qualified-execution-evidence.json"] {
 		return fmt.Errorf("%w: evidence missing from checksums", ErrMalformedChecksums)
 	}
 
 	// Verify inventory consistency: every item in inventory must be in checksums
 	for _, item := range inventory {
-		if _, ok := seen[item]; !ok {
+		if !seen[item] {
 			return fmt.Errorf("%w: %q from inventory not in checksums", ErrMalformedChecksums, item)
 		}
 	}
@@ -677,53 +603,29 @@ func verifyPhysicalChecksums(checksumsPath, evidencePath string, inventory []str
 		}
 	}
 
-	// AUTHORITATIVE: For each checksum entry, physically verify the file.
-	// Derive the run root from the evidence path.
+	// Derive the run root from the evidence path
 	runRoot := filepath.Dir(evidencePath)
 
+	// For each checksum entry, physically verify the file using the canonical resolver
 	for _, entry := range entries {
-		// Resolve the path relative to run root
-		resolvedPath := filepath.Join(runRoot, entry.path)
-
-		// Prove containment: resolved path must start with run root
-		absResolved, err := filepath.Abs(resolvedPath)
+		// Use the canonical physical resolver
+		resolvedPath, err := ResolveRegularArtifactPath(runRoot, entry.Path)
 		if err != nil {
-			return fmt.Errorf("%w: cannot resolve %q: %v", ErrChecksumMismatch, entry.path, err)
-		}
-		absRunRoot, err := filepath.Abs(runRoot)
-		if err != nil {
-			return fmt.Errorf("%w: cannot resolve run root: %v", ErrChecksumMismatch, err)
-		}
-		if !strings.HasPrefix(absResolved, absRunRoot+string(filepath.Separator)) && absResolved != absRunRoot {
-			return fmt.Errorf("%w: %q resolves outside run root", ErrChecksumMismatch, entry.path)
-		}
-
-		// Reject symlinks
-		info, err := os.Lstat(resolvedPath)
-		if err != nil {
-			return fmt.Errorf("%w: cannot stat %q: %v", ErrChecksumMismatch, entry.path, err)
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%w: %q is a symlink", ErrChecksumMismatch, entry.path)
-		}
-
-		// Reject non-regular files
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("%w: %q is not a regular file", ErrChecksumMismatch, entry.path)
+			return fmt.Errorf("%w: resolve %q: %v", ErrChecksumMismatch, entry.Path, err)
 		}
 
 		// Read physical bytes and recompute SHA-256
 		fileBytes, err := os.ReadFile(resolvedPath)
 		if err != nil {
-			return fmt.Errorf("%w: cannot read %q: %v", ErrChecksumMismatch, entry.path, err)
+			return fmt.Errorf("%w: cannot read %q: %v", ErrChecksumMismatch, entry.Path, err)
 		}
 
 		actualDigest := sha256.Sum256(fileBytes)
 		actualHex := hex.EncodeToString(actualDigest[:])
 
-		if actualHex != entry.digest {
+		if actualHex != entry.Digest {
 			return fmt.Errorf("%w: %q: declared=%s actual=%s",
-				ErrChecksumMismatch, entry.path, entry.digest, actualHex)
+				ErrChecksumMismatch, entry.Path, entry.Digest, actualHex)
 		}
 	}
 
@@ -957,6 +859,48 @@ func ParseChecksumsCanonical(data []byte) ([]ChecksumEntry, error) {
 	}
 
 	return entries, nil
+}
+
+// ResolveRegularArtifactPath resolves an artifact path to its physical location.
+// It validates the path and ensures it resolves to a regular file within runRoot.
+func ResolveRegularArtifactPath(runRoot string, artifactPath string) (string, error) {
+	// Validate the artifact path first
+	if err := ValidateArtifactPath(artifactPath, runRoot); err != nil {
+		return "", err
+	}
+
+	// Resolve and validate runRoot
+	if runRoot == "" {
+		return "", fmt.Errorf("%w: runRoot is empty", ErrInvalidArtifactPath)
+	}
+	absRunRoot, err := filepath.Abs(runRoot)
+	if err != nil {
+		return "", fmt.Errorf("%w: cannot resolve runRoot: %v", ErrInvalidArtifactPath, err)
+	}
+
+	// Resolve the full path
+	resolvedPath := filepath.Join(absRunRoot, artifactPath)
+
+	// Prove containment using filepath.Rel
+	rel, err := filepath.Rel(absRunRoot, resolvedPath)
+	if err != nil {
+		return "", fmt.Errorf("%w: cannot derive relative path: %v", ErrInvalidArtifactPath, err)
+	}
+	// Must be the same as the original path (no escape)
+	if rel != artifactPath {
+		return "", fmt.Errorf("%w: path escapes run root", ErrInvalidArtifactPath)
+	}
+
+	// Require regular file
+	info, err := os.Stat(resolvedPath)
+	if err != nil {
+		return "", fmt.Errorf("%w: cannot stat %q: %v", ErrInvalidArtifactPath, artifactPath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%w: %q is not a regular file", ErrInvalidArtifactPath, artifactPath)
+	}
+
+	return resolvedPath, nil
 }
 
 // RecordOutcome creates a deterministic fixture outcome for testing.
