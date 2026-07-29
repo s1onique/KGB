@@ -1,15 +1,11 @@
 // Package main provides the UVB-76 pprof memory leak lab.
 //
-// # Process Metrics
+// # Process Metrics with Mandatory Field Presence
 //
-// This file implements P0-4: Make process metrics truthful.
-// It parses and writes all required fields from /proc:
-// - VmRSS, VmSize, Threads from /proc/<pid>/status
-// - Pss, Pss_Anon, Private_Dirty, Anonymous from /proc/<pid>/smaps_rollup
-// - Open FD count from /proc/<pid>/fd
+// This file implements P0-12: Mandatory procfs field presence authority.
+// Every accepted process sample must have all mandatory fields observed and parsed.
+// Missing fields must not become zero.
 //
-// Returns a sampling error when required procfs files disappear or cannot be parsed.
-// Does not silently append all-zero samples.
 package main
 
 import (
@@ -65,16 +61,44 @@ type processMetrics struct {
 	FDCount         int
 }
 
+// mandatoryStatusFields lists all mandatory fields from /proc/<pid>/status.
+var mandatoryStatusFields = []string{
+	"VmRSS",
+	"VmSize",
+	"Threads",
+}
+
+// mandatorySmapsFields lists all mandatory fields from /proc/<pid>/smaps_rollup.
+var mandatorySmapsFields = []string{
+	"Pss",
+	"Pss_Anon",
+	"Private_Dirty",
+	"Anonymous",
+}
+
+// fieldPresence tracks whether a mandatory field has been observed.
+type fieldPresence struct {
+	present  bool
+	duplicate bool
+	value    int64
+}
+
 // readStatusMetrics reads VmRSS, VmSize, and Threads from /proc/<pid>/status.
-// P0-3: Returns parse errors instead of silently ignoring failures.
-func readStatusMetrics(pid int) (*processMetrics, error) {
+// P0-12: Tracks field presence explicitly.
+func readStatusMetrics(pid int) (map[string]fieldPresence, *processMetrics, error) {
 	statusPath := filepath.Join("/proc", strconv.Itoa(pid), "status")
 
 	f, err := os.Open(statusPath)
 	if err != nil {
-		return nil, SampleErrorf(pid, "open status", err)
+		return nil, nil, SampleErrorf(pid, "open status", err)
 	}
 	defer f.Close()
+
+	// Track field presence
+	presence := make(map[string]fieldPresence)
+	for _, field := range mandatoryStatusFields {
+		presence[field] = fieldPresence{}
+	}
 
 	m := &processMetrics{}
 	scanner := bufio.NewScanner(f)
@@ -82,68 +106,80 @@ func readStatusMetrics(pid int) (*processMetrics, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Parse key: value format
-		// VmRSS:     1234 kB
-		// Threads:   12
 		idx := strings.IndexByte(line, ':')
 		if idx < 0 {
 			continue
 		}
 		key := strings.TrimSpace(line[:idx])
 		val := strings.TrimSpace(line[idx+1:])
+
+		// Check if this is a mandatory field
+		p, ok := presence[key]
+		if !ok {
+			continue
+		}
+
+		// P0-12: Detect duplicate fields
+		if p.present {
+			return nil, nil, SampleErrorf(pid, "%w: %s", ErrStatusFieldDuplicate, key)
+		}
 
 		switch key {
 		case "VmRSS":
 			v, err := parseMemValue(pid, "VmRSS", val)
 			if err != nil {
-				return nil, SampleErrorf(pid, "parse VmRSS", err)
+				return nil, nil, SampleErrorf(pid, "%w: %s", ErrStatusFieldParse, key)
 			}
 			m.RSSKIB = v
+			presence[key] = fieldPresence{present: true, value: v}
 		case "VmSize":
 			v, err := parseMemValue(pid, "VmSize", val)
 			if err != nil {
-				return nil, SampleErrorf(pid, "parse VmSize", err)
+				return nil, nil, SampleErrorf(pid, "%w: %s", ErrStatusFieldParse, key)
 			}
 			m.VMSizeKIB = v
+			presence[key] = fieldPresence{present: true, value: v}
 		case "Threads":
 			v, err := parseIntValue(pid, "Threads", val)
 			if err != nil {
-				return nil, SampleErrorf(pid, "parse Threads", err)
+				return nil, nil, SampleErrorf(pid, "%w: %s", ErrStatusFieldParse, key)
 			}
 			m.Threads = v
+			presence[key] = fieldPresence{present: true, value: int64(v)}
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, SampleErrorf(pid, "scan status", err)
+		return nil, nil, SampleErrorf(pid, "scan status", err)
 	}
 
-	return m, nil
+	return presence, m, nil
 }
 
 // readSmapsMetrics reads Pss, Pss_Anon, Private_Dirty, Anonymous from /proc/<pid>/smaps_rollup.
-// P0-3: Returns parse errors instead of silently ignoring failures.
-func readSmapsMetrics(pid int) (*processMetrics, error) {
+// P0-12: Tracks field presence explicitly.
+func readSmapsMetrics(pid int) (map[string]fieldPresence, *processMetrics, error) {
 	smapsPath := filepath.Join("/proc", strconv.Itoa(pid), "smaps_rollup")
 
 	f, err := os.Open(smapsPath)
 	if err != nil {
-		// If smaps_rollup is not available, fall back to smaps
+		// Fall back to smaps
 		return readSmapsMetricsFallback(pid)
 	}
 	defer f.Close()
 
+	// Track field presence
+	presence := make(map[string]fieldPresence)
+	for _, field := range mandatorySmapsFields {
+		presence[field] = fieldPresence{}
+	}
+
 	m := &processMetrics{}
 	scanner := bufio.NewScanner(f)
 
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Parse key: value format
-		// Pss:            1234 kB
-		// Pss_Anon:       1000 kB
-		// Private_Dirty:    500 kB
-		// Anonymous:        300 kB
 		idx := strings.IndexByte(line, ':')
 		if idx < 0 {
 			continue
@@ -151,51 +187,71 @@ func readSmapsMetrics(pid int) (*processMetrics, error) {
 		key := strings.TrimSpace(line[:idx])
 		val := strings.TrimSpace(line[idx+1:])
 
+		// Check if this is a mandatory field
+		p, ok := presence[key]
+		if !ok {
+			continue
+		}
+
+		// P0-12: Detect duplicate fields
+		if p.present {
+			return nil, nil, SampleErrorf(pid, "%w: %s", ErrSmapsFieldDuplicate, key)
+		}
+
 		switch key {
 		case "Pss":
 			v, err := parseMemValue(pid, "Pss", val)
 			if err != nil {
-				return nil, SampleErrorf(pid, "parse Pss", err)
+				return nil, nil, SampleErrorf(pid, "%w: %s", ErrSmapsFieldParse, key)
 			}
 			m.PSS_KIB = v
+			presence[key] = fieldPresence{present: true, value: v}
 		case "Pss_Anon":
 			v, err := parseMemValue(pid, "Pss_Anon", val)
 			if err != nil {
-				return nil, SampleErrorf(pid, "parse Pss_Anon", err)
+				return nil, nil, SampleErrorf(pid, "%w: %s", ErrSmapsFieldParse, key)
 			}
 			m.PSSAnonKIB = v
+			presence[key] = fieldPresence{present: true, value: v}
 		case "Private_Dirty":
 			v, err := parseMemValue(pid, "Private_Dirty", val)
 			if err != nil {
-				return nil, SampleErrorf(pid, "parse Private_Dirty", err)
+				return nil, nil, SampleErrorf(pid, "%w: %s", ErrSmapsFieldParse, key)
 			}
 			m.PrivateDirtyKIB = v
+			presence[key] = fieldPresence{present: true, value: v}
 		case "Anonymous":
 			v, err := parseMemValue(pid, "Anonymous", val)
 			if err != nil {
-				return nil, SampleErrorf(pid, "parse Anonymous", err)
+				return nil, nil, SampleErrorf(pid, "%w: %s", ErrSmapsFieldParse, key)
 			}
 			m.AnonymousKIB = v
+			presence[key] = fieldPresence{present: true, value: v}
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, SampleErrorf(pid, "scan smaps_rollup", err)
+		return nil, nil, SampleErrorf(pid, "scan smaps_rollup", err)
 	}
 
-	return m, nil
+	return presence, m, nil
 }
 
 // readSmapsMetricsFallback reads Pss metrics from /proc/<pid>/smaps if smaps_rollup is not available.
-// P0-3: Returns parse errors instead of silently ignoring failures.
-func readSmapsMetricsFallback(pid int) (*processMetrics, error) {
+func readSmapsMetricsFallback(pid int) (map[string]fieldPresence, *processMetrics, error) {
 	smapsPath := filepath.Join("/proc", strconv.Itoa(pid), "smaps")
 
 	f, err := os.Open(smapsPath)
 	if err != nil {
-		return nil, SampleErrorf(pid, "open smaps", err)
+		return nil, nil, SampleErrorf(pid, "open smaps", err)
 	}
 	defer f.Close()
+
+	// Track field presence
+	presence := make(map[string]fieldPresence)
+	for _, field := range mandatorySmapsFields {
+		presence[field] = fieldPresence{}
+	}
 
 	m := &processMetrics{}
 	scanner := bufio.NewScanner(f)
@@ -210,39 +266,55 @@ func readSmapsMetricsFallback(pid int) (*processMetrics, error) {
 		key := strings.TrimSpace(line[:idx])
 		val := strings.TrimSpace(line[idx+1:])
 
+		// Check if this is a mandatory field
+		p, ok := presence[key]
+		if !ok {
+			continue
+		}
+
+		// P0-12: Detect duplicate fields
+		if p.present {
+			return nil, nil, SampleErrorf(pid, "%w: %s", ErrSmapsFieldDuplicate, key)
+		}
+
+		// Accumulate values for smaps (different from smaps_rollup)
 		switch key {
 		case "Pss":
 			v, err := parseMemValue(pid, "Pss", val)
 			if err != nil {
-				return nil, SampleErrorf(pid, "parse Pss", err)
+				return nil, nil, SampleErrorf(pid, "%w: %s", ErrSmapsFieldParse, key)
 			}
 			m.PSS_KIB += v
+			presence[key] = fieldPresence{present: true, value: m.PSS_KIB}
 		case "Pss_Anon":
 			v, err := parseMemValue(pid, "Pss_Anon", val)
 			if err != nil {
-				return nil, SampleErrorf(pid, "parse Pss_Anon", err)
+				return nil, nil, SampleErrorf(pid, "%w: %s", ErrSmapsFieldParse, key)
 			}
 			m.PSSAnonKIB += v
+			presence[key] = fieldPresence{present: true, value: m.PSSAnonKIB}
 		case "Private_Dirty":
 			v, err := parseMemValue(pid, "Private_Dirty", val)
 			if err != nil {
-				return nil, SampleErrorf(pid, "parse Private_Dirty", err)
+				return nil, nil, SampleErrorf(pid, "%w: %s", ErrSmapsFieldParse, key)
 			}
 			m.PrivateDirtyKIB += v
+			presence[key] = fieldPresence{present: true, value: m.PrivateDirtyKIB}
 		case "Anonymous":
 			v, err := parseMemValue(pid, "Anonymous", val)
 			if err != nil {
-				return nil, SampleErrorf(pid, "parse Anonymous", err)
+				return nil, nil, SampleErrorf(pid, "%w: %s", ErrSmapsFieldParse, key)
 			}
 			m.AnonymousKIB += v
+			presence[key] = fieldPresence{present: true, value: m.AnonymousKIB}
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, SampleErrorf(pid, "scan smaps", err)
+		return nil, nil, SampleErrorf(pid, "scan smaps", err)
 	}
 
-	return m, nil
+	return presence, m, nil
 }
 
 // countFDs counts the number of open file descriptors for a process.
@@ -251,31 +323,47 @@ func countFDs(pid int) (int, error) {
 
 	entries, err := os.ReadDir(fdDir)
 	if err != nil {
-		return 0, SampleErrorf(pid, "read fd dir", err)
+		return 0, SampleErrorf(pid, "%w: read fd dir", ErrFDDirectoryRead, err)
 	}
 
 	return len(entries), nil
 }
 
-// sampleProcessMetricsFull collects all process metrics with strict error handling.
-// P0-4: Returns error rather than silently appending all-zero sample.
-func sampleProcessMetricsFull(pid int) (*ProcessSample, error) {
+// sampleProcessMetricsWithPresence collects all process metrics with mandatory field presence.
+// P0-12: Returns error if any mandatory field is absent.
+func sampleProcessMetricsWithPresence(pid int) (*ProcessSample, error) {
 	// Check if process still exists
 	procPath := filepath.Join("/proc", strconv.Itoa(pid))
 	if _, err := os.Stat(procPath); os.IsNotExist(err) {
-		return nil, SampleErrorf(pid, "process gone")
+		return nil, SampleErrorf(pid, "%w: process gone", ErrProcessDisappeared)
 	}
 
-	// Read status metrics (VmRSS, VmSize, Threads)
-	status, err := readStatusMetrics(pid)
+	// Read status metrics with presence tracking
+	statusPresence, status, err := readStatusMetrics(pid)
 	if err != nil {
 		return nil, err
 	}
 
-	// Read smaps_rollup metrics (Pss, Pss_Anon, Private_Dirty, Anonymous)
-	smaps, err := readSmapsMetrics(pid)
+	// Verify all mandatory status fields present
+	for _, field := range mandatoryStatusFields {
+		p := statusPresence[field]
+		if !p.present {
+			return nil, SampleErrorf(pid, "%w: %s", ErrStatusFieldMissing, field)
+		}
+	}
+
+	// Read smaps metrics with presence tracking
+	smapsPresence, smaps, err := readSmapsMetrics(pid)
 	if err != nil {
 		return nil, err
+	}
+
+	// Verify all mandatory smaps fields present
+	for _, field := range mandatorySmapsFields {
+		p := smapsPresence[field]
+		if !p.present {
+			return nil, SampleErrorf(pid, "%w: %s", ErrSmapsFieldMissing, field)
+		}
 	}
 
 	// Count open FDs
@@ -284,7 +372,7 @@ func sampleProcessMetricsFull(pid int) (*ProcessSample, error) {
 		return nil, err
 	}
 
-	// Build ProcessSample with PID and Timestamp
+	// Build ProcessSample
 	now := time.Now()
 	sample := &ProcessSample{
 		PID:             pid,
@@ -299,8 +387,8 @@ func sampleProcessMetricsFull(pid int) (*ProcessSample, error) {
 		FDCount:         fdCount,
 	}
 
-	// Validate we got non-zero values for required fields
-	// If all are zero, the sampling may have failed silently
+	// P0-12: Validate we got non-zero values for required fields
+	// Note: Zero is valid, but all-zero indicates potential sampling failure
 	if sample.RSSKIB == 0 && sample.VMSizeKIB == 0 && sample.Threads == 0 {
 		return nil, SampleErrorf(pid, "all zero metrics - possible sampling failure")
 	}
@@ -308,8 +396,13 @@ func sampleProcessMetricsFull(pid int) (*ProcessSample, error) {
 	return sample, nil
 }
 
+// sampleProcessMetricsFull collects all process metrics with strict error handling.
+// P0-4: Returns error rather than silently appending all-zero sample.
+func sampleProcessMetricsFull(pid int) (*ProcessSample, error) {
+	return sampleProcessMetricsWithPresence(pid)
+}
+
 // parseMemValue parses memory values like "1234 kB" to KiB.
-// P0-3: Returns error instead of silently discarding parse failures.
 func parseMemValue(pid int, fieldName, s string) (int64, error) {
 	s = strings.TrimSpace(s)
 	s = strings.ReplaceAll(s, "kB", "")
@@ -323,7 +416,6 @@ func parseMemValue(pid int, fieldName, s string) (int64, error) {
 }
 
 // parseIntValue parses integer values.
-// P0-3: Returns error instead of silently discarding parse failures.
 func parseIntValue(pid int, fieldName, s string) (int, error) {
 	s = strings.TrimSpace(s)
 	v, err := strconv.Atoi(s)

@@ -1,11 +1,17 @@
+// Package main provides the UVB-76 pprof memory leak lab.
+//
+// # Memory Lab Runner with Generated Authority
+//
+// P0-1 through P0-15: All authorities wired into production path.
+// P0-2: Creates GeneratedLabAuthority ONCE before any process startup.
 package main
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -13,44 +19,47 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	fake "github.com/s1onique/KGB/uvb76/cmd/uvb76-memleak-pprof-lab/internal/fake"
 )
 
-// runLab orchestrates the full memory leak lab with real binaries.
-// P0-1 through P0-8: All authorities wired into production path.
-// P0-2: Creates runExecutionIdentity ONCE before any process startup.
-func runLab() LabResult {
+// runLab orchestrates the full memory leak lab with generated authority.
+// P0-6: runLab consumes the validated authority explicitly.
+func runLab(authority *GeneratedLabAuthority) LabResult {
+	if authority == nil {
+		return LabResult{
+			OK:             false,
+			Classification:  "FAILED",
+			Errors:         []string{"nil authority"},
+		}
+	}
+
 	// === PHASE 0: Pre-start embedded source identity validation ===
-	// P0-1: Resolve embedded source identity and RETAIN it for authoritative use.
-	// P0-2: Validate embedded source identity BEFORE any process startup side effects.
-	// This ensures the controller binary itself is a clean, reproducible build.
 	embeddedIdentity, sourceErr := ProductionSourceIdentityResolver.Resolve()
 	if sourceErr != nil {
 		log.Printf("[SOURCE] Embedded source identity resolution failed: %v", sourceErr)
 		return LabResult{
 			OK:             false,
-			Classification: "FAILED",
+			Classification:  "FAILED",
 			Errors:         []string{fmt.Sprintf("embedded source identity: %v", sourceErr)},
 		}
 	}
 
-	// P0-2: Create run identity BEFORE any process startup - shared by success and failure
-	// P0-1: Use embedded vcs.revision as canonical SourceCommit authority
-	// P0-5: Populate binary paths - always populate, validation is mode-aware
+	// P0-6: Use authority fields, not flag package globals
 	identity := &runExecutionIdentity{
 		RunID:            fmt.Sprintf("run-%d", time.Now().Unix()),
-		SourceCommit:     embeddedIdentity.VCSRevision, // P0-1: Use embedded vcs.revision as canonical authority
+		SourceCommit:     embeddedIdentity.VCSRevision,
 		RunStartedAt:     time.Now(),
 		ArtifactDir:      artifactDir,
-		TovarischBinPath: *flagTovarischBin, // P0-5: Always populated (fake path allowed in fake mode)
-		UVB76BinPath:     *flagUVB76Bin,     // P0-5: Always required (UVB76 never faked)
-		TovarischPort:    *flagTovarischPort,
-		UVB76Port:        *flagUVB76Port,
-		PProfPort:        *flagPProfPort,
+		TovarischBinPath: *flagTovarischBin,
+		UVB76BinPath:     *flagUVB76Bin,
+		TovarischPort:    authority.Target.BaseURL, // P0-6: From authority, not flag
+		UVB76Port:        authority.Config.Listen.Addr, // P0-6: From authority
+		PProfPort:        authority.Config.Diagnostics.PProf.Listen, // P0-6: From authority
 	}
 
-	// P0-5: Validate complete identity BEFORE starting any processes
-	// P0-5: Binary path validation is mode-aware (fake path allowed for fake mode)
-	identityValidationErrors := validateRunExecutionIdentity(identity, *flagUseFakeTovarisch)
+	// P0-5: Validate identity using mode from authority
+	identityValidationErrors := validateRunExecutionIdentity(identity, authority.Mode == ExecutionModeFake)
 	if len(identityValidationErrors) > 0 {
 		var errMsgs []string
 		for _, e := range identityValidationErrors {
@@ -58,7 +67,7 @@ func runLab() LabResult {
 		}
 		return LabResult{
 			OK:             false,
-			Classification: "FAILED",
+			Classification:  "FAILED",
 			Errors:         errMsgs,
 		}
 	}
@@ -73,52 +82,48 @@ func runLab() LabResult {
 	tovarischCmd, uvb76Cmd := (*exec.Cmd)(nil), (*exec.Cmd)(nil)
 	var tovarischPS, uvb76PS *ProcessState
 
-	log.Printf("[SETUP] Ports: Tovarisch=%s, UVB-76=%s, pprof=%s",
-		*flagTovarischPort, *flagUVB76Port, *flagPProfPort)
-	log.Printf("[IDENTITY] RunID=%s, Commit=%s, TovarischBin=%s, UVB76Bin=%s",
-		identity.RunID, identity.SourceCommit, identity.TovarischBinPath, identity.UVB76BinPath)
+	log.Printf("[IDENTITY] RunID=%s, Commit=%s, TargetID=%s, Mode=%s",
+		identity.RunID, identity.SourceCommit, authority.Target.TargetID, authority.Mode)
 
 	// === PHASE 1: Start Tovarisch (or fake server) ===
-	if *flagUseFakeTovarisch {
-		log.Printf("[SETUP] Starting fake tovarisch on port %s", *flagTovarischPort)
-		if err := startFakeTovarisch(); err != nil {
+	if authority.Mode == ExecutionModeFake {
+		log.Printf("[SETUP] Starting fake tovarisch on port %s", authority.Target.BaseURL)
+		if err := startFakeTovarischFromAuthority(authority); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("start fake tovarisch: %v", err))
 			result.Classification = "FAILED"
 			return result
 		}
-		result.RealTovarischStarted = true                  // Fake counts as started for fake mode
-		result.TovarischBinPath = identity.TovarischBinPath // P0-5: Use canonical identity path
+		result.RealTovarischStarted = true
+		result.TovarischBinPath = identity.TovarischBinPath
 	} else {
 		// Start real Tovarisch
 		log.Printf("[SETUP] Starting real Tovarisch: %s", *flagTovarischBin)
 
+		port := extractPortFromURL(authority.Target.BaseURL)
 		var err error
-		tovarischCmd, tovarischPS, err = startTovarisch(*flagTovarischBin, *flagTovarischArgs, *flagTovarischPort)
+		tovarischCmd, tovarischPS, err = startTovarisch(*flagTovarischBin, *flagTovarischArgs, port)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("start tovarisch: %v", err))
 			result.Classification = "FAILED"
 			return result
 		}
 
-		// P0-3: Use canonical ProcessState.StartTime as single authority
 		result.TovarischStartTime = &tovarischPS.StartTime
 		result.RealTovarischStarted = true
 		result.TovarischPID = tovarischPID
 		result.TovarischBinPath = *flagTovarischBin
-		// P0-3: Copy argv from ProcessState for process identity (cloned in process.go)
 		if tovarischPS != nil && tovarischPS.Argv != nil {
 			result.TovarischArgv = tovarischPS.Argv
 		}
 	}
 
 	// === PHASE 2: Wait for Tovarisch readiness ===
-	tovarischReady := waitForTovarischReady(*flagTovarischPort, 15*time.Second)
-
+	tovarischReady := waitForTovarischReadyFromAuthority(authority)
 	now := time.Now()
 	if tovarischReady {
 		result.RealTovarischReady = true
 		result.TovarischReadyTime = &now
-		log.Printf("[READY] Tovarisch ready on port %s", *flagTovarischPort)
+		log.Printf("[READY] Tovarisch ready")
 	} else {
 		result.Errors = append(result.Errors, "tovarisch did not become ready")
 		result.Classification = "FAILED"
@@ -130,12 +135,11 @@ func runLab() LabResult {
 	log.Printf("[LAUNCH] Starting UVB-76: %s", *flagUVB76Bin)
 
 	var err error
-	uvb76Cmd, uvb76PS, err = startUVB76(*flagUVB76Bin)
+	uvb76Cmd, uvb76PS, err = startUVB76WithConfigPath(*flagUVB76Bin, authority.ConfigPath)
 	if err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("start uvb76: %v", err))
 		result.Classification = "FAILED"
 
-		// P0-5: Route UVB-76 startup failure through canonical finalizer
 		processes := &failedRunProcesses{
 			TovarischCmd: tovarischCmd,
 			UVB76Cmd:     uvb76Cmd,
@@ -149,23 +153,23 @@ func runLab() LabResult {
 		return result
 	}
 
-	// P0-3: Use canonical ProcessState.StartTime as single authority
 	result.UVB76StartTime = &uvb76PS.StartTime
 	result.RealUVB76Started = true
 	result.UVB76PID = uvb76PID
 	result.UVB76BinPath = *flagUVB76Bin
-	// P0-3: Copy argv from ProcessState for process identity (cloned in process.go)
 	if uvb76PS != nil && uvb76PS.Argv != nil {
 		result.UVB76Argv = uvb76PS.Argv
 	}
 
 	// === PHASE 4: Wait for UVB-76 pprof readiness ===
-	pprofReady, pprofErr := waitForPPROFReady(*flagPProfPort, 30*time.Second, uvb76PS)
+	pprofPort := authority.Config.Diagnostics.PProf.Listen
+	pprofPortStr := extractPortFromURL("http://" + pprofPort)
+	pprofReady, pprofErr := waitForPPROFReady(pprofPortStr, 30*time.Second, uvb76PS)
 	if pprofReady {
 		result.UVB76PProfReady = true
 		now := time.Now()
 		result.UVB76PProfReadyTime = &now
-		log.Printf("[READY] UVB-76 pprof ready on port %s", *flagPProfPort)
+		log.Printf("[READY] UVB-76 pprof ready")
 	} else {
 		if uvb76PS.Exited() {
 			exitCode, _ := uvb76PS.ExitInfo()
@@ -179,7 +183,7 @@ func runLab() LabResult {
 	}
 
 	// Verify pprof endpoints
-	if !verifyPPROFEndpoints(*flagPProfPort) {
+	if !verifyPPROFEndpoints(pprofPortStr) {
 		result.Errors = append(result.Errors, "pprof endpoint verification failed")
 		result.Classification = "FAILED"
 		cleanup(tovarischCmd, uvb76Cmd, tovarischPS, uvb76PS)
@@ -191,7 +195,7 @@ func runLab() LabResult {
 	collectionStart := time.Now()
 	result.CollectionStartTime = &collectionStart
 
-	// Create bounded collection context for collector goroutines
+	// Create bounded collection context
 	collectionCtx, collectionCancel := context.WithTimeout(labCtx, *flagDuration)
 	defer collectionCancel()
 
@@ -200,48 +204,66 @@ func runLab() LabResult {
 	var samplesMu sync.Mutex
 	var tovarischSamples []ProcessSample
 	var uvb76Samples []ProcessSample
-	var collectorErrors []string // P0-4: Track collector errors for LabResult
+	var collectorErrors []string
 
-	// P0-4: Collect process samples using strict authority
+	// P0-12: Collect process samples with mandatory field presence
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		collectProcessSamplesStrict(collectionCtx, tovarischPID, *flagSampleInterval, &tovarischSamples, &samplesMu, &collectorErrors)
 	}()
 
-	// P0-4: Collect UVB-76 samples with goroutine count
+	// P0-14: Collect UVB-76 samples with typed goroutine observation
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		collectUVB76SamplesStrict(collectionCtx, uvb76PID, *flagPProfPort, *flagSampleInterval, &uvb76Samples, &samplesMu, &collectorErrors)
+		collectUVB76SamplesStrict(collectionCtx, uvb76PID, pprofPortStr, *flagSampleInterval, &uvb76Samples, &samplesMu, &collectorErrors)
 	}()
 
-	// P0-1/P0-2: Poll for target authority CONCURRENTLY with profile capture
-	// Target polling must not block the profile schedule
-	var targetAuthority *TargetStateAuthority
-	var targetIdentityErr error // P0-2: Track identity validation errors
-	targetCtx, targetCancel := context.WithCancel(collectionCtx)
-	defer targetCancel()
+	// P0-8: Poll for target authority using typed result
+	pollCtx, pollCancel := context.WithCancel(collectionCtx)
+	defer pollCancel()
 
-	// P0-1: Build expected URL from tovarisch port for identity binding
-	expectedTargetURL := fmt.Sprintf("http://localhost:%s", *flagTovarischPort)
+	pollResult := PollTargetAuthoritySimple(pollCtx, authority, 5*time.Second, *flagDuration)
 
-	targetWg := sync.WaitGroup{}
-	targetWg.Add(1)
-	go func() {
-		defer targetWg.Done()
-		targetAuthority = pollTargetAuthorityWithCompletion(targetCtx, *flagUVB76Port, "real-tovarisch", 5*time.Second)
-	}()
-
-	// P0-6: Capture profiles using validated CaptureProfile (runs in parallel)
+	// Capture profiles in parallel
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	captureErr := captureProfilesWithValidation(httpClient, *flagPProfPort, artifactDir, collectionStart, *flagDuration, *flagProfileInterval)
+	captureErr := captureProfilesWithValidation(httpClient, pprofPortStr, artifactDir, collectionStart, *flagDuration, *flagProfileInterval)
 
-	// Cancel target polling and wait for result
-	targetCancel()
-	targetWg.Wait()
+	// Cancel target polling and wait
+	pollCancel()
+	wg.Wait()
 
-	// P0-1: Use extracted CollectAndSnapshot seam for lifecycle authority
+	// P0-11: Target observation is mandatory
+	if pollResult.BestAuthority != nil {
+		result.RealTargetObserved = true
+		result.ScrapeAttempted = pollResult.BestAuthority.IsScrapeAttempted()
+		result.ScrapeCompleted = pollResult.BestAuthority.IsScrapeCompleted()
+
+		// P0-10: Identity was validated during polling
+		// Additional validation for safety
+		if err := validateSnapshotIdentity(pollResult.BestAuthority, authority.Target); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("target identity validation failed: %v", err))
+			result.Classification = "FAILED"
+			result.OK = false
+		}
+	}
+
+	// P0-11: Fail closed if no target observation
+	if !result.RealTargetObserved {
+		result.Errors = append(result.Errors, "target observation mandatory: no target observed")
+		result.Classification = "FAILED"
+		result.OK = false
+	}
+
+	// P0-11: Fail closed if poll failed with terminal error
+	if pollResult.TerminalError != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("target poll terminal error: %v", pollResult.TerminalError))
+		result.Classification = "FAILED"
+		result.OK = false
+	}
+
+	// Use CollectAndSnapshot for lifecycle authority
 	snapshot, err := CollectAndSnapshot(
 		collectionCancel,
 		&wg,
@@ -257,9 +279,6 @@ func runLab() LabResult {
 		result.Classification = "FAILED"
 		result.OK = false
 
-		// P0-2: Use the PRE-CREATED identity - not a new one
-		// P0-4: Finalize lifecycle failure - returns joined error compatible with errors.Is
-		// P0-8: Pass initiating error and real process handles
 		processes := &failedRunProcesses{
 			TovarischCmd: tovarischCmd,
 			UVB76Cmd:     uvb76Cmd,
@@ -268,7 +287,6 @@ func runLab() LabResult {
 		}
 		finalizationErr := finalizeLifecycleFailure(&result, err, identity, processes)
 		if finalizationErr != nil {
-			// P0-4: Terminal error satisfies errors.Is for all causes
 			result.Errors = append(result.Errors, fmt.Sprintf("finalization: %v", finalizationErr))
 		}
 		return result
@@ -281,42 +299,26 @@ func runLab() LabResult {
 	result.CollectionEndTime = &collectionEnd
 	log.Printf("[COLLECTION] Collection phase complete")
 
-	// === PHASE 6: Verify cross-component interaction ===
-	// P0-1/P0-2: Use authoritative target state
-	if targetAuthority != nil {
-		result.RealTargetObserved = true
-		result.ScrapeAttempted = targetAuthority.IsScrapeAttempted()
-		result.ScrapeCompleted = targetAuthority.IsScrapeCompleted()
-
-		// P0-2: Validate target identity binding - fail closed if URL mismatch
-		targetIdentityErr = ValidateTargetIdentity(targetAuthority, "real-tovarisch", expectedTargetURL)
-		if targetIdentityErr != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("target identity validation failed: %v", targetIdentityErr))
-			result.Classification = "FAILED"
-			result.OK = false
-		}
-	}
-
-	// Check if we have process samples (P0-4)
+	// Check process samples
 	result.ProcessSamplesPresent = len(tovarischFinal) > 0 && len(uvb76Final) > 0
 
-	// P0-6: Check profiles using ValidateAllProfiles
+	// Validate profiles
 	profileErr := ValidateAllProfiles(artifactDir)
 	result.ProfilesPresent = profileErr == nil
 	if profileErr != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("profile validation failed: %v", profileErr))
 	}
 
-	// P0-6: Propagate profile capture errors to LabResult
+	// Propagate profile capture errors
 	if captureErr != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("profile capture failed: %v", captureErr))
 	}
 
-	// P0-8: Compute deltas for both series
+	// Compute deltas
 	tovarischDelta := ComputeProcessDeltas(tovarischFinal)
 	uvb76Delta := ComputeProcessDeltas(uvb76Final)
 
-	// P0-7: Write series files - track write errors
+	// Write series files
 	var artifactErrors []string
 	if err := writeProcessSeries("tovarisch", tovarischFinal); err != nil {
 		artifactErrors = append(artifactErrors, fmt.Sprintf("tovarisch series write: %v", err))
@@ -336,10 +338,10 @@ func runLab() LabResult {
 	// Accumulate artifact errors
 	result.Errors = append(result.Errors, artifactErrors...)
 
-	// P0-4: Propagate collector errors to LabResult
+	// Propagate collector errors
 	result.Errors = append(result.Errors, collectorErrorsFinal...)
 
-	// === PHASE 7: Cleanup ===
+	// === PHASE 6: Cleanup ===
 	cleanupErrors := cleanup(tovarischCmd, uvb76Cmd, tovarischPS, uvb76PS)
 	result.Errors = append(result.Errors, cleanupErrors...)
 
@@ -347,19 +349,17 @@ func runLab() LabResult {
 	result.UVB76Removed = uvb76PID == 0 || processIsGone(uvb76PID)
 	result.TovarischRemoved = tovarischPID == 0 || processIsGone(tovarischPID)
 
-	// P0-7: Independently verify port release - not just absence of cleanup errors
-	portErr := verifyPortsReleased()
+	// Verify port release
+	portErr := verifyPortsReleasedFromAuthority(authority)
 	if portErr != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("port release verification failed: %v", portErr))
 	}
 	result.PortsReleased = portErr == nil
 
-	// === PHASE 8: Final classification using strict authority (P0-3) ===
+	// === PHASE 7: Final classification ===
 	result.Classification, result.OK = classifyLabResult(result)
 
-	// === PHASE 9: Persist result.json (P0-7) ===
-	// P0-2: Use the pre-created identity for success path
-	// P0-7: BuildResultFromLabResult now returns error for validation failures
+	// === PHASE 8: Persist result ===
 	builtResult, buildErr := BuildResultFromLabResult(identity, result)
 	if buildErr != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("result construction: %v", buildErr))
@@ -367,16 +367,18 @@ func runLab() LabResult {
 		result.OK = false
 		return result
 	}
-	if targetAuthority != nil {
+
+	// P0-15: Publish target authority and poll diagnostics
+	if pollResult.BestAuthority != nil {
 		builtResult.ScrapeAuthority = &ScrapeAuthorityObservation{
-			TargetID:            targetAuthority.TargetID,
-			AttemptObserved:     targetAuthority.AttemptObserved,
-			AttemptTimestamp:    &targetAuthority.AttemptTimestamp,
-			CompletionObserved:  targetAuthority.CompletionObserved,
-			CompletionTimestamp: &targetAuthority.CompletionTimestamp,
-			Reachable:           targetAuthority.Reachable,
-			Status:              targetAuthority.Status,
-			Error:               targetAuthority.Error,
+			TargetID:            pollResult.BestAuthority.TargetID,
+			AttemptObserved:     pollResult.BestAuthority.AttemptObserved,
+			AttemptTimestamp:    &pollResult.BestAuthority.AttemptTimestamp,
+			CompletionObserved:  pollResult.BestAuthority.CompletionObserved,
+			CompletionTimestamp: &pollResult.BestAuthority.CompletionTimestamp,
+			Reachable:           pollResult.BestAuthority.Reachable,
+			Status:              pollResult.BestAuthority.Status,
+			Error:               pollResult.BestAuthority.Error,
 		}
 		builtResult.TovarischSeriesFile = "tovarisch-process-series.csv"
 		builtResult.UVB76SeriesFile = "uvb76-process-series.csv"
@@ -384,7 +386,7 @@ func runLab() LabResult {
 		builtResult.UVB76SampleCount = len(uvb76Final)
 	}
 
-	// P0-7: Persist result with strict reread validation
+	// Persist result
 	if persistErr := persistResult(builtResult, artifactDir); persistErr != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("result persistence failed: %v", persistErr))
 		result.Classification = "FAILED"
@@ -394,10 +396,151 @@ func runLab() LabResult {
 	return result
 }
 
+// extractPortFromURL extracts the port from a URL like "http://localhost:18317".
+func extractPortFromURL(urlStr string) string {
+	// Simple extraction - assumes URL is already validated
+	parts := strings.Split(urlStr, ":")
+	if len(parts) >= 3 {
+		return parts[len(parts)-1]
+	}
+	// Handle URLs without scheme
+	hostPort := strings.TrimPrefix(urlStr, "http://")
+	hostPort = strings.TrimPrefix(hostPort, "https://")
+	hostPort = strings.TrimSuffix(hostPort, "/")
+	parts = strings.Split(hostPort, ":")
+	if len(parts) >= 2 {
+		return parts[len(parts)-1]
+	}
+	return ""
+}
+
+// startFakeTovarischFromAuthority starts fake tovarisch using authority.
+func startFakeTovarischFromAuthority(authority *GeneratedLabAuthority) error {
+	fakePort := extractPortFromURL(authority.Target.BaseURL)
+
+	fakeServer = &fake.StatusServer{
+		Port:    fakePort,
+		LogFile: tovarischLogFile,
+	}
+
+	if err := fakeServer.Start(); err != nil {
+		return fmt.Errorf("start fake server: %w", err)
+	}
+
+	fakePID := 99999
+	tovarischPID = fakePID
+	pidFile := filepath.Join(artifactDir, "tovarisch.pid")
+	os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", fakePID)), 0644)
+
+	log.Printf("[LAUNCH] Fake Tovarisch started on port %s, log=%s", fakePort, tovarischLogFile)
+	return nil
+}
+
+// waitForTovarischReadyFromAuthority waits for tovarisch using authority.
+func waitForTovarischReadyFromAuthority(authority *GeneratedLabAuthority) bool {
+	fakePort := extractPortFromURL(authority.Target.BaseURL)
+	deadline := time.Now().Add(15 * time.Second)
+	url := fmt.Sprintf("http://localhost:%s/status", fakePort)
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return true
+			}
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return false
+}
+
+// startUVB76WithConfigPath starts UVB-76 with the specified config path.
+func startUVB76WithConfigPath(bin, configPath string) (*exec.Cmd, *ProcessState, error) {
+	args := []string{
+		"-dev",
+		"-config", configPath,
+	}
+
+	cmd := exec.Command(bin, args...)
+
+	logOut, err := os.OpenFile(uvb76LogFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open log file: %w", err)
+	}
+
+	cmd.Stdout = logOut
+	cmd.Stderr = logOut
+
+	startTime := time.Now()
+
+	if err := cmd.Start(); err != nil {
+		logOut.Close()
+		return nil, nil, fmt.Errorf("start: %w", err)
+	}
+	uvb76PID = cmd.Process.Pid
+
+	pidFile := filepath.Join(artifactDir, "uvb76.pid")
+	os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", uvb76PID)), 0644)
+
+	clonedArgv := make([]string, len(cmd.Args))
+	copy(clonedArgv, cmd.Args)
+	ps := &ProcessState{
+		StartTime: startTime,
+		Argv:      clonedArgv,
+	}
+	ps.done = make(chan struct{})
+
+	ps.mu.Lock()
+	ps.running = true
+	ps.exited = false
+	ps.mu.Unlock()
+
+	go func() {
+		_ = cmd.Wait()
+		_ = logOut.Close()
+
+		ps.mu.Lock()
+		defer ps.mu.Unlock()
+
+		ps.running = false
+		ps.exited = true
+
+		if cmd.ProcessState != nil {
+			ps.exitCode = cmd.ProcessState.ExitCode()
+		}
+
+		close(ps.done)
+	}()
+
+	log.Printf("[LAUNCH] UVB-76 started: PID=%d, log=%s", uvb76PID, uvb76LogFile)
+	return cmd, ps, nil
+}
+
+// verifyPortsReleasedFromAuthority verifies ports are released using authority.
+func verifyPortsReleasedFromAuthority(authority *GeneratedLabAuthority) error {
+	ports := []string{
+		extractPortFromURL(authority.Target.BaseURL),
+		extractPortFromURL("http://" + authority.Config.Listen.Addr),
+		extractPortFromURL("http://" + authority.Config.Diagnostics.PProf.Listen),
+	}
+
+	for _, port := range ports {
+		addr := fmt.Sprintf("localhost:%s", port)
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("port %s still in use", port)
+		}
+		ln.Close()
+	}
+	return nil
+}
+
 // SamplingError represents a structured sampling failure.
 type SamplingError struct {
-	Process  string // "tovarisch" or "uvb76"
-	Phase    string // "sampling", "goroutine", "disappearance"
+	Process  string
+	Phase    string
 	PID      int
 	InnerErr error
 }
@@ -406,9 +549,9 @@ func (e *SamplingError) Error() string {
 	return fmt.Sprintf("%s %s error (PID %d): %v", e.Process, e.Phase, e.PID, e.InnerErr)
 }
 
-// collectProcessSamplesStrict collects process metrics using strict authority.
-// P0-4: Uses sampleProcessMetricsFull which returns errors; propagates errors to LabResult.
-// P0-4: Treats premature process disappearance as a collector failure.
+// collectProcessSamplesStrict collects process metrics with mandatory field presence.
+// P0-12: Requires all mandatory fields before appending sample.
+// P0-13: Reports typed disappearance before first sample.
 func collectProcessSamplesStrict(ctx context.Context, pid int, interval time.Duration, samples *[]ProcessSample, mu *sync.Mutex, errors *[]string) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -417,28 +560,26 @@ func collectProcessSamplesStrict(ctx context.Context, pid int, interval time.Dur
 	for {
 		select {
 		case <-ticker.C:
-			// P0-4: Check if process disappeared prematurely (after we started collecting)
+			// P0-13: Check process before first sample
 			if processIsGone(pid) {
-				if firstSampleSeen {
-					// Process disappeared prematurely - this is a failure condition
-					mu.Lock()
+				mu.Lock()
+				if !firstSampleSeen {
+					// P0-13: Process disappeared before first sample
 					*errors = append(*errors, (&SamplingError{
 						Process:  "tovarisch",
-						Phase:    "disappearance",
+						Phase:    "disappearance_before_first_sample",
 						PID:      pid,
-						InnerErr: fmt.Errorf("process exited before collection completed"),
+						InnerErr: ErrProcessDisappeared,
 					}).Error())
-					mu.Unlock()
 				}
+				mu.Unlock()
 				return
 			}
-			firstSampleSeen = true
 
-			// P0-4: Use strict sampler that returns errors
-			sample, err := sampleProcessMetricsFull(pid)
+			// P0-12: Use strict sampler that enforces mandatory fields
+			sample, err := sampleProcessMetricsWithPresence(pid)
 			if err != nil {
 				log.Printf("[METRICS] Tovarisch sampling error: %v", err)
-				// P0-4: Propagate error to LabResult instead of silently continuing
 				mu.Lock()
 				*errors = append(*errors, (&SamplingError{
 					Process:  "tovarisch",
@@ -449,50 +590,51 @@ func collectProcessSamplesStrict(ctx context.Context, pid int, interval time.Dur
 				mu.Unlock()
 				continue
 			}
+
+			firstSampleSeen = true
 			mu.Lock()
 			*samples = append(*samples, *sample)
 			mu.Unlock()
+
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-// collectUVB76SamplesStrict collects UVB-76 process metrics and goroutine count.
-// P0-4: Uses strict sampler for process metrics; propagates errors to LabResult.
-// P0-4: Treats premature process disappearance as a collector failure.
+// collectUVB76SamplesStrict collects UVB-76 metrics with typed goroutine observation.
+// P0-14: Goroutine observation returns typed result, not zero on error.
 func collectUVB76SamplesStrict(ctx context.Context, pid int, pprofPort string, interval time.Duration, samples *[]ProcessSample, mu *sync.Mutex, errors *[]string) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	client := &http.Client{Timeout: 2 * time.Second}
 	firstSampleSeen := false
+	pprofBaseURL := fmt.Sprintf("http://localhost:%s", pprofPort)
 
 	for {
 		select {
 		case <-ticker.C:
-			// P0-4: Check if process disappeared prematurely
+			// P0-13: Check process before first sample
 			if processIsGone(pid) {
-				if firstSampleSeen {
-					// Process disappeared prematurely - this is a failure condition
-					mu.Lock()
+				mu.Lock()
+				if !firstSampleSeen {
+					// P0-13: Process disappeared before first sample
 					*errors = append(*errors, (&SamplingError{
 						Process:  "uvb76",
-						Phase:    "disappearance",
+						Phase:    "disappearance_before_first_sample",
 						PID:      pid,
-						InnerErr: fmt.Errorf("process exited before collection completed"),
+						InnerErr: ErrProcessDisappeared,
 					}).Error())
-					mu.Unlock()
 				}
+				mu.Unlock()
 				return
 			}
-			firstSampleSeen = true
 
-			// P0-4: Use strict sampler
-			sample, err := sampleProcessMetricsFull(pid)
+			// P0-12: Use strict sampler for process metrics
+			sample, err := sampleProcessMetricsWithPresence(pid)
 			if err != nil {
 				log.Printf("[METRICS] UVB-76 sampling error: %v", err)
-				// P0-4: Propagate error to LabResult instead of silently continuing
 				mu.Lock()
 				*errors = append(*errors, (&SamplingError{
 					Process:  "uvb76",
@@ -503,74 +645,46 @@ func collectUVB76SamplesStrict(ctx context.Context, pid int, pprofPort string, i
 				mu.Unlock()
 				continue
 			}
-			// P0-5: Only GoroutineCount has real authority
-			if gc := fetchGoroutineCount(client, pprofPort); gc > 0 {
-				sample.GoroutineCount = gc
+
+			// P0-14: Use typed goroutine observation
+			gc, gcErr := FetchGoroutineCount(ctx, client, pprofBaseURL)
+			if gcErr != nil {
+				log.Printf("[METRICS] Goroutine observation error: %v", gcErr)
+				mu.Lock()
+				*errors = append(*errors, (&SamplingError{
+					Process:  "uvb76",
+					Phase:    "goroutine",
+					PID:      pid,
+					InnerErr: gcErr,
+				}).Error())
+				mu.Unlock()
+				// P0-14: Do not append sample without goroutine authority
+				continue
 			}
+			sample.GoroutineCount = gc
+
+			firstSampleSeen = true
 			mu.Lock()
 			*samples = append(*samples, *sample)
 			mu.Unlock()
+
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-// pollTargetAuthorityWithCompletion polls UVB-76 for authoritative target state.
-// Retains observations until either a completed scrape is observed or context ends.
-// P0-1/P0-2: Retains authority observation until completion.
-func pollTargetAuthorityWithCompletion(ctx context.Context, uvb76Port, targetID string, interval time.Duration) *TargetStateAuthority {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	sessionCookie := os.Getenv("UVB76_SESSION_COOKIE")
-	var bestAuthority *TargetStateAuthority
-
-	for {
-		select {
-		case <-ticker.C:
-			auth, err := FetchTargetState(uvb76Port, targetID, sessionCookie)
-			if err != nil {
-				log.Printf("[TARGET] FetchTargetState error: %v", err)
-				continue
-			}
-			if auth != nil {
-				// Keep updating until we see completion or context ends
-				bestAuthority = auth
-				if auth.IsScrapeCompleted() {
-					// Return immediately on completion
-					return auth
-				}
-			}
-		case <-ctx.Done():
-			// Return the best authority we observed (even if incomplete)
-			return bestAuthority
-		}
-	}
-}
-
-// fetchGoroutineCount fetches goroutine count from pprof endpoint.
-// P0-5: Only GoroutineCount has real authority.
+// fetchGoroutineCount is kept for backward compatibility with tests.
+// P0-14: Deprecated - use FetchGoroutineCount instead.
 func fetchGoroutineCount(client *http.Client, pprofPort string) int64 {
-	resp, err := client.Get(fmt.Sprintf("http://localhost:%s/debug/pprof/goroutine?debug=1", pprofPort))
+	count, err := FetchGoroutineCount(context.Background(), client, fmt.Sprintf("http://localhost:%s", pprofPort))
 	if err != nil {
 		return 0
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	lines := strings.Split(string(body), "\n")
-	var count int64
-	for _, line := range lines {
-		if strings.HasPrefix(line, "goroutine ") && strings.HasSuffix(line, ":") {
-			count++
-		}
 	}
 	return count
 }
 
 // captureProfilesWithValidation captures and validates all required profiles.
-// P0-6: Uses CaptureProfile with full validation. Accumulates all errors.
 func captureProfilesWithValidation(client *http.Client, pprofPort, artifactDir string, start time.Time, duration, interval time.Duration) error {
 	profiles := []struct {
 		name string
@@ -615,7 +729,6 @@ func captureProfilesWithValidation(client *http.Client, pprofPort, artifactDir s
 		}
 	}
 
-	// Return all accumulated errors joined
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
@@ -634,13 +747,12 @@ func getExtension(name string) string {
 	}
 }
 
-// writeDeltaSummary writes delta summary to JSON and returns any error.
+// writeDeltaSummary writes delta summary to JSON.
 func writeDeltaSummary(prefix string, delta *ProcessDelta) error {
 	if delta == nil {
 		return nil
 	}
 
-	// P0-8: Set metric name
 	delta.Metric = "rss_kib"
 
 	path := filepath.Join(artifactDir, fmt.Sprintf("%s-delta.json", prefix))
@@ -650,7 +762,6 @@ func writeDeltaSummary(prefix string, delta *ProcessDelta) error {
 	}
 	defer f.Close()
 
-	// Format with UTC timestamps
 	_, err = fmt.Fprintf(f, `{
   "metric": "%s",
   "first_ts": "%s",
@@ -689,8 +800,7 @@ func sleepUntil(deadline time.Time) {
 	}
 }
 
-// writeProcessSeries writes process samples to a CSV file and returns any error.
-// P0-4: Writes truthy process metrics from /proc including PID.
+// writeProcessSeries writes process samples to a CSV file.
 func writeProcessSeries(prefix string, samples []ProcessSample) error {
 	if len(samples) == 0 {
 		return nil
@@ -703,10 +813,8 @@ func writeProcessSeries(prefix string, samples []ProcessSample) error {
 	}
 	defer f.Close()
 
-	// CSV header including PID
 	fmt.Fprintf(f, "pid,timestamp,rss_kib,vm_size_kib,pss_kib,pss_anon_kib,private_dirty_kib,anonymous_kib,threads,fd_count,goroutines\n")
 
-	// CSV rows
 	for _, s := range samples {
 		fmt.Fprintf(f, "%d,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
 			s.PID,
@@ -724,10 +832,7 @@ func writeProcessSeries(prefix string, samples []ProcessSample) error {
 	return nil
 }
 
-// finalizeLifecycleFailure finalizes lifecycle failure with complete cleanup and verification.
-// P0-4: Returns single joined error compatible with errors.Is for all causes.
-// P0-6: Uses only supplied PIDs, never package globals.
-// P0-7: Passes initiating error and real process handles.
+// finalizeLifecycleFailure finalizes lifecycle failure with complete cleanup.
 func finalizeLifecycleFailure(
 	result *LabResult,
 	initiatingFailure error,
@@ -745,7 +850,6 @@ func finalizeLifecycleFailure(
 
 	ops := lifecycleFailureOps{
 		Cleanup: func() []error {
-			// P0-1: Use typed cleanup authority that returns []error directly
 			return cleanupOwnedProcesses(
 				processes.TovarischCmd,
 				processes.UVB76Cmd,
