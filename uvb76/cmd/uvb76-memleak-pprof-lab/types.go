@@ -17,16 +17,18 @@ type LabResult struct {
 	ArtifactDir     string `json:"artifact_dir"`
 
 	// Real Tovarisch lifecycle
-	RealTovarischStarted bool   `json:"real_tovarisch_started"`
-	RealTovarischReady   bool   `json:"real_tovarisch_ready"`
-	TovarischPID         int    `json:"tovarisch_pid,omitempty"`
-	TovarischBinPath     string `json:"tovarisch_bin_path,omitempty"`
+	RealTovarischStarted bool     `json:"real_tovarisch_started"`
+	RealTovarischReady   bool     `json:"real_tovarisch_ready"`
+	TovarischPID         int      `json:"tovarisch_pid,omitempty"`
+	TovarischBinPath     string   `json:"tovarisch_bin_path,omitempty"`
+	TovarischArgv        []string `json:"tovarisch_argv,omitempty"` // P0-3: Command arguments for identity
 
 	// Real UVB-76 lifecycle
-	RealUVB76Started bool   `json:"real_uvb76_started"`
-	UVB76PProfReady  bool   `json:"uvb76_pprof_ready"`
-	UVB76PID         int    `json:"uvb76_pid,omitempty"`
-	UVB76BinPath     string `json:"uvb76_bin_path,omitempty"`
+	RealUVB76Started bool     `json:"real_uvb76_started"`
+	UVB76PProfReady  bool     `json:"uvb76_pprof_ready"`
+	UVB76PID         int      `json:"uvb76_pid,omitempty"`
+	UVB76BinPath     string   `json:"uvb76_bin_path,omitempty"`
+	UVB76Argv        []string `json:"uvb76_argv,omitempty"` // P0-3: Command arguments for identity
 
 	// Cross-component interaction
 	RealTargetObserved bool `json:"real_tovarisch_target_observed"`
@@ -76,6 +78,8 @@ type ReadinessResult struct {
 }
 
 // ProcessSample records a single process measurement snapshot.
+// P0-5: Removed zero placeholder Go metrics (HeapAlloc, HeapInuse, HeapObjects, NumGC)
+// until a real parser exists. GoroutineCount is kept as it has a real authority.
 type ProcessSample struct {
 	Timestamp       time.Time `json:"timestamp"`
 	PID             int       `json:"pid"`
@@ -87,12 +91,8 @@ type ProcessSample struct {
 	AnonymousKIB    int64     `json:"anonymous_kib,omitempty"`
 	Threads         int       `json:"threads"`
 	FDCount         int       `json:"fd_count"`
-	// UVB-76 specific (when available)
+	// UVB-76 specific
 	GoroutineCount int64 `json:"goroutine_count,omitempty"`
-	HeapAlloc      int64 `json:"heap_alloc,omitempty"`
-	HeapInuse      int64 `json:"heap_inuse,omitempty"`
-	HeapObjects    int64 `json:"heap_objects,omitempty"`
-	NumGC          int   `json:"num_gc,omitempty"`
 }
 
 // TargetObservation records a single scrape observation from UVB-76.

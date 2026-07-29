@@ -803,3 +803,41 @@ tovarisch-memory-lab-verify-matrix:
 	"$(MEMORY_LAB)" verify-matrix \
 		--matrix-dir "$(MATRIX_DIR)"
 	cd tovarisch/labs/memory && go clean
+
+# === UVB-76 Memory Leak pprof Lab ===
+# Lab harness for UVB-76 memory leak detection using pprof profiles.
+# Tests real binary behavior with truthful process metrics (VmRSS, VmSize, Threads, FD, Pss).
+# Primary execution: `make uvb76-memleak-pprof-lab-fake` (fake mode) or `make uvb76-memleak-pprof-lab-real` (real binaries).
+# Artifacts go to: /tmp/uvb76-memleak-pprof-lab/ (external to repository)
+
+MEMLEAK_PPROF_LAB := .factory/bin/uvb76-memleak-pprof-lab
+
+uvb76-memleak-pprof-lab-build:
+	@mkdir -p .factory/bin
+	cd uvb76/cmd/uvb76-memleak-pprof-lab && go build -o ../../../.factory/bin/uvb76-memleak-pprof-lab .
+
+uvb76-memleak-pprof-lab-test:
+	cd uvb76/cmd/uvb76-memleak-pprof-lab && go test ./... -v
+
+uvb76-memleak-pprof-lab-vet:
+	cd uvb76/cmd/uvb76-memleak-pprof-lab && go vet ./...
+
+# Run in fake mode (no real binaries needed) - quick smoke test
+# Artifacts go to: /tmp/uvb76-memleak-pprof-lab/{run-id}/
+uvb76-memleak-pprof-lab-fake:
+	@$(MAKE) uvb76-memleak-pprof-lab-build
+	@mkdir -p /tmp/uvb76-memleak-pprof-lab
+	@./.factory/bin/uvb76-memleak-pprof-lab \
+		--use-fake-tovarisch \
+		--artifact-dir=/tmp/uvb76-memleak-pprof-lab
+
+# Run with real binaries (requires tovarisch and uvb76 built)
+# P0-11: Execute real three-row matrix (A: idle, B: normal, C: high-freq)
+uvb76-memleak-pprof-lab-real:
+	@$(MAKE) tovarisch-build
+	@$(MAKE) uvb76-build
+	@mkdir -p /tmp/uvb76-memleak-pprof-lab
+	@./.factory/bin/uvb76-memleak-pprof-lab \
+		--tovarisch-bin="$(CURDIR)/tovarisch/zig-out/bin/tovarisch" \
+		--uvb76-bin="$(CURDIR)/uvb76/uvb76" \
+		--artifact-dir=/tmp/uvb76-memleak-pprof-lab

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -16,6 +17,83 @@ import (
 
 	"github.com/s1onique/KGB/uvb76/cmd/uvb76-memleak-pprof-lab/internal/fake"
 )
+
+// Sentinel errors for cleanup authority.
+// P0-1: Typed cleanup errors preserve exact identity for errors.Is.
+
+var ErrFakeServerShutdownFailed = errors.New("fake server shutdown failed")
+var ErrUVB76GracefulShutdownFailed = errors.New("uvb76 graceful shutdown failed")
+var ErrUVB76ForceKillFailed = errors.New("uvb76 force kill failed")
+var ErrTovarischGracefulShutdownFailed = errors.New("tovarisch graceful shutdown failed")
+var ErrTovarischForceKillFailed = errors.New("tovarisch force kill failed")
+var ErrPortReleaseFailed = errors.New("port release failed")
+
+// cleanupOwnedProcesses performs bounded cleanup of owned processes and returns typed errors.
+// P0-1: Returns []error to preserve exact causes for errors.Is comparison.
+// P0-3: Does NOT verify port release - that is the finalizer's independent authority.
+func cleanupOwnedProcesses(
+	tovarischCmd, uvb76Cmd *exec.Cmd,
+	tovarischPS, uvb76PS *ProcessState,
+) []error {
+	var errs []error
+
+	// Shutdown fake server first if running
+	if fakeServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := fakeServer.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("%w: %w", ErrFakeServerShutdownFailed, err))
+		}
+		fakeServer = nil
+	}
+
+	// Stop UVB-76 gracefully
+	if uvb76Cmd != nil && uvb76Cmd.Process != nil && uvb76PS != nil {
+		if err := gracefulShutdown(uvb76Cmd, uvb76PS, 10*time.Second); err != nil {
+			log.Printf("[CLEANUP] UVB-76 graceful shutdown failed, forcing: %v", err)
+			if forceErr := forceKill(uvb76Cmd, uvb76PS); forceErr != nil {
+				// P0-2: Preserve BOTH sentinel identities via errors.Join
+				errs = append(errs, errors.Join(
+					fmt.Errorf("%w: %w", ErrUVB76GracefulShutdownFailed, err),
+					fmt.Errorf("%w: %w", ErrUVB76ForceKillFailed, forceErr),
+				))
+			} else {
+				errs = append(errs, fmt.Errorf("%w: %w", ErrUVB76GracefulShutdownFailed, err))
+			}
+		}
+	}
+
+	// Stop Tovarisch gracefully
+	if tovarischCmd != nil && tovarischCmd.Process != nil && tovarischPS != nil {
+		if err := gracefulShutdown(tovarischCmd, tovarischPS, 10*time.Second); err != nil {
+			log.Printf("[CLEANUP] Tovarisch graceful shutdown failed, forcing: %v", err)
+			if forceErr := forceKill(tovarischCmd, tovarischPS); forceErr != nil {
+				// P0-2: Preserve BOTH sentinel identities via errors.Join
+				errs = append(errs, errors.Join(
+					fmt.Errorf("%w: %w", ErrTovarischGracefulShutdownFailed, err),
+					fmt.Errorf("%w: %w", ErrTovarischForceKillFailed, forceErr),
+				))
+			} else {
+				errs = append(errs, fmt.Errorf("%w: %w", ErrTovarischGracefulShutdownFailed, err))
+			}
+		}
+	}
+
+	// P0-3: Port verification is NOT done here - finalizer has independent authority
+
+	// Clean up PID files
+	pidFiles := []string{
+		filepath.Join(artifactDir, "tovarisch.pid"),
+		filepath.Join(artifactDir, "uvb76.pid"),
+	}
+	for _, f := range pidFiles {
+		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
+			errs = append(errs, fmt.Errorf("pid file removal %s: %w", f, err))
+		}
+	}
+
+	return errs
+}
 
 // startFakeTovarisch creates and starts the fake tovarisch status server.
 func startFakeTovarisch() error {
@@ -74,6 +152,9 @@ func startTovarisch(bin string, args string, port string) (*exec.Cmd, *ProcessSt
 	cmd.Stdout = logOut
 	cmd.Stderr = logOut
 
+	// P0-4: Capture start time before process startup for process identity
+	startTime := time.Now()
+
 	if err := cmd.Start(); err != nil {
 		logOut.Close()
 		return nil, nil, fmt.Errorf("start tovarisch: %w", err)
@@ -84,8 +165,14 @@ func startTovarisch(bin string, args string, port string) (*exec.Cmd, *ProcessSt
 	pidFile := filepath.Join(artifactDir, "tovarisch.pid")
 	os.WriteFile(pidFile, []byte(strconv.Itoa(tovarischPID)), 0644)
 
-	// Create process state
-	ps := &ProcessState{}
+	// Create process state with captured start time and argv
+	// P0-3: Clone argv for process identity (done here, not in runner.go)
+	clonedArgv := make([]string, len(cmd.Args))
+	copy(clonedArgv, cmd.Args)
+	ps := &ProcessState{
+		StartTime: startTime,
+		Argv:      clonedArgv,
+	}
 	ps.done = make(chan struct{})
 
 	ps.mu.Lock()
@@ -143,6 +230,9 @@ func startUVB76(bin string) (*exec.Cmd, *ProcessState, error) {
 	cmd.Stdout = logOut
 	cmd.Stderr = logOut
 
+	// P0-4: Capture start time before process startup for process identity
+	startTime := time.Now()
+
 	if err := cmd.Start(); err != nil {
 		logOut.Close()
 		return nil, nil, fmt.Errorf("start: %w", err)
@@ -153,8 +243,14 @@ func startUVB76(bin string) (*exec.Cmd, *ProcessState, error) {
 	pidFile := filepath.Join(artifactDir, "uvb76.pid")
 	os.WriteFile(pidFile, []byte(strconv.Itoa(uvb76PID)), 0644)
 
-	// Create process state
-	ps := &ProcessState{}
+	// Create process state with captured start time and argv
+	// P0-3: Clone argv for process identity (done here, not in runner.go)
+	clonedArgv := make([]string, len(cmd.Args))
+	copy(clonedArgv, cmd.Args)
+	ps := &ProcessState{
+		StartTime: startTime,
+		Argv:      clonedArgv,
+	}
 	ps.done = make(chan struct{})
 
 	ps.mu.Lock()
@@ -212,13 +308,17 @@ func gracefulShutdown(cmd *exec.Cmd, ps *ProcessState, timeout time.Duration) er
 	}
 }
 
-// forceKill sends SIGKILL to the process.
-func forceKill(cmd *exec.Cmd, ps *ProcessState) {
+// forceKill sends SIGKILL to the process and returns any error.
+// P0-2: Returns error to preserve force-kill failures for errors.Is.
+func forceKill(cmd *exec.Cmd, ps *ProcessState) error {
 	if cmd == nil || cmd.Process == nil {
-		return
+		return nil
 	}
-	cmd.Process.Kill()
+	if err := cmd.Process.Kill(); err != nil {
+		return err
+	}
 	<-ps.done
+	return nil
 }
 
 // waitForTovarischReady waits for Tovarisch /status endpoint to be ready.

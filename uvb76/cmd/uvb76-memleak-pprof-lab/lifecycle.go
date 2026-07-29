@@ -3,6 +3,7 @@ package main
 import (
 	"sync"
 	"syscall"
+	"time"
 )
 
 // LifecycleState represents the current state of the lab harness.
@@ -57,13 +58,17 @@ func (s LifecycleState) String() string {
 }
 
 // ProcessState holds shared process state for the monitored child.
+// P0-4: Includes StartTime for process identity in failed results.
+// P0-3: Includes Argv for complete process identity projection.
 type ProcessState struct {
-	mu       sync.RWMutex
-	running  bool
-	exited   bool
-	exitCode int
-	signal   syscall.Signal
-	done     chan struct{} // Closed when Wait() completes
+	mu        sync.RWMutex
+	running   bool
+	exited    bool
+	exitCode  int
+	signal    syscall.Signal
+	StartTime time.Time     // Captured at process startup for identity
+	Argv      []string      // P0-3: Command arguments for identity
+	done      chan struct{} // Closed when Wait() completes
 }
 
 // Running returns true if the process is still running.
