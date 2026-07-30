@@ -375,17 +375,23 @@ func TestCaptureProfile_SuccessfulAtomicReplacement(t *testing.T) {
 	tmpDir := t.TempDir()
 	destPath := filepath.Join(tmpDir, "valid-profile.pb.gz")
 
-	// Generate valid gzip data at runtime
+	// Generate valid gzip data for new profile
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
-	gz.Write([]byte("test profile content for validation"))
+	gz.Write([]byte("new profile content for replacement"))
 	gz.Close()
-	validGzip := buf.Bytes()
+	newGzip := buf.Bytes()
+
+	// Create old content that will be replaced
+	oldContent := []byte("old profile content")
+	if err := os.WriteFile(destPath, oldContent, 0644); err != nil {
+		t.Fatalf("Failed to create old profile: %v", err)
+	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")
 		w.WriteHeader(http.StatusOK)
-		w.Write(validGzip)
+		w.Write(newGzip)
 	}))
 	defer server.Close()
 
@@ -398,14 +404,29 @@ func TestCaptureProfile_SuccessfulAtomicReplacement(t *testing.T) {
 		t.Errorf("Expected successful capture, got: %v", err)
 	}
 
-	// Verify destination exists and is valid
+	// Verify destination exists and contains NEW content (not old)
 	info, err := os.Stat(destPath)
 	if err != nil {
-		t.Errorf("Destination should exist: %v", err)
+		t.Fatal("Destination should exist after replacement")
 	}
 
-	if info.Size() != int64(len(validGzip)) {
-		t.Errorf("Destination size mismatch: got %d, expected %d", info.Size(), len(validGzip))
+	if info.Size() != int64(len(newGzip)) {
+		t.Fatalf("Destination size mismatch: got %d, expected %d (old was %d)", info.Size(), len(newGzip), len(oldContent))
+	}
+
+	// Verify final bytes equal new profile
+	finalContent, err := os.ReadFile(destPath)
+	if err != nil {
+		t.Fatal("Failed to read final destination")
+	}
+
+	if !bytes.Equal(finalContent, newGzip) {
+		t.Fatalf("Destination not replaced with new content: got %d bytes", len(finalContent))
+	}
+
+	// Verify old content is gone
+	if bytes.Equal(finalContent, oldContent) {
+		t.Fatal("Old content should be replaced, not preserved")
 	}
 
 	// Verify no temp files
@@ -479,12 +500,17 @@ func TestCaptureProfile_ReadError(t *testing.T) {
 	err := CaptureProfile(ctx, client, server.URL, destPath, "heap")
 
 	if err == nil {
-		t.Error("Expected read error")
+		t.Fatal("Expected read error")
 	}
 
-	// Should be transport or read error
+	// Require transport or read error - fail if neither
 	if !errors.Is(err, ErrProfileTransport) && !errors.Is(err, ErrProfileRead) {
-		t.Logf("Got error type: %v", err)
+		t.Fatalf("missing both ErrProfileTransport and ErrProfileRead: %v", err)
+	}
+
+	// Verify destination absent
+	if _, statErr := os.Stat(destPath); !os.IsNotExist(statErr) {
+		t.Errorf("Destination should be absent, got: %v", statErr)
 	}
 }
 

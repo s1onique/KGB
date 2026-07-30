@@ -232,7 +232,10 @@ func CaptureProfile(ctx context.Context, client *http.Client, url string, outPat
 	written, err := io.Copy(tmp, limitReader)
 	if err != nil {
 		cleanup()
-		return profileContextFailure(fmt.Errorf("write %s: %w", tmpPath, err))
+		return errors.Join(
+			ErrProfileRead,
+			profileContextFailure(fmt.Errorf("write %s: %w", tmpPath, err)),
+		)
 	}
 
 	// P0-5: Check for overflow - if we wrote more than limit, the response was too large
