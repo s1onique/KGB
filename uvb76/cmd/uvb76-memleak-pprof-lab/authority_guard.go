@@ -136,9 +136,9 @@ func inspectPollProfileAuthority(sourceDir string) (*pollProfileAuthorityInspect
 
 			case *ast.SelectStmt:
 				// Check for default case in select (non-blocking send)
-				// Default case is *ast.CommClause with nil List
+				// Default case is *ast.CommClause with nil Comm
 				for _, stmt := range node.Body.List {
-					if c, ok := stmt.(*ast.CaseClause); ok && c.List == nil {
+					if clause, ok := stmt.(*ast.CommClause); ok && clause.Comm == nil {
 						result.DefaultPollSendCases++
 					}
 				}

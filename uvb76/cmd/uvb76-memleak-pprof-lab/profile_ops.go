@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 )
 
@@ -33,15 +34,23 @@ func validateProfileOps(ops profileCaptureOps) error {
 }
 
 // cleanupProfileTempPreserving removes temp file and returns cleanup error.
-// P0-5: Cleanup errors are now preserved and joined with main errors.
+// P0-5: Cleanup errors are now preserved using errors.Join.
 func cleanupProfileTempPreserving(ops profileCaptureOps, tmp profileTempFile, tmpPath string) error {
+	var cleanupErrors []error
+
 	if tmp != nil {
-		tmp.Close()
+		if err := tmp.Close(); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("close temp profile: %w", err))
+		}
 	}
+
 	if tmpPath != "" {
-		return ops.Remove(tmpPath)
+		if err := ops.Remove(tmpPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("remove temp profile: %w", err))
+		}
 	}
-	return nil
+
+	return errors.Join(cleanupErrors...)
 }
 
 // captureProfileWithOps captures a profile using the provided operations.
@@ -59,6 +68,9 @@ func captureProfileWithOps(
 	if err := validateProfileOps(ops); err != nil {
 		return err
 	}
+
+	// Track cleanup errors
+	var cleanupErr error
 
 	// Create request with context for cancellation support
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -90,9 +102,6 @@ func captureProfileWithOps(
 		)
 	}
 	tmpPath := tmp.Name()
-
-	// P0-5: Use centralized cleanup on any failure
-	cleanupErr := cleanupProfileTempPreserving(ops, tmp, tmpPath)
 
 	// Use limit+1 to detect overflow
 	const limit = 100 * 1024 * 1024 // 100MB max

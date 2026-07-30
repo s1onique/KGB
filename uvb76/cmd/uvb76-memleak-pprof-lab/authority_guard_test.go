@@ -43,17 +43,17 @@ func TestAuthorityGuard_ASTInspection(t *testing.T) {
 
 // TestAuthorityGuard_PollGuards verifies poll authority guards.
 // P0-15: These guards detect forbidden patterns in production code.
-// This test documents current production state.
+// Production noncompliance must fail the gate.
 func TestAuthorityGuard_PollGuards(t *testing.T) {
 	dir, err := filepath.Abs(".")
 	if err != nil {
-		t.Skipf("Could not get absolute path: %v", err)
+		t.Fatalf("Could not get absolute path: %v", err)
 	}
 
-	// Run inspection to document current state
+	// Run inspection - failure to inspect is itself a guard failure
 	inspection, err := inspectPollProfileAuthority(dir)
 	if err != nil {
-		t.Skipf("Inspection failed: %v", err)
+		t.Fatalf("Poll authority inspection failed: %v", err)
 	}
 
 	// Document current state
@@ -62,25 +62,25 @@ func TestAuthorityGuard_PollGuards(t *testing.T) {
 	t.Logf("  GenericPollFnFields: %d", inspection.GenericPollFnFields)
 	t.Logf("  DefaultPollSendCases: %d", inspection.DefaultPollSendCases)
 
-	// Verify guard
+	// Verify guard - production noncompliance must fail
 	if err := VerifyPollAuthorityGuards(dir); err != nil {
-		t.Logf("Poll authority violations detected (existing in codebase): %v", err)
+		t.Fatalf("poll authority violation: %v", err)
 	}
 }
 
 // TestAuthorityGuard_ProfileGuards verifies profile authority guards.
 // P0-15: These guards detect forbidden patterns in production code.
-// This test documents current production state.
+// Production noncompliance must fail the gate.
 func TestAuthorityGuard_ProfileGuards(t *testing.T) {
 	dir, err := filepath.Abs(".")
 	if err != nil {
-		t.Skipf("Could not get absolute path: %v", err)
+		t.Fatalf("Could not get absolute path: %v", err)
 	}
 
-	// Run inspection to document current state
+	// Run inspection - failure to inspect is itself a guard failure
 	inspection, err := inspectPollProfileAuthority(dir)
 	if err != nil {
-		t.Skipf("Inspection failed: %v", err)
+		t.Fatalf("Profile authority inspection failed: %v", err)
 	}
 
 	// Document current state
@@ -88,9 +88,9 @@ func TestAuthorityGuard_ProfileGuards(t *testing.T) {
 	t.Logf("  ClientGetCallsInCapture: %d", inspection.ClientGetCallsInCapture)
 	t.Logf("  TempCleanupCalls: %d", inspection.TempCleanupCalls)
 
-	// Verify guard
+	// Verify guard - production noncompliance must fail
 	if err := VerifyProfileAuthorityGuards(dir); err != nil {
-		t.Logf("Profile authority violations detected (existing in codebase): %v", err)
+		t.Fatalf("profile authority violation: %v", err)
 	}
 }
 
