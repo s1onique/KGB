@@ -39,3 +39,4 @@ tovarisch/labs/memory/tovarisch-memory-lab-qualified-smoke.test
 tovarisch/labs/memory/tovarisch-memory-lab-cli
 .factory/bin/extract-image-metadata
 tovarisch/labs/memory/canary
+/uvb76/cmd/uvb76-memleak-pprof-lab/uvb76-memleak-pprof-lab
