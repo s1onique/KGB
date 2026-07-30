@@ -132,7 +132,7 @@ func inspectFunctionBody(body *ast.BlockStmt, funcName string, result *pollProfi
 	// Functions where client.Get calls are forbidden
 	isCaptureFunction := funcName == "CaptureProfile" || funcName == "captureProfileWithOps"
 	// Functions where string-based error classification is forbidden
-	isLifecycleFunction := funcName == "RunCollectionLifecycle" || funcName == "RunLifecycle" || funcName == "lifecycle" || funcName == "Lifecycle" || funcName == "PollTargetAuthoritySimple" || funcName == "PollCollectionLifecycle"
+	isLifecycleFunction := funcName == "PollTargetAuthoritySimple"
 
 	ast.Inspect(body, func(n ast.Node) bool {
 		switch node := n.(type) {
@@ -230,8 +230,12 @@ func inspectFunctionBody(body *ast.BlockStmt, funcName string, result *pollProfi
 				switch funcName {
 				case "runLab", "Run", "main":
 					result.DirectRunnerPollCalls++
-				case "RunCollectionLifecycle", "RunLifecycle", "lifecycle", "Lifecycle", "PollTargetAuthoritySimple", "PollCollectionLifecycle":
+				case "PollTargetAuthoritySimple":
+					// Canonical lifecycle wrapper - count as lifecycle poll
 					result.LifecyclePollCalls++
+				case "RunCollectionLifecycle":
+					// Lifecycle helper - nested goroutine, not canonical authority
+					// Does not increment LifecyclePollCalls (only wrapper is canonical)
 				default:
 					// Unrecognized call site - fail closed
 					result.UnexpectedPollCallSites++
@@ -354,6 +358,16 @@ func VerifyPollAuthorityGuards(sourceDir string) error {
 			Details:  "PollTargetAuthority called from unrecognized function",
 			Expected: 0,
 			Actual:   inspection.UnexpectedPollCallSites,
+		}
+	}
+
+	// Rule: Exactly one lifecycle poll call (canonical authority)
+	if inspection.LifecyclePollCalls != 1 {
+		return &ErrAuthorityGuardFailed{
+			Guard:    "lifecycle_poll_call_count",
+			Details:  "Lifecycle must have exactly one PollTargetAuthority call",
+			Expected: 1,
+			Actual:   inspection.LifecyclePollCalls,
 		}
 	}
 
