@@ -28,15 +28,17 @@ type pollProfileAuthorityInspection struct {
 	// Poll guards
 	DirectRunnerPollCalls      int
 	LifecyclePollCalls         int
+	UnexpectedPollCallSites    int
 	GenericPollFnFields        int
 	DefaultPollSendCases       int
 	StringErrorClassifications int
 
 	// Profile guards
-	ClientGetCallsInCapture  int
-	DirectDestinationCreates int
-	RenamesBeforeValidation  int
-	TempCleanupCalls         int
+	ClientGetCallsInCapture     int
+	DirectDestinationCreates   int
+	RenamesBeforeValidation   int
+	TempCleanupCalls          int
+	SeamDelegationCount       int
 }
 
 // inspectPollProfileAuthority parses source files and returns AST inspection results.
@@ -130,7 +132,7 @@ func inspectFunctionBody(body *ast.BlockStmt, funcName string, result *pollProfi
 	// Functions where client.Get calls are forbidden
 	isCaptureFunction := funcName == "CaptureProfile" || funcName == "captureProfileWithOps"
 	// Functions where string-based error classification is forbidden
-	isLifecycleFunction := funcName == "RunCollectionLifecycle" || funcName == "RunLifecycle" || funcName == "lifecycle" || funcName == "Lifecycle"
+	isLifecycleFunction := funcName == "RunCollectionLifecycle" || funcName == "RunLifecycle" || funcName == "lifecycle" || funcName == "Lifecycle" || funcName == "PollTargetAuthoritySimple" || funcName == "PollCollectionLifecycle"
 
 	ast.Inspect(body, func(n ast.Node) bool {
 		switch node := n.(type) {
@@ -228,10 +230,11 @@ func inspectFunctionBody(body *ast.BlockStmt, funcName string, result *pollProfi
 				switch funcName {
 				case "runLab", "Run", "main":
 					result.DirectRunnerPollCalls++
-				case "RunCollectionLifecycle", "RunLifecycle", "lifecycle", "Lifecycle":
+				case "RunCollectionLifecycle", "RunLifecycle", "lifecycle", "Lifecycle", "PollTargetAuthoritySimple", "PollCollectionLifecycle":
 					result.LifecyclePollCalls++
 				default:
-					result.LifecyclePollCalls++
+					// Unrecognized call site - fail closed
+					result.UnexpectedPollCallSites++
 				}
 			}
 		}
@@ -341,6 +344,16 @@ func VerifyPollAuthorityGuards(sourceDir string) error {
 			Details:  "String-based error classification found",
 			Expected: 0,
 			Actual:   inspection.StringErrorClassifications,
+		}
+	}
+
+	// Rule: No unexpected poll call sites (fail closed)
+	if inspection.UnexpectedPollCallSites > 0 {
+		return &ErrAuthorityGuardFailed{
+			Guard:    "unexpected_poll_call_guard",
+			Details:  "PollTargetAuthority called from unrecognized function",
+			Expected: 0,
+			Actual:   inspection.UnexpectedPollCallSites,
 		}
 	}
 
