@@ -269,7 +269,8 @@ func finalizeTargetPollContext(
 	recoveredCauses targetPollCauseSet,
 	result TargetPollResult,
 ) TargetPollResult {
-	// P0-8: Explicit cancellation - distinct from deadline
+	// P0-8: Explicit cancellation - check parent first
+	// P0-8: If parent was cancelled, this takes precedence over any derived deadline
 	if errors.Is(parentCtx.Err(), context.Canceled) {
 		result.TerminalError = errors.Join(
 			ErrTargetPollCancelled,
@@ -279,30 +280,44 @@ func finalizeTargetPollContext(
 		return result
 	}
 
-	// P0-8: Deadline classifications based on progress
-	if !progress.ObservationSeen {
-		// P0-8: Deadline with no observation
-		result.TerminalError = errors.Join(
-			ErrTargetPollDeadline,
-			ErrTargetPollNoObservation,
-			context.DeadlineExceeded,
-			recoveredCauses.Error(),
-		)
-	} else if !progress.CompletionSeen {
-		// P0-8: Deadline after observation but without completion
-		result.TerminalError = errors.Join(
-			ErrTargetPollDeadline,
-			ErrTargetPollNoCompletion,
-			context.DeadlineExceeded,
-			recoveredCauses.Error(),
-		)
-	} else {
-		// Should not reach here if completion was seen, but handle gracefully
-		result.TerminalError = errors.Join(
-			ErrTargetPollDeadline,
-			context.DeadlineExceeded,
-			recoveredCauses.Error(),
-		)
+	// P0-8: Check pollCtx error type
+	// P0-8: When WithTimeout parent is cancelled, pollCtx also returns Canceled
+	// P0-8: When pollCtx's own deadline fires, it returns DeadlineExceeded
+	if pollCtx.Err() != nil {
+		if errors.Is(pollCtx.Err(), context.Canceled) {
+			// Parent cancellation propagated to pollCtx
+			result.TerminalError = errors.Join(
+				ErrTargetPollCancelled,
+				context.Canceled,
+				recoveredCauses.Error(),
+			)
+		} else if errors.Is(pollCtx.Err(), context.DeadlineExceeded) {
+			// Deadline classifications based on progress
+			if !progress.ObservationSeen {
+				// P0-8: Deadline with no observation
+				result.TerminalError = errors.Join(
+					ErrTargetPollDeadline,
+					ErrTargetPollNoObservation,
+					context.DeadlineExceeded,
+					recoveredCauses.Error(),
+				)
+			} else if !progress.CompletionSeen {
+				// P0-8: Deadline after observation but without completion
+				result.TerminalError = errors.Join(
+					ErrTargetPollDeadline,
+					ErrTargetPollNoCompletion,
+					context.DeadlineExceeded,
+					recoveredCauses.Error(),
+				)
+			} else {
+				// Should not reach here if completion was seen, but handle gracefully
+				result.TerminalError = errors.Join(
+					ErrTargetPollDeadline,
+					context.DeadlineExceeded,
+					recoveredCauses.Error(),
+				)
+			}
+		}
 	}
 
 	return result

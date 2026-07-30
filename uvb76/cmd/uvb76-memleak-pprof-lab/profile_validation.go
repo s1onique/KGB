@@ -191,7 +191,11 @@ func CaptureProfile(ctx context.Context, client *http.Client, url string, outPat
 	// P0-5: Request can be cancelled by context
 	resp, err := client.Do(req)
 	if err != nil {
-		return profileContextFailure(fmt.Errorf("fetch %s: %w", url, err))
+		// P0-8: Join transport category with context failure
+		return errors.Join(
+			ErrProfileTransport,
+			profileContextFailure(fmt.Errorf("fetch %s: %w", url, err)),
+		)
 	}
 	defer resp.Body.Close()
 

@@ -208,48 +208,24 @@ func RunCollectionLifecycle(input CollectionLifecycleInput) CollectionLifecycleR
 	// Cancel polling
 	pollCancel()
 
-	// P0-2: Create separate bounded drain context after cancelling poll
-	// P0-2: Must observe BOTH result received AND goroutine terminated
-	drainCtx, drainCancel := context.WithTimeout(context.Background(), drainTimeout)
+	// P0-2: Create separate bounded drain context AFTER cancelling poll
+	// P0-2: Must survive ObservationCtx cancellation but retain bounded timeout
+	// P0-2: Use WithoutCancel to remove observation cancellation while preserving values
+	drainBase := context.WithoutCancel(input.ObservationCtx)
+	drainCtx, drainCancel := context.WithTimeout(drainBase, drainTimeout)
 	defer drainCancel()
 
-	// P0-2: Wait for both result and goroutine termination
-	for !(result.PollResultReceived && result.PollGoroutineTerminated) {
-		select {
-		case pollResult, ok := <-pollResultCh:
-			if !ok {
-				// P0-2: Channel closed unexpectedly
-				result.PollTerminalError = errors.Join(
-					ErrPollResultMissing,
-					ErrPollChannelClosed,
-				)
-				break
-			}
-			result.PollResult = pollResult
-			result.PollResultReceived = true
-
-		case <-pollDone:
-			result.PollGoroutineTerminated = true
-
-		case <-drainCtx.Done():
-			// P0-2: Drain timeout - neither condition met
-			var drainErrs []error
-			drainErrs = append(drainErrs, ErrPollReceiveDeadline)
-
-			if !result.PollResultReceived {
-				drainErrs = append(drainErrs, ErrPollResultMissing)
-			}
-			if !result.PollGoroutineTerminated {
-				drainErrs = append(drainErrs, ErrPollGoroutineNotTerminated)
-			}
-			drainErrs = append(drainErrs, drainCtx.Err())
-
-			result.PollTerminalError = errors.Join(drainErrs...)
-			goto collectSnapshot
-		}
+	// P0-2: Drain both result channel and pollDone channel
+	// P0-2: Must observe BOTH result received AND goroutine terminated
+	// P0-2: Disable channels after they're satisfied to prevent spinning
+	drainResult := drainTargetPoll(drainCtx, pollResultCh, pollDone)
+	result.PollResult = drainResult.Result
+	result.PollResultReceived = drainResult.ResultReceived
+	result.PollGoroutineTerminated = drainResult.GoroutineTerminated
+	if drainResult.TerminalError != nil {
+		result.PollTerminalError = drainResult.TerminalError
 	}
 
-collectSnapshot:
 	// P0-6: CollectAndSnapshot is the SOLE WaitGroup owner
 	// It cancels, waits, copies, and validates the collector state
 	snapshot, snapshotErr := CollectAndSnapshot(
@@ -302,4 +278,75 @@ func receiveTargetPollWithTimeout(
 			context.Canceled,
 		)
 	}
+}
+
+// pollDrainResult contains the result of draining the poll channels.
+type pollDrainResult struct {
+	// Result is the poll result if received.
+	Result TargetPollResult
+
+	// ResultReceived is true if poll result was received.
+	ResultReceived bool
+
+	// GoroutineTerminated is true if poll goroutine terminated.
+	GoroutineTerminated bool
+
+	// TerminalError is non-nil if drain failed (timeout, channel closed, etc).
+	TerminalError error
+}
+
+// drainTargetPoll drains both the poll result channel and the poll done channel.
+// P0-2: Centralized drain state machine that requires BOTH conditions before returning.
+// P0-2: Returns terminal error if drain deadline expires.
+// P0-2: Handles closed channels immediately without spinning.
+func drainTargetPoll(
+	ctx context.Context,
+	resultCh <-chan TargetPollResult,
+	done <-chan struct{},
+) pollDrainResult {
+	var result pollDrainResult
+
+	for !(result.ResultReceived && result.GoroutineTerminated) {
+		// P0-2: Select from remaining active channels
+		// Once a condition is satisfied, we disable that channel to prevent spinning
+		select {
+		case pollResult, ok := <-resultCh:
+			if !ok {
+				// P0-2: Channel closed - terminalize immediately
+				result.TerminalError = errors.Join(
+					ErrPollResultMissing,
+					ErrPollChannelClosed,
+				)
+				// Cannot continue waiting - channel is closed
+				return result
+			}
+			result.Result = pollResult
+			result.ResultReceived = true
+			// P0-2: Disable resultCh after receiving to prevent re-entry
+			resultCh = nil
+
+		case <-done:
+			result.GoroutineTerminated = true
+			// P0-2: Disable done after receiving to prevent spinning
+			done = nil
+
+		case <-ctx.Done():
+			// P0-2: Drain deadline expired - classify what's missing
+			var drainErrs []error
+			drainErrs = append(drainErrs, ErrPollReceiveDeadline)
+
+			if !result.ResultReceived {
+				drainErrs = append(drainErrs, ErrPollResultMissing)
+			}
+			if !result.GoroutineTerminated {
+				drainErrs = append(drainErrs, ErrPollGoroutineNotTerminated)
+			}
+			drainErrs = append(drainErrs, ctx.Err())
+
+			result.TerminalError = errors.Join(drainErrs...)
+			return result
+		}
+	}
+
+	return result
 }
