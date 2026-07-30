@@ -371,7 +371,7 @@ func TestCaptureProfileOps_DeadlineDuringRead(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := captureProfileWithOps(ctx, &http.Client{Timeout: 1}, server.URL, destPath, "heap", defaultProfileCaptureOps())
+	err := captureProfileWithOps(ctx, &http.Client{Timeout: time.Second}, server.URL, destPath, "heap", defaultProfileCaptureOps())
 
 	// Should have deadline error
 	if err == nil {

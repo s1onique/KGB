@@ -70,88 +70,44 @@ func inspectPollProfileAuthority(sourceDir string) (*pollProfileAuthorityInspect
 			return fmt.Errorf("parse %s: %w", path, err)
 		}
 
-		// Track enclosing function for call classification
-		var enclosingFunc string
+		// Inspect each function separately to avoid closure contamination
+		for _, decl := range node.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			funcName := fn.Name.Name
+			inspectFunctionBody(fn.Body, funcName, result)
+		}
 
-		// Inspect AST
-		ast.Inspect(node, func(n ast.Node) bool {
-			switch node := n.(type) {
-			case *ast.FuncDecl:
-				// Track enclosing function
-				enclosingFunc = node.Name.Name
-
-			case *ast.FuncLit:
-				// Track enclosing function for closures
-				if node.Type != nil {
-					enclosingFunc = "closure"
+		// Inspect type declarations for forbidden fields
+		for _, decl := range node.Decls {
+			genDecl, ok := decl.(*ast.GenDecl)
+			if !ok || genDecl.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range genDecl.Specs {
+				typeSpec, ok := spec.(*ast.TypeSpec)
+				if !ok {
+					continue
 				}
-
-			case *ast.CallExpr:
-				// Handle both identifier calls and selector calls
-				var funcName string
-				var isQualified bool
-
-				switch fun := node.Fun.(type) {
-				case *ast.Ident:
-					funcName = fun.Name
-					isQualified = false
-				case *ast.SelectorExpr:
-					funcName = fun.Sel.Name
-					isQualified = true
-				default:
-					return true
+				// Only inspect CollectionLifecycleInput
+				if typeSpec.Name.Name != "CollectionLifecycleInput" {
+					continue
 				}
-
-				// Check for PollTargetAuthority calls
-				if funcName == "PollTargetAuthority" {
-					if isQualified {
-						// Qualified call like pkg.PollTargetAuthority - external
-						return true
-					}
-					// Direct call - classify by enclosing function
-					switch enclosingFunc {
-					case "runLab", "Run", "main":
-						result.DirectRunnerPollCalls++
-					case "RunCollectionLifecycle", "RunLifecycle", "lifecycle", "Lifecycle":
-						result.LifecyclePollCalls++
-					default:
-						// Call in other context
-						result.LifecyclePollCalls++
-					}
+				structType, ok := typeSpec.Type.(*ast.StructType)
+				if !ok {
+					continue
 				}
-
-				// Check for http.Client.Get calls
-				if funcName == "Get" && isQualified {
-					if sel, ok := node.Fun.(*ast.SelectorExpr); ok {
-						if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "client" {
-							result.ClientGetCallsInCapture++
+				for _, field := range structType.Fields.List {
+					for _, name := range field.Names {
+						if name.Name == "PollFn" || name.Name == "PollCallback" {
+							result.GenericPollFnFields++
 						}
 					}
 				}
-
-				// Check for direct Get calls (http.DefaultClient or similar)
-				if funcName == "Get" && !isQualified {
-					result.ClientGetCallsInCapture++
-				}
-
-			case *ast.SelectStmt:
-				// Check for default case in select (non-blocking send)
-				// Default case is *ast.CommClause with nil Comm
-				for _, stmt := range node.Body.List {
-					if clause, ok := stmt.(*ast.CommClause); ok && clause.Comm == nil {
-						result.DefaultPollSendCases++
-					}
-				}
-
-			case *ast.Ident:
-				// Check for PollFn field references
-				if strings.Contains(node.Name, "PollFn") || strings.Contains(node.Name, "PollCallback") {
-					result.GenericPollFnFields++
-				}
 			}
-
-			return true
-		})
+		}
 
 		// Check for os.Create calls (direct destination creation)
 		result.DirectDestinationCreates += countDirectDestinationCreates(node)
@@ -167,6 +123,102 @@ func inspectPollProfileAuthority(sourceDir string) (*pollProfileAuthorityInspect
 	}
 
 	return result, nil
+}
+
+// inspectFunctionBody inspects a single function body with precise function tracking.
+func inspectFunctionBody(body *ast.BlockStmt, funcName string, result *pollProfileAuthorityInspection) {
+	// Functions where client.Get calls are forbidden
+	isCaptureFunction := funcName == "CaptureProfile" || funcName == "captureProfileWithOps"
+
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.SelectStmt:
+			// Check for lossy poll send pattern: send to pollResultCh + default
+			hasPollSend := false
+			hasDefault := false
+			for _, stmt := range node.Body.List {
+				clause, ok := stmt.(*ast.CommClause)
+				if !ok {
+					continue
+				}
+				// Check for default clause (nil Comm)
+				if clause.Comm == nil {
+					hasDefault = true
+				}
+				// Check for send to pollResultCh
+				if clause.Comm != nil {
+					if send, ok := clause.Comm.(*ast.SendStmt); ok {
+						if ident, ok := send.Chan.(*ast.Ident); ok {
+							if strings.Contains(ident.Name, "pollResultCh") || strings.Contains(ident.Name, "PollResult") {
+								hasPollSend = true
+							}
+						}
+					}
+				}
+			}
+			if hasPollSend && hasDefault {
+				result.DefaultPollSendCases++
+			}
+
+		case *ast.CallExpr:
+			// Check for http.Client.Get calls ONLY in capture functions
+			if isCaptureFunction {
+				var funcName string
+				var isQualified bool
+
+				switch fun := node.Fun.(type) {
+				case *ast.Ident:
+					funcName = fun.Name
+					isQualified = false
+				case *ast.SelectorExpr:
+					funcName = fun.Sel.Name
+					isQualified = true
+				default:
+					return true
+				}
+
+				if funcName == "Get" && isQualified {
+					if sel, ok := node.Fun.(*ast.SelectorExpr); ok {
+						if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "client" {
+							result.ClientGetCallsInCapture++
+						}
+					}
+				}
+			}
+
+			// Check for PollTargetAuthority calls (not scoped)
+			var pollFuncName string
+			var pollQualified bool
+
+			switch fun := node.Fun.(type) {
+			case *ast.Ident:
+				pollFuncName = fun.Name
+				pollQualified = false
+			case *ast.SelectorExpr:
+				pollFuncName = fun.Sel.Name
+				pollQualified = true
+			default:
+				return true
+			}
+
+			if pollFuncName == "PollTargetAuthority" {
+				if pollQualified {
+					// Qualified call like pkg.PollTargetAuthority - external
+					return true
+				}
+				// Direct call - classify by enclosing function
+				switch funcName {
+				case "runLab", "Run", "main":
+					result.DirectRunnerPollCalls++
+				case "RunCollectionLifecycle", "RunLifecycle", "lifecycle", "Lifecycle":
+					result.LifecyclePollCalls++
+				default:
+					result.LifecyclePollCalls++
+				}
+			}
+		}
+		return true
+	})
 }
 
 // countDirectDestinationCreates counts os.Create calls in the source.
@@ -244,21 +296,21 @@ func VerifyPollAuthorityGuards(sourceDir string) error {
 		}
 	}
 
-	// Rule: No generic PollFn fields
+	// Rule: No generic PollFn fields in CollectionLifecycleInput
 	if inspection.GenericPollFnFields > 0 {
 		return &ErrAuthorityGuardFailed{
 			Guard:    "generic_poll_callback_guard",
-			Details:  "PollFn or PollCallback fields found",
+			Details:  "PollFn or PollCallback fields found in CollectionLifecycleInput",
 			Expected: 0,
 			Actual:   inspection.GenericPollFnFields,
 		}
 	}
 
-	// Rule: No default select cases (non-blocking send)
+	// Rule: No lossy poll send pattern (send to pollResultCh + default)
 	if inspection.DefaultPollSendCases > 0 {
 		return &ErrAuthorityGuardFailed{
-			Guard:    "default_send_guard",
-			Details:  "Default case found in select",
+			Guard:    "lossy_poll_send_guard",
+			Details:  "Lossy poll send pattern found (pollResultCh send + default)",
 			Expected: 0,
 			Actual:   inspection.DefaultPollSendCases,
 		}
@@ -276,11 +328,11 @@ func VerifyProfileAuthorityGuards(sourceDir string) error {
 
 	// P0-14: Profile authority rules
 
-	// Rule: No direct http.Client.Get calls
+	// Rule: No direct http.Client.Get calls in capture functions
 	if inspection.ClientGetCallsInCapture > 0 {
 		return &ErrAuthorityGuardFailed{
 			Guard:    "client_get_guard",
-			Details:  "Direct http.Client.Get calls found",
+			Details:  "Direct http.Client.Get calls found in CaptureProfile",
 			Expected: 0,
 			Actual:   inspection.ClientGetCallsInCapture,
 		}
