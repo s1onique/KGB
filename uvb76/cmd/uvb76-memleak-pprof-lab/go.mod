@@ -2,7 +2,10 @@ module github.com/s1onique/KGB/uvb76/cmd/uvb76-memleak-pprof-lab
 
 go 1.25.0
 
-require github.com/s1onique/KGB/uvb76 v0.1.0
+require (
+	github.com/google/pprof v0.0.0-20260709232956-b9395ee17fa0
+	github.com/s1onique/KGB/uvb76 v0.1.0
+)
 
 require (
 	github.com/gorilla/mux v1.8.1 // indirect

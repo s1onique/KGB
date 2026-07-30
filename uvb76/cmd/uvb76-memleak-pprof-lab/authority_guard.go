@@ -34,11 +34,11 @@ type pollProfileAuthorityInspection struct {
 	StringErrorClassifications int
 
 	// Profile guards
-	ClientGetCallsInCapture     int
-	DirectDestinationCreates   int
-	RenamesBeforeValidation   int
-	TempCleanupCalls          int
-	SeamDelegationCount       int
+	ClientGetCallsInCapture  int
+	DirectDestinationCreates int
+	RenamesBeforeValidation  int
+	TempCleanupCalls         int
+	SeamDelegationCount      int
 }
 
 // inspectPollProfileAuthority parses source files and returns AST inspection results.
@@ -127,12 +127,26 @@ func inspectPollProfileAuthority(sourceDir string) (*pollProfileAuthorityInspect
 	return result, nil
 }
 
+// canonicalPollAuthorityFunction is the sole authorized function for PollTargetAuthority.
+// P0-2: Only RunCollectionLifecycle may directly call PollTargetAuthority.
+const canonicalPollAuthorityFunction = "RunCollectionLifecycle"
+
 // inspectFunctionBody inspects a single function body with precise function tracking.
 func inspectFunctionBody(body *ast.BlockStmt, funcName string, result *pollProfileAuthorityInspection) {
 	// Functions where client.Get calls are forbidden
 	isCaptureFunction := funcName == "CaptureProfile" || funcName == "captureProfileWithOps"
+
 	// Functions where string-based error classification is forbidden
-	isLifecycleFunction := funcName == "PollTargetAuthoritySimple"
+	// P0-10: String classification is forbidden in ALL poll-related functions
+	isPollFunction := funcName == "PollTargetAuthority" ||
+		funcName == "finalizeTargetPollContext" ||
+		funcName == "isTerminalPollError" ||
+		funcName == canonicalPollAuthorityFunction ||
+		funcName == "drainTargetPoll" ||
+		funcName == "CaptureProfile" ||
+		funcName == "captureProfileWithOps" ||
+		funcName == "profileContextFailure" ||
+		funcName == "authFailure"
 
 	ast.Inspect(body, func(n ast.Node) bool {
 		switch node := n.(type) {
@@ -166,16 +180,36 @@ func inspectFunctionBody(body *ast.BlockStmt, funcName string, result *pollProfi
 
 		case *ast.AssignStmt:
 			// Check for strings.Contains or strings.HasPrefix with .Error() for classification
-			if isCaptureFunction || isLifecycleFunction {
+			// P0-10: Must check ALL RHS expressions, not just assignments
+			if isCaptureFunction || isPollFunction {
+				// Check all RHS expressions for string classification with .Error()
 				for _, expr := range node.Rhs {
-					if call, ok := expr.(*ast.CallExpr); ok {
-						if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
-							if sel.Sel.Name == "Contains" || sel.Sel.Name == "HasPrefix" || sel.Sel.Name == "HasSuffix" || sel.Sel.Name == "Equal" {
-								if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "strings" {
-									result.StringErrorClassifications++
-								}
-							}
-						}
+					if containsStringErrorClassification(expr) {
+						result.StringErrorClassifications++
+					}
+				}
+				// Also check LHS if it's used in condition context later
+				for _, lhsExpr := range node.Lhs {
+					if containsStringErrorClassification(lhsExpr) {
+						result.StringErrorClassifications++
+					}
+				}
+			}
+
+		case *ast.IfStmt:
+			// P0-10: Check if conditions for string error classification
+			if isCaptureFunction || isPollFunction {
+				if containsStringErrorClassification(node.Cond) {
+					result.StringErrorClassifications++
+				}
+			}
+
+		case *ast.ReturnStmt:
+			// P0-10: Check return expressions for string error classification
+			if isCaptureFunction || isPollFunction {
+				for _, expr := range node.Results {
+					if containsStringErrorClassification(expr) {
+						result.StringErrorClassifications++
 					}
 				}
 			}
@@ -206,6 +240,14 @@ func inspectFunctionBody(body *ast.BlockStmt, funcName string, result *pollProfi
 				}
 			}
 
+			// P0-10: Check if CallExpr is itself a string error classification
+			// This catches cases like: if strings.Contains(err.Error(), ...) { ... }
+			if isCaptureFunction || isPollFunction {
+				if containsStringErrorClassification(node) {
+					result.StringErrorClassifications++
+				}
+			}
+
 			// Check for PollTargetAuthority calls (not scoped)
 			var pollFuncName string
 			var pollQualified bool
@@ -226,24 +268,88 @@ func inspectFunctionBody(body *ast.BlockStmt, funcName string, result *pollProfi
 					// Qualified call like pkg.PollTargetAuthority - external
 					return true
 				}
-				// Direct call - classify by enclosing function
+				// P0-2: Direct call - classify by enclosing function
+				// P0-2: Only RunCollectionLifecycle is canonical authority
 				switch funcName {
 				case "runLab", "Run", "main":
 					result.DirectRunnerPollCalls++
-				case "PollTargetAuthoritySimple":
-					// Canonical lifecycle wrapper - count as lifecycle poll
+				case canonicalPollAuthorityFunction:
+					// P0-2: Canonical lifecycle - the sole production authority
 					result.LifecyclePollCalls++
-				case "RunCollectionLifecycle":
-					// Lifecycle helper - nested goroutine, not canonical authority
-					// Does not increment LifecyclePollCalls (only wrapper is canonical)
 				default:
-					// Unrecognized call site - fail closed
+					// P0-2: Any other call site is forbidden
 					result.UnexpectedPollCallSites++
 				}
 			}
 		}
 		return true
 	})
+}
+
+// containsStringErrorClassification checks if an expression contains string-based
+// error classification patterns like strings.Contains(err.Error(), ...).
+// P0-10: Inspect all relevant expression types.
+func containsStringErrorClassification(expr ast.Expr) bool {
+	if expr == nil {
+		return false
+	}
+
+	var found bool
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+
+		// Look for: strings.Contains(expr.Error(), ...), strings.HasPrefix, etc.
+		if call, ok := n.(*ast.CallExpr); ok {
+			if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+				methodName := sel.Sel.Name
+				if methodName == "Contains" || methodName == "HasPrefix" ||
+					methodName == "HasSuffix" || methodName == "EqualFold" ||
+					methodName == "Equal" {
+					// Check if the base is "strings"
+					if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "strings" {
+						// Check if any argument contains an .Error() call
+						for _, arg := range call.Args {
+							if containsErrorDotCall(arg) {
+								found = true
+								return false
+							}
+						}
+					}
+				}
+			}
+		}
+		return true
+	})
+
+	return found
+}
+
+// containsErrorDotCall checks if an expression contains an .Error() method call.
+func containsErrorDotCall(expr ast.Expr) bool {
+	if expr == nil {
+		return false
+	}
+
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+
+		if call, ok := n.(*ast.CallExpr); ok {
+			if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+				if sel.Sel.Name == "Error" && len(call.Args) == 0 {
+					found = true
+					return false
+				}
+			}
+		}
+		return true
+	})
+
+	return found
 }
 
 // countDirectDestinationCreates counts os.Create calls in the source.
