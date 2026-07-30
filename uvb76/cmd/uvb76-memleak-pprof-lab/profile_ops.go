@@ -148,6 +148,8 @@ func captureProfileWithOps(
 			cleanupErr,
 		)
 	}
+	// Mark temp as closed so subsequent cleanup doesn't try to close again
+	tmp = nil
 
 	if written == 0 {
 		cleanupErr = cleanupProfileTempPreserving(ops, tmp, tmpPath)
