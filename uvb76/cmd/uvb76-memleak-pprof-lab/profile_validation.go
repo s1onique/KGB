@@ -93,7 +93,7 @@ func defaultProfileCaptureOps() profileCaptureOps {
 // ProfileValidationError represents a profile validation failure.
 type ProfileValidationError struct {
 	ProfileName string
-	What        string
+	What       string
 }
 
 func (e *ProfileValidationError) Error() string {
@@ -213,106 +213,17 @@ func validateTextProfile(f *os.File, path string) error {
 // P0-5: On any failure, temporary file is removed and destination is absent.
 // P0-6: Returns error rather than merely logging failure.
 // P0-7: Uses context for cancellation of in-flight HTTP requests.
+//
+// P0-12: Delegates to profile_ops seam for deterministic testing.
 func CaptureProfile(ctx context.Context, client *http.Client, url string, outPath string, profileType string) error {
-	// P0-5: Create request with context for cancellation support
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return profileContextFailure(fmt.Errorf("create request for %s: %w", url, err))
-	}
-
-	// P0-5: Request can be cancelled by context
-	resp, err := client.Do(req)
-	if err != nil {
-		// P0-8: Join transport category with context failure
-		return errors.Join(
-			ErrProfileTransport,
-			profileContextFailure(fmt.Errorf("fetch %s: %w", url, err)),
-		)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("fetch %s: status %d", url, resp.StatusCode)
-	}
-
-	// P0-5: Create temporary file in same directory as final destination
-	// This ensures atomic rename works (same filesystem)
-	tmpDir := filepath.Dir(outPath)
-	tmp, err := os.CreateTemp(tmpDir, filepath.Base(outPath)+".tmp.*")
-	if err != nil {
-		return errors.Join(
-			ErrProfilePublication,
-			fmt.Errorf("create temp file: %w", err),
-		)
-	}
-	tmpPath := tmp.Name()
-
-	// P0-5: cleanup function removes temp file on any failure path
-	cleanup := func() {
-		tmp.Close()
-		os.Remove(tmpPath)
-	}
-
-	// P0-5: Use limit+1 to detect overflow
-	const limit = 100 * 1024 * 1024 // 100MB max
-	limitReader := io.LimitReader(resp.Body, limit+1)
-
-	// P0-5: Write bounded content to temp file
-	written, err := io.Copy(tmp, limitReader)
-	if err != nil {
-		cleanup()
-		return errors.Join(
-			ErrProfileRead,
-			profileContextFailure(fmt.Errorf("write %s: %w", tmpPath, err)),
-		)
-	}
-
-	// P0-5: Check for overflow - if we wrote more than limit, the response was too large
-	if written > limit {
-		cleanup()
-		return errors.Join(ErrProfileBodyTooLarge, fmt.Errorf("profile %s exceeds size limit (%d bytes)", outPath, limit))
-	}
-
-	// P0-5: Sync to disk
-	if err := tmp.Sync(); err != nil {
-		cleanup()
-		return errors.Join(
-			ErrProfilePublication,
-			fmt.Errorf("sync temp file: %w", err),
-		)
-	}
-
-	// P0-5: Close temp file before validation and rename
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return errors.Join(
-			ErrProfilePublication,
-			fmt.Errorf("close temp file: %w", err),
-		)
-	}
-
-	if written == 0 {
-		cleanup()
-		return fmt.Errorf("%w: profile %s is empty", ErrProfileBodyEmpty, outPath)
-	}
-
-	// P0-5: Validate the captured profile BEFORE renaming
-	if err := ValidateProfile(tmpPath, profileType); err != nil {
-		cleanup()
-		return fmt.Errorf("%w: validation failed for %s: %w", ErrProfileValidation, tmpPath, err)
-	}
-
-	// P0-5: Atomic rename from temp to destination
-	// On POSIX systems with same filesystem, this is atomic
-	if err := os.Rename(tmpPath, outPath); err != nil {
-		cleanup()
-		return fmt.Errorf("%w: rename %s to %s: %w", ErrProfilePublication, tmpPath, outPath, err)
-	}
-
-	// P0-5: Success - temp file is now the destination
-	// No cleanup needed - rename succeeded
-
-	return nil
+	return captureProfileWithOps(
+		ctx,
+		client,
+		url,
+		outPath,
+		profileType,
+		defaultProfileCaptureOps(),
+	)
 }
 
 // ValidateAllProfiles validates all required profiles for a lab run.
@@ -333,16 +244,16 @@ func ValidateAllProfiles(artifactDir string) error {
 		{"goroutine-final.txt", "goroutine"},
 	}
 
-	var errors []string
+	var validationErrors []string
 	for _, req := range required {
 		path := filepath.Join(artifactDir, req.profileName)
 		if err := ValidateProfile(path, req.profileType); err != nil {
-			errors = append(errors, err.Error())
+			validationErrors = append(validationErrors, err.Error())
 		}
 	}
 
-	if len(errors) > 0 {
-		return fmt.Errorf("profile validation errors: %s", strings.Join(errors, "; "))
+	if len(validationErrors) > 0 {
+		return fmt.Errorf("profile validation errors: %s", strings.Join(validationErrors, "; "))
 	}
 
 	return nil
