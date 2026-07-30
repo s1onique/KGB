@@ -15,9 +15,11 @@ func defaultTestIdentity() *runExecutionIdentity {
 		ArtifactDir:      "/tmp/test-artifacts",
 		TovarischBinPath: "/usr/local/bin/tovarisch",
 		UVB76BinPath:     "/usr/local/bin/uvb76",
-		TovarischPort:    "12345",
-		UVB76Port:        "12346",
-		PProfPort:        "12347",
+		Endpoints: RuntimeEndpoints{
+			TovarischPort: "12345",
+			UVB76Port:     "12346",
+			PProfPort:     "12347",
+		},
 	}
 }
 
@@ -295,13 +297,15 @@ func TestFinalizer_InputValidationFailsClosed(t *testing.T) {
 				TovarischPID: 0,
 				UVB76PID:     0,
 				Identity: &runExecutionIdentity{
-					RunID:         "",
-					SourceCommit:  "abc123",
-					RunStartedAt:  time.Now(),
-					ArtifactDir:   "/tmp",
-					TovarischPort: "12345",
-					UVB76Port:     "12346",
-					PProfPort:     "12347",
+					RunID:        "",
+					SourceCommit: "abc123",
+					RunStartedAt: time.Now(),
+					ArtifactDir:  "/tmp",
+					Endpoints: RuntimeEndpoints{
+						TovarischPort: "12345",
+						UVB76Port:     "12346",
+						PProfPort:     "12347",
+					},
 				},
 				InitiatingFailure: errors.New("test"),
 				LabResult:         &LabResult{},
@@ -314,13 +318,15 @@ func TestFinalizer_InputValidationFailsClosed(t *testing.T) {
 				TovarischPID: 0,
 				UVB76PID:     0,
 				Identity: &runExecutionIdentity{
-					RunID:         "test-run",
-					SourceCommit:  "",
-					RunStartedAt:  time.Now(),
-					ArtifactDir:   "/tmp",
-					TovarischPort: "12345",
-					UVB76Port:     "12346",
-					PProfPort:     "12347",
+					RunID:        "test-run",
+					SourceCommit: "",
+					RunStartedAt: time.Now(),
+					ArtifactDir:  "/tmp",
+					Endpoints: RuntimeEndpoints{
+						TovarischPort: "12345",
+						UVB76Port:     "12346",
+						PProfPort:     "12347",
+					},
 				},
 				InitiatingFailure: errors.New("test"),
 				LabResult:         &LabResult{},
@@ -415,9 +421,11 @@ func TestValidateRunExecutionIdentity(t *testing.T) {
 		ArtifactDir:      "/tmp/test-artifacts",
 		TovarischBinPath: "/usr/local/bin/tovarisch",
 		UVB76BinPath:     "/usr/local/bin/uvb76",
-		TovarischPort:    "12345",
-		UVB76Port:        "12346",
-		PProfPort:        "12347",
+		Endpoints: RuntimeEndpoints{
+			TovarischPort: "12345",
+			UVB76Port:     "12346",
+			PProfPort:     "12347",
+		},
 	}
 
 	// Valid identity should have no errors (real mode)
@@ -466,7 +474,7 @@ func TestValidateRunExecutionIdentity(t *testing.T) {
 
 	// Test empty TovarischPort
 	emptyTPort := *validIdentity
-	emptyTPort.TovarischPort = ""
+	emptyTPort.Endpoints.TovarischPort = ""
 	errs = validateRunExecutionIdentity(&emptyTPort, false)
 	if len(errs) == 0 {
 		t.Error("empty TovarischPort should return error")
@@ -474,7 +482,7 @@ func TestValidateRunExecutionIdentity(t *testing.T) {
 
 	// Test invalid port number
 	invalidPort := *validIdentity
-	invalidPort.TovarischPort = "99999"
+	invalidPort.Endpoints.TovarischPort = "99999"
 	errs = validateRunExecutionIdentity(&invalidPort, false)
 	if len(errs) == 0 {
 		t.Error("port > 65535 should return error")
@@ -549,9 +557,11 @@ func TestValidateRunExecutionIdentity_FakeMode(t *testing.T) {
 		ArtifactDir:      "/tmp/test-artifacts",
 		TovarischBinPath: "", // Empty is OK in fake mode
 		UVB76BinPath:     "/usr/local/bin/uvb76",
-		TovarischPort:    "12345",
-		UVB76Port:        "12346",
-		PProfPort:        "12347",
+		Endpoints: RuntimeEndpoints{
+			TovarischPort: "12345",
+			UVB76Port:     "12346",
+			PProfPort:     "12347",
+		},
 	}
 
 	// Valid in fake mode (second param = true)

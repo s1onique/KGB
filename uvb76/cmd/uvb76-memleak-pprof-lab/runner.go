@@ -13,10 +13,10 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -25,11 +25,12 @@ import (
 
 // runLab orchestrates the full memory leak lab with generated authority.
 // P0-6: runLab consumes the validated authority explicitly.
-func runLab(authority *GeneratedLabAuthority) LabResult {
+// P0-7-fix: Accept ephemeralPassword for post-startup authentication.
+func runLab(authority *GeneratedLabAuthority, ephemeralPassword []byte) LabResult {
 	if authority == nil {
 		return LabResult{
 			OK:             false,
-			Classification:  "FAILED",
+			Classification: "FAILED",
 			Errors:         []string{"nil authority"},
 		}
 	}
@@ -40,12 +41,17 @@ func runLab(authority *GeneratedLabAuthority) LabResult {
 		log.Printf("[SOURCE] Embedded source identity resolution failed: %v", sourceErr)
 		return LabResult{
 			OK:             false,
-			Classification:  "FAILED",
+			Classification: "FAILED",
 			Errors:         []string{fmt.Sprintf("embedded source identity: %v", sourceErr)},
 		}
 	}
 
 	// P0-6: Use authority fields, not flag package globals
+	// P0-1: Extract decimal ports from URLs using proper URL parsing
+	tovarischPort := extractPortFromURL(authority.Target.BaseURL)
+	uvb76APIPort := extractPortFromURL(authority.UVB76APIBaseURL)
+	pprofPort := extractPortFromURL("http://" + authority.Config.Diagnostics.PProf.Listen)
+
 	identity := &runExecutionIdentity{
 		RunID:            fmt.Sprintf("run-%d", time.Now().Unix()),
 		SourceCommit:     embeddedIdentity.VCSRevision,
@@ -53,9 +59,14 @@ func runLab(authority *GeneratedLabAuthority) LabResult {
 		ArtifactDir:      artifactDir,
 		TovarischBinPath: *flagTovarischBin,
 		UVB76BinPath:     *flagUVB76Bin,
-		TovarischPort:    authority.Target.BaseURL, // P0-6: From authority, not flag
-		UVB76Port:        authority.Config.Listen.Addr, // P0-6: From authority
-		PProfPort:        authority.Config.Diagnostics.PProf.Listen, // P0-6: From authority
+		Endpoints: RuntimeEndpoints{
+			TovarischBaseURL: authority.Target.BaseURL,
+			TovarischPort:    tovarischPort,
+			UVB76APIBaseURL:  authority.UVB76APIBaseURL,
+			UVB76Port:        uvb76APIPort,
+			PProfBaseURL:     "http://" + authority.Config.Diagnostics.PProf.Listen,
+			PProfPort:        pprofPort,
+		},
 	}
 
 	// P0-5: Validate identity using mode from authority
@@ -67,7 +78,7 @@ func runLab(authority *GeneratedLabAuthority) LabResult {
 		}
 		return LabResult{
 			OK:             false,
-			Classification:  "FAILED",
+			Classification: "FAILED",
 			Errors:         errMsgs,
 		}
 	}
@@ -127,7 +138,17 @@ func runLab(authority *GeneratedLabAuthority) LabResult {
 	} else {
 		result.Errors = append(result.Errors, "tovarisch did not become ready")
 		result.Classification = "FAILED"
-		cleanup(tovarischCmd, uvb76Cmd, tovarischPS, uvb76PS)
+		// P0-4: Use canonical finalizer for universal finalization authority
+		processes := &failedRunProcesses{
+			TovarischCmd: tovarischCmd,
+			UVB76Cmd:     uvb76Cmd,
+			TovarischPS:  tovarischPS,
+			UVB76PS:      uvb76PS,
+		}
+		finalizationErr := finalizeLifecycleFailure(&result, errors.New("tovarisch readiness timeout"), identity, processes)
+		if finalizationErr != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("finalization: %v", finalizationErr))
+		}
 		return result
 	}
 
@@ -162,9 +183,7 @@ func runLab(authority *GeneratedLabAuthority) LabResult {
 	}
 
 	// === PHASE 4: Wait for UVB-76 pprof readiness ===
-	pprofPort := authority.Config.Diagnostics.PProf.Listen
-	pprofPortStr := extractPortFromURL("http://" + pprofPort)
-	pprofReady, pprofErr := waitForPPROFReady(pprofPortStr, 30*time.Second, uvb76PS)
+	pprofReady, pprofErr := waitForPPROFReady(pprofPort, 30*time.Second, uvb76PS)
 	if pprofReady {
 		result.UVB76PProfReady = true
 		now := time.Now()
@@ -178,26 +197,120 @@ func runLab(authority *GeneratedLabAuthority) LabResult {
 			result.Errors = append(result.Errors, fmt.Sprintf("pprof never ready: %v", pprofErr))
 		}
 		result.Classification = "FAILED"
-		cleanup(tovarischCmd, uvb76Cmd, tovarischPS, uvb76PS)
+		// P0-4: Use canonical finalizer for universal finalization authority
+		var terminalErr error
+		if pprofErr != nil {
+			terminalErr = fmt.Errorf("pprof not ready: %w", pprofErr)
+		} else {
+			terminalErr = errors.New("pprof readiness timeout")
+		}
+		processes := &failedRunProcesses{
+			TovarischCmd: tovarischCmd,
+			UVB76Cmd:     uvb76Cmd,
+			TovarischPS:  tovarischPS,
+			UVB76PS:      uvb76PS,
+		}
+		finalizationErr := finalizeLifecycleFailure(&result, terminalErr, identity, processes)
+		if finalizationErr != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("finalization: %v", finalizationErr))
+		}
 		return result
 	}
 
 	// Verify pprof endpoints
-	if !verifyPPROFEndpoints(pprofPortStr) {
+	if !verifyPPROFEndpoints(pprofPort) {
 		result.Errors = append(result.Errors, "pprof endpoint verification failed")
 		result.Classification = "FAILED"
-		cleanup(tovarischCmd, uvb76Cmd, tovarischPS, uvb76PS)
+		// P0-4: Use canonical finalizer for universal finalization authority
+		processes := &failedRunProcesses{
+			TovarischCmd: tovarischCmd,
+			UVB76Cmd:     uvb76Cmd,
+			TovarischPS:  tovarischPS,
+			UVB76PS:      uvb76PS,
+		}
+		finalizationErr := finalizeLifecycleFailure(&result, errors.New("pprof endpoint verification failed"), identity, processes)
+		if finalizationErr != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("finalization: %v", finalizationErr))
+		}
 		return result
 	}
 
-	// === PHASE 5: Collection phase ===
+	// === PHASE 4b: Wait for UVB-76 API readiness and resolve authentication ===
+	// P0-3: Use typed API readiness with process exit detection
+	// P0-4: Route readiness failure through canonical finalizer
+	log.Printf("[AUTH] Waiting for UVB-76 API readiness...")
+
+	readinessResult := CheckAPIReadiness(labCtx, APIReadinessInput{
+		URL:        authority.UVB76APIBaseURL,
+		Deadline:   30 * time.Second,
+		PollInterval: 250 * time.Millisecond,
+		ProcessExited: func() bool {
+			return uvb76PS != nil && uvb76PS.Exited()
+		},
+	})
+
+	if !readinessResult.Ready {
+		// P0-4: Readiness failure uses canonical finalizer
+		var terminalErr error
+		if readinessResult.TerminalError != nil {
+			terminalErr = readinessResult.TerminalError
+		} else {
+			terminalErr = fmt.Errorf("UVB-76 API readiness deadline exceeded after %d attempts", readinessResult.Attempts)
+		}
+
+		processes := &failedRunProcesses{
+			TovarischCmd: tovarischCmd,
+			UVB76Cmd:     uvb76Cmd,
+			TovarischPS:  tovarischPS,
+			UVB76PS:      uvb76PS,
+		}
+		finalizationErr := finalizeLifecycleFailure(&result, terminalErr, identity, processes)
+		if finalizationErr != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("finalization: %v", finalizationErr))
+		}
+		return result
+	}
+	log.Printf("[AUTH] UVB-76 API ready after %d attempts, resolving authentication...", readinessResult.Attempts)
+
+	// P0-5: Perform actual login with ephemeral password
+	// P0-5: Route auth failure through canonical finalizer
+	targetAuth, authErr := ResolveTargetAuth(labCtx, authority, ephemeralPassword)
+	if authErr != nil {
+		// P0-5: Auth failure uses canonical finalizer
+		processes := &failedRunProcesses{
+			TovarischCmd: tovarischCmd,
+			UVB76Cmd:     uvb76Cmd,
+			TovarischPS:  tovarischPS,
+			UVB76PS:      uvb76PS,
+		}
+		finalizationErr := finalizeLifecycleFailure(&result, authErr, identity, processes)
+		if finalizationErr != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("finalization: %v", finalizationErr))
+		}
+		return result
+	}
+	authority.TargetStateAuth = targetAuth
+	log.Printf("[AUTH] Authentication resolved: cookie=%s", targetAuth.CookieName)
+
+	// === PHASE 5: Collection phase using RunCollectionLifecycle ===
+	// P0-7: Single production authority for collection + polling
 	log.Printf("[COLLECTION] Starting collection phase...")
 	collectionStart := time.Now()
 	result.CollectionStartTime = &collectionStart
 
-	// Create bounded collection context
-	collectionCtx, collectionCancel := context.WithTimeout(labCtx, *flagDuration)
-	defer collectionCancel()
+	// P0-7: Separate deadlines for observation window and final profile completion.
+	// P0-7: Both contexts derive from labCtx so cancellation propagates.
+	// P0-7: ProfileCtx outlives ObservationCtx to avoid deadline collision.
+	observationEnd := collectionStart.Add(*flagDuration)
+	finalProfileBudget := 30 * time.Second // Budget for final profile requests after observation ends
+	finalProfileDeadline := observationEnd.Add(finalProfileBudget)
+
+	// P0-7: Create two derived contexts from labCtx with separate deadlines
+	observationCtx, observationCancel := context.WithDeadline(labCtx, observationEnd)
+	defer observationCancel()
+
+	profileCtx, profileCancel := context.WithDeadline(labCtx, finalProfileDeadline)
+	defer profileCancel()
 
 	// Start goroutines for collection
 	var wg sync.WaitGroup
@@ -210,29 +323,57 @@ func runLab(authority *GeneratedLabAuthority) LabResult {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		collectProcessSamplesStrict(collectionCtx, tovarischPID, *flagSampleInterval, &tovarischSamples, &samplesMu, &collectorErrors)
+		collectProcessSamplesStrict(observationCtx, tovarischPID, *flagSampleInterval, &tovarischSamples, &samplesMu, &collectorErrors)
 	}()
 
 	// P0-14: Collect UVB-76 samples with typed goroutine observation
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		collectUVB76SamplesStrict(collectionCtx, uvb76PID, pprofPortStr, *flagSampleInterval, &uvb76Samples, &samplesMu, &collectorErrors)
+		collectUVB76SamplesStrict(observationCtx, uvb76PID, pprofPort, *flagSampleInterval, &uvb76Samples, &samplesMu, &collectorErrors)
 	}()
 
-	// P0-8: Poll for target authority using typed result
-	pollCtx, pollCancel := context.WithCancel(collectionCtx)
-	defer pollCancel()
+	// P0-1: Build poll input for PollTargetAuthority
+	pollInput := TargetPollInput{
+		Client:          &http.Client{Timeout: 5 * time.Second},
+		UVB76APIBaseURL: authority.UVB76APIBaseURL,
+		Target:          authority.Target,
+		Auth:            authority.TargetStateAuth,
+		PollInterval:    5 * time.Second,
+		RequestTimeout:  5 * time.Second,
+		Deadline:        *flagDuration,
+	}
 
-	pollResult := PollTargetAuthoritySimple(pollCtx, authority, 5*time.Second, *flagDuration)
+	// P0-1: Run collection lifecycle using exact PollTargetAuthority via PollInput
+	// P0-6: Runner owns collector goroutine lifecycle - collectors already started above
+	lifecycleResult := RunCollectionLifecycle(CollectionLifecycleInput{
+		ObservationCtx:    observationCtx,
+		ProfileCtx:       profileCtx,
+		ObservationCancel: observationCancel,
+		WaitGroup:        &wg,
+		CollectorInput: &CollectorInput{
+			TovarischSamples: &tovarischSamples,
+			UVB76Samples:     &uvb76Samples,
+			CollectorErrors:  &collectorErrors,
+			SamplesMu:        &samplesMu,
+		},
+		PollInput:       pollInput,
+		PollDrainTimeout: 5 * time.Second,
+		CaptureProfilesFn: func(ctx context.Context) error {
+			// P0-7: ctx is ProfileCtx with extended deadline for final profiles
+			httpClient := &http.Client{Timeout: 30 * time.Second}
+			return captureProfilesWithValidation(ctx, httpClient, pprofPort, artifactDir, collectionStart, *flagDuration, *flagProfileInterval, observationEnd)
+		},
+	})
 
-	// Capture profiles in parallel
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	captureErr := captureProfilesWithValidation(httpClient, pprofPortStr, artifactDir, collectionStart, *flagDuration, *flagProfileInterval)
+	pollResult := lifecycleResult.PollResult
 
-	// Cancel target polling and wait
-	pollCancel()
-	wg.Wait()
+	// P0-7: Propagate poll terminal error from lifecycle
+	if lifecycleResult.PollTerminalError != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("poll lifecycle failed: %v", lifecycleResult.PollTerminalError))
+		result.OK = false
+		result.Classification = "FAILED"
+	}
 
 	// P0-11: Target observation is mandatory
 	if pollResult.BestAuthority != nil {
@@ -263,19 +404,10 @@ func runLab(authority *GeneratedLabAuthority) LabResult {
 		result.OK = false
 	}
 
-	// Use CollectAndSnapshot for lifecycle authority
-	snapshot, err := CollectAndSnapshot(
-		collectionCancel,
-		&wg,
-		&CollectorInput{
-			TovarischSamples: &tovarischSamples,
-			UVB76Samples:     &uvb76Samples,
-			CollectorErrors:  &collectorErrors,
-			SamplesMu:        &samplesMu,
-		},
-	)
-	if err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("collector lifecycle failed: %v", err))
+	// P0-6: Use snapshot from RunCollectionLifecycle (CollectAndSnapshot already called inside)
+	snapshot := lifecycleResult.Snapshot
+	if lifecycleResult.SnapshotErr != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("collector lifecycle failed: %v", lifecycleResult.SnapshotErr))
 		result.Classification = "FAILED"
 		result.OK = false
 
@@ -285,7 +417,7 @@ func runLab(authority *GeneratedLabAuthority) LabResult {
 			TovarischPS:  tovarischPS,
 			UVB76PS:      uvb76PS,
 		}
-		finalizationErr := finalizeLifecycleFailure(&result, err, identity, processes)
+		finalizationErr := finalizeLifecycleFailure(&result, lifecycleResult.SnapshotErr, identity, processes)
 		if finalizationErr != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("finalization: %v", finalizationErr))
 		}
@@ -309,9 +441,9 @@ func runLab(authority *GeneratedLabAuthority) LabResult {
 		result.Errors = append(result.Errors, fmt.Sprintf("profile validation failed: %v", profileErr))
 	}
 
-	// Propagate profile capture errors
-	if captureErr != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("profile capture failed: %v", captureErr))
+	// Propagate profile capture errors from lifecycle
+	if lifecycleResult.ProfileErr != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("profile capture failed: %v", lifecycleResult.ProfileErr))
 	}
 
 	// Compute deltas
@@ -396,22 +528,20 @@ func runLab(authority *GeneratedLabAuthority) LabResult {
 	return result
 }
 
-// extractPortFromURL extracts the port from a URL like "http://localhost:18317".
+// extractPortFromURL extracts the port from a URL using proper URL parsing.
+// P0-3: Uses net/url for structured URL parsing instead of string manipulation.
 func extractPortFromURL(urlStr string) string {
-	// Simple extraction - assumes URL is already validated
-	parts := strings.Split(urlStr, ":")
-	if len(parts) >= 3 {
-		return parts[len(parts)-1]
+	u, err := parseURL(urlStr)
+	if err != nil {
+		return ""
 	}
-	// Handle URLs without scheme
-	hostPort := strings.TrimPrefix(urlStr, "http://")
-	hostPort = strings.TrimPrefix(hostPort, "https://")
-	hostPort = strings.TrimSuffix(hostPort, "/")
-	parts = strings.Split(hostPort, ":")
-	if len(parts) >= 2 {
-		return parts[len(parts)-1]
-	}
-	return ""
+	return u.Port()
+}
+
+// parseURL parses a URL string using the standard library.
+// P0-3: Centralized URL parsing for testability.
+var parseURL = func(rawURL string) (*url.URL, error) {
+	return url.Parse(rawURL)
 }
 
 // startFakeTovarischFromAuthority starts fake tovarisch using authority.
@@ -685,7 +815,16 @@ func fetchGoroutineCount(client *http.Client, pprofPort string) int64 {
 }
 
 // captureProfilesWithValidation captures and validates all required profiles.
-func captureProfilesWithValidation(client *http.Client, pprofPort, artifactDir string, start time.Time, duration, interval time.Duration) error {
+// P0-7: Context-aware profile capture - observes context cancellation.
+// P0-7: Uses the passed context (which has extended deadline for final profiles).
+func captureProfilesWithValidation(
+	ctx context.Context,
+	client *http.Client,
+	pprofPort, artifactDir string,
+	start time.Time,
+	duration, interval time.Duration,
+	observationEnd time.Time, // P0-7: When observation phase ends
+) error {
 	profiles := []struct {
 		name string
 		url  string
@@ -699,31 +838,56 @@ func captureProfilesWithValidation(client *http.Client, pprofPort, artifactDir s
 
 	// Capture at start
 	for _, p := range profiles {
+		select {
+		case <-ctx.Done():
+			return errors.Join(ctx.Err(), errors.New("profile capture cancelled at start"))
+		default:
+		}
 		outPath := filepath.Join(artifactDir, fmt.Sprintf("%s-start.%s", p.name, getExtension(p.name)))
-		if err := CaptureProfile(client, p.url, outPath, p.name); err != nil {
+		if err := CaptureProfile(ctx, client, p.url, outPath, p.name); err != nil {
 			log.Printf("[PROFILE] Capture failed at start for %s: %v", p.name, err)
 			errs = append(errs, fmt.Errorf("%s-start: %w", p.name, err))
 		}
 	}
 
-	// Capture at midpoint
+	// Capture at midpoint (using collection context)
 	midTime := start.Add(interval)
 	if midTime.Before(start.Add(duration)) {
-		sleepUntil(midTime)
+		if err := sleepUntilWithContext(ctx, midTime); err != nil {
+			return errors.Join(err, errors.New("profile capture cancelled at midpoint"))
+		}
 		for _, p := range profiles {
+			select {
+			case <-ctx.Done():
+				return errors.Join(ctx.Err(), errors.New("profile capture cancelled at midpoint"))
+			default:
+			}
 			outPath := filepath.Join(artifactDir, fmt.Sprintf("%s-mid.%s", p.name, getExtension(p.name)))
-			if err := CaptureProfile(client, p.url, outPath, p.name); err != nil {
+			if err := CaptureProfile(ctx, client, p.url, outPath, p.name); err != nil {
 				log.Printf("[PROFILE] Capture failed at mid for %s: %v", p.name, err)
 				errs = append(errs, fmt.Errorf("%s-mid: %w", p.name, err))
 			}
 		}
 	}
 
-	// Capture at end
-	sleepUntil(start.Add(duration))
+	// P0-7: Sleep until observation end using the passed-in context (which has extended deadline).
+	// P0-7: ctx derives from labCtx so parent cancellation still propagates.
+	// P0-7: ctx has finalProfileDeadline so final profiles can complete.
+	if err := sleepUntilWithContext(ctx, observationEnd); err != nil {
+		return errors.Join(err, errors.New("profile capture cancelled before final"))
+	}
+
+	// P0-7: Capture at end using the same context (ctx = ProfileCtx with extended deadline).
+	// P0-7: ProfileCtx derives from labCtx, so parent cancellation still propagates.
+	// P0-7: No separate finalCtx needed - ctx already has the correct deadline.
 	for _, p := range profiles {
+		select {
+		case <-ctx.Done():
+			return errors.Join(ctx.Err(), errors.New("profile capture cancelled at final"))
+		default:
+		}
 		outPath := filepath.Join(artifactDir, fmt.Sprintf("%s-final.%s", p.name, getExtension(p.name)))
-		if err := CaptureProfile(client, p.url, outPath, p.name); err != nil {
+		if err := CaptureProfile(ctx, client, p.url, outPath, p.name); err != nil {
 			log.Printf("[PROFILE] Capture failed at final for %s: %v", p.name, err)
 			errs = append(errs, fmt.Errorf("%s-final: %w", p.name, err))
 		}
@@ -731,6 +895,22 @@ func captureProfilesWithValidation(client *http.Client, pprofPort, artifactDir s
 
 	if len(errs) > 0 {
 		return errors.Join(errs...)
+	}
+	return nil
+}
+
+// sleepUntilWithContext sleeps until the specified absolute time or context is cancelled.
+// P0-7: Context-aware sleep for cancellation support.
+func sleepUntilWithContext(ctx context.Context, deadline time.Time) error {
+	now := time.Now()
+	if deadline.After(now) {
+		waitDuration := deadline.Sub(now)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(waitDuration):
+			return nil
+		}
 	}
 	return nil
 }

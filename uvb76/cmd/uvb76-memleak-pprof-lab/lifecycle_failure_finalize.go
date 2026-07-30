@@ -81,6 +81,17 @@ var ErrEmptyTovarischPort = errors.New("empty tovarisch port")
 // ErrEmptyUVB76Port is returned when uvb76 port is empty.
 var ErrEmptyUVB76Port = errors.New("empty uvb76 port")
 
+// RuntimeEndpoints represents the separate URL and port authorities for a run.
+// P0-1: URLs and ports are distinct typed authorities, never mixed.
+type RuntimeEndpoints struct {
+	TovarischBaseURL string // Full URL like "http://localhost:18317"
+	TovarischPort    string // Decimal port like "18317"
+	UVB76APIBaseURL  string // Full URL like "http://localhost:18444"
+	UVB76Port        string // Decimal port like "18444"
+	PProfBaseURL     string // Full URL like "http://localhost:16060"
+	PProfPort        string // Decimal port like "16060"
+}
+
 // runExecutionIdentity holds identity information for a run.
 // P0-2: Created once before process startup, shared by success and failure paths.
 // P0-5: Includes binary paths for complete owned-process identity.
@@ -91,9 +102,7 @@ type runExecutionIdentity struct {
 	ArtifactDir      string
 	TovarischBinPath string
 	UVB76BinPath     string
-	TovarischPort    string
-	UVB76Port        string
-	PProfPort        string
+	Endpoints        RuntimeEndpoints
 }
 
 // failedRunProcesses holds the process resources for cleanup.
@@ -183,14 +192,14 @@ func validateLifecycleFailureInput(input lifecycleFailureInput) []error {
 		if input.Identity.ArtifactDir == "" {
 			validationErrors = append(validationErrors, ErrEmptyArtifactDir)
 		}
-		// All ports non-empty
-		if input.Identity.TovarischPort == "" {
+		// All ports non-empty - use Endpoints field
+		if input.Identity.Endpoints.TovarischPort == "" {
 			validationErrors = append(validationErrors, fmt.Errorf("%w: tovarisch", ErrEmptyPort))
 		}
-		if input.Identity.UVB76Port == "" {
+		if input.Identity.Endpoints.UVB76Port == "" {
 			validationErrors = append(validationErrors, fmt.Errorf("%w: uvb76", ErrEmptyPort))
 		}
-		if input.Identity.PProfPort == "" {
+		if input.Identity.Endpoints.PProfPort == "" {
 			validationErrors = append(validationErrors, fmt.Errorf("%w: pprof", ErrEmptyPort))
 		}
 	}
@@ -367,14 +376,15 @@ func buildFailedResult(lab *LabResult, identity *runExecutionIdentity, cleanupSu
 	// P0-4: Construct Errors as deterministic projection of existing + finalization
 	allErrors := append(existingErrors, finalizationErrStrings...)
 
+	// P0-1: Use Endpoints field for ports
 	r := &Result{
 		SchemaVersion:    ResultSchemaVersion,
 		RunID:            identity.RunID,
 		SourceCommit:     identity.SourceCommit,
 		RunStartedAt:     identity.RunStartedAt.Format(time.RFC3339),
-		TovarischPort:    identity.TovarischPort,
-		UVB76Port:        identity.UVB76Port,
-		PProfPort:        identity.PProfPort,
+		TovarischPort:    identity.Endpoints.TovarischPort,
+		UVB76Port:        identity.Endpoints.UVB76Port,
+		PProfPort:        identity.Endpoints.PProfPort,
 		Classification:   "FAILED",
 		OK:               false,
 		CleanupSuccess:   cleanupSuccess,
@@ -394,7 +404,7 @@ func buildFailedResult(lab *LabResult, identity *runExecutionIdentity, cleanupSu
 	if lab.TovarischPID > 0 {
 		r.TovarischIdentity = &ProcessIdentity{
 			PID:            lab.TovarischPID,
-			Port:           identity.TovarischPort,
+			Port:           identity.Endpoints.TovarischPort,
 			ExecutablePath: lab.TovarischBinPath,
 		}
 		// P0-3: Include StartTime if available
@@ -410,7 +420,7 @@ func buildFailedResult(lab *LabResult, identity *runExecutionIdentity, cleanupSu
 	if lab.UVB76PID > 0 {
 		r.UVB76Identity = &ProcessIdentity{
 			PID:            lab.UVB76PID,
-			Port:           identity.UVB76Port,
+			Port:           identity.Endpoints.UVB76Port,
 			ExecutablePath: lab.UVB76BinPath,
 		}
 		// P0-3: Include StartTime if available
@@ -467,23 +477,23 @@ func validateRunExecutionIdentity(identity *runExecutionIdentity, fakeMode bool)
 		validationErrors = append(validationErrors, ErrEmptyUVB76BinPath)
 	}
 
-	// All ports non-empty and valid
-	if identity.TovarischPort == "" {
+	// P0-1: Validate RuntimeEndpoints - all ports non-empty and valid
+	if identity.Endpoints.TovarischPort == "" {
 		validationErrors = append(validationErrors, fmt.Errorf("%w: tovarisch", ErrEmptyPort))
-	} else if !isValidPort(identity.TovarischPort) {
-		validationErrors = append(validationErrors, fmt.Errorf("%w: tovarisch=%s", ErrInvalidPort, identity.TovarischPort))
+	} else if !isValidPort(identity.Endpoints.TovarischPort) {
+		validationErrors = append(validationErrors, fmt.Errorf("%w: tovarisch=%s", ErrInvalidPort, identity.Endpoints.TovarischPort))
 	}
 
-	if identity.UVB76Port == "" {
+	if identity.Endpoints.UVB76Port == "" {
 		validationErrors = append(validationErrors, fmt.Errorf("%w: uvb76", ErrEmptyPort))
-	} else if !isValidPort(identity.UVB76Port) {
-		validationErrors = append(validationErrors, fmt.Errorf("%w: uvb76=%s", ErrInvalidPort, identity.UVB76Port))
+	} else if !isValidPort(identity.Endpoints.UVB76Port) {
+		validationErrors = append(validationErrors, fmt.Errorf("%w: uvb76=%s", ErrInvalidPort, identity.Endpoints.UVB76Port))
 	}
 
-	if identity.PProfPort == "" {
+	if identity.Endpoints.PProfPort == "" {
 		validationErrors = append(validationErrors, fmt.Errorf("%w: pprof", ErrEmptyPort))
-	} else if !isValidPort(identity.PProfPort) {
-		validationErrors = append(validationErrors, fmt.Errorf("%w: pprof=%s", ErrInvalidPort, identity.PProfPort))
+	} else if !isValidPort(identity.Endpoints.PProfPort) {
+		validationErrors = append(validationErrors, fmt.Errorf("%w: pprof=%s", ErrInvalidPort, identity.Endpoints.PProfPort))
 	}
 
 	return validationErrors

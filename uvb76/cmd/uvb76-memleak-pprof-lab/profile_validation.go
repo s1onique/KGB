@@ -1,24 +1,29 @@
 // Package main provides the UVB-76 pprof memory leak lab.
 //
-// # Profile Validation
+// # Profile Validation and Cancellation-Safe Capture
 //
-// This file implements P0-5/P0-6:
-// - P0-5: Overflow detection using limit+1 bytes
-// - P0-6: Real pprof profile validation via gzip decode + structure checks
+// This file implements:
+// P0-5: Overflow detection using limit+1 bytes
+// P0-6: Real pprof profile validation via gzip decode + structure checks
 //
 // For every profile capture requires:
 // - HTTP 200
 // - bounded body with overflow detection
-// - successful create/write/sync/close
-// - regular non-empty file
-// - gzip validity for heap and allocs
-// - non-empty valid UTF-8 for goroutine dumps
+// - temporary file creation (atomic publication pattern)
+// - successful sync and close
+// - profile validation
+// - atomic rename to final destination
 //
-// Profile capture must return an error rather than merely log failure.
+// On cancellation or error:
+// - destination file is absent
+// - temporary files are removed
+// - partial artifacts are never published
 package main
 
 import (
 	"compress/gzip"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,14 +33,64 @@ import (
 	"unicode/utf8"
 )
 
+// Sentinel errors for profile capture.
+// P0-5: Typed error categories for cancellation safety.
+var (
+	// ErrProfileCancelled is returned when profile capture is cancelled.
+	ErrProfileCancelled = errors.New("profile capture cancelled")
+
+	// ErrProfileDeadline is returned when profile capture deadline exceeds.
+	ErrProfileDeadline = errors.New("profile capture deadline exceeded")
+
+	// ErrProfileTransport is returned when profile transport fails.
+	ErrProfileTransport = errors.New("profile transport failure")
+
+	// ErrProfileRead is returned when profile body read fails.
+	ErrProfileRead = errors.New("profile body read failure")
+
+	// ErrProfileBodyTooLarge is returned when profile exceeds size limit.
+	ErrProfileBodyTooLarge = errors.New("profile body too large")
+
+	// ErrProfileValidation is returned when profile validation fails.
+	ErrProfileValidation = errors.New("profile validation failure")
+
+	// ErrProfilePublication is returned when profile publication fails.
+	ErrProfilePublication = errors.New("profile publication failure")
+)
+
 // ProfileValidationError represents a profile validation failure.
 type ProfileValidationError struct {
 	ProfileName string
-	What        string
+	What       string
 }
 
 func (e *ProfileValidationError) Error() string {
 	return fmt.Sprintf("profile validation failed for %s: %s", e.ProfileName, e.What)
+}
+
+// profileContextFailure classifies context errors for profile capture.
+// P0-5: Cancellation composition preserving errors.Is contract.
+func profileContextFailure(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	switch {
+	case errors.Is(err, context.Canceled):
+		return errors.Join(
+			ErrProfileCancelled,
+			context.Canceled,
+		)
+
+	case errors.Is(err, context.DeadlineExceeded):
+		return errors.Join(
+			ErrProfileDeadline,
+			context.DeadlineExceeded,
+		)
+
+	default:
+		return err
+	}
 }
 
 // ValidateProfile performs full validation of a captured profile.
@@ -121,14 +176,22 @@ func validateTextProfile(f *os.File, path string) error {
 	return nil
 }
 
-// CaptureProfile captures a profile with full validation.
-// P0-5: Uses limit+1 to detect overflow (response exceeds limit).
+// CaptureProfile captures a profile with cancellation-safe atomic publication.
+// P0-5: Uses temporary file pattern for atomic publication.
+// P0-5: On any failure, temporary file is removed and destination is absent.
 // P0-6: Returns error rather than merely logging failure.
-func CaptureProfile(client *http.Client, url string, outPath string, profileType string) error {
-	// Fetch with bounded body
-	resp, err := client.Get(url)
+// P0-7: Uses context for cancellation of in-flight HTTP requests.
+func CaptureProfile(ctx context.Context, client *http.Client, url string, outPath string, profileType string) error {
+	// P0-5: Create request with context for cancellation support
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return fmt.Errorf("fetch %s: %w", url, err)
+		return profileContextFailure(fmt.Errorf("create request for %s: %w", url, err))
+	}
+
+	// P0-5: Request can be cancelled by context
+	resp, err := client.Do(req)
+	if err != nil {
+		return profileContextFailure(fmt.Errorf("fetch %s: %w", url, err))
 	}
 	defer resp.Body.Close()
 
@@ -136,56 +199,70 @@ func CaptureProfile(client *http.Client, url string, outPath string, profileType
 		return fmt.Errorf("fetch %s: status %d", url, resp.StatusCode)
 	}
 
-	// Create file with proper sync
-	f, err := os.Create(outPath)
+	// P0-5: Create temporary file in same directory as final destination
+	// This ensures atomic rename works (same filesystem)
+	tmpDir := filepath.Dir(outPath)
+	tmp, err := os.CreateTemp(tmpDir, filepath.Base(outPath)+".tmp.*")
 	if err != nil {
-		return fmt.Errorf("create %s: %w", outPath, err)
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	// P0-5: cleanup function removes temp file on any failure path
+	cleanup := func() {
+		tmp.Close()
+		os.Remove(tmpPath)
 	}
 
 	// P0-5: Use limit+1 to detect overflow
-	// Read limit bytes, then try to read one more byte
-	// If that byte succeeds, the response was larger than limit
 	const limit = 100 * 1024 * 1024 // 100MB max
 	limitReader := io.LimitReader(resp.Body, limit+1)
 
-	// Write the bounded content
-	written, err := io.Copy(f, limitReader)
+	// P0-5: Write bounded content to temp file
+	written, err := io.Copy(tmp, limitReader)
 	if err != nil {
-		f.Close()
-		os.Remove(outPath)
-		return fmt.Errorf("write %s: %w", outPath, err)
+		cleanup()
+		return profileContextFailure(fmt.Errorf("write %s: %w", tmpPath, err))
 	}
 
 	// P0-5: Check for overflow - if we wrote more than limit, the response was too large
 	if written > limit {
-		f.Close()
-		os.Remove(outPath)
-		return fmt.Errorf("profile %s exceeds size limit (%d bytes)", outPath, limit)
+		cleanup()
+		return errors.Join(ErrProfileBodyTooLarge, fmt.Errorf("profile %s exceeds size limit (%d bytes)", outPath, limit))
 	}
 
-	// Sync to disk
-	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(outPath)
-		return fmt.Errorf("sync %s: %w", outPath, err)
+	// P0-5: Sync to disk
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return profileContextFailure(fmt.Errorf("sync %s: %w", tmpPath, err))
 	}
 
-	// Close
-	if err := f.Close(); err != nil {
-		os.Remove(outPath)
-		return fmt.Errorf("close %s: %w", outPath, err)
+	// P0-5: Close temp file before validation and rename
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close %s: %w", tmpPath, err)
 	}
 
 	if written == 0 {
-		os.Remove(outPath)
+		cleanup()
 		return fmt.Errorf("profile %s is empty", outPath)
 	}
 
-	// Validate the captured profile
-	if err := ValidateProfile(outPath, profileType); err != nil {
-		os.Remove(outPath)
-		return fmt.Errorf("validation failed for %s: %w", outPath, err)
+	// P0-5: Validate the captured profile BEFORE renaming
+	if err := ValidateProfile(tmpPath, profileType); err != nil {
+		cleanup()
+		return fmt.Errorf("%w: validation failed for %s: %w", ErrProfileValidation, tmpPath, err)
 	}
+
+	// P0-5: Atomic rename from temp to destination
+	// On POSIX systems with same filesystem, this is atomic
+	if err := os.Rename(tmpPath, outPath); err != nil {
+		cleanup()
+		return fmt.Errorf("%w: rename %s to %s: %w", ErrProfilePublication, tmpPath, outPath, err)
+	}
+
+	// P0-5: Success - temp file is now the destination
+	// No cleanup needed - rename succeeded
 
 	return nil
 }

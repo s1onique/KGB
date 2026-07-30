@@ -1,10 +1,12 @@
 // Package main provides the UVB-76 pprof memory leak lab.
 //
-// # Target Polling with Typed Results
+// # Target Polling with Typed Results and Complete Cancellation
 //
-// This file implements P0-8: Typed TargetPollResult and P0-9: Preserve polling failures.
-// All polling failures are typed and propagated. No log-and-continue behavior.
-//
+// This file implements:
+// P0-3: PollTargetAuthority cancellation-complete
+// P0-7: Bounded recovered cause set
+// P0-8: Centralized semantic poll termination
+// P0-9: All failures typed and preserved with errors.Join
 package main
 
 import (
@@ -16,6 +18,43 @@ import (
 	"net/http"
 	"strings"
 	"time"
+)
+
+// Sentinel errors for target poll.
+var (
+	// ErrTargetPollCancelled is returned when poll is explicitly cancelled.
+	// P0-8: Explicit cancellation must not expose deadline identities.
+	ErrTargetPollCancelled = errors.New("target poll cancelled")
+
+	// ErrTargetPollDeadline is returned when polling deadline expires.
+	ErrTargetPollDeadline = errors.New("target poll deadline")
+
+	// ErrTargetPollTransport is returned on transport errors during polling.
+	ErrTargetPollTransport = errors.New("target poll transport error")
+
+	// ErrTargetPollUnauthorized is returned on 401 during polling.
+	ErrTargetPollUnauthorized = errors.New("target poll unauthorized")
+
+	// ErrTargetPollForbidden is returned on 403 during polling.
+	ErrTargetPollForbidden = errors.New("target poll forbidden")
+
+	// ErrTargetPollUnexpectedStatus is returned on unexpected HTTP status.
+	ErrTargetPollUnexpectedStatus = errors.New("target poll unexpected status")
+
+	// ErrTargetPollDecode is returned when snapshot decode fails.
+	ErrTargetPollDecode = errors.New("target poll decode failed")
+
+	// ErrTargetPollTrailingContent is returned when response has trailing content.
+	ErrTargetPollTrailingContent = errors.New("target poll trailing content")
+
+	// ErrTargetPollTargetNotFound is returned when target doesn't exist.
+	ErrTargetPollTargetNotFound = errors.New("target poll target not found")
+
+	// ErrTargetPollNoObservation is returned when no observation before deadline.
+	ErrTargetPollNoObservation = errors.New("target poll no observation")
+
+	// ErrTargetPollNoCompletion is returned when no completion before deadline.
+	ErrTargetPollNoCompletion = errors.New("target poll no completion")
 )
 
 // TargetPollInput contains all inputs required for target polling.
@@ -52,8 +91,12 @@ type TargetPollResult struct {
 	// Attempts is the number of poll attempts made.
 	Attempts int
 
-	// RecoveredErrors contains transient errors that were recovered.
-	RecoveredErrors []error
+	// RecoveredErrorCount is the number of transient errors that were recovered.
+	RecoveredErrorCount int
+
+	// RecoveredErrors contains truncated diagnostic strings for recovered errors.
+	// P0-7: Bounded to maximum 16 entries, each truncated to 512 bytes.
+	RecoveredErrors []string
 
 	// TerminalError is non-nil when polling terminated with a terminal failure.
 	TerminalError error
@@ -62,13 +105,56 @@ type TargetPollResult struct {
 	Completed bool
 }
 
-// PollTargetAuthority polls UVB-76 for target state with typed results.
-// P0-8: Returns typed result instead of pointer.
-// P0-9: All failures are typed and preserved.
-func PollTargetAuthority(ctx context.Context, input TargetPollInput) TargetPollResult {
-	result := TargetPollResult{
-		RecoveredErrors: make([]error, 0),
+// targetPollProgress tracks semantic progress during polling.
+// P0-8: Used to classify deadline termination correctly.
+type targetPollProgress struct {
+	// ObservationSeen is true if at least one observation was made.
+	ObservationSeen bool
+
+	// AttemptSeen is true if at least one attempt was made.
+	AttemptSeen bool
+
+	// CompletionSeen is true if a completed snapshot was observed.
+	CompletionSeen bool
+}
+
+// targetPollCauseSet tracks bounded machine causes for recovered errors.
+// P0-7: Bounded set prevents unbounded error accumulation.
+type targetPollCauseSet struct {
+	transport        bool
+	unexpectedStatus bool
+	targetNotFound   bool
+}
+
+// Error implements error for targetPollCauseSet.
+func (s targetPollCauseSet) Error() error {
+	var causes []error
+
+	if s.transport {
+		causes = append(causes, ErrTargetPollTransport)
 	}
+	if s.unexpectedStatus {
+		causes = append(causes, ErrTargetPollUnexpectedStatus)
+	}
+	if s.targetNotFound {
+		causes = append(causes, ErrTargetPollTargetNotFound)
+	}
+
+	return errors.Join(causes...)
+}
+
+// MaxRecoveredDiagnostics is the maximum number of diagnostic entries.
+const MaxRecoveredDiagnostics = 16
+
+// MaxRecoveredErrorLen is the maximum length of each diagnostic string.
+const MaxRecoveredErrorLen = 512
+
+// PollTargetAuthority polls UVB-76 for target state with typed results.
+// P0-3: Cancellation-complete - all blocking points observe context.
+// P0-8: Centralized semantic termination using finalizeTargetPollContext.
+// P0-9: All failures typed and preserved.
+func PollTargetAuthority(ctx context.Context, input TargetPollInput) TargetPollResult {
+	result := TargetPollResult{}
 
 	// Validate input
 	if input.Client == nil {
@@ -83,7 +169,7 @@ func PollTargetAuthority(ctx context.Context, input TargetPollInput) TargetPollR
 		result.TerminalError = fmt.Errorf("empty target ID: %w", ErrTargetIdentityMismatch)
 		return result
 	}
-	if input.Auth.SessionCookie == "" {
+	if input.Auth.CookieName == "" || input.Auth.CookieValue == "" {
 		result.TerminalError = fmt.Errorf("missing auth input: %w", ErrAuthInputMissing)
 		return result
 	}
@@ -91,9 +177,12 @@ func PollTargetAuthority(ctx context.Context, input TargetPollInput) TargetPollR
 	// Build snapshot URL
 	snapshotURL := BuildSnapshotURL(input.UVB76APIBaseURL, input.Target.TargetID)
 
-	// Create polling context with deadline
+	// Create polling context with deadline derived from caller context
 	pollCtx, pollCancel := context.WithTimeout(ctx, input.Deadline)
 	defer pollCancel()
+
+	// P0-7: Bounded recovered causes
+	var recoveredCauses targetPollCauseSet
 
 	ticker := time.NewTicker(input.PollInterval)
 	defer ticker.Stop()
@@ -105,18 +194,51 @@ func PollTargetAuthority(ctx context.Context, input TargetPollInput) TargetPollR
 
 	for {
 		select {
+		case <-pollCtx.Done():
+			// P0-3: Check parent context for explicit cancellation vs deadline
+			// P0-8: Centralized termination using finalizeTargetPollContext
+			return finalizeTargetPollContext(ctx, pollCtx, targetPollProgress{
+				ObservationSeen: result.BestAuthority != nil,
+				AttemptSeen:    result.Attempts > 0,
+				CompletionSeen: result.Completed,
+			}, recoveredCauses, result)
+
 		case <-ticker.C:
 			result.Attempts++
-			auth, pollErr := fetchTargetSnapshotWithAuth(pollCtx, input.Client, snapshotURL, input.Auth.SessionCookie, input.RequestTimeout, input.Target)
+			progress := targetPollProgress{
+				ObservationSeen: result.BestAuthority != nil,
+				AttemptSeen:     true,
+				CompletionSeen:  result.Completed,
+			}
+
+			auth, pollErr := fetchTargetSnapshotWithAuth(
+				pollCtx, input.Client, snapshotURL,
+				input.Auth.CookieName, input.Auth.CookieValue,
+				input.RequestTimeout, input.Target,
+			)
 
 			if pollErr != nil {
+				// P0-3: Check parent context before classifying as recoverable
+				// This prevents cancellation from being recorded as transport error
+				if pollCtx.Err() != nil {
+					return finalizeTargetPollContext(ctx, pollCtx, progress, recoveredCauses, result)
+				}
+
 				// Classify error
 				if isTerminalPollError(pollErr) {
 					result.TerminalError = pollErr
 					return result
 				}
-				// Recoverable error - retain and continue
-				result.RecoveredErrors = append(result.RecoveredErrors, pollErr)
+
+				// P0-7: Recoverable error - track bounded cause
+				recoveredCauses = addRecoveredCause(recoveredCauses, pollErr)
+				result.RecoveredErrorCount++
+
+				// P0-7: Add truncated diagnostic string
+				if len(result.RecoveredErrors) < MaxRecoveredDiagnostics {
+					errStr := truncateErrorString(pollErr.Error(), MaxRecoveredErrorLen)
+					result.RecoveredErrors = append(result.RecoveredErrors, errStr)
+				}
 				continue
 			}
 
@@ -134,57 +256,106 @@ func PollTargetAuthority(ctx context.Context, input TargetPollInput) TargetPollR
 					return result
 				}
 			}
-
-		case <-pollCtx.Done():
-			// Deadline reached
-			if result.BestAuthority == nil {
-				// No observation at all
-				if len(result.RecoveredErrors) > 0 {
-					result.TerminalError = fmt.Errorf("%w: %w", ErrTargetPollNoObservation, errors.Join(result.RecoveredErrors...))
-				} else {
-					result.TerminalError = fmt.Errorf("%w: deadline reached with no observation", ErrTargetPollDeadline)
-				}
-			} else if !result.Completed {
-				// Observation but no completion
-				var cause error
-				if result.BestAuthority.IsScrapeAttempted() {
-					cause = fmt.Errorf("%w: deadline reached after attempt but before completion", ErrTargetPollNoCompletion)
-				} else {
-					cause = fmt.Errorf("%w: deadline reached, no completion observed", ErrTargetPollNoCompletion)
-				}
-				if len(result.RecoveredErrors) > 0 {
-					cause = fmt.Errorf("%v: recovered: %w", cause, errors.Join(result.RecoveredErrors...))
-				}
-				result.TerminalError = fmt.Errorf("%w: %w", ErrTargetPollDeadline, cause)
-			}
-			return result
 		}
 	}
 }
 
+// finalizeTargetPollContext classifies and returns the appropriate terminal error.
+// P0-8: Centralized semantic termination.
+func finalizeTargetPollContext(
+	parentCtx context.Context,
+	pollCtx context.Context,
+	progress targetPollProgress,
+	recoveredCauses targetPollCauseSet,
+	result TargetPollResult,
+) TargetPollResult {
+	// P0-8: Explicit cancellation - distinct from deadline
+	if errors.Is(parentCtx.Err(), context.Canceled) {
+		result.TerminalError = errors.Join(
+			ErrTargetPollCancelled,
+			context.Canceled,
+			recoveredCauses.Error(),
+		)
+		return result
+	}
+
+	// P0-8: Deadline classifications based on progress
+	if !progress.ObservationSeen {
+		// P0-8: Deadline with no observation
+		result.TerminalError = errors.Join(
+			ErrTargetPollDeadline,
+			ErrTargetPollNoObservation,
+			context.DeadlineExceeded,
+			recoveredCauses.Error(),
+		)
+	} else if !progress.CompletionSeen {
+		// P0-8: Deadline after observation but without completion
+		result.TerminalError = errors.Join(
+			ErrTargetPollDeadline,
+			ErrTargetPollNoCompletion,
+			context.DeadlineExceeded,
+			recoveredCauses.Error(),
+		)
+	} else {
+		// Should not reach here if completion was seen, but handle gracefully
+		result.TerminalError = errors.Join(
+			ErrTargetPollDeadline,
+			context.DeadlineExceeded,
+			recoveredCauses.Error(),
+		)
+	}
+
+	return result
+}
+
+// addRecoveredCause adds a cause to the bounded set based on error type.
+func addRecoveredCause(set targetPollCauseSet, err error) targetPollCauseSet {
+	if errors.Is(err, ErrTargetPollTransport) {
+		set.transport = true
+	} else if errors.Is(err, ErrTargetPollUnexpectedStatus) {
+		set.unexpectedStatus = true
+	} else if errors.Is(err, ErrTargetPollTargetNotFound) {
+		set.targetNotFound = true
+	}
+	return set
+}
+
+// truncateErrorString truncates error string to maximum length.
+func truncateErrorString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen]
+}
+
 // fetchTargetSnapshotWithAuth fetches a target snapshot with explicit auth.
+// P0-3: Cancellation-complete - all blocking points observe request context.
 func fetchTargetSnapshotWithAuth(
 	ctx context.Context,
 	client *http.Client,
 	url string,
-	sessionCookie string,
+	cookieName string,
+	cookieValue string,
 	timeout time.Duration,
 	expectedTarget TargetConfigBinding,
 ) (*TargetStateAuthority, error) {
-	// Create request with timeout
+	// P0-3: Create request with timeout context for cancellation support
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// P0-3: Request can be cancelled by context
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: create request: %v", ErrTargetPollTransport, err)
 	}
 
-	// Add session auth
-	req.AddCookie(&http.Cookie{Name: "session", Value: sessionCookie})
+	// Add session auth using http.Cookie with separate name/value
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: cookieValue})
 
+	// P0-3: HTTP request observes reqCtx for cancellation
 	resp, err := client.Do(req)
 	if err != nil {
+		// P0-3: Request-level cancellation is captured here
 		return nil, fmt.Errorf("%w: %v", ErrTargetPollTransport, err)
 	}
 	defer resp.Body.Close()
@@ -203,6 +374,7 @@ func fetchTargetSnapshotWithAuth(
 		return nil, fmt.Errorf("%w: status %d", ErrTargetPollUnexpectedStatus, resp.StatusCode)
 	}
 
+	// P0-3: Body read observes reqCtx for cancellation
 	// Decode with strict field matching
 	decoder := json.NewDecoder(resp.Body)
 	decoder.DisallowUnknownFields()
@@ -222,6 +394,7 @@ func fetchTargetSnapshotWithAuth(
 	}
 
 	// Also verify no trailing content
+	// P0-3: Body read for trailing check observes reqCtx
 	body, _ := io.ReadAll(resp.Body)
 	if len(body) > 0 {
 		trimmed := strings.TrimSpace(string(body))
@@ -267,30 +440,18 @@ func fetchTargetSnapshotWithAuth(
 }
 
 // isTerminalPollError classifies whether a polling error is terminal.
+// P0-9: Uses errors.Is for sentinel classification, not string matching.
 func isTerminalPollError(err error) bool {
 	if err == nil {
 		return false
 	}
-	errStr := err.Error()
 
-	// Terminal error types
-	terminalPrefixes := []string{
-		"unauthorized",
-		"forbidden",
-		"identity mismatch",
-		"trailing content",
-		"multiple JSON documents",
-		"decode failed",
-		"schema-invalid",
-	}
-
-	for _, prefix := range terminalPrefixes {
-		if strings.Contains(errStr, prefix) {
-			return true
-		}
-	}
-
-	return false
+	// P0-9: Classify using sentinel errors via errors.Is
+	return errors.Is(err, ErrTargetPollUnauthorized) ||
+		errors.Is(err, ErrTargetPollForbidden) ||
+		errors.Is(err, ErrTargetPollDecode) ||
+		errors.Is(err, ErrTargetPollTrailingContent) ||
+		errors.Is(err, ErrTargetIdentityMismatch)
 }
 
 // validateSnapshotIdentity validates a snapshot against the expected target binding.

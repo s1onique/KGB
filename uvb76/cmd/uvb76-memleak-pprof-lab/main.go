@@ -60,6 +60,16 @@ func main() {
 	uvb76LogFile = filepath.Join(artifactDir, "uvb76.log")
 	tovarischLogFile = filepath.Join(artifactDir, "tovarisch.log")
 
+	// Run with proper defer for credential cleanup
+	if err := runMain(); err != nil {
+		log.Printf("memory lab failed: %v", err)
+		os.Exit(1)
+	}
+}
+
+// runMain is the main entry point that returns errors for proper credential cleanup.
+// P0-1: Uses return-based error handling so defer runs before os.Exit.
+func runMain() error {
 	// === PHASE 0: Generate and validate configuration authority ===
 	// P0-1: Create authority bundle before any process startup
 	// P0-3: Validate before any side effects
@@ -74,40 +84,53 @@ func main() {
 	}
 
 	// Generate configuration
-	labCfg := labconfig.Generate(*flagUVB76Port, *flagPProfPort, *flagTovarischPort, *flagUseFakeTovarisch)
+	// P0-1: Returns error if credential generation fails - no fallback
+	labResult, genErr := labconfig.Generate(*flagUVB76Port, *flagPProfPort, *flagTovarischPort, *flagUseFakeTovarisch)
+	if genErr != nil {
+		return fmt.Errorf("generate configuration: %w", genErr)
+	}
+
+	// P0-1: Install credential cleanup via defer - runs on ALL return paths
+	ephemeralPassword := labResult.EphemeralPassword
+	defer func() {
+		for i := range ephemeralPassword {
+			ephemeralPassword[i] = 0
+		}
+	}()
 
 	// Convert to GeneratedConfig
 	generatedCfg := &GeneratedConfig{
-		Listen:      ConfigListenConfig(labCfg.Listen),
-		Auth:        ConfigAuthConfig(labCfg.Auth),
-		Scrape:      ConfigScrapeConfig(labCfg.Scrape),
-		Latency:     ConfigLatencyConfig(labCfg.Latency),
-		Diagnostics: ConfigDiagnosticsConfig(labCfg.Diagnostics),
-		Targets:     make([]ConfigTargetConfig, len(labCfg.Targets)),
+		Listen:      ConfigListenConfig(labResult.Config.Listen),
+		Auth:        ConfigAuthConfig(labResult.Config.Auth),
+		Scrape:      ConfigScrapeConfig(labResult.Config.Scrape),
+		Latency:     ConfigLatencyConfig(labResult.Config.Latency),
+		Diagnostics: ConfigDiagnosticsConfig(labResult.Config.Diagnostics),
+		Targets:     make([]ConfigTargetConfig, len(labResult.Config.Targets)),
 	}
-	for i, t := range labCfg.Targets {
+	for i, t := range labResult.Config.Targets {
 		generatedCfg.Targets[i] = ConfigTargetConfig(t)
 	}
 
 	// P0-3: Validate generated config before publication
 	if err := ValidateGeneratedConfig(generatedCfg, mode); err != nil {
-		log.Fatalf("Generated config validation failed: %v", err)
+		return fmt.Errorf("validate generated config: %w", err)
 	}
 
 	// P0-2: Extract target binding from generated config
 	targetBinding, err := ExtractTargetBinding(generatedCfg, mode)
 	if err != nil {
-		log.Fatalf("Target binding extraction failed: %v", err)
+		return fmt.Errorf("extract target binding: %w", err)
 	}
 
 	// P0-5: Derive canonical URLs from config
 	uvb76APIBaseURL, err := DeriveUVB76APIBaseURL(generatedCfg)
 	if err != nil {
-		log.Fatalf("UVB-76 API base URL derivation failed: %v", err)
+		return fmt.Errorf("derive UVB-76 API base URL: %w", err)
 	}
 
-	// P0-7: Resolve explicit authentication
-	authResolver := &ProductionAuthResolver{}
+	// P0-1: Authority bundle created before process startup
+	// P0-3: Authentication deferred until after UVB-76 starts and API is ready
+	// P0-7: Auth resolver NOT resolved here - will be resolved inside runLab after UVB-76 ready
 	authority := &GeneratedLabAuthority{
 		Config:          generatedCfg,
 		ConfigPath:      configFile,
@@ -115,47 +138,45 @@ func main() {
 		Target:          targetBinding,
 		UVB76APIBaseURL: uvb76APIBaseURL,
 	}
-	targetAuth, err := authResolver.Resolve(context.Background(), authority)
-	if err != nil {
-		log.Fatalf("Target auth resolution failed: %v", err)
-	}
-	authority.TargetStateAuth = targetAuth
 
 	// P0-3: Atomic config publication
 	if err := atomicPublishConfig(generatedCfg, configFile); err != nil {
-		log.Fatalf("Config publication failed: %v", err)
+		return fmt.Errorf("publish config: %w", err)
 	}
 	log.Printf("Generated and published lab config: %s", configFile)
 
 	// P0-3: Strict reread
 	rereadCfg, err := StrictlyReadConfig(configFile)
 	if err != nil {
-		log.Fatalf("Config reread failed: %v", err)
+		return fmt.Errorf("reread config: %w", err)
 	}
 
 	// P0-3: Prove equality
 	if err := ProveConfigEquality(generatedCfg, rereadCfg); err != nil {
-		log.Fatalf("Config equality proof failed: %v", err)
+		return fmt.Errorf("prove config equality: %w", err)
 	}
 
 	// P0-3: Re-extract binding from reread config
 	rereadBinding, err := ExtractTargetBinding(rereadCfg, mode)
 	if err != nil {
-		log.Fatalf("Reread binding extraction failed: %v", err)
+		return fmt.Errorf("reread binding: %w", err)
 	}
 
 	// P0-3: Prove binding equality
 	if err := ProveTargetBindingEquality(targetBinding, rereadBinding); err != nil {
-		log.Fatalf("Binding equality proof failed: %v", err)
+		return fmt.Errorf("prove binding equality: %w", err)
 	}
 
 	// === PHASE 1: Run the lab with authority ===
-	result := runLab(authority)
+	// P0-7-fix: Pass ephemeral password to runLab for post-startup authentication
+	result := runLab(authority, ephemeralPassword)
 
 	// Write result
 	resultBytes, _ := json.MarshalIndent(result, "", "  ")
 	resultFile := filepath.Join(artifactDir, "result.json")
-	os.WriteFile(resultFile, resultBytes, 0644)
+	if err := os.WriteFile(resultFile, resultBytes, 0644); err != nil {
+		return fmt.Errorf("write result: %w", err)
+	}
 
 	log.Printf("")
 	log.Printf("=== Lab Result ===")
@@ -185,8 +206,10 @@ func main() {
 	}
 
 	if !result.OK {
-		os.Exit(1)
+		return fmt.Errorf("lab result not OK: classification=%s", result.Classification)
 	}
+
+	return nil
 }
 
 // atomicPublishConfig atomically publishes the config file.

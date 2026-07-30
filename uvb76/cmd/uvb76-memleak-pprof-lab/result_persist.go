@@ -148,6 +148,9 @@ type Result struct {
 	// Scrape authority observations
 	ScrapeAuthority *ScrapeAuthorityObservation `json:"scrape_authority,omitempty"`
 
+	// P0-11: Target poll diagnostics - physically published in durable result
+	TargetPoll *TargetPollSummary `json:"target_poll,omitempty"`
+
 	// Process series file names
 	TovarischSeriesFile string `json:"tovarisch_series_file,omitempty"`
 	UVB76SeriesFile     string `json:"uvb76_series_file,omitempty"`
@@ -517,10 +520,10 @@ func BuildResultFromLabResult(identity *runExecutionIdentity, lab LabResult) (*R
 	if identity.SourceCommit == "" {
 		return nil, ErrEmptySourceCommit
 	}
-	if identity.TovarischPort == "" {
+	if identity.Endpoints.TovarischPort == "" {
 		return nil, ErrEmptyTovarischPort
 	}
-	if identity.UVB76Port == "" {
+	if identity.Endpoints.UVB76Port == "" {
 		return nil, ErrEmptyUVB76Port
 	}
 
@@ -543,9 +546,9 @@ func BuildResultFromLabResult(identity *runExecutionIdentity, lab LabResult) (*R
 		RunID:               identity.RunID,
 		SourceCommit:        identity.SourceCommit,
 		RunStartedAt:        identity.RunStartedAt.Format(time.RFC3339),
-		TovarischPort:       identity.TovarischPort,
-		UVB76Port:           identity.UVB76Port,
-		PProfPort:           identity.PProfPort,
+		TovarischPort:       identity.Endpoints.TovarischPort,
+		UVB76Port:           identity.Endpoints.UVB76Port,
+		PProfPort:           identity.Endpoints.PProfPort,
 		TovarischStartTime:  lab.TovarischStartTime,
 		TovarischReadyTime:  lab.TovarischReadyTime,
 		UVB76StartTime:      lab.UVB76StartTime,
@@ -580,7 +583,7 @@ func BuildResultFromLabResult(identity *runExecutionIdentity, lab LabResult) (*R
 		r.TovarischIdentity = &ProcessIdentity{
 			ExecutablePath: lab.TovarischBinPath,
 			PID:            lab.TovarischPID,
-			Port:           identity.TovarischPort,
+			Port:           identity.Endpoints.TovarischPort,
 		}
 		// P0-3: Include StartTime if available
 		if lab.TovarischStartTime != nil {
@@ -610,7 +613,7 @@ func BuildResultFromLabResult(identity *runExecutionIdentity, lab LabResult) (*R
 		r.UVB76Identity = &ProcessIdentity{
 			ExecutablePath: lab.UVB76BinPath,
 			PID:            lab.UVB76PID,
-			Port:           identity.UVB76Port,
+			Port:           identity.Endpoints.UVB76Port,
 		}
 		// P0-3: Include StartTime if available
 		if lab.UVB76StartTime != nil {

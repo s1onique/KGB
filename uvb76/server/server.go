@@ -72,7 +72,7 @@ func (s *Server) Start() error {
 	// Public endpoints (no auth required)
 	router.Handle("/api/v1/healthz", http.HandlerFunc(s.handleHealthz)).Methods(http.MethodGet)
 	// Status endpoint is public - it only exposes telemetry, no sensitive data
-	router.Handle("/api/v1/status", http.HandlerFunc(s.handleStatus)).Methods(http.MethodGet)
+	router.Handle(StatusRoute, http.HandlerFunc(s.handleStatus)).Methods(http.MethodGet)
 
 	// Auth endpoints (public, but create/clear sessions)
 	router.Handle("/api/v1/auth/login", http.HandlerFunc(s.handleLogin)).Methods(http.MethodPost)

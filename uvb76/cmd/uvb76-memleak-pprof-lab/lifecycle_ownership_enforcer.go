@@ -4,14 +4,15 @@ import "errors"
 
 // lifecycleOwnershipResult holds the result of inspecting lifecycle ownership.
 type lifecycleOwnershipResult struct {
-	RunLabFound             bool // true if runLab function was found
-	CollectAndSnapshotCalls int
-	DeferredCancelCalls     int
-	OrdinaryCancelCalls     int
-	DirectWaitCalls         int
-	DirectCloneCalls        int
-	ImportsSlices           bool
-	WaitGroupIdentifier     string // Identifier name for WaitGroup binding
+	RunLabFound                  bool // true if runLab function was found
+	CollectAndSnapshotCalls      int  // Direct calls to CollectAndSnapshot
+	RunCollectionLifecycleCalls  int  // Calls to RunCollectionLifecycle (which internally calls CollectAndSnapshot)
+	DeferredCancelCalls          int
+	OrdinaryCancelCalls          int
+	DirectWaitCalls              int
+	DirectCloneCalls             int
+	ImportsSlices                bool
+	WaitGroupIdentifier          string // Identifier name for WaitGroup binding
 }
 
 // ErrLifecycleOwnershipViolation is the sentinel for lifecycle ownership violations.
@@ -38,6 +39,12 @@ var ErrDirectClone = errors.New("slices.Clone must not be called directly")
 // ErrSlicesImport is returned when slices package is imported.
 var ErrSlicesImport = errors.New("slices package must not be imported")
 
+// ErrMissingLifecycleAuthority is returned when neither CollectAndSnapshot nor RunCollectionLifecycle is called.
+var ErrMissingLifecycleAuthority = errors.New("CollectAndSnapshot or RunCollectionLifecycle must be called exactly once")
+
+// ErrLifecycleAuthorityCount is returned when lifecycle authority count is not exactly one.
+var ErrLifecycleAuthorityCount = errors.New("exactly one lifecycle authority required")
+
 // validateLifecycleOwnership checks the lifecycle ownership result and returns a typed error
 // if any violation is detected.
 func validateLifecycleOwnership(result lifecycleOwnershipResult) error {
@@ -46,11 +53,18 @@ func validateLifecycleOwnership(result lifecycleOwnershipResult) error {
 		return errors.Join(ErrLifecycleOwnershipViolation, ErrMissingRunLab)
 	}
 
+	// Exactly one lifecycle authority must be called
+	// Check specific duplicates before checking total > 1
 	switch {
-	case result.CollectAndSnapshotCalls == 0:
-		return errors.Join(ErrLifecycleOwnershipViolation, ErrMissingCollectAndSnapshot)
+	case result.CollectAndSnapshotCalls == 0 && result.RunCollectionLifecycleCalls == 0:
+		return errors.Join(ErrLifecycleOwnershipViolation, ErrMissingLifecycleAuthority)
 	case result.CollectAndSnapshotCalls > 1:
 		return errors.Join(ErrLifecycleOwnershipViolation, ErrDuplicateCollectAndSnapshot)
+	case result.RunCollectionLifecycleCalls > 1:
+		return errors.Join(ErrLifecycleOwnershipViolation, errors.New("RunCollectionLifecycle must be called at most once"))
+	case result.CollectAndSnapshotCalls == 1 && result.RunCollectionLifecycleCalls == 1:
+		// Having both is forbidden - must be exactly one
+		return errors.Join(ErrLifecycleOwnershipViolation, ErrLifecycleAuthorityCount)
 	}
 
 	if result.OrdinaryCancelCalls > 0 {

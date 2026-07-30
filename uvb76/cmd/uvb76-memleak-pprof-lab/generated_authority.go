@@ -5,7 +5,6 @@
 // This file implements P0-1: Generated lab authority bundle.
 // The GeneratedLabAuthority is the sole runtime authority for target identity,
 // URLs, authentication, and execution mode after configuration generation.
-//
 package main
 
 import (
@@ -39,8 +38,10 @@ type TargetConfigBinding struct {
 
 // TargetStateAuthInput represents the explicit authentication for target-state queries.
 // P0-7: Authentication must be supplied explicitly, not read from environment.
+// P0-7-fix: Separate name and value to avoid double-formatting.
 type TargetStateAuthInput struct {
-	SessionCookie string
+	CookieName  string
+	CookieValue string
 }
 
 // GeneratedLabAuthority is the sole runtime authority for the lab execution.
@@ -130,36 +131,6 @@ var ErrTargetPeerBindingMismatch = errors.New("target peer binding mismatch")
 // ErrModeTargetMismatch is returned when mode and target don't align.
 var ErrModeTargetMismatch = errors.New("mode target mismatch")
 
-// ErrTargetPollTransport is returned on transport errors during polling.
-var ErrTargetPollTransport = errors.New("target poll transport error")
-
-// ErrTargetPollUnauthorized is returned on 401 during polling.
-var ErrTargetPollUnauthorized = errors.New("target poll unauthorized")
-
-// ErrTargetPollForbidden is returned on 403 during polling.
-var ErrTargetPollForbidden = errors.New("target poll forbidden")
-
-// ErrTargetPollUnexpectedStatus is returned on unexpected HTTP status.
-var ErrTargetPollUnexpectedStatus = errors.New("target poll unexpected status")
-
-// ErrTargetPollDecode is returned when snapshot decode fails.
-var ErrTargetPollDecode = errors.New("target poll decode failed")
-
-// ErrTargetPollTrailingContent is returned when response has trailing content.
-var ErrTargetPollTrailingContent = errors.New("target poll trailing content")
-
-// ErrTargetPollTargetNotFound is returned when target doesn't exist.
-var ErrTargetPollTargetNotFound = errors.New("target poll target not found")
-
-// ErrTargetPollNoObservation is returned when no observation before deadline.
-var ErrTargetPollNoObservation = errors.New("target poll no observation")
-
-// ErrTargetPollNoCompletion is returned when no completion before deadline.
-var ErrTargetPollNoCompletion = errors.New("target poll no completion")
-
-// ErrTargetPollDeadline is returned when polling deadline expires.
-var ErrTargetPollDeadline = errors.New("target poll deadline")
-
 // ErrTargetIdentityMismatch is returned when snapshot identity doesn't match.
 var ErrTargetIdentityMismatch = errors.New("target identity mismatch")
 
@@ -204,9 +175,6 @@ var ErrGoroutineParse = errors.New("goroutine parse error")
 
 // ErrGoroutineObservationEmpty is returned when goroutine dump is empty.
 var ErrGoroutineObservationEmpty = errors.New("goroutine observation empty")
-
-// ErrAuthInputMissing is returned when authentication input is missing.
-var ErrAuthInputMissing = errors.New("auth input missing")
 
 // ErrURLInvalid is returned when a URL fails validation.
 var ErrURLInvalid = errors.New("URL invalid")
@@ -546,7 +514,7 @@ var openForReading = func(path string) (interface {
 }
 
 // ProveConfigEquality proves that reread config equals generated config.
-// P0-3: Returns error if configs are not semantically equal.
+// P0-3: Returns error if configs are not physically equal (all fields).
 func ProveConfigEquality(generated, reread *GeneratedConfig) error {
 	if generated == nil {
 		return fmt.Errorf("%w: generated config is nil", ErrGeneratedConfigMismatch)
@@ -555,31 +523,40 @@ func ProveConfigEquality(generated, reread *GeneratedConfig) error {
 		return fmt.Errorf("%w: reread config is nil", ErrGeneratedConfigMismatch)
 	}
 
-	// Compare target count
-	if len(generated.Targets) != len(reread.Targets) {
-		return fmt.Errorf("%w: target count mismatch", ErrGeneratedConfigMismatch)
+	// P0-4: Compare ALL fields of the configuration for physical equality
+
+	// Compare Auth
+	if generated.Auth.Username != reread.Auth.Username {
+		return fmt.Errorf("%w: auth.username mismatch", ErrGeneratedConfigMismatch)
+	}
+	if generated.Auth.PasswordSHA256 != reread.Auth.PasswordSHA256 {
+		return fmt.Errorf("%w: auth.password mismatch", ErrGeneratedConfigMismatch)
 	}
 
-	// Compare targets
-	for i, gt := range generated.Targets {
-		rt := reread.Targets[i]
-		if gt.ID != rt.ID {
-			return fmt.Errorf("%w: target[%d] ID mismatch", ErrGeneratedConfigMismatch, i)
-		}
-		if gt.BaseURL != rt.BaseURL {
-			return fmt.Errorf("%w: target[%d] BaseURL mismatch", ErrGeneratedConfigMismatch, i)
-		}
-		if gt.Enabled != rt.Enabled {
-			return fmt.Errorf("%w: target[%d] Enabled mismatch", ErrGeneratedConfigMismatch, i)
-		}
-	}
-
-	// Compare listen address
+	// Compare Listen
 	if generated.Listen.Addr != reread.Listen.Addr {
-		return fmt.Errorf("%w: listen addr mismatch", ErrGeneratedConfigMismatch)
+		return fmt.Errorf("%w: listen.addr mismatch", ErrGeneratedConfigMismatch)
 	}
 
-	// Compare diagnostics peers
+	// Compare Scrape
+	if generated.Scrape.IntervalSeconds != reread.Scrape.IntervalSeconds {
+		return fmt.Errorf("%w: scrape.interval_seconds mismatch: got %d, want %d", ErrGeneratedConfigMismatch, reread.Scrape.IntervalSeconds, generated.Scrape.IntervalSeconds)
+	}
+	if generated.Scrape.TimeoutMilliseconds != reread.Scrape.TimeoutMilliseconds {
+		return fmt.Errorf("%w: scrape.timeout_milliseconds mismatch: got %d, want %d", ErrGeneratedConfigMismatch, reread.Scrape.TimeoutMilliseconds, generated.Scrape.TimeoutMilliseconds)
+	}
+
+	// Compare Latency field-by-field (LatencyConfig contains non-comparable slices)
+	if err := compareLatencyConfig(generated.Latency, reread.Latency); err != nil {
+		return fmt.Errorf("%w: latency mismatch: %v", ErrGeneratedConfigMismatch, err)
+	}
+
+	// Compare Diagnostics
+	if generated.Diagnostics.PProf.Listen != reread.Diagnostics.PProf.Listen {
+		return fmt.Errorf("%w: diagnostics.pprof.listen mismatch", ErrGeneratedConfigMismatch)
+	}
+
+	// Compare Diagnostics peers
 	if len(generated.Diagnostics.Peers) != len(reread.Diagnostics.Peers) {
 		return fmt.Errorf("%w: peer count mismatch", ErrGeneratedConfigMismatch)
 	}
@@ -591,6 +568,34 @@ func ProveConfigEquality(generated, reread *GeneratedConfig) error {
 		}
 		if gp.BaseURL != rp.BaseURL {
 			return fmt.Errorf("%w: peer[%d] BaseURL mismatch", ErrGeneratedConfigMismatch, i)
+		}
+		// Compare peer targets
+		if len(gp.Targets) != len(rp.Targets) {
+			return fmt.Errorf("%w: peer[%d] target count mismatch", ErrGeneratedConfigMismatch, i)
+		}
+		for j, gt := range gp.Targets {
+			if gt != rp.Targets[j] {
+				return fmt.Errorf("%w: peer[%d] target[%d] mismatch", ErrGeneratedConfigMismatch, i, j)
+			}
+		}
+	}
+
+	// Compare target count
+	if len(generated.Targets) != len(reread.Targets) {
+		return fmt.Errorf("%w: target count mismatch", ErrGeneratedConfigMismatch)
+	}
+
+	// Compare targets - ALL fields
+	for i, gt := range generated.Targets {
+		rt := reread.Targets[i]
+		if gt.ID != rt.ID {
+			return fmt.Errorf("%w: target[%d] ID mismatch", ErrGeneratedConfigMismatch, i)
+		}
+		if gt.BaseURL != rt.BaseURL {
+			return fmt.Errorf("%w: target[%d] BaseURL mismatch", ErrGeneratedConfigMismatch, i)
+		}
+		if gt.Enabled != rt.Enabled {
+			return fmt.Errorf("%w: target[%d] Enabled mismatch", ErrGeneratedConfigMismatch, i)
 		}
 	}
 
@@ -612,4 +617,104 @@ func ProveTargetBindingEquality(generated, reread TargetConfigBinding) error {
 		return fmt.Errorf("%w: DiagnosticsPeer mismatch", ErrGeneratedConfigMismatch)
 	}
 	return nil
+}
+
+// compareLatencyConfig compares two LatencyConfig values field-by-field.
+// LatencyConfig contains slices which are not directly comparable, so we compare them element-wise.
+func compareLatencyConfig(a, b config.LatencyConfig) error {
+	// Compare HTTP config
+	if err := compareHTTPProbeConfig(a.HTTP, b.HTTP); err != nil {
+		return fmt.Errorf("http: %v", err)
+	}
+
+	// Compare ICMP config
+	if err := compareICMPProbeConfig(a.ICMP, b.ICMP); err != nil {
+		return fmt.Errorf("icmp: %v", err)
+	}
+
+	return nil
+}
+
+// compareHTTPProbeConfig compares two HTTPProbeConfig values field-by-field.
+func compareHTTPProbeConfig(a, b config.HTTPProbeConfig) error {
+	// Compare Enabled pointer
+	if !compareBoolPtr(a.Enabled, b.Enabled) {
+		return fmt.Errorf("enabled mismatch")
+	}
+	if a.IntervalSeconds != b.IntervalSeconds {
+		return fmt.Errorf("interval_seconds mismatch: got %d, want %d", b.IntervalSeconds, a.IntervalSeconds)
+	}
+	if a.TimeoutMilliseconds != b.TimeoutMilliseconds {
+		return fmt.Errorf("timeout_milliseconds mismatch: got %d, want %d", b.TimeoutMilliseconds, a.TimeoutMilliseconds)
+	}
+	if !compareInt64Slices(a.HistogramBucketsMS, b.HistogramBucketsMS) {
+		return fmt.Errorf("histogram_buckets_ms mismatch")
+	}
+	if a.RecentSamplesMax != b.RecentSamplesMax {
+		return fmt.Errorf("recent_samples_max mismatch")
+	}
+	if a.WindowSeconds != b.WindowSeconds {
+		return fmt.Errorf("window_seconds mismatch")
+	}
+	if a.RetainedRangeSeconds != b.RetainedRangeSeconds {
+		return fmt.Errorf("retained_range_seconds mismatch")
+	}
+	return nil
+}
+
+// compareICMPProbeConfig compares two ICMPProbeConfig values field-by-field.
+func compareICMPProbeConfig(a, b config.ICMPProbeConfig) error {
+	// Compare Enabled pointer
+	if !compareBoolPtr(a.Enabled, b.Enabled) {
+		return fmt.Errorf("enabled mismatch")
+	}
+	if a.IntervalSeconds != b.IntervalSeconds {
+		return fmt.Errorf("interval_seconds mismatch")
+	}
+	if a.TimeoutSeconds != b.TimeoutSeconds {
+		return fmt.Errorf("timeout_seconds mismatch")
+	}
+	if a.MaxConcurrentOSPing != b.MaxConcurrentOSPing {
+		return fmt.Errorf("max_concurrent_os_ping mismatch")
+	}
+	if a.Backend != b.Backend {
+		return fmt.Errorf("backend mismatch")
+	}
+	if !compareInt64Slices(a.HistogramBucketsMS, b.HistogramBucketsMS) {
+		return fmt.Errorf("histogram_buckets_ms mismatch")
+	}
+	if a.RecentSamplesMax != b.RecentSamplesMax {
+		return fmt.Errorf("recent_samples_max mismatch")
+	}
+	if a.WindowSeconds != b.WindowSeconds {
+		return fmt.Errorf("window_seconds mismatch")
+	}
+	if a.RetainedRangeSeconds != b.RetainedRangeSeconds {
+		return fmt.Errorf("retained_range_seconds mismatch")
+	}
+	return nil
+}
+
+// compareBoolPtr compares two bool pointers.
+func compareBoolPtr(a, b *bool) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+// compareInt64Slices compares two int64 slices for exact equality.
+func compareInt64Slices(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

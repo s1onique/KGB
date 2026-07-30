@@ -5,7 +5,6 @@
 // This file implements P0-12: Mandatory procfs field presence authority.
 // Every accepted process sample must have all mandatory fields observed and parsed.
 // Missing fields must not become zero.
-//
 package main
 
 import (
@@ -78,9 +77,9 @@ var mandatorySmapsFields = []string{
 
 // fieldPresence tracks whether a mandatory field has been observed.
 type fieldPresence struct {
-	present  bool
+	present   bool
 	duplicate bool
-	value    int64
+	value     int64
 }
 
 // readStatusMetrics reads VmRSS, VmSize, and Threads from /proc/<pid>/status.

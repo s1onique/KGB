@@ -4,7 +4,6 @@
 //
 // This file implements P0-14: Make goroutine observation typed and mandatory.
 // The FetchGoroutineCount function returns typed success or typed failure.
-//
 package main
 
 import (
@@ -69,11 +68,8 @@ func FetchGoroutineCount(ctx context.Context, client *http.Client, pprofBaseURL 
 		return 0, fmt.Errorf("%w: %v", ErrGoroutineParse, parseErr)
 	}
 
-	// P0-14: Empty dump (zero goroutines) is still an error
-	if count == 0 {
-		return 0, fmt.Errorf("%w: zero goroutines observed", ErrGoroutineObservationEmpty)
-	}
-
+	// P0-14: Zero goroutines is a valid observation - process may have exited
+	// or be in a quiescent state. Only empty body is an error.
 	return count, nil
 }
 

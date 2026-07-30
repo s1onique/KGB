@@ -9,6 +9,10 @@ import (
 	"github.com/s1onique/KGB/uvb76/probe"
 )
 
+// StatusRoute is the canonical UVB-76 status API route.
+// P0-3R: Exported for mechanical binding by consumers.
+const StatusRoute = "/api/v1/status"
+
 // ServerStatus represents the runtime status of the UVB-76 server.
 type ServerStatus struct {
 	StartedAt  string                           `json:"started_at"`
