@@ -7,7 +7,6 @@ package main
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -19,18 +18,63 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/pprof/profile"
 )
 
 // Injected operation errors for deterministic testing.
 var (
-	errInjectedRead     = errors.New("injected read error")
-	errCreateTemp       = errors.New("injected CreateTemp error")
-	errSync             = errors.New("injected Sync error")
-	errClose            = errors.New("injected Close error")
-	errRename           = errors.New("injected Rename error")
-	errRemove           = errors.New("injected Remove error")
-	errCopy             = errors.New("injected Copy error")
+	errInjectedRead = errors.New("injected read error")
+	errCreateTemp   = errors.New("injected CreateTemp error")
+	errSync         = errors.New("injected sync error")
+	errClose        = errors.New("injected close error")
+	errRename       = errors.New("injected rename error")
+	errRemove       = errors.New("injected remove error")
+	errCopy         = errors.New("injected copy error")
 )
+
+// faultingTempFile implements profileTempFile for deterministic fault injection.
+// P0-4: Uses real temporary file with injected failures.
+// Each injected failure fires once, then delegates to the real file.
+type faultingTempFile struct {
+	file         *os.File
+	syncErrOnce  error // injected sync error, fires once then nil
+	closeErrOnce error // injected close error, fires once then nil
+	syncCalls    int
+	closeCalls   int
+}
+
+func (f *faultingTempFile) Name() string { return f.file.Name() }
+
+func (f *faultingTempFile) Write(p []byte) (int, error) {
+	return f.file.Write(p)
+}
+
+func (f *faultingTempFile) Seek(offset int64, whence int) (int64, error) {
+	return f.file.Seek(offset, whence)
+}
+
+func (f *faultingTempFile) Sync() error {
+	f.syncCalls++
+	if f.syncErrOnce != nil {
+		err := f.syncErrOnce
+		f.syncErrOnce = nil // fire once
+		return err
+	}
+	return f.file.Sync()
+}
+
+func (f *faultingTempFile) Close() error {
+	f.closeCalls++
+	if f.closeErrOnce != nil {
+		err := f.closeErrOnce
+		f.closeErrOnce = nil // fire once
+		// Still close the real file to release descriptor
+		_ = f.file.Close()
+		return err
+	}
+	return f.file.Close()
+}
 
 // fakeTempFile implements profileTempFile for testing.
 type fakeTempFile struct {
@@ -87,9 +131,9 @@ func (f *lifecycleFakeTempFile) Close() error {
 // fakeProfileOps implements profileCaptureOps for deterministic testing.
 type fakeProfileOps struct {
 	CreateTemp func(dir, pattern string) (profileTempFile, error)
-	Rename    func(oldPath, newPath string) error
-	Remove    func(path string) error
-	Copy      func(dst io.Writer, src io.Reader) (int64, error)
+	Rename     func(oldPath, newPath string) error
+	Remove     func(path string) error
+	Copy       func(dst io.Writer, src io.Reader) (int64, error)
 }
 
 func (f fakeProfileOps) Validate() error {
@@ -108,26 +152,48 @@ func (f fakeProfileOps) Validate() error {
 	return nil
 }
 
-// createValidGzipProfile creates a valid gzip-compressed pprof profile for testing.
-func createValidGzipProfile(t *testing.T) []byte {
+// createSemanticPprofProfile creates a semantically valid pprof profile.
+// P0-6: Uses the official pprof profile package to create a valid profile.
+func createSemanticPprofProfile(t *testing.T) []byte {
 	t.Helper()
 
-	// Create a minimal pprof protobuf profile
-	var profileBuf bytes.Buffer
-	gz := gzip.NewWriter(&profileBuf)
-
-	// Write minimal pprof profile data
-	// This is a valid pprof profile with period_type, sample_type, and location
-	profileData := []byte{
-		// Profile header
-		0x0a, 0x04, 'h', 'e', 'a', 'p', // period_type: "heap"
-		0x12, 0x03, 'a', 'b', 'c', // some profile data
+	// Create a valid pprof profile using the official package
+	p := &profile.Profile{
+		SampleType: []*profile.ValueType{
+			{Type: "alloc_objects", Unit: "count"},
+			{Type: "alloc_space", Unit: "bytes"},
+		},
+		Sample: []*profile.Sample{
+			{
+				Location: []*profile.Location{},
+				Value:    []int64{100, 200},
+			},
+		},
+		PeriodType: &profile.ValueType{
+			Type: "time",
+			Unit: "nanoseconds",
+		},
+		Period: 1,
 	}
 
-	gz.Write(profileData)
-	gz.Close()
+	var buf bytes.Buffer
+	if err := p.Write(&buf); err != nil {
+		t.Fatalf("Failed to write profile: %v", err)
+	}
 
-	return profileBuf.Bytes()
+	// Verify the profile can be parsed back
+	if _, err := profile.ParseData(buf.Bytes()); err != nil {
+		t.Fatalf("Profile is not valid pprof data: %v", err)
+	}
+
+	return buf.Bytes()
+}
+
+// createValidGzipProfile creates a valid gzip-compressed pprof profile for testing.
+// Deprecated: Use createSemanticPprofProfile instead.
+func createValidGzipProfile(t *testing.T) []byte {
+	t.Helper()
+	return createSemanticPprofProfile(t)
 }
 
 // TestCaptureProfileOps_Success verifies successful profile capture.
@@ -303,7 +369,6 @@ func TestCaptureProfileOps_ExplicitCancelDuringBodyRead(t *testing.T) {
 	}
 }
 
-
 // TestCaptureProfileOps_ValidationError verifies validation error handling.
 func TestCaptureProfileOps_ValidationError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -416,9 +481,9 @@ func TestProfileOps_ValidateProfileOps(t *testing.T) {
 	// Valid ops
 	validOps := profileCaptureOps{
 		CreateTemp: func(dir, pattern string) (profileTempFile, error) { return nil, nil },
-		Rename:    os.Rename,
-		Remove:    os.Remove,
-		Copy:      io.Copy,
+		Rename:     os.Rename,
+		Remove:     os.Remove,
+		Copy:       io.Copy,
 	}
 	if err := validateProfileOps(validOps); err != nil {
 		t.Errorf("Valid ops should not error: %v", err)
@@ -427,9 +492,9 @@ func TestProfileOps_ValidateProfileOps(t *testing.T) {
 	// Invalid: nil CreateTemp
 	invalidOps := profileCaptureOps{
 		CreateTemp: nil,
-		Rename:    os.Rename,
-		Remove:    os.Remove,
-		Copy:      io.Copy,
+		Rename:     os.Rename,
+		Remove:     os.Remove,
+		Copy:       io.Copy,
 	}
 	if err := validateProfileOps(invalidOps); err == nil {
 		t.Error("Nil CreateTemp should error")
@@ -491,5 +556,303 @@ func TestProfileOps_ValidateGzipProfile(t *testing.T) {
 	// Validate should fail
 	if err := ValidateProfile(invalidPath, "heap"); err == nil {
 		t.Error("Invalid gzip should not validate")
+	}
+}
+
+// TestProfileOps_SyncFailure verifies sync failure handling.
+// P0-3: Deterministic sync failure injection.
+func TestProfileOps_SyncFailure(t *testing.T) {
+	profileData := createSemanticPprofProfile(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		w.WriteHeader(http.StatusOK)
+		w.Write(profileData)
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	destPath := filepath.Join(tmpDir, "heap.pb.gz")
+
+	// Track cleanup calls
+	removeCalled := false
+
+	ops := profileCaptureOps{
+		CreateTemp: func(dir, pattern string) (profileTempFile, error) {
+			realFile, err := os.CreateTemp(dir, pattern)
+			if err != nil {
+				return nil, err
+			}
+			return &faultingTempFile{
+				file:        realFile,
+				syncErrOnce: errSync,
+			}, nil
+		},
+		Rename: os.Rename,
+		Remove: func(path string) error {
+			removeCalled = true
+			return os.Remove(path)
+		},
+		Copy: io.Copy,
+	}
+
+	err := captureProfileWithOps(context.Background(), &http.Client{Timeout: 5 * time.Second}, server.URL, destPath, "heap", ops)
+
+	if err == nil {
+		t.Fatal("Expected sync error")
+	}
+
+	// Verify both broad and physical errors are preserved
+	if !errors.Is(err, ErrProfilePublication) {
+		t.Errorf("Expected ErrProfilePublication, got: %v", err)
+	}
+	if !errors.Is(err, errSync) {
+		t.Errorf("Expected errSync, got: %v", err)
+	}
+
+	// Verify cleanup was attempted
+	if !removeCalled {
+		t.Error("Remove should have been called for temp file cleanup")
+	}
+
+	// Verify destination is unchanged
+	if _, statErr := os.Stat(destPath); !os.IsNotExist(statErr) {
+		t.Errorf("Destination should be absent, got: %v", statErr)
+	}
+}
+
+// TestProfileOps_CloseFailure verifies close failure handling.
+// P0-3: Deterministic close failure with cleanup retry.
+func TestProfileOps_CloseFailure(t *testing.T) {
+	profileData := createSemanticPprofProfile(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		w.WriteHeader(http.StatusOK)
+		w.Write(profileData)
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	destPath := filepath.Join(tmpDir, "heap.pb.gz")
+
+	// Track cleanup calls
+	var tempFile *faultingTempFile
+	closeCalls := 0
+
+	ops := profileCaptureOps{
+		CreateTemp: func(dir, pattern string) (profileTempFile, error) {
+			realFile, err := os.CreateTemp(dir, pattern)
+			if err != nil {
+				return nil, err
+			}
+			tempFile = &faultingTempFile{
+				file:         realFile,
+				closeErrOnce: errClose,
+			}
+			return tempFile, nil
+		},
+		Rename: os.Rename,
+		Remove: func(path string) error {
+			closeCalls = tempFile.closeCalls
+			return os.Remove(path)
+		},
+		Copy: io.Copy,
+	}
+
+	err := captureProfileWithOps(context.Background(), &http.Client{Timeout: 5 * time.Second}, server.URL, destPath, "heap", ops)
+
+	if err == nil {
+		t.Fatal("Expected close error")
+	}
+
+	// Verify both broad and physical errors are preserved
+	if !errors.Is(err, ErrProfilePublication) {
+		t.Errorf("Expected ErrProfilePublication, got: %v", err)
+	}
+	if !errors.Is(err, errClose) {
+		t.Errorf("Expected errClose, got: %v", err)
+	}
+
+	// Verify first close error is preserved
+	if closeCalls < 1 {
+		t.Error("Close should have been called at least once")
+	}
+
+	// Verify cleanup was attempted
+	if tempFile == nil {
+		t.Error("Temp file should have been created")
+	}
+}
+
+// TestProfileOps_RenameFailure verifies rename failure handling.
+// P0-3: Deterministic rename failure with cleanup.
+func TestProfileOps_RenameFailure(t *testing.T) {
+	profileData := createSemanticPprofProfile(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		w.WriteHeader(http.StatusOK)
+		w.Write(profileData)
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	destPath := filepath.Join(tmpDir, "heap.pb.gz")
+
+	// Track cleanup
+	var tempPath string
+	removeCalled := false
+
+	ops := profileCaptureOps{
+		CreateTemp: func(dir, pattern string) (profileTempFile, error) {
+			realFile, err := os.CreateTemp(dir, pattern)
+			if err != nil {
+				return nil, err
+			}
+			tempPath = realFile.Name()
+			// Don't close the file - let the lifecycle manage it
+			return &faultingTempFile{file: realFile}, nil
+		},
+		Rename: func(oldPath, newPath string) error {
+			return errRename
+		},
+		Remove: func(path string) error {
+			removeCalled = true
+			return os.Remove(path)
+		},
+		Copy: io.Copy,
+	}
+
+	err := captureProfileWithOps(context.Background(), &http.Client{Timeout: 5 * time.Second}, server.URL, destPath, "heap", ops)
+
+	if err == nil {
+		t.Fatal("Expected rename error")
+	}
+
+	// Verify both broad and physical errors are preserved
+	if !errors.Is(err, ErrProfilePublication) {
+		t.Errorf("Expected ErrProfilePublication, got: %v", err)
+	}
+	if !errors.Is(err, errRename) {
+		t.Errorf("Expected errRename, got: %v", err)
+	}
+
+	// Verify temp path is absent after cleanup
+	if tempPath != "" {
+		if _, statErr := os.Stat(tempPath); !os.IsNotExist(statErr) {
+			t.Errorf("Temp path should be absent, got: %v", statErr)
+		}
+	}
+
+	// Verify destination is absent
+	if _, statErr := os.Stat(destPath); !os.IsNotExist(statErr) {
+		t.Errorf("Destination should be absent, got: %v", statErr)
+	}
+
+	// Verify cleanup was attempted
+	if !removeCalled {
+		t.Error("Remove should have been called")
+	}
+}
+
+// TestProfileOps_CombinedFailure verifies combined initiating + cleanup failure.
+// P0-3: Multiple error preservation with errors.Join.
+func TestProfileOps_CombinedFailure(t *testing.T) {
+	profileData := createSemanticPprofProfile(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		w.WriteHeader(http.StatusOK)
+		w.Write(profileData)
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	destPath := filepath.Join(tmpDir, "heap.pb.gz")
+
+	ops := profileCaptureOps{
+		CreateTemp: func(dir, pattern string) (profileTempFile, error) {
+			realFile, err := os.CreateTemp(dir, pattern)
+			if err != nil {
+				return nil, err
+			}
+			return &faultingTempFile{file: realFile}, nil
+		},
+		Rename: func(oldPath, newPath string) error {
+			return errRename
+		},
+		Remove: func(path string) error {
+			return errRemove
+		},
+		Copy: io.Copy,
+	}
+
+	err := captureProfileWithOps(context.Background(), &http.Client{Timeout: 5 * time.Second}, server.URL, destPath, "heap", ops)
+
+	if err == nil {
+		t.Fatal("Expected combined error")
+	}
+
+	// Verify all errors are preserved
+	if !errors.Is(err, ErrProfilePublication) {
+		t.Errorf("Expected ErrProfilePublication, got: %v", err)
+	}
+	if !errors.Is(err, errRename) {
+		t.Errorf("Expected errRename, got: %v", err)
+	}
+	if !errors.Is(err, errRemove) {
+		t.Errorf("Expected errRemove, got: %v", err)
+	}
+}
+
+// TestProfileOps_ClosePlusRemoveFailure verifies close + remove cleanup failure.
+// P0-3: Both close and remove errors preserved.
+func TestProfileOps_ClosePlusRemoveFailure(t *testing.T) {
+	profileData := createSemanticPprofProfile(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		w.WriteHeader(http.StatusOK)
+		w.Write(profileData)
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	destPath := filepath.Join(tmpDir, "heap.pb.gz")
+
+	var tempFile *faultingTempFile
+
+	ops := profileCaptureOps{
+		CreateTemp: func(dir, pattern string) (profileTempFile, error) {
+			realFile, err := os.CreateTemp(dir, pattern)
+			if err != nil {
+				return nil, err
+			}
+			tempFile = &faultingTempFile{
+				file:         realFile,
+				closeErrOnce: errClose,
+			}
+			return tempFile, nil
+		},
+		Rename: os.Rename,
+		Remove: func(path string) error {
+			return errRemove
+		},
+		Copy: io.Copy,
+	}
+
+	err := captureProfileWithOps(context.Background(), &http.Client{Timeout: 5 * time.Second}, server.URL, destPath, "heap", ops)
+
+	if err == nil {
+		t.Fatal("Expected combined close + remove error")
+	}
+
+	// Verify both close and remove errors are preserved
+	if !errors.Is(err, errClose) {
+		t.Errorf("Expected errClose, got: %v", err)
+	}
+	if !errors.Is(err, errRemove) {
+		t.Errorf("Expected errRemove, got: %v", err)
 	}
 }

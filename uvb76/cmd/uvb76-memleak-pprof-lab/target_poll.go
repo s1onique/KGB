@@ -488,25 +488,3 @@ func validateSnapshotIdentity(auth *TargetStateAuthority, expected TargetConfigB
 
 	return nil
 }
-
-// PollTargetAuthoritySimple is a simple wrapper for the existing poll function.
-// P0-8: Maintains backward compatibility while using typed result internally.
-func PollTargetAuthoritySimple(ctx context.Context, authority *GeneratedLabAuthority, pollInterval, deadline time.Duration) TargetPollResult {
-	if authority == nil {
-		return TargetPollResult{
-			TerminalError: fmt.Errorf("nil authority: %w", ErrGeneratedConfigNil),
-		}
-	}
-
-	input := TargetPollInput{
-		Client:          &http.Client{Timeout: 5 * time.Second},
-		UVB76APIBaseURL: authority.UVB76APIBaseURL,
-		Target:          authority.Target,
-		Auth:            authority.TargetStateAuth,
-		PollInterval:    pollInterval,
-		RequestTimeout:  5 * time.Second,
-		Deadline:        deadline,
-	}
-
-	return PollTargetAuthority(ctx, input)
-}

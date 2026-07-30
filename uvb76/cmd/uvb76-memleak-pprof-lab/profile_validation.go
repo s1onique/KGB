@@ -73,9 +73,9 @@ type profileTempFile interface {
 // P0-2: This seam allows deterministic fault injection in tests.
 type profileCaptureOps struct {
 	CreateTemp func(dir, pattern string) (profileTempFile, error)
-	Rename    func(oldPath, newPath string) error
-	Remove    func(path string) error
-	Copy      func(dst io.Writer, src io.Reader) (int64, error)
+	Rename     func(oldPath, newPath string) error
+	Remove     func(path string) error
+	Copy       func(dst io.Writer, src io.Reader) (int64, error)
 }
 
 // defaultProfileCaptureOps returns production operations.
@@ -93,7 +93,7 @@ func defaultProfileCaptureOps() profileCaptureOps {
 // ProfileValidationError represents a profile validation failure.
 type ProfileValidationError struct {
 	ProfileName string
-	What       string
+	What        string
 }
 
 func (e *ProfileValidationError) Error() string {
