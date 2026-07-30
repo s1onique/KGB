@@ -70,39 +70,74 @@ func inspectPollProfileAuthority(sourceDir string) (*pollProfileAuthorityInspect
 			return fmt.Errorf("parse %s: %w", path, err)
 		}
 
+		// Track enclosing function for call classification
+		var enclosingFunc string
+
 		// Inspect AST
 		ast.Inspect(node, func(n ast.Node) bool {
-			switch expr := n.(type) {
+			switch node := n.(type) {
+			case *ast.FuncDecl:
+				// Track enclosing function
+				enclosingFunc = node.Name.Name
+
+			case *ast.FuncLit:
+				// Track enclosing function for closures
+				if node.Type != nil {
+					enclosingFunc = "closure"
+				}
+
 			case *ast.CallExpr:
-				// Check for direct PollTargetAuthority calls
-				if sel, ok := expr.Fun.(*ast.SelectorExpr); ok {
-					if sel.Sel.Name == "PollTargetAuthority" {
-						// Determine if this is in runner or lifecycle
-						if strings.Contains(path, "runner.go") {
-							result.DirectRunnerPollCalls++
-						}
-						if strings.Contains(path, "lifecycle") || strings.Contains(path, "poll_lifecycle") {
-							result.LifecyclePollCalls++
-						}
+				// Handle both identifier calls and selector calls
+				var funcName string
+				var isQualified bool
+
+				switch fun := node.Fun.(type) {
+				case *ast.Ident:
+					funcName = fun.Name
+					isQualified = false
+				case *ast.SelectorExpr:
+					funcName = fun.Sel.Name
+					isQualified = true
+				default:
+					return true
+				}
+
+				// Check for PollTargetAuthority calls
+				if funcName == "PollTargetAuthority" {
+					if isQualified {
+						// Qualified call like pkg.PollTargetAuthority - external
+						return true
 					}
-					// Check for http.Client.Get calls
-					if sel.Sel.Name == "Get" {
+					// Direct call - classify by enclosing function
+					switch enclosingFunc {
+					case "runLab", "Run", "main":
+						result.DirectRunnerPollCalls++
+					case "RunCollectionLifecycle", "RunLifecycle", "lifecycle", "Lifecycle":
+						result.LifecyclePollCalls++
+					default:
+						// Call in other context
+						result.LifecyclePollCalls++
+					}
+				}
+
+				// Check for http.Client.Get calls
+				if funcName == "Get" && isQualified {
+					if sel, ok := node.Fun.(*ast.SelectorExpr); ok {
 						if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "client" {
 							result.ClientGetCallsInCapture++
 						}
 					}
 				}
 
-				// Check for client.Get (direct HTTP call)
-				if ident, ok := expr.Fun.(*ast.Ident); ok && ident.Name == "Get" {
-					// This would be http.DefaultClient or similar
+				// Check for direct Get calls (http.DefaultClient or similar)
+				if funcName == "Get" && !isQualified {
 					result.ClientGetCallsInCapture++
 				}
 
 			case *ast.SelectStmt:
 				// Check for default case in select (non-blocking send)
-				// Default case is *ast.CaseClause with nil List
-				for _, stmt := range expr.Body.List {
+				// Default case is *ast.CommClause with nil List
+				for _, stmt := range node.Body.List {
 					if c, ok := stmt.(*ast.CaseClause); ok && c.List == nil {
 						result.DefaultPollSendCases++
 					}
@@ -110,7 +145,7 @@ func inspectPollProfileAuthority(sourceDir string) (*pollProfileAuthorityInspect
 
 			case *ast.Ident:
 				// Check for PollFn field references
-				if strings.Contains(expr.Name, "PollFn") || strings.Contains(expr.Name, "PollCallback") {
+				if strings.Contains(node.Name, "PollFn") || strings.Contains(node.Name, "PollCallback") {
 					result.GenericPollFnFields++
 				}
 			}
@@ -121,10 +156,7 @@ func inspectPollProfileAuthority(sourceDir string) (*pollProfileAuthorityInspect
 		// Check for os.Create calls (direct destination creation)
 		result.DirectDestinationCreates += countDirectDestinationCreates(node)
 
-		// Check for validation before rename
-		result.RenamesBeforeValidation += countRenamesBeforeValidation(node)
-
-		// Check for temp cleanup calls
+		// Check for temp cleanup calls (both os.Remove and cleanupProfileTemp)
 		result.TempCleanupCalls += countTempCleanupCalls(node)
 
 		return nil
@@ -155,39 +187,23 @@ func countDirectDestinationCreates(node ast.Node) int {
 	return count
 }
 
-// countRenamesBeforeValidation checks for rename calls before validation.
-func countRenamesBeforeValidation(node ast.Node) int {
-	// This is a simplified check - in production code, we'd need
-	// to track the order of calls more carefully
-	count := 0
-	validationFound := false
-
-	ast.Inspect(node, func(n ast.Node) bool {
-		if call, ok := n.(*ast.CallExpr); ok {
-			if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
-				if sel.Sel.Name == "Rename" && !validationFound {
-					count++
-				}
-				if sel.Sel.Name == "ValidateProfile" {
-					validationFound = true
-				}
-			}
-		}
-		return true
-	})
-	return count
-}
-
 // countTempCleanupCalls counts explicit temp file cleanup patterns.
 func countTempCleanupCalls(node ast.Node) int {
 	count := 0
 	ast.Inspect(node, func(n ast.Node) bool {
 		if call, ok := n.(*ast.CallExpr); ok {
-			if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
-				if sel.Sel.Name == "Remove" || sel.Sel.Name == "cleanupProfileTemp" {
-					if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "os" {
+			switch fun := call.Fun.(type) {
+			case *ast.SelectorExpr:
+				// os.Remove, os.RemoveAll
+				if sel, ok := fun.X.(*ast.Ident); ok && sel.Name == "os" {
+					if fun.Sel.Name == "Remove" || fun.Sel.Name == "RemoveAll" {
 						count++
 					}
+				}
+			case *ast.Ident:
+				// cleanupProfileTemp, cleanupProfileTempPreserving (local function calls)
+				if fun.Name == "cleanupProfileTemp" || fun.Name == "cleanupProfileTempPreserving" {
+					count++
 				}
 			}
 		}

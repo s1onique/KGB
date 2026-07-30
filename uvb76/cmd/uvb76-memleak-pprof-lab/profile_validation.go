@@ -61,6 +61,35 @@ var (
 	ErrProfilePublication = errors.New("profile publication failure")
 )
 
+// P0-2: profileTempFile abstracts os.File for testing seam.
+type profileTempFile interface {
+	io.WriteSeeker
+	Sync() error
+	Close() error
+	Name() string
+}
+
+// profileCaptureOps contains injectable file operations for testing.
+// P0-2: This seam allows deterministic fault injection in tests.
+type profileCaptureOps struct {
+	CreateTemp func(dir, pattern string) (profileTempFile, error)
+	Rename    func(oldPath, newPath string) error
+	Remove    func(path string) error
+	Copy      func(dst io.Writer, src io.Reader) (int64, error)
+}
+
+// defaultProfileCaptureOps returns production operations.
+func defaultProfileCaptureOps() profileCaptureOps {
+	return profileCaptureOps{
+		CreateTemp: func(dir, pattern string) (profileTempFile, error) {
+			return os.CreateTemp(dir, pattern)
+		},
+		Rename: os.Rename,
+		Remove: os.Remove,
+		Copy:   io.Copy,
+	}
+}
+
 // ProfileValidationError represents a profile validation failure.
 type ProfileValidationError struct {
 	ProfileName string
