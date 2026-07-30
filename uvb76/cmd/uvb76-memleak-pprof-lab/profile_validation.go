@@ -51,6 +51,9 @@ var (
 	// ErrProfileBodyTooLarge is returned when profile exceeds size limit.
 	ErrProfileBodyTooLarge = errors.New("profile body too large")
 
+	// ErrProfileBodyEmpty is returned when profile body is empty.
+	ErrProfileBodyEmpty = errors.New("profile body empty")
+
 	// ErrProfileValidation is returned when profile validation fails.
 	ErrProfileValidation = errors.New("profile validation failure")
 
@@ -208,7 +211,10 @@ func CaptureProfile(ctx context.Context, client *http.Client, url string, outPat
 	tmpDir := filepath.Dir(outPath)
 	tmp, err := os.CreateTemp(tmpDir, filepath.Base(outPath)+".tmp.*")
 	if err != nil {
-		return fmt.Errorf("%w: create temp file: %v", ErrProfilePublication, err)
+		return errors.Join(
+			ErrProfilePublication,
+			fmt.Errorf("create temp file: %w", err),
+		)
 	}
 	tmpPath := tmp.Name()
 
@@ -238,18 +244,24 @@ func CaptureProfile(ctx context.Context, client *http.Client, url string, outPat
 	// P0-5: Sync to disk
 	if err := tmp.Sync(); err != nil {
 		cleanup()
-		return fmt.Errorf("%w: sync %s: %v", ErrProfilePublication, tmpPath, err)
+		return errors.Join(
+			ErrProfilePublication,
+			fmt.Errorf("sync temp file: %w", err),
+		)
 	}
 
 	// P0-5: Close temp file before validation and rename
 	if err := tmp.Close(); err != nil {
 		cleanup()
-		return fmt.Errorf("%w: close %s: %v", ErrProfilePublication, tmpPath, err)
+		return errors.Join(
+			ErrProfilePublication,
+			fmt.Errorf("close temp file: %w", err),
+		)
 	}
 
 	if written == 0 {
 		cleanup()
-		return fmt.Errorf("%w: profile %s is empty", ErrProfileBodyTooLarge, outPath)
+		return fmt.Errorf("%w: profile %s is empty", ErrProfileBodyEmpty, outPath)
 	}
 
 	// P0-5: Validate the captured profile BEFORE renaming

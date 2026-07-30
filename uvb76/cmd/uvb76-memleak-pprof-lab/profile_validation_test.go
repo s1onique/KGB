@@ -136,15 +136,19 @@ func TestCaptureProfile_DeadlineBeforeHeaders(t *testing.T) {
 // TestCaptureProfile_CancelDuringBody verifies that cancelling during body read
 // leaves no destination or temp files.
 func TestCaptureProfile_CancelDuringBody(t *testing.T) {
-	bodyStarted := make(chan struct{}, 1)
+	bodyWritten := make(chan struct{}, 1)
 	handlerExited := make(chan struct{}, 1)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.(http.Flusher).Flush()
-		close(bodyStarted)
 
-		// Write slowly to allow cancellation
+		// Write first byte to prove body reading began
+		fmt.Fprint(w, "x")
+		w.(http.Flusher).Flush()
+		close(bodyWritten)
+
+		// Write remaining data slowly to allow cancellation
 		for i := 0; i < 100; i++ {
 			fmt.Fprint(w, "x")
 			w.(http.Flusher).Flush()
@@ -173,8 +177,8 @@ func TestCaptureProfile_CancelDuringBody(t *testing.T) {
 		errCh <- CaptureProfile(ctx, client, server.URL, destPath, "heap")
 	}()
 
-	// Wait for body to start being read
-	<-bodyStarted
+	// Wait for body to be written and read
+	<-bodyWritten
 
 	// Cancel explicitly
 	cancel()
@@ -234,13 +238,12 @@ func TestCaptureProfile_DeadlineDuringBody(t *testing.T) {
 
 	err := CaptureProfile(ctx, client, server.URL, destPath, "heap")
 
-	// Should have deadline error
-	if err == nil {
-		t.Error("Expected error after deadline")
+	// Should have deadline error - require BOTH identities
+	if !errors.Is(err, ErrProfileDeadline) {
+		t.Fatalf("missing ErrProfileDeadline: %v", err)
 	}
-
-	if !errors.Is(err, ErrProfileDeadline) && !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("Expected deadline error, got: %v", err)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("missing context.DeadlineExceeded: %v", err)
 	}
 
 	// Verify destination absent
@@ -485,7 +488,7 @@ func TestCaptureProfile_ReadError(t *testing.T) {
 	}
 }
 
-// TestCaptureProfile_EmptyBody verifies empty body is rejected.
+// TestCaptureProfile_EmptyBody verifies empty body is rejected with ErrProfileBodyEmpty.
 func TestCaptureProfile_EmptyBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -502,7 +505,17 @@ func TestCaptureProfile_EmptyBody(t *testing.T) {
 	err := CaptureProfile(ctx, client, server.URL, destPath, "heap")
 
 	if err == nil {
-		t.Error("Expected error for empty body")
+		t.Fatal("Expected error for empty body")
+	}
+
+	// Require ErrProfileBodyEmpty
+	if !errors.Is(err, ErrProfileBodyEmpty) {
+		t.Fatalf("missing ErrProfileBodyEmpty: %v", err)
+	}
+
+	// Forbid ErrProfileBodyTooLarge
+	if errors.Is(err, ErrProfileBodyTooLarge) {
+		t.Fatalf("empty body must NOT be ErrProfileBodyTooLarge: %v", err)
 	}
 
 	// Verify destination absent
