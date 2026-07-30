@@ -61,7 +61,7 @@ var (
 // ProfileValidationError represents a profile validation failure.
 type ProfileValidationError struct {
 	ProfileName string
-	What       string
+	What        string
 }
 
 func (e *ProfileValidationError) Error() string {
@@ -208,7 +208,7 @@ func CaptureProfile(ctx context.Context, client *http.Client, url string, outPat
 	tmpDir := filepath.Dir(outPath)
 	tmp, err := os.CreateTemp(tmpDir, filepath.Base(outPath)+".tmp.*")
 	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
+		return fmt.Errorf("%w: create temp file: %v", ErrProfilePublication, err)
 	}
 	tmpPath := tmp.Name()
 
@@ -238,18 +238,18 @@ func CaptureProfile(ctx context.Context, client *http.Client, url string, outPat
 	// P0-5: Sync to disk
 	if err := tmp.Sync(); err != nil {
 		cleanup()
-		return profileContextFailure(fmt.Errorf("sync %s: %w", tmpPath, err))
+		return fmt.Errorf("%w: sync %s: %v", ErrProfilePublication, tmpPath, err)
 	}
 
 	// P0-5: Close temp file before validation and rename
 	if err := tmp.Close(); err != nil {
 		cleanup()
-		return fmt.Errorf("close %s: %w", tmpPath, err)
+		return fmt.Errorf("%w: close %s: %v", ErrProfilePublication, tmpPath, err)
 	}
 
 	if written == 0 {
 		cleanup()
-		return fmt.Errorf("profile %s is empty", outPath)
+		return fmt.Errorf("%w: profile %s is empty", ErrProfileBodyTooLarge, outPath)
 	}
 
 	// P0-5: Validate the captured profile BEFORE renaming

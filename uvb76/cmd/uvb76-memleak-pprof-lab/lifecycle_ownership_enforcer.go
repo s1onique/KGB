@@ -4,15 +4,15 @@ import "errors"
 
 // lifecycleOwnershipResult holds the result of inspecting lifecycle ownership.
 type lifecycleOwnershipResult struct {
-	RunLabFound                  bool // true if runLab function was found
-	CollectAndSnapshotCalls      int  // Direct calls to CollectAndSnapshot
-	RunCollectionLifecycleCalls  int  // Calls to RunCollectionLifecycle (which internally calls CollectAndSnapshot)
-	DeferredCancelCalls          int
-	OrdinaryCancelCalls          int
-	DirectWaitCalls              int
-	DirectCloneCalls             int
-	ImportsSlices                bool
-	WaitGroupIdentifier          string // Identifier name for WaitGroup binding
+	RunLabFound                 bool // true if runLab function was found
+	CollectAndSnapshotCalls     int  // Direct calls to CollectAndSnapshot
+	RunCollectionLifecycleCalls int  // Calls to RunCollectionLifecycle (which internally calls CollectAndSnapshot)
+	DeferredCancelCalls         int
+	OrdinaryCancelCalls         int
+	DirectWaitCalls             int
+	DirectCloneCalls            int
+	ImportsSlices               bool
+	WaitGroupIdentifier         string // Identifier name for WaitGroup binding
 }
 
 // ErrLifecycleOwnershipViolation is the sentinel for lifecycle ownership violations.

@@ -77,14 +77,14 @@ func TestAuthorityGuard_PollTargetAuthorityCalledByRunCollectionLifecycle(t *tes
 
 	input := CollectionLifecycleInput{
 		ObservationCtx:    context.Background(),
-		ProfileCtx:       context.Background(),
+		ProfileCtx:        context.Background(),
 		ObservationCancel: func() {},
-		WaitGroup:        &sync.WaitGroup{},
+		WaitGroup:         &sync.WaitGroup{},
 		CollectorInput: &CollectorInput{
 			TovarischSamples: &samples,
-			UVB76Samples:    &samples,
+			UVB76Samples:     &samples,
 			CollectorErrors:  &[]string{},
-			SamplesMu:       &mu,
+			SamplesMu:        &mu,
 		},
 		PollInput: TargetPollInput{
 			Client:          &http.Client{Timeout: 1 * time.Second},
@@ -225,8 +225,8 @@ func TestAuthorityGuard_ProfileTempCleanupPathPresent(t *testing.T) {
 // TestAuthorityGuard_AdversarialFixtures verifies all guard fixtures are present.
 func TestAuthorityGuard_AdversarialFixtures(t *testing.T) {
 	guards := []struct {
-		name     string
-		check    func() bool
+		name  string
+		check func() bool
 	}{
 		{
 			name: "PollFn_absent",
@@ -264,7 +264,8 @@ func TestAuthorityGuard_AdversarialFixtures(t *testing.T) {
 		{
 			name: "closed_channel_terminalizes",
 			check: func() bool {
-				ctx, _ := context.WithTimeout(context.Background(), 10*time.Millisecond)
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+				defer cancel()
 				closedCh := make(chan TargetPollResult)
 				close(closedCh)
 				doneCh := make(chan struct{})

@@ -199,8 +199,8 @@ func PollTargetAuthority(ctx context.Context, input TargetPollInput) TargetPollR
 			// P0-8: Centralized termination using finalizeTargetPollContext
 			return finalizeTargetPollContext(ctx, pollCtx, targetPollProgress{
 				ObservationSeen: result.BestAuthority != nil,
-				AttemptSeen:    result.Attempts > 0,
-				CompletionSeen: result.Completed,
+				AttemptSeen:     result.Attempts > 0,
+				CompletionSeen:  result.Completed,
 			}, recoveredCauses, result)
 
 		case <-ticker.C:

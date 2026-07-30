@@ -241,8 +241,8 @@ func runLab(authority *GeneratedLabAuthority, ephemeralPassword []byte) LabResul
 	log.Printf("[AUTH] Waiting for UVB-76 API readiness...")
 
 	readinessResult := CheckAPIReadiness(labCtx, APIReadinessInput{
-		URL:        authority.UVB76APIBaseURL,
-		Deadline:   30 * time.Second,
+		URL:          authority.UVB76APIBaseURL,
+		Deadline:     30 * time.Second,
 		PollInterval: 250 * time.Millisecond,
 		ProcessExited: func() bool {
 			return uvb76PS != nil && uvb76PS.Exited()
@@ -348,16 +348,16 @@ func runLab(authority *GeneratedLabAuthority, ephemeralPassword []byte) LabResul
 	// P0-6: Runner owns collector goroutine lifecycle - collectors already started above
 	lifecycleResult := RunCollectionLifecycle(CollectionLifecycleInput{
 		ObservationCtx:    observationCtx,
-		ProfileCtx:       profileCtx,
+		ProfileCtx:        profileCtx,
 		ObservationCancel: observationCancel,
-		WaitGroup:        &wg,
+		WaitGroup:         &wg,
 		CollectorInput: &CollectorInput{
 			TovarischSamples: &tovarischSamples,
 			UVB76Samples:     &uvb76Samples,
 			CollectorErrors:  &collectorErrors,
 			SamplesMu:        &samplesMu,
 		},
-		PollInput:       pollInput,
+		PollInput:        pollInput,
 		PollDrainTimeout: 5 * time.Second,
 		CaptureProfilesFn: func(ctx context.Context) error {
 			// P0-7: ctx is ProfileCtx with extended deadline for final profiles

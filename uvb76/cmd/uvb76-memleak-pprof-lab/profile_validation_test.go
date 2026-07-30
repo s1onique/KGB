@@ -136,9 +136,13 @@ func TestCaptureProfile_DeadlineBeforeHeaders(t *testing.T) {
 // TestCaptureProfile_CancelDuringBody verifies that cancelling during body read
 // leaves no destination or temp files.
 func TestCaptureProfile_CancelDuringBody(t *testing.T) {
+	bodyStarted := make(chan struct{}, 1)
+	handlerExited := make(chan struct{}, 1)
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.(http.Flusher).Flush()
+		close(bodyStarted)
 
 		// Write slowly to allow cancellation
 		for i := 0; i < 100; i++ {
@@ -147,25 +151,42 @@ func TestCaptureProfile_CancelDuringBody(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 			select {
 			case <-r.Context().Done():
+				close(handlerExited)
 				return
 			default:
 			}
 		}
+		close(handlerExited)
 	}))
 	defer server.Close()
 
 	tmpDir := t.TempDir()
 	destPath := filepath.Join(tmpDir, "test-profile.pb.gz")
 
+	// P0: Use explicit WithCancel for cancellation test
 	client := &http.Client{Timeout: 10 * time.Second}
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
 
-	err := CaptureProfile(ctx, client, server.URL, destPath, "heap")
+	// Run in goroutine so we can cancel
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- CaptureProfile(ctx, client, server.URL, destPath, "heap")
+	}()
 
-	// Should have cancellation error
-	if err == nil {
-		t.Error("Expected error after cancellation")
+	// Wait for body to start being read
+	<-bodyStarted
+
+	// Cancel explicitly
+	cancel()
+
+	err := <-errCh
+
+	// P0: Require both ErrProfileCancelled AND context.Canceled
+	if !errors.Is(err, ErrProfileCancelled) {
+		t.Errorf("Expected ErrProfileCancelled, got: %v", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Expected context.Canceled, got: %v", err)
 	}
 
 	// Verify destination absent
@@ -178,6 +199,9 @@ func TestCaptureProfile_CancelDuringBody(t *testing.T) {
 	if len(tempFiles) > 0 {
 		t.Errorf("Temp files should be absent, found: %v", tempFiles)
 	}
+
+	// Wait for handler cleanup
+	<-handlerExited
 }
 
 // TestCaptureProfile_DeadlineDuringBody verifies that deadline during body read
@@ -331,14 +355,14 @@ func TestCaptureProfile_ExistingDestinationPreserved(t *testing.T) {
 		t.Error("Expected error after cancellation")
 	}
 
-	// Verify original content preserved
+	// Verify original content preserved - byte-exact match
 	preservedContent, err := os.ReadFile(destPath)
 	if err != nil {
 		t.Errorf("Original file should still exist: %v", err)
 	}
 
-	if len(preservedContent) != len(existingContent) {
-		t.Errorf("Original content corrupted: got %d bytes, expected %d", len(preservedContent), len(existingContent))
+	if !bytes.Equal(preservedContent, existingContent) {
+		t.Fatalf("Existing destination changed: got %d bytes, expected %d", len(preservedContent), len(existingContent))
 	}
 }
 

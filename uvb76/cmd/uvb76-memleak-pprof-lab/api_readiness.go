@@ -59,8 +59,8 @@ var (
 
 	// P0-3E: Recovered error bounds
 	maxAPIReadinessRecoveredErrors = 16
-	maxAPIReadinessErrorBytes     = 512
-	maxStatusBodyBytes            = 4096
+	maxAPIReadinessErrorBytes      = 512
+	maxStatusBodyBytes             = 4096
 )
 
 // APIReadinessInput contains all inputs required for API readiness checking.

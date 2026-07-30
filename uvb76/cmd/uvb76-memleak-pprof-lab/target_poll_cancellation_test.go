@@ -477,9 +477,9 @@ func TestRunCollectionLifecycle_WithRealPollInput(t *testing.T) {
 
 	collectorInput := &CollectorInput{
 		TovarischSamples: &samples,
-		UVB76Samples:    &samples,
+		UVB76Samples:     &samples,
 		CollectorErrors:  &errors,
-		SamplesMu:       &mu,
+		SamplesMu:        &mu,
 	}
 
 	// Create observation context
@@ -491,12 +491,12 @@ func TestRunCollectionLifecycle_WithRealPollInput(t *testing.T) {
 
 	result := RunCollectionLifecycle(CollectionLifecycleInput{
 		ObservationCtx:    obsCtx,
-		ProfileCtx:       profileCtx,
+		ProfileCtx:        profileCtx,
 		ObservationCancel: obsCancel,
-		WaitGroup:        &wg,
-		CollectorInput:   collectorInput,
-		PollInput:        pollInput,
-		PollDrainTimeout: 500 * time.Millisecond,
+		WaitGroup:         &wg,
+		CollectorInput:    collectorInput,
+		PollInput:         pollInput,
+		PollDrainTimeout:  500 * time.Millisecond,
 		CaptureProfilesFn: func(ctx context.Context) error {
 			// Profile capture does nothing in this test
 			return nil

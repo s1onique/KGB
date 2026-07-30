@@ -134,16 +134,16 @@ func sanitizeErrorString(s string) string {
 // CloneTargetPollSummary creates a deep copy of the summary.
 func CloneTargetPollSummary(summary TargetPollSummary) TargetPollSummary {
 	clone := TargetPollSummary{
-		TargetID:           summary.TargetID,
-		ConfiguredBaseURL:  summary.ConfiguredBaseURL,
-		SourceURL:          summary.SourceURL,
-		Attempts:           summary.Attempts,
+		TargetID:            summary.TargetID,
+		ConfiguredBaseURL:   summary.ConfiguredBaseURL,
+		SourceURL:           summary.SourceURL,
+		Attempts:            summary.Attempts,
 		RecoveredErrorCount: summary.RecoveredErrorCount,
-		RecoveredErrors:    make([]string, len(summary.RecoveredErrors)),
-		AttemptObserved:    summary.AttemptObserved,
-		CompletionObserved: summary.CompletionObserved,
-		IdentityValidated:  summary.IdentityValidated,
-		TerminalError:      summary.TerminalError,
+		RecoveredErrors:     make([]string, len(summary.RecoveredErrors)),
+		AttemptObserved:     summary.AttemptObserved,
+		CompletionObserved:  summary.CompletionObserved,
+		IdentityValidated:   summary.IdentityValidated,
+		TerminalError:       summary.TerminalError,
 	}
 	copy(clone.RecoveredErrors, summary.RecoveredErrors)
 	return clone

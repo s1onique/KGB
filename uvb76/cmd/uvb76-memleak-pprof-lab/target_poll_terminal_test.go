@@ -286,11 +286,11 @@ func TestPollTarget_CompletionNoTerminalError(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"target_id": "test",
-			"reachable":   true,
-			"status":      "healthy", // Non-empty status required for IsScrapeCompleted
-			"error":       "",
-			"scraped_at":  time.Now().Format(time.RFC3339), // Required for AttemptObserved
+			"target_id":  "test",
+			"reachable":  true,
+			"status":     "healthy", // Non-empty status required for IsScrapeCompleted
+			"error":      "",
+			"scraped_at": time.Now().Format(time.RFC3339), // Required for AttemptObserved
 		})
 	}))
 	defer server.Close()

@@ -53,8 +53,8 @@ func inspectLifecycleOwnership(filename string, source []byte) (lifecycleOwnersh
 		if deferStmt, ok := n.(*ast.DeferStmt); ok {
 			if call, ok := deferStmt.Call.Fun.(*ast.Ident); ok {
 				if call.Name == "collectionCancel" ||
-				   call.Name == "observationCancel" ||
-				   call.Name == "profileCancel" {
+					call.Name == "observationCancel" ||
+					call.Name == "profileCancel" {
 					result.DeferredCancelCalls++
 					deferredCancelCallsInDefer++
 				}
@@ -594,11 +594,11 @@ func runLab() {
 // P0-15: Complete test matrix for authority selection.
 func TestLifecycleOwnershipEnforcer_LifecycleMatrix(t *testing.T) {
 	tests := []struct {
-		name                      string
-		collectAndSnapshotCalls   int
+		name                        string
+		collectAndSnapshotCalls     int
 		runCollectionLifecycleCalls int
-		wantErr                   bool
-		wantErrType               error
+		wantErr                     bool
+		wantErrType                 error
 	}{
 		// | Direct | Lifecycle | Result |
 		// | -----: | --------: | ------ |
@@ -623,9 +623,9 @@ func TestLifecycleOwnershipEnforcer_LifecycleMatrix(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			result := lifecycleOwnershipResult{
-				RunLabFound:                  true,
-				CollectAndSnapshotCalls:      tc.collectAndSnapshotCalls,
-				RunCollectionLifecycleCalls:  tc.runCollectionLifecycleCalls,
+				RunLabFound:                 true,
+				CollectAndSnapshotCalls:     tc.collectAndSnapshotCalls,
+				RunCollectionLifecycleCalls: tc.runCollectionLifecycleCalls,
 			}
 
 			err := validateLifecycleOwnership(result)

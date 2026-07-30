@@ -171,8 +171,8 @@ func GenerateWithGenerator(uvb76Port, pprofPort, tovarischPort string, useFakeTo
 					TimeoutSeconds:       3,
 					WindowSeconds:        60,
 					RetainedRangeSeconds: 3600,
-					HistogramBucketsMS:    []int64{1, 5, 10, 25, 50, 100, 250, 500, 1000},
-					RecentSamplesMax:      3600,
+					HistogramBucketsMS:   []int64{1, 5, 10, 25, 50, 100, 250, 500, 1000},
+					RecentSamplesMax:     3600,
 				},
 			},
 			// pprof is enabled; diagnostics peer config is required

@@ -82,10 +82,10 @@ func TestCheckAPIReadinessDeadlineExceeded(t *testing.T) {
 	defer server.Close()
 
 	result := CheckAPIReadiness(context.Background(), APIReadinessInput{
-		URL:           server.URL,
-		PollInterval:  10 * time.Millisecond,
-		RequestLimit:  5 * time.Millisecond,
-		Deadline:      50 * time.Millisecond,
+		URL:          server.URL,
+		PollInterval: 10 * time.Millisecond,
+		RequestLimit: 5 * time.Millisecond,
+		Deadline:     50 * time.Millisecond,
 	})
 
 	if result.Ready {
@@ -315,7 +315,7 @@ func TestCheckAPIReadinessMalformedJSON(t *testing.T) {
 // TestCheckAPIReadinessEmptyURL tests empty URL rejection.
 func TestCheckAPIReadinessEmptyURL(t *testing.T) {
 	result := CheckAPIReadiness(context.Background(), APIReadinessInput{
-		URL:     "",
+		URL:      "",
 		Deadline: 5 * time.Second,
 	})
 
@@ -377,10 +377,10 @@ func TestCheckAPIReadinessRecoveredErrorBounds(t *testing.T) {
 	defer server.Close()
 
 	result := CheckAPIReadiness(context.Background(), APIReadinessInput{
-		URL:           server.URL,
-		PollInterval:  10 * time.Millisecond,
-		RequestLimit:  5 * time.Millisecond,
-		Deadline:      200 * time.Millisecond,
+		URL:          server.URL,
+		PollInterval: 10 * time.Millisecond,
+		RequestLimit: 5 * time.Millisecond,
+		Deadline:     200 * time.Millisecond,
 	})
 
 	// Should have multiple recovered errors
@@ -466,9 +466,9 @@ func TestProbeAPIReadinessOnceContextLifecycle(t *testing.T) {
 // TestDecodeStrictJSON tests the strict JSON decoder.
 func TestDecodeStrictJSON(t *testing.T) {
 	testCases := []struct {
-		name     string
-		input    string
-		wantErr  bool
+		name    string
+		input   string
+		wantErr bool
 	}{
 		{"valid", `{"started_at":"2024-01-01T00:00:00Z"}`, false},
 		{"unknown field", `{"started_at":"2024-01-01T00:00:00Z","extra":"value"}`, true},
@@ -732,7 +732,7 @@ func TestCheckAPIReadinessNegativeDurations(t *testing.T) {
 // TestCheckAPIReadinessNilContext tests nil context rejection.
 func TestCheckAPIReadinessNilContext(t *testing.T) {
 	result := CheckAPIReadiness(nil, APIReadinessInput{
-		URL:     "http://localhost:8080",
+		URL:      "http://localhost:8080",
 		Deadline: 5 * time.Second,
 	})
 
@@ -784,7 +784,7 @@ func TestCheckAPIReadinessPerRequestTimeout(t *testing.T) {
 	result := CheckAPIReadiness(context.Background(), APIReadinessInput{
 		URL:          server.URL,
 		PollInterval: 10 * time.Millisecond,
-		RequestLimit: 20 * time.Millisecond, // Each request times out after 20ms
+		RequestLimit: 20 * time.Millisecond,  // Each request times out after 20ms
 		Deadline:     200 * time.Millisecond, // Overall deadline 200ms
 	})
 
