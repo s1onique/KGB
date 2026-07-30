@@ -129,6 +129,8 @@ func inspectPollProfileAuthority(sourceDir string) (*pollProfileAuthorityInspect
 func inspectFunctionBody(body *ast.BlockStmt, funcName string, result *pollProfileAuthorityInspection) {
 	// Functions where client.Get calls are forbidden
 	isCaptureFunction := funcName == "CaptureProfile" || funcName == "captureProfileWithOps"
+	// Functions where string-based error classification is forbidden
+	isLifecycleFunction := funcName == "RunCollectionLifecycle" || funcName == "RunLifecycle" || funcName == "lifecycle" || funcName == "Lifecycle"
 
 	ast.Inspect(body, func(n ast.Node) bool {
 		switch node := n.(type) {
@@ -158,6 +160,22 @@ func inspectFunctionBody(body *ast.BlockStmt, funcName string, result *pollProfi
 			}
 			if hasPollSend && hasDefault {
 				result.DefaultPollSendCases++
+			}
+
+		case *ast.AssignStmt:
+			// Check for strings.Contains or strings.HasPrefix with .Error() for classification
+			if isCaptureFunction || isLifecycleFunction {
+				for _, expr := range node.Rhs {
+					if call, ok := expr.(*ast.CallExpr); ok {
+						if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+							if sel.Sel.Name == "Contains" || sel.Sel.Name == "HasPrefix" || sel.Sel.Name == "HasSuffix" || sel.Sel.Name == "Equal" {
+								if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "strings" {
+									result.StringErrorClassifications++
+								}
+							}
+						}
+					}
+				}
 			}
 
 		case *ast.CallExpr:
@@ -313,6 +331,16 @@ func VerifyPollAuthorityGuards(sourceDir string) error {
 			Details:  "Lossy poll send pattern found (pollResultCh send + default)",
 			Expected: 0,
 			Actual:   inspection.DefaultPollSendCases,
+		}
+	}
+
+	// Rule: No string-based error classification
+	if inspection.StringErrorClassifications > 0 {
+		return &ErrAuthorityGuardFailed{
+			Guard:    "string_classification_guard",
+			Details:  "String-based error classification found",
+			Expected: 0,
+			Actual:   inspection.StringErrorClassifications,
 		}
 	}
 
