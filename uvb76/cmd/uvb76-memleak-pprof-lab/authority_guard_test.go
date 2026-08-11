@@ -88,10 +88,58 @@ func TestAuthorityGuard_ProfileGuards(t *testing.T) {
 	t.Logf("  ClientGetCallsInCapture: %d", inspection.ClientGetCallsInCapture)
 	t.Logf("  TempCleanupCalls: %d", inspection.TempCleanupCalls)
 
-	// Verify guard - production noncompliance must fail
+	// Verify profile authority guards - production noncompliance must fail
 	if err := VerifyProfileAuthorityGuards(dir); err != nil {
 		t.Fatalf("profile authority violation: %v", err)
 	}
+
+	// Verify runner orchestration guard - CaptureProfilesFn must delegate canonically
+	if err := VerifyRunnerProfileOrchestrationGuard(dir); err != nil {
+		t.Fatalf("runner orchestration violation: %v", err)
+	}
+
+	// P0-11: Document runner orchestration cardinality
+	orchestration, err := inspectRunnerProfileOrchestration(dir)
+	if err != nil {
+		t.Fatalf("runner orchestration inspection failed: %v", err)
+	}
+	t.Logf("Runner orchestration cardinality:")
+	t.Logf("  Total Bindings: %d", orchestration.Bindings)
+	t.Logf("  Canonical Bindings: %d", orchestration.CanonicalBindings)
+	t.Logf("  NonCanonical Bindings: %d", orchestration.NonCanonicalBindings)
+}
+
+// TestAuthorityGuard_RunnerOrchestrationCardinality verifies binding cardinality enforcement.
+func TestAuthorityGuard_RunnerOrchestrationCardinality(t *testing.T) {
+	dir, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatalf("Could not get absolute path: %v", err)
+	}
+
+	orchestration, err := inspectRunnerProfileOrchestration(dir)
+	if err != nil {
+		t.Fatalf("Runner orchestration inspection failed: %v", err)
+	}
+
+	// P0-11: Cardinality invariants
+	// 1. If bindings exist, canonical + noncanonical must equal total
+	if orchestration.Bindings > 0 {
+		expectedTotal := orchestration.CanonicalBindings + orchestration.NonCanonicalBindings
+		if orchestration.Bindings != expectedTotal {
+			t.Errorf("Binding count mismatch: Bindings=%d, Canonical=%d, NonCanonical=%d",
+				orchestration.Bindings, orchestration.CanonicalBindings, orchestration.NonCanonicalBindings)
+		}
+	}
+
+	// 2. Noncanonical bindings must be zero for production
+	if orchestration.NonCanonicalBindings > 0 {
+		t.Errorf("Found %d noncanonical bindings (should be 0 for production)",
+			orchestration.NonCanonicalBindings)
+	}
+
+	t.Logf("Runner orchestration cardinality verified:")
+	t.Logf("  Bindings=%d, Canonical=%d, NonCanonical=%d",
+		orchestration.Bindings, orchestration.CanonicalBindings, orchestration.NonCanonicalBindings)
 }
 
 // TestPollTarget_WrapperResilience verifies error wrapper resilience.

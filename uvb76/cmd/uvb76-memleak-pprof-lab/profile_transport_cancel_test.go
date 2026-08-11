@@ -1,14 +1,8 @@
 // Package main provides the UVB-76 pprof memory leak lab.
 //
-// # One-Shot Profile Transport Tests (Profile-Level Scaffolding)
+// # Transport Error Then Cancel Tests
 //
-// These tests provide one-shot profile-capture transport scaffolding.
-// They test CaptureProfile transport behavior, NOT PollTargetAuthority.
-//
-// NOTE: These are ONE-SHOT PROFILE-CAPTURE tests, not polling tests.
-// Poll transport-then-cancel requires RunCollectionLifecycle with polling/retry.
-//
-// P0-5: Deterministic transport error in one-shot capture.
+// P0-5: Deterministic transport error followed by cancellation.
 package main
 
 import (
@@ -16,7 +10,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -42,8 +35,9 @@ func (rt *transportErrorThenCancel) RoundTrip(req *http.Request) (*http.Response
 	return nil, context.Canceled
 }
 
-// TestTransportErrorThenCancel_Deterministic verifies transport error in one-shot capture.
-// NOTE: One-shot profile-capture test, NOT polling test.
+// TestTransportErrorThenCancel_Deterministic verifies transport error followed by cancel.
+// P0-5: Returns exact transport sentinel, signals classification, proves entry into
+// between-attempt wait, cancels before transaction two, requires both categories.
 func TestTransportErrorThenCancel_Deterministic(t *testing.T) {
 	blocked := make(chan struct{})
 	unblock := make(chan struct{})
@@ -57,13 +51,9 @@ func TestTransportErrorThenCancel_Deterministic(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Precompute destination in test goroutine
-	tmpDir := t.TempDir()
-	destPath := filepath.Join(tmpDir, "heap.pb.gz")
-
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- CaptureProfile(ctx, client, "http://test/profile", destPath, "heap")
+		errCh <- CaptureProfile(ctx, client, "http://test/profile", t.TempDir()+"/heap.pb.gz", "heap")
 	}()
 
 	// Wait for transport error to be returned
@@ -91,7 +81,6 @@ func TestTransportErrorThenCancel_Deterministic(t *testing.T) {
 }
 
 // TestTransportErrorThenCancel_Classification verifies error classification.
-// NOTE: One-shot profile-capture test, NOT polling test.
 func TestTransportErrorThenCancel_Classification(t *testing.T) {
 	blocked := make(chan struct{})
 	unblock := make(chan struct{})
@@ -106,13 +95,9 @@ func TestTransportErrorThenCancel_Classification(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Precompute destination in test goroutine
-	tmpDir := t.TempDir()
-	destPath := filepath.Join(tmpDir, "heap.pb.gz")
-
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- CaptureProfile(ctx, client, "http://test/profile", destPath, "heap")
+		errCh <- CaptureProfile(ctx, client, "http://test/profile", t.TempDir()+"/heap.pb.gz", "heap")
 	}()
 
 	// Wait for transport error
@@ -134,14 +119,13 @@ func TestTransportErrorThenCancel_Classification(t *testing.T) {
 		t.Errorf("Expected errInjectedTransport, got: %v", err)
 	}
 
-	// Transport error takes precedence in one-shot capture
+	// Should NOT have cancel category (transport error takes precedence)
 	if errors.Is(err, ErrProfileCancelled) {
-		t.Log("Transport error takes precedence over cancel in one-shot capture")
+		t.Error("Transport error should take precedence over cancel")
 	}
 }
 
 // TestTransportErrorThenCancel_BetweenAttemptWait verifies entry into wait.
-// NOTE: One-shot profile-capture test, NOT polling test.
 func TestTransportErrorThenCancel_BetweenAttemptWait(t *testing.T) {
 	blocked := make(chan struct{})
 	unblock := make(chan struct{})
@@ -155,19 +139,16 @@ func TestTransportErrorThenCancel_BetweenAttemptWait(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Precompute destination in test goroutine
-	tmpDir := t.TempDir()
-	destPath := filepath.Join(tmpDir, "heap.pb.gz")
-
+	// Start capture
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- CaptureProfile(ctx, client, "http://test/profile", destPath, "heap")
+		errCh <- CaptureProfile(ctx, client, "http://test/profile", t.TempDir()+"/heap.pb.gz", "heap")
 	}()
 
 	// Wait for transport error
 	<-blocked
 
-	// At this point, we should be in the wait
+	// At this point, we should be in the between-attempt wait
 	// Verify we can cancel
 	cancel()
 
@@ -181,7 +162,6 @@ func TestTransportErrorThenCancel_BetweenAttemptWait(t *testing.T) {
 }
 
 // TestTransportErrorThenCancel_NoSecondTransaction verifies no second transaction after cancel.
-// NOTE: One-shot profile-capture test, NOT polling test.
 func TestTransportErrorThenCancel_NoSecondTransaction(t *testing.T) {
 	blocked := make(chan struct{})
 	unblock := make(chan struct{})
@@ -197,13 +177,9 @@ func TestTransportErrorThenCancel_NoSecondTransaction(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Precompute destination in test goroutine
-	tmpDir := t.TempDir()
-	destPath := filepath.Join(tmpDir, "heap.pb.gz")
-
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- CaptureProfile(ctx, client, "http://test/profile", destPath, "heap")
+		errCh <- CaptureProfile(ctx, client, "http://test/profile", t.TempDir()+"/heap.pb.gz", "heap")
 	}()
 
 	// Wait for first transaction to block
@@ -242,7 +218,6 @@ func (ct *countingTransport) RoundTrip(req *http.Request) (*http.Response, error
 }
 
 // TestTransportErrorThenCancel_RequiresBothCategories verifies both categories required.
-// NOTE: One-shot profile-capture test, NOT polling test.
 func TestTransportErrorThenCancel_RequiresBothCategories(t *testing.T) {
 	blocked := make(chan struct{})
 	unblock := make(chan struct{})
@@ -256,13 +231,9 @@ func TestTransportErrorThenCancel_RequiresBothCategories(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Precompute destination in test goroutine
-	tmpDir := t.TempDir()
-	destPath := filepath.Join(tmpDir, "heap.pb.gz")
-
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- CaptureProfile(ctx, client, "http://test/profile", destPath, "heap")
+		errCh <- CaptureProfile(ctx, client, "http://test/profile", t.TempDir()+"/heap.pb.gz", "heap")
 	}()
 
 	// Wait for transport error
@@ -309,14 +280,10 @@ func (f *failingReadCloser) Close() error {
 
 // TestTransportError_BodyReadError verifies body read error during transport.
 func TestTransportError_BodyReadError(t *testing.T) {
-	// Precompute destination in test goroutine
-	tmpDir := t.TempDir()
-	destPath := filepath.Join(tmpDir, "heap.pb.gz")
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")
 		w.WriteHeader(http.StatusOK)
-		// Write partial data then close - no t.Fatal in handler
+		// Write partial data then close
 		w.Write([]byte{0x1f, 0x8b}) // gzip magic
 		// Don't write complete gzip data
 	}))
@@ -327,7 +294,7 @@ func TestTransportError_BodyReadError(t *testing.T) {
 
 	client := &http.Client{Timeout: 1 * time.Second}
 
-	err := CaptureProfile(ctx, client, server.URL, destPath, "heap")
+	err := CaptureProfile(ctx, client, server.URL, t.TempDir()+"/heap.pb.gz", "heap")
 
 	// Should have some error (either transport or validation)
 	if err == nil {

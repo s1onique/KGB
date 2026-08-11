@@ -344,6 +344,9 @@ func runLab(authority *GeneratedLabAuthority, ephemeralPassword []byte) LabResul
 		Deadline:        *flagDuration,
 	}
 
+	// P0-11: Create httpClient outside closure for canonical form
+	profileClient := &http.Client{Timeout: 30 * time.Second}
+
 	// P0-1: Run collection lifecycle using exact PollTargetAuthority via PollInput
 	// P0-6: Runner owns collector goroutine lifecycle - collectors already started above
 	lifecycleResult := RunCollectionLifecycle(CollectionLifecycleInput{
@@ -359,10 +362,9 @@ func runLab(authority *GeneratedLabAuthority, ephemeralPassword []byte) LabResul
 		},
 		PollInput:        pollInput,
 		PollDrainTimeout: 5 * time.Second,
+		// P0-11: Canonical delegation - direct return of captureProfilesWithValidation
 		CaptureProfilesFn: func(ctx context.Context) error {
-			// P0-7: ctx is ProfileCtx with extended deadline for final profiles
-			httpClient := &http.Client{Timeout: 30 * time.Second}
-			return captureProfilesWithValidation(ctx, httpClient, pprofPort, artifactDir, collectionStart, *flagDuration, *flagProfileInterval, observationEnd)
+			return captureProfilesWithValidation(ctx, profileClient, pprofPort, artifactDir, collectionStart, *flagDuration, *flagProfileInterval, observationEnd)
 		},
 	})
 

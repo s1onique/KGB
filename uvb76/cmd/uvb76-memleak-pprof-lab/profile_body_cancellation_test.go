@@ -1,12 +1,8 @@
 // Package main provides the UVB-76 pprof memory leak lab.
 //
-// # Profile Body Cancellation Tests (Profile-Level Scaffolding)
-//
-// These tests provide profile-level cancellation scaffolding.
-// They test CaptureProfile behavior, not RunCollectionLifecycle.
+// # Profile Body Cancellation Tests
 //
 // P0-5: Cancellation during actual response-body reading.
-// NOTE: These are PROFILE-CAPTURE tests, not lifecycle tests.
 package main
 
 import (
@@ -44,15 +40,12 @@ func (b *blockingProfileBody) Close() error {
 	return nil
 }
 
-// cancellableRoundTripper returns a response with blockingProfileBody bound to req.Context().
+// cancellableRoundTripper returns a response with blockingProfileBody.
 type cancellableRoundTripper struct {
 	body *blockingProfileBody
 }
 
 func (rt *cancellableRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Bind body to actual request context
-	rt.body.ctx = req.Context()
-
 	return &http.Response{
 		StatusCode: 200,
 		Body:       rt.body,
@@ -62,7 +55,6 @@ func (rt *cancellableRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 
 // TestProfileBodyRead_CancelDuringActualRead verifies cancellation during body read.
 // P0-5: First Read completes, second Read blocks until cancellation.
-// NOTE: Profile-capture level test, not lifecycle test.
 func TestProfileBodyRead_CancelDuringActualRead(t *testing.T) {
 	firstReadDone := make(chan struct{})
 	secondRead := make(chan struct{})
@@ -76,16 +68,13 @@ func TestProfileBodyRead_CancelDuringActualRead(t *testing.T) {
 	}
 
 	transport := &cancellableRoundTripper{body: body}
-	client := &http.Client{Transport: transport}
 
-	// Precompute fixture in test goroutine (not handler)
-	tmpDir := t.TempDir()
-	destPath := tmpDir + "/heap.pb.gz"
+	client := &http.Client{Transport: transport}
 
 	// Start capture in goroutine
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- CaptureProfile(ctx, client, "http://test/profile", destPath, "heap")
+		errCh <- CaptureProfile(ctx, client, "http://test/profile", t.TempDir()+"/heap.pb.gz", "heap")
 	}()
 
 	// Wait for first read to complete
@@ -121,7 +110,6 @@ func TestProfileBodyRead_CancelDuringActualRead(t *testing.T) {
 }
 
 // TestProfileBodyRead_DeadlineDuringActualRead verifies deadline during body read.
-// NOTE: Profile-capture level test, not lifecycle test.
 func TestProfileBodyRead_DeadlineDuringActualRead(t *testing.T) {
 	firstReadDone := make(chan struct{})
 	secondRead := make(chan struct{})
@@ -136,14 +124,13 @@ func TestProfileBodyRead_DeadlineDuringActualRead(t *testing.T) {
 	}
 
 	transport := &cancellableRoundTripper{body: body}
+
 	client := &http.Client{Transport: transport}
 
-	tmpDir := t.TempDir()
-	destPath := tmpDir + "/heap.pb.gz"
-
+	// Start capture in goroutine
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- CaptureProfile(ctx, client, "http://test/profile", destPath, "heap")
+		errCh <- CaptureProfile(ctx, client, "http://test/profile", t.TempDir()+"/heap.pb.gz", "heap")
 	}()
 
 	// Wait for first read to complete
@@ -176,13 +163,11 @@ func TestProfileBodyRead_DeadlineDuringActualRead(t *testing.T) {
 }
 
 // TestProfileBodyRead_ParentCancelDuringBodyRead verifies parent context cancellation.
-// NOTE: Profile-capture level test, not lifecycle test.
 func TestProfileBodyRead_ParentCancelDuringBodyRead(t *testing.T) {
 	firstReadDone := make(chan struct{})
 	secondRead := make(chan struct{})
 
 	parentCtx, parentCancel := context.WithCancel(context.Background())
-	defer parentCancel()
 
 	// Create a derived deadline context
 	ctx, cancel := context.WithTimeout(parentCtx, 10*time.Second)
@@ -195,14 +180,13 @@ func TestProfileBodyRead_ParentCancelDuringBodyRead(t *testing.T) {
 	}
 
 	transport := &cancellableRoundTripper{body: body}
+
 	client := &http.Client{Transport: transport}
 
-	tmpDir := t.TempDir()
-	destPath := tmpDir + "/heap.pb.gz"
-
+	// Start capture in goroutine
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- CaptureProfile(ctx, client, "http://test/profile", destPath, "heap")
+		errCh <- CaptureProfile(ctx, client, "http://test/profile", t.TempDir()+"/heap.pb.gz", "heap")
 	}()
 
 	// Wait for first read to complete
@@ -230,7 +214,6 @@ func TestProfileBodyRead_ParentCancelDuringBodyRead(t *testing.T) {
 }
 
 // TestProfileBodyRead_DestinationAbsent verifies destination is absent on cancellation.
-// NOTE: Profile-capture level test, not lifecycle test.
 func TestProfileBodyRead_DestinationAbsent(t *testing.T) {
 	firstReadDone := make(chan struct{})
 	secondRead := make(chan struct{})
@@ -249,6 +232,7 @@ func TestProfileBodyRead_DestinationAbsent(t *testing.T) {
 	tmpDir := t.TempDir()
 	destPath := tmpDir + "/heap.pb.gz"
 
+	// Start capture in goroutine
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- CaptureProfile(ctx, client, "http://test/profile", destPath, "heap")

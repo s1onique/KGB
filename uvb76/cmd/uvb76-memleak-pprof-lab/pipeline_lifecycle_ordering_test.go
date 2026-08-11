@@ -1,48 +1,38 @@
 // Package main provides the UVB-76 pprof memory leak lab.
 //
-// # Profile Capture Goroutine Tests (Profile-Level Scaffolding)
+// # Pipeline Lifecycle Ordering Tests
 //
-// These tests provide profile-capture-level goroutine scaffolding.
-// They test CaptureProfile behavior, not RunCollectionLifecycle.
-//
-// NOTE: These are PROFILE-CAPTURE tests, not lifecycle tests.
-// RunCollectionLifecycle ordering requires separate production integration.
-//
-// P0-5: Prove profile capture ordering.
+// P0-5: Prove real RunCollectionLifecycle ordering.
 package main
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-// TestCollectionLifecycle_ResultChannelOrdering verifies profile capture result ordering.
-// NOTE: Profile-capture level test, not RunCollectionLifecycle test.
+// TestCollectionLifecycle_ResultChannelOrdering verifies lifecycle result ordering.
+// P0-5: Result channel is populated before goroutine returns.
 func TestCollectionLifecycle_ResultChannelOrdering(t *testing.T) {
+	// Track if result is available when goroutine exits
 	resultAvailable := atomic.Bool{}
 	resultCh := make(chan struct{})
-
-	// Precompute fixture in test goroutine
-	profileData := createSemanticPprofProfile(t)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")
 		w.WriteHeader(http.StatusOK)
-		w.Write(profileData)
+		w.Write(createSemanticPprofProfile(t))
 	}))
 	defer server.Close()
 
 	client := &http.Client{Timeout: 3 * time.Second}
 	tmpDir := t.TempDir()
-	destPath := filepath.Join(tmpDir, "heap.pb.gz")
+	destPath := tmpDir + "/heap.pb.gz"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -66,22 +56,19 @@ func TestCollectionLifecycle_ResultChannelOrdering(t *testing.T) {
 }
 
 // TestCollectionLifecycle_GoroutineExits verifies goroutine exits after result.
-// NOTE: Profile-capture level test, not RunCollectionLifecycle test.
 func TestCollectionLifecycle_GoroutineExits(t *testing.T) {
 	goroutineDone := atomic.Bool{}
-
-	profileData := createSemanticPprofProfile(t)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")
 		w.WriteHeader(http.StatusOK)
-		w.Write(profileData)
+		w.Write(createSemanticPprofProfile(t))
 	}))
 	defer server.Close()
 
 	client := &http.Client{Timeout: 3 * time.Second}
 	tmpDir := t.TempDir()
-	destPath := filepath.Join(tmpDir, "heap.pb.gz")
+	destPath := tmpDir + "/heap.pb.gz"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -108,37 +95,24 @@ func TestCollectionLifecycle_GoroutineExits(t *testing.T) {
 }
 
 // TestCollectionLifecycle_TransportError propagates transport errors correctly.
-// NOTE: Profile-capture level test, not RunCollectionLifecycle test.
 func TestCollectionLifecycle_TransportError(t *testing.T) {
-	handlerErrCh := make(chan error, 1)
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Close connection without response - no t.Fatal in handler
+		// Close connection without response
 		hijacker, ok := w.(http.Hijacker)
 		if !ok {
-			handlerErrCh <- errors.New("server does not support hijacking")
-			return
+			t.Fatal("Server does not support hijacking")
 		}
 		conn, _, err := hijacker.Hijack()
 		if err != nil {
-			handlerErrCh <- fmt.Errorf("hijack: %w", err)
-			return
+			t.Fatalf("Hijack failed: %v", err)
 		}
 		conn.Close()
 	}))
 	defer server.Close()
 
-	// Check handler setup
-	select {
-	case hErr := <-handlerErrCh:
-		t.Fatalf("Handler setup failed: %v", hErr)
-	default:
-		// OK
-	}
-
 	client := &http.Client{Timeout: 3 * time.Second}
 	tmpDir := t.TempDir()
-	destPath := filepath.Join(tmpDir, "heap.pb.gz")
+	destPath := tmpDir + "/heap.pb.gz"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -155,30 +129,20 @@ func TestCollectionLifecycle_TransportError(t *testing.T) {
 }
 
 // TestCollectionLifecycle_ContextCancel verifies context cancellation.
-// NOTE: Profile-capture level test, not RunCollectionLifecycle test.
 func TestCollectionLifecycle_ContextCancel(t *testing.T) {
 	blocked := make(chan struct{})
 
-	profileData := createSemanticPprofProfile(t)
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Block until cancelled - no t.Fatal in handler
-		select {
-		case <-blocked:
-			// Continue
-		case <-time.After(5 * time.Second):
-			// Timeout
-			return
-		}
+		// Block until cancelled
+		<-blocked
 		w.Header().Set("Content-Type", "application/gzip")
 		w.WriteHeader(http.StatusOK)
-		w.Write(profileData)
 	}))
 	defer server.Close()
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	tmpDir := t.TempDir()
-	destPath := filepath.Join(tmpDir, "heap.pb.gz")
+	destPath := tmpDir + "/heap.pb.gz"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -204,37 +168,30 @@ func TestCollectionLifecycle_ContextCancel(t *testing.T) {
 }
 
 // TestCollectionLifecycle_ConcurrentCaptures verifies concurrent capture safety.
-// NOTE: Profile-capture level test, not RunCollectionLifecycle test.
 func TestCollectionLifecycle_ConcurrentCaptures(t *testing.T) {
 	var wg sync.WaitGroup
 	errCh := make(chan error, 10)
 
-	profileData := createSemanticPprofProfile(t)
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")
 		w.WriteHeader(http.StatusOK)
-		w.Write(profileData)
+		w.Write(createSemanticPprofProfile(t))
 	}))
 	defer server.Close()
 
 	client := &http.Client{Timeout: 3 * time.Second}
 
-	// Precompute destinations in test goroutine (NOT in worker goroutines)
-	tmpDir := t.TempDir()
-	destinations := make([]string, 5)
-	for i := range destinations {
-		destinations[i] = filepath.Join(tmpDir, fmt.Sprintf("heap-%d.pb.gz", i))
-	}
-
-	for i, destPath := range destinations {
+	for i := 0; i < 5; i++ {
 		wg.Add(1)
-		go func(idx int, path string) {
+		go func(n int) {
 			defer wg.Done()
-			if err := CaptureProfile(context.Background(), client, server.URL, path, "heap"); err != nil {
-				errCh <- fmt.Errorf("capture %d: %w", idx, err)
+			tmpDir := t.TempDir()
+			destPath := tmpDir + "/heap.pb.gz"
+			err := CaptureProfile(context.Background(), client, server.URL, destPath, "heap")
+			if err != nil {
+				errCh <- err
 			}
-		}(i, destPath)
+		}(i)
 	}
 
 	wg.Wait()

@@ -24,6 +24,10 @@ import (
 // ErrNilResultFileDependency is returned when result file ops receive a nil dependency.
 var ErrNilResultFileDependency = errors.New("nil result file dependency")
 
+// ErrNilResult is returned when result is nil (publication authority guard).
+// P0-12: Fail-closed publication authority guard for nil result.
+var ErrNilResult = errors.New("nil result")
+
 // ErrResultStillPresent is returned when a result file cannot be removed.
 var ErrResultStillPresent = errors.New("result file still present after removal attempt")
 
@@ -200,7 +204,13 @@ type ProfileInfo struct {
 // P0-7: Strictly reread and decode the physical file before returning success.
 // P0-8: If verification fails, remove the invalid final file and verify removal.
 // Requires exact-one JSON document (no trailing data).
+// P0-12: Fail-closed publication authority guard - nil result is terminal corruption.
 func persistResult(result *Result, artifactDir string) error {
+	// P0-12: Refuse to persist nil result (authority boundary)
+	if result == nil {
+		return fmt.Errorf("persistResult: %w", ErrNilResult)
+	}
+
 	resultFile := filepath.Join(artifactDir, "result.json")
 
 	// Marshal to JSON
